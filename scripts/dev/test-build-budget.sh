@@ -300,4 +300,31 @@ expect_status 0 run_budget --no-prune -- sh -c 'ls "$AURA_BUILD_SHARED_DIR/reser
 [[ -z "$(ls -A "$AURA_BUILD_SHARED_DIR/reservations")" ]] # Released on exit.
 [[ ! -d "$AURA_BUILD_SHARED_DIR/admission.lock" ]]
 
+# Task 198: a gate runs under one budgeted hold; a nested budgeted call for
+# the same checkout runs its command inside that hold (no second lock).
+reset_case
+nested="bash $repo_root/scripts/dev/build-budget.sh --root $project --lane nested -- sh -c 'touch \"\$FREE_FILE.nested-ran\"'"
+expect_status 0 run_budget --no-prune -- sh -c "test -d target/.aura-build-budget.lock && $nested"
+[[ -e "$FREE_FILE.nested-ran" ]]
+rg -q 'runs inside the held budget' "$test_root/output"
+# The hold is per checkout: another checkout's marker does not bypass the lock.
+reset_case
+mkdir "$project/target/.aura-build-budget.lock"
+expect_status 1 env AURA_BUILD_BUDGET_HELD="$test_root/other" bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.foreign-ran"'
+[[ ! -e "$FREE_FILE.foreign-ran" ]]
+# Gates wait for a busy lock up to AURA_BUILD_WAIT_SECONDS instead of failing.
+reset_case
+mkdir "$project/target/.aura-build-budget.lock"
+(sleep 2; rm -rf "$project/target/.aura-build-budget.lock") &
+expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=10 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.waited-ran"'
+[[ -e "$FREE_FILE.waited-ran" ]]
+wait
+# The gate recipes' cargo goes through the budget.
+for recipe in _policy-check _ownership-lint web-check; do
+  awk -v r="$recipe" '$0 ~ "^"r"[ :]" {on=1; next} on && /^[^ \t]/ {on=0} on' "$repo_root/justfile" \
+    | rg -q 'build-budget.sh --lane gates' || { echo "justfile $recipe bypasses build-budget" >&2; exit 1; }
+done
+
 echo 'build-budget safety tests passed'

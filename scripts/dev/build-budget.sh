@@ -68,6 +68,14 @@ done
   echo 'build-budget: invalid budget ordering' >&2
   exit 2
 }
+# A gate recipe runs under one budgeted invocation that already holds this
+# checkout's lock and admission and sweeps afterwards; nested invocations from
+# inside it (e.g. the ownership gate running web-check) run their command
+# directly instead of waiting on their own parent.
+if [[ "$dry_run" -eq 0 && "${AURA_BUILD_BUDGET_HELD:-}" == "$root" ]]; then
+  echo "build-budget: lane $lane runs inside the held budget for $root"
+  cd "$root" && exec "$@"
+fi
 
 free_kib() { df -Pk "$root" | awk 'NR == 2 {print $4}'; }
 target_kib() {
@@ -228,12 +236,21 @@ if [[ "$dry_run" -eq 1 ]]; then
   exit 0
 fi
 
+# Gates opt in to waiting (AURA_BUILD_WAIT_SECONDS) for the checkout's lock
+# and for other builders such as rust-analyzer, instead of failing at once.
+wait_seconds="${AURA_BUILD_WAIT_SECONDS:-0}"
+[[ "$wait_seconds" =~ ^[0-9]+$ ]] || { echo 'build-budget: AURA_BUILD_WAIT_SECONDS must be a whole number' >&2; exit 2; }
+waited=0
 lock_dir="$root/target/.aura-build-budget.lock"
 mkdir -p "$root/target"
-if ! mkdir "$lock_dir" 2>/dev/null; then
-  echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
-  exit 1
-fi
+until mkdir "$lock_dir" 2>/dev/null; do
+  if (( waited >= wait_seconds )); then
+    echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
+    exit 1
+  fi
+  sleep "$poll_seconds"
+  waited=$((waited + poll_seconds))
+done
 printf '%s\n' "$$" > "$lock_dir/pid"
 child_pid=''
 stop_owned_group() {
@@ -259,7 +276,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-require_idle
+until require_idle 2>/dev/null; do
+  if (( waited >= wait_seconds )); then require_idle || exit $?; fi
+  sleep "$poll_seconds"
+  waited=$((waited + poll_seconds))
+done
 if (( before_target > cap_kib || before_free < min_free_kib )); then
   if (( no_prune == 1 )); then
     echo 'build-budget: no-prune mode cannot recover the required headroom or target cap' >&2
@@ -286,7 +307,7 @@ printf 'Build lane=%s command:' "$lane"
 printf ' %q' "$@"
 printf '\n'
 set -m # Give the background build its own process group for bounded shutdown.
-(cd "$root" && "$@") &
+(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") &
 child_pid=$!
 set +m
 lowest_free="$pre_free"

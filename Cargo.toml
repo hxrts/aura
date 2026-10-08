@@ -178,6 +178,15 @@ debug = false
 [profile.release.package.aura-terminal]
 opt-level = "s"
 
+# LAN ship builds (scripts/harness/lan/ship.sh): release optimization without
+# whole-program LTO, so a one-crate change relinks quickly and unchanged
+# crates come from the checkout's target and sccache (work/8.md Task 197).
+[profile.lan]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = false
+
 [profile.dev]
 opt-level = 0
 # Line tables keep file:line backtraces for workspace crates at a fraction

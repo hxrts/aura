@@ -46,14 +46,16 @@ _harness action *ARGS:
 _toolkit-shell *ARGS:
     ./scripts/toolkit-shell.sh {{ ARGS }}
 
+# Gate recipes build through the checkout's size cap and the shared volume
+# floor (Task 198); nested budgeted calls inside a gate run under its hold.
 _policy-check *ARGS:
-    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- {{ ARGS }}
+    AURA_BUILD_WAIT_SECONDS=1800 bash scripts/dev/build-budget.sh --lane gates -- cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- {{ ARGS }}
 
 _ownership-lint mode *PATHS:
     if [ -x target/debug/ownership_lints ]; then \
         target/debug/ownership_lints {{ mode }} {{ PATHS }}; \
     else \
-        cargo run -q -p hxrts-aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}; \
+        AURA_BUILD_WAIT_SECONDS=1800 bash scripts/dev/build-budget.sh --lane gates -- cargo run -q -p hxrts-aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}; \
     fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -101,11 +103,6 @@ prune-inactive-lane lane="wasm-debug" mode="--dry-run":
 nix-store-gc mode="--dry-run":
     bash scripts/dev/nix-store-gc.sh {{ mode }}
 
-# Build the LAN `aura` and `tool_repl` binaries hermetically with crate2nix
-nix-build-lan:
-    nix build .#aura-lan-terminal --out-link .nix-ship/aura-lan-terminal
-    nix build .#aura-lan-harness --out-link .nix-ship/aura-lan-harness
-
 # Preview Cargo artifact collection without building or deleting
 build-budget-dry-run:
     bash scripts/dev/build-budget.sh --dry-run
@@ -141,7 +138,7 @@ e2e-build-harness-live:
 
 # Check Aura web shell + shared UI core for the WASM target
 web-check:
-    bash scripts/web/web-check.sh
+    AURA_BUILD_WAIT_SECONDS=1800 bash scripts/dev/build-budget.sh --lane gates -- bash scripts/web/web-check.sh
 
 # Rebuild the local Tailwind bundle used by aura-web (no CDN)
 web-tailwind-build:
@@ -501,13 +498,14 @@ ci-policy-toolkit-clippy:
 
 # Verify cache guards, evidence retention, and a tiny isolated compiler probe.
 ci-build-cache-policy:
-    bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/web/serve-static.sh
+    bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/runtime-refs.sh scripts/web/serve-static.sh
     bash scripts/dev/test-cargo-in-nix.sh
     bash scripts/dev/test-cargo-incremental-default.sh
     bash scripts/dev/test-build-budget.sh
     bash scripts/dev/test-prune-ci-cache.sh
     bash scripts/dev/test-prune-inactive-lane.sh
     bash scripts/dev/test-lan-build-sequence.sh
+    bash scripts/dev/test-lan-ship.sh
     bash scripts/dev/test-web-prebuilt-only.sh
     bash scripts/dev/test-retain-e2e-runs.sh
     bash scripts/dev/test-lan-retention.sh

@@ -927,16 +927,18 @@ default, and passes `CARGO_INCREMENTAL=1` compilations through. Set
 `just disk-report` shows the shared store's size. `sccache --show-stats`
 shows hit rates.
 
-LAN run binaries are built hermetically with crate2nix. `just nix-build-lan`
-(and `scripts/harness/lan/ship.sh`) builds `.#aura-lan-terminal` (`aura` with
-the `terminal` feature) and `.#aura-lan-harness` (`tool_repl`) from the
-committed tree. Each crate is its own Nix derivation, so unchanged crates are
-reused across worktrees and hosts; an edited crate and its dependents rebuild
-from scratch. `ship.sh` sends the closures with `nix copy` (the remote user
-must be a Nix trusted-user) and keeps the web bundle on `dx`. Run
-`crate2nix generate` after any dependency change. `.nix-ship/` out-links are
-GC roots; `just nix-store-gc` reports reclaimable store paths and
-`just nix-store-gc --apply` collects them.
+LAN run binaries are built by `scripts/harness/lan/ship.sh` from a clean
+commit with Cargo's `lan` profile: release optimization without whole-program
+LTO (`lto = false`, 16 codegen units). `aura` (with the `terminal` feature) and
+`tool_repl` build in the checkout's `target/` through the build budget, so
+unchanged crates come from `target/` and sccache and a one-crate change
+rebuilds only that crate and its dependents. `ship.sh` rsyncs the binaries,
+sends the Nix store paths they reference at run time (dev-shell libraries,
+listed by `scripts/harness/lan/runtime-refs.sh`) with `nix copy` (the remote
+user must be a Nix trusted-user), and keeps the web bundle on `dx`. The dev
+shell profile and those run-time paths are GC roots under `.nix-ship/` on both
+hosts; `just nix-store-gc` reports the roots it keeps and the reclaimable
+store paths, and `just nix-store-gc --apply` collects them.
 
 The dev profile builds third-party dependencies at `opt-level = 1` (2 for
 `curve25519-dalek` and `frost-ed25519`) without debuginfo, and workspace crates
