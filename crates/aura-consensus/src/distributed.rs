@@ -10,7 +10,8 @@
 
 use crate::types::{consensus_commit_transcript_bytes, CommitFact, ConsensusId};
 use aura_core::crypto::tree_signing::{
-    frost_aggregate, NonceCommitment, NonceToken, PartialSignature, PublicKeyPackage, Share,
+    frost_aggregate, FrostNonces, NonceCommitment, PartialSignature, PublicKeyPackage,
+    RetiredFrostNonces, Share,
 };
 use aura_core::frost::ThresholdSignature;
 use aura_core::time::ProvenancedTime;
@@ -69,20 +70,21 @@ impl ConsensusRound {
     }
 }
 
-/// A witness's nonce commitment for a round; the token stays with it.
+/// A witness's single-use nonces for a round; only their public
+/// commitment leaves the witness.
 pub async fn witness_commit(
     share: &Share,
     random: &(impl aura_core::effects::RandomEffects + ?Sized),
-) -> Result<(NonceCommitment, NonceToken)> {
+) -> Result<FrostNonces> {
     crate::frost::witness_nonce(share, random).await
 }
 
 /// A witness's signature share over `round`, given every participating
-/// witness's commitment. The token is consumed.
+/// witness's commitment. The retired nonces are consumed.
 pub fn witness_sign(
     round: &ConsensusRound,
     share: &Share,
-    token: NonceToken,
+    nonces: RetiredFrostNonces,
     commitments: &[NonceCommitment],
     group_public_key: &PublicKeyPackage,
 ) -> Result<PartialSignature> {
@@ -115,8 +117,7 @@ pub fn witness_sign(
         );
     }
     let package = frost_ed25519::SigningPackage::new(frost_commitments, &round.transcript()?);
-    let signature = frost_ed25519::round2::sign(&package, &token.into_frost(), &key_package)
-        .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))?;
+    let signature = nonces.sign(&package, &key_package)?;
     Ok(PartialSignature::from_frost(identifier, signature))
 }
 
@@ -223,15 +224,25 @@ mod tests {
     async fn commit_all(
         witnesses: &[Share],
         random: &CounterRandom,
-    ) -> (Vec<NonceCommitment>, Vec<NonceToken>) {
+    ) -> (Vec<NonceCommitment>, Vec<RetiredFrostNonces>) {
         let mut commitments = Vec::new();
         let mut tokens = Vec::new();
         for share in witnesses {
-            let (commitment, token) = witness_commit(share, random).await.unwrap();
+            let (commitment, token) = commit_one(share, random).await;
             commitments.push(commitment);
             tokens.push(token);
         }
         (commitments, tokens)
+    }
+
+    async fn commit_one(
+        share: &Share,
+        random: &CounterRandom,
+    ) -> (NonceCommitment, RetiredFrostNonces) {
+        let nonces = witness_commit(share, random).await.unwrap();
+        let commitment = nonces.commitment().clone();
+        let log = aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+        (commitment, nonces.retire(&log).await.unwrap())
     }
 
     #[tokio::test]
@@ -274,7 +285,7 @@ mod tests {
             .zip(tokens)
             .map(|(share, token)| witness_sign(&round, share, token, &commitments, &group).unwrap())
             .collect();
-        let (c2, t2) = witness_commit(&witnesses[1], &random).await.unwrap();
+        let (c2, t2) = commit_one(&witnesses[1], &random).await;
         mixed[1] = witness_sign(
             &other,
             &witnesses[1],

@@ -396,17 +396,11 @@ impl CryptoExtendedEffects for CustomCryptoProbe {
     ) -> Result<FrostKeyGenResult, CryptoError> {
         self.inner.frost_generate_keys(threshold, max_signers).await
     }
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        self.inner.frost_generate_nonces(key_package).await
-    }
-    async fn frost_public_commitment(
+    async fn frost_generate_nonces(
         &self,
-        participant_index: u16,
-        local_nonce_bundle: &[u8],
-    ) -> Result<FrostPublicCommitment, CryptoError> {
-        self.inner
-            .frost_public_commitment(participant_index, local_nonce_bundle)
-            .await
+        key_package: &[u8],
+    ) -> Result<aura_core::effects::crypto::FrostNonces, CryptoError> {
+        self.inner.frost_generate_nonces(key_package).await
     }
     async fn frost_create_public_signing_package(
         &self,
@@ -428,7 +422,7 @@ impl CryptoExtendedEffects for CustomCryptoProbe {
         &self,
         package: &FrostSigningPackage,
         local_key_share: &[u8],
-        local_nonce_bundle: &[u8],
+        nonces: aura_core::effects::crypto::RetiredFrostNonces,
         expected_message: &[u8],
         expected_public_key_package: &[u8],
         expected_threshold: u16,
@@ -437,32 +431,11 @@ impl CryptoExtendedEffects for CustomCryptoProbe {
             .frost_sign_share_for_message(
                 package,
                 local_key_share,
-                local_nonce_bundle,
+                nonces,
                 expected_message,
                 expected_public_key_package,
                 expected_threshold,
             )
-            .await
-    }
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        self.inner
-            .frost_create_signing_package(message, nonces, participants, public_key_package)
-            .await
-    }
-    async fn frost_sign_share(
-        &self,
-        signing_package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        self.inner
-            .frost_sign_share(signing_package, key_share, nonces)
             .await
     }
     async fn frost_aggregate_signatures(

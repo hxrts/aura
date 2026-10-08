@@ -342,40 +342,6 @@ impl CryptoExtendedEffects for MockEffects {
         })
     }
 
-    async fn frost_generate_nonces(
-        &self,
-        _key_package: &[u8],
-    ) -> Result<Vec<u8>, aura_core::effects::crypto::CryptoError> {
-        Ok(vec![0x88; 32])
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        _nonces: &[Vec<u8>],
-        _participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<
-        aura_core::effects::crypto::FrostSigningPackage,
-        aura_core::effects::crypto::CryptoError,
-    > {
-        Ok(aura_core::effects::crypto::FrostSigningPackage {
-            message: message.to_vec(),
-            package: vec![0x99; 64],
-            participants: vec![1, 2],
-            public_key_package: public_key_package.to_vec(),
-        })
-    }
-
-    async fn frost_sign_share(
-        &self,
-        _signing_package: &aura_core::effects::crypto::FrostSigningPackage,
-        _key_share: &[u8],
-        _nonces: &[u8],
-    ) -> Result<Vec<u8>, aura_core::effects::crypto::CryptoError> {
-        Ok(vec![0xAA; 32])
-    }
-
     async fn frost_aggregate_signatures(
         &self,
         _signing_package: &aura_core::effects::crypto::FrostSigningPackage,

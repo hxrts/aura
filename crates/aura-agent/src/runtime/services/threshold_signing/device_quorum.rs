@@ -194,7 +194,7 @@ struct ParticipantSlot {
     validator: ParticipantRoundSession,
     approved: bool,
     queued: VecDeque<ParticipantProvenRoundPacket>,
-    nonces: Option<Zeroizing<Vec<u8>>>,
+    nonces: Option<aura_core::effects::crypto::FrostNonces>,
     commitment: Option<Vec<u8>>,
 }
 
@@ -202,6 +202,8 @@ struct ParticipantSlot {
 #[derive(Default)]
 pub(super) struct DeviceQuorumSlots {
     slots: Mutex<HashMap<[u8; 32], ParticipantSlot>>,
+    /// Retirement log for quorum nonces, which never leave process memory.
+    nonce_retirement: aura_core::crypto::tree_signing::ProcessFrostNonceRetirement,
 }
 
 impl ThresholdSigningService {
@@ -485,12 +487,8 @@ impl ThresholdSigningService {
 
         // Commitments: ours, then each co-signer's.
 
-        let nonces = Zeroizing::new(self.effects.frost_generate_nonces(&local_share).await?);
-        let mut commitments = vec![
-            self.effects
-                .frost_public_commitment(policy.my_index, &nonces)
-                .await?,
-        ];
+        let nonces = self.effects.frost_generate_nonces(&local_share).await?;
+        let mut commitments = vec![nonces.public_commitment()];
         for (_, index, first, verifier) in &rounds {
             match self.await_quorum_response(first, 2, verifier).await? {
                 TranscriptRoundBody::Commitment(commitment)
@@ -527,20 +525,22 @@ impl ThresholdSigningService {
             share_requests.push(request);
         }
         let mut shares = BTreeMap::new();
+        let nonces = nonces
+            .retire(&self.shared.device_quorum.nonce_retirement)
+            .await?;
         shares.insert(
             policy.my_index,
             self.effects
                 .frost_sign_share_for_message(
                     &package,
                     &local_share,
-                    &nonces,
+                    nonces,
                     &message,
                     &policy.public_package,
                     policy.threshold,
                 )
                 .await?,
         );
-        drop(nonces);
         for ((_, index, _, verifier), request) in rounds.iter().zip(&share_requests) {
             match self.await_quorum_response(request, 4, verifier).await? {
                 TranscriptRoundBody::Share(share) => {
@@ -728,12 +728,8 @@ impl ThresholdSigningService {
         let local_share = self.local_quorum_share(&policy).await?;
         let (sequence, response, finished) = match body {
             TranscriptRoundBody::RequestCommitment => {
-                let nonces =
-                    Zeroizing::new(self.effects.frost_generate_nonces(&local_share).await?);
-                let commitment = self
-                    .effects
-                    .frost_public_commitment(policy.my_index, &nonces)
-                    .await?;
+                let nonces = self.effects.frost_generate_nonces(&local_share).await?;
+                let commitment = nonces.public_commitment();
                 slot.commitment = Some(commitment.commitment_bytes.clone());
                 slot.nonces = Some(nonces);
                 (2, TranscriptRoundBody::Commitment(commitment), false)
@@ -754,13 +750,15 @@ impl ThresholdSigningService {
                 let nonces = slot
                     .nonces
                     .take()
-                    .ok_or_else(|| refused(DeviceQuorumError::Phase))?;
+                    .ok_or_else(|| refused(DeviceQuorumError::Phase))?
+                    .retire(&self.shared.device_quorum.nonce_retirement)
+                    .await?;
                 let share = self
                     .effects
                     .frost_sign_share_for_message(
                         &package,
                         &local_share,
-                        &nonces,
+                        nonces,
                         &slot.message,
                         &policy.public_package,
                         policy.threshold,

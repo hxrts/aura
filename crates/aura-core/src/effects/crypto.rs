@@ -14,6 +14,7 @@
 //! with stateless handlers. Domain crates should not implement this trait directly
 //! but rather use it via dependency injection.
 
+pub use crate::crypto::tree_signing::{FrostNonces, RetiredFrostNonces};
 use crate::effects::random::RandomCoreEffects;
 use crate::types::identifiers::DeviceId;
 use crate::{AccountId, AuraError};
@@ -316,20 +317,12 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         Err(AuraError::crypto("frost_generate_keys not supported"))
     }
 
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    /// Fresh single-use signing nonces for the signer holding `key_package`.
+    /// The secret never leaves the returned [`FrostNonces`]; read its public
+    /// commitment for round one, retire it, then sign once.
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<FrostNonces, CryptoError> {
         let _ = key_package;
         Err(AuraError::crypto("frost_generate_nonces not supported"))
-    }
-
-    /// Extract audited public commitments from a participant-local nonce bundle.
-    /// The secret bundle must remain with its move-owned, one-use runtime owner.
-    async fn frost_public_commitment(
-        &self,
-        participant_index: u16,
-        local_nonce_bundle: &[u8],
-    ) -> Result<FrostPublicCommitment, CryptoError> {
-        let _ = (participant_index, local_nonce_bundle);
-        Err(AuraError::crypto("frost_public_commitment not supported"))
     }
 
     /// Build a signing package using only public round-one entries. The returned
@@ -369,12 +362,13 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
     /// Sign only the exact independently admitted message and public policy.
     /// Audit native package bytes as well as the outer DTO, own key index,
     /// verifying share, quorum and local nonce commitment before signing.
-    /// Runtime admission and durable one-use nonce retirement remain separate.
+    /// The nonces are consumed: their retirement is already recorded, and
+    /// they cannot sign again.
     async fn frost_sign_share_for_message(
         &self,
         package: &FrostSigningPackage,
         local_key_share: &[u8],
-        local_nonce_bundle: &[u8],
+        nonces: RetiredFrostNonces,
         expected_message: &[u8],
         expected_public_key_package: &[u8],
         expected_threshold: u16,
@@ -382,7 +376,7 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         let _ = (
             package,
             local_key_share,
-            local_nonce_bundle,
+            nonces,
             expected_message,
             expected_public_key_package,
             expected_threshold,
@@ -390,29 +384,6 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         Err(AuraError::crypto(
             "frost_sign_share_for_message not supported",
         ))
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        let _ = (message, nonces, participants, public_key_package);
-        Err(AuraError::crypto(
-            "frost_create_signing_package not supported",
-        ))
-    }
-
-    async fn frost_sign_share(
-        &self,
-        signing_package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        let _ = (signing_package, key_share, nonces);
-        Err(AuraError::crypto("frost_sign_share not supported"))
     }
 
     async fn frost_aggregate_signatures(
@@ -666,17 +637,8 @@ impl<T: CryptoExtendedEffects + ?Sized> CryptoExtendedEffects for std::sync::Arc
     ) -> Result<FrostKeyGenResult, CryptoError> {
         (**self).frost_generate_keys(threshold, max_signers).await
     }
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<FrostNonces, CryptoError> {
         (**self).frost_generate_nonces(key_package).await
-    }
-    async fn frost_public_commitment(
-        &self,
-        participant_index: u16,
-        local_nonce_bundle: &[u8],
-    ) -> Result<FrostPublicCommitment, CryptoError> {
-        (**self)
-            .frost_public_commitment(participant_index, local_nonce_bundle)
-            .await
     }
     async fn frost_create_public_signing_package(
         &self,
@@ -698,7 +660,7 @@ impl<T: CryptoExtendedEffects + ?Sized> CryptoExtendedEffects for std::sync::Arc
         &self,
         package: &FrostSigningPackage,
         local_key_share: &[u8],
-        local_nonce_bundle: &[u8],
+        nonces: RetiredFrostNonces,
         expected_message: &[u8],
         expected_public_key_package: &[u8],
         expected_threshold: u16,
@@ -707,32 +669,11 @@ impl<T: CryptoExtendedEffects + ?Sized> CryptoExtendedEffects for std::sync::Arc
             .frost_sign_share_for_message(
                 package,
                 local_key_share,
-                local_nonce_bundle,
+                nonces,
                 expected_message,
                 expected_public_key_package,
                 expected_threshold,
             )
-            .await
-    }
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        (**self)
-            .frost_create_signing_package(message, nonces, participants, public_key_package)
-            .await
-    }
-    async fn frost_sign_share(
-        &self,
-        signing_package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        (**self)
-            .frost_sign_share(signing_package, key_share, nonces)
             .await
     }
     async fn frost_aggregate_signatures(

@@ -739,24 +739,34 @@ mod tests {
         let message = snapshot_transcript_bytes(snapshot.proposal_id, &snapshot)
             .expect("snapshot transcript");
         let signing_package = crypto
-            .frost_create_signing_package(
+            .frost_create_public_signing_package(
                 &message,
-                &[nonces_1.clone(), nonces_2.clone()],
-                &[1u16, 2u16],
+                &[nonces_1.public_commitment(), nonces_2.public_commitment()],
                 &keys.public_key_package,
+                2,
             )
             .await
             .expect("signing package");
-        let share_1 = crypto
-            .frost_sign_share(&signing_package, &keys.key_packages[0], &nonces_1)
-            .await
-            .expect("sign share");
-        let share_2 = crypto
-            .frost_sign_share(&signing_package, &keys.key_packages[1], &nonces_2)
-            .await
-            .expect("sign share");
+        let log = aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+        let mut shares = Vec::new();
+        for (key_package, nonces) in keys.key_packages.iter().zip([nonces_1, nonces_2]) {
+            let nonces = nonces.retire(&log).await.expect("retire nonces");
+            shares.push(
+                crypto
+                    .frost_sign_share_for_message(
+                        &signing_package,
+                        key_package,
+                        nonces,
+                        &message,
+                        &keys.public_key_package,
+                        2,
+                    )
+                    .await
+                    .expect("sign share"),
+            );
+        }
         snapshot.aggregate_signature = crypto
-            .frost_aggregate_signatures(&signing_package, &[share_1, share_2])
+            .frost_aggregate_signatures(&signing_package, &shares)
             .await
             .expect("aggregate signature");
         snapshot

@@ -4240,7 +4240,7 @@ mod tests {
         );
 
         let nonces = nonces_result.unwrap();
-        assert!(!nonces.is_empty(), "Nonces should not be empty");
+        assert_eq!(nonces.participant(), 1, "Nonces belong to the first signer");
     }
 
     #[tokio::test]

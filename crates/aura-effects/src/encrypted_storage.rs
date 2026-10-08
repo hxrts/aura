@@ -985,37 +985,6 @@ mod tests {
             })
         }
 
-        async fn frost_generate_nonces(
-            &self,
-            _key_package: &[u8],
-        ) -> Result<Vec<u8>, aura_core::AuraError> {
-            Ok(vec![0u8; 64])
-        }
-
-        async fn frost_create_signing_package(
-            &self,
-            message: &[u8],
-            _nonces: &[Vec<u8>],
-            participants: &[u16],
-            public_key_package: &[u8],
-        ) -> Result<aura_core::effects::crypto::FrostSigningPackage, aura_core::AuraError> {
-            Ok(aura_core::effects::crypto::FrostSigningPackage {
-                message: message.to_vec(),
-                package: vec![0u8; 64],
-                participants: participants.to_vec(),
-                public_key_package: public_key_package.to_vec(),
-            })
-        }
-
-        async fn frost_sign_share(
-            &self,
-            _signing_package: &aura_core::effects::crypto::FrostSigningPackage,
-            _key_share: &[u8],
-            _nonces: &[u8],
-        ) -> Result<Vec<u8>, aura_core::AuraError> {
-            Ok(vec![0u8; 64])
-        }
-
         async fn frost_aggregate_signatures(
             &self,
             _signing_package: &aura_core::effects::crypto::FrostSigningPackage,
