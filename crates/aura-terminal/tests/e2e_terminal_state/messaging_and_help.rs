@@ -149,7 +149,6 @@ async fn test_channel_mode_operations() {
         let mut homes = aura_app::views::home::HomesState::default();
         super::add_fixture_home(&mut homes, home);
         homes.select_home(Some(home_id));
-        core.views().set_homes(homes.clone());
         core.emit(&*HOMES_SIGNAL, homes)
             .await
             .expect("Failed to emit homes state");

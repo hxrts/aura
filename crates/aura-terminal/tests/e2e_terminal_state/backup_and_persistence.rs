@@ -249,13 +249,7 @@ async fn test_snapshot_data_accuracy() {
             invitation_code: None,
         },
     ]);
-    {
-        let core = app_core.read().await;
-        core.views().set_contacts(contacts_state);
-    }
-
-    let contacts_snapshot = ctx.snapshot_contacts();
-    for contact in &contacts_snapshot.contacts {
+    for contact in contacts_state.all_contacts() {
         let has_pending_suggestion = contact
             .nickname_suggestion
             .as_ref()

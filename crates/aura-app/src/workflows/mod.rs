@@ -14,17 +14,20 @@
 //!
 //! All workflows follow these patterns:
 //!
-//! **1. ViewState-First Pattern**
-//! - Read current state from ViewState (`app_core.views().snapshot()`)
-//! - Perform operations via AppCore's runtime bridge
-//! - Update ViewState via AppCore methods (signals auto-forward)
+//! **1. Projection-Owner Pattern**
+//! - The observed projections (chat, contacts, homes, invitations, recovery,
+//!   neighborhood) live in their reactive signals; `ProjectionOwner` is the
+//!   one writer, and the runtime's reactive pipeline emits into the same slots
+//! - Update a projection through the `observed_projection` helpers, which
+//!   publish to the signal and then mirror the committed revision into
+//!   `ViewState`; `ViewState` is the render snapshot (`AppCore::snapshot`)
+//!   and is never written directly
+//! - The system refresh hooks mirror runtime emissions into `ViewState`
 //! - Return domain types (not UI types)
 //!
 //! **2. AppCore Integration**
 //! - All workflows take `&Arc<RwLock<AppCore>>` reference
 //! - Use AppCore's runtime bridge for effect execution
-//! - Update ViewState via `core.views().set_*()` or AppCore helper methods
-//! - ReactiveEffects signals update automatically via signal forwarding
 //!
 //! **3. Error Handling**
 //! - Return `Result<T, AuraError>` (not terminal-specific errors)

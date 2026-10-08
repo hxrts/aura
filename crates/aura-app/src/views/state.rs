@@ -7,8 +7,6 @@ use super::{
 };
 use crate::core::{ProjectionSourceRevisions, StateSnapshot};
 #[cfg(feature = "signals")]
-use aura_core::types::identifiers::ChannelId;
-#[cfg(feature = "signals")]
 use futures_signals::signal::{Mutable, Signal};
 
 #[cfg(feature = "signals")]
@@ -129,41 +127,33 @@ impl ViewState {
     }
 
     /// Update chat state
-    pub fn set_chat(&self, state: ChatState) {
+    pub(crate) fn set_chat(&self, state: ChatState) {
         self.chat.set(state);
     }
 
     /// Update recovery state
-    pub fn set_recovery(&self, state: RecoveryState) {
+    pub(crate) fn set_recovery(&self, state: RecoveryState) {
         self.recovery.set(state);
     }
 
     /// Update invitations state
-    pub fn set_invitations(&self, state: InvitationsState) {
+    pub(crate) fn set_invitations(&self, state: InvitationsState) {
         self.invitations.set(state);
     }
 
     /// Update contacts state
-    pub fn set_contacts(&self, state: ContactsState) {
+    pub(crate) fn set_contacts(&self, state: ContactsState) {
         self.contacts.set(state);
     }
 
     /// Update neighborhood state
-    pub fn set_neighborhood(&self, state: NeighborhoodState) {
+    pub(crate) fn set_neighborhood(&self, state: NeighborhoodState) {
         self.neighborhood.set(state);
     }
 
     /// Update homes state
-    pub fn set_homes(&self, state: HomesState) {
+    pub(crate) fn set_homes(&self, state: HomesState) {
         self.homes.set(state);
-    }
-
-    /// Select a home (UI-only, not journaled)
-    ///
-    /// This updates the selected home in HomesState and triggers
-    /// the homes signal for UI updates.
-    pub fn select_home(&self, home_id: Option<ChannelId>) {
-        self.homes.lock_mut().select_home(home_id);
     }
 }
 
@@ -199,27 +189,27 @@ impl ViewState {
     }
 
     /// Update chat state
-    pub fn set_chat(&mut self, state: ChatState) {
+    pub(crate) fn set_chat(&mut self, state: ChatState) {
         self.chat = state;
     }
 
     /// Update recovery state
-    pub fn set_recovery(&mut self, state: RecoveryState) {
+    pub(crate) fn set_recovery(&mut self, state: RecoveryState) {
         self.recovery = state;
     }
 
     /// Update invitations state
-    pub fn set_invitations(&mut self, state: InvitationsState) {
+    pub(crate) fn set_invitations(&mut self, state: InvitationsState) {
         self.invitations = state;
     }
 
     /// Update contacts state
-    pub fn set_contacts(&mut self, state: ContactsState) {
+    pub(crate) fn set_contacts(&mut self, state: ContactsState) {
         self.contacts = state;
     }
 
     /// Update neighborhood state
-    pub fn set_neighborhood(&mut self, state: NeighborhoodState) {
+    pub(crate) fn set_neighborhood(&mut self, state: NeighborhoodState) {
         self.neighborhood = state;
     }
 
@@ -229,12 +219,12 @@ impl ViewState {
     }
 
     /// Get mutable homes state
-    pub fn homes_mut(&mut self) -> &mut HomesState {
+    pub(crate) fn homes_mut(&mut self) -> &mut HomesState {
         &mut self.homes
     }
 
     /// Update homes state
-    pub fn set_homes(&mut self, state: HomesState) {
+    pub(crate) fn set_homes(&mut self, state: HomesState) {
         self.homes = state;
     }
 }
