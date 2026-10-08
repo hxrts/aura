@@ -23,8 +23,8 @@ use super::AuraEffectSystem;
 use aura_consensus::dkg::DkgConfig;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
-    CryptoCoreEffects, CryptoExtendedEffects, SecureStorageCapability, SecureStorageEffects,
-    SecureStorageLocation, StorageCoreEffects,
+    CryptoCoreEffects, CryptoExtendedEffects, PhysicalTimeEffects, SecureStorageCapability,
+    SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
 };
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_core::{AuraError, Hash32};
@@ -348,7 +348,14 @@ where
     Fut: std::future::Future<Output = Result<bool, AuraError>>,
 {
     let me = aura_guards::GuardContextProvider::authority_id(effects);
+    let now_ms = effects
+        .physical_time()
+        .await
+        .map_err(|error| AuraError::internal(format!("time error: {error}")))?
+        .ts_ms;
     let mut outcomes = Vec::new();
+    let mut deferred = Vec::new();
+    let mut ready: Vec<(u64, ChannelKeyInvite)> = Vec::new();
     while let Ok(envelope) = effects.take_inbound_envelope(is_invite_envelope) {
         let invite = match admit_invite(me, &envelope) {
             Ok(invite) => invite,
@@ -358,9 +365,44 @@ where
             }
         };
         if !has_standing(invite.clone()).await? {
-            tracing::warn!(
+            // The coordinator's own join may not have synced here yet (a
+            // late joiner sees the invite before the roster facts). Hold the
+            // invite until standing is observed, for at most the
+            // coordinator's attempt window, rather than refusing the only
+            // invite (Task 196).
+            match hold_for_standing(envelope, now_ms) {
+                Some(held) => {
+                    tracing::debug!(
+                        coordinator = %invite.coordinator,
+                        "channel key invite waits for the coordinator's standing"
+                    );
+                    deferred.push(held);
+                }
+                None => tracing::warn!(
+                    coordinator = %invite.coordinator,
+                    "channel key invite from a coordinator without standing refused"
+                ),
+            }
+            continue;
+        }
+        ready.push((held_since_ms(&envelope).unwrap_or(now_ms), invite));
+    }
+    // Requeue after draining, so one round never takes a deferred invite twice.
+    for envelope in deferred {
+        effects.requeue_envelope(envelope);
+    }
+    // A coordinator re-invites after an attempt that timed out while its
+    // standing was unobserved here; of the invites for one channel epoch,
+    // run only the most recently received. An older one names a ceremony its
+    // coordinator already abandoned.
+    ready.sort_by_key(|(held_since, _)| std::cmp::Reverse(*held_since));
+    let mut started = std::collections::BTreeSet::new();
+    for (_, invite) in ready {
+        if !started.insert((invite.scope.context, invite.scope.channel, invite.epoch)) {
+            tracing::debug!(
                 coordinator = %invite.coordinator,
-                "channel key invite from a coordinator without standing refused"
+                epoch = invite.epoch,
+                "superseded channel key invite dropped"
             );
             continue;
         }
@@ -368,6 +410,39 @@ where
         outcomes.push((invite, outcome));
     }
     Ok(outcomes)
+}
+
+/// Local metadata recording when this member first held an invite while it
+/// waited for the coordinator's standing.
+const HELD_SINCE_METADATA: &str = "aura-channel-key-held-since-ms";
+
+/// How long an invite may wait for its coordinator's standing before it is
+/// refused: the coordinator's attempt window (`CEREMONY_MAX_POLLS` receive
+/// polls of 50 ms).
+pub(crate) const STANDING_HOLD_MS: u64 = CEREMONY_MAX_POLLS as u64 * 50;
+
+/// Hold `envelope` (from a peer whose standing this member has not yet
+/// observed) for a later round, or `None` once it has waited out the
+/// coordinator's attempt window and is refused.
+pub(crate) fn hold_for_standing(
+    mut envelope: TransportEnvelope,
+    now_ms: u64,
+) -> Option<TransportEnvelope> {
+    let held_since = held_since_ms(&envelope).unwrap_or(now_ms);
+    if now_ms.saturating_sub(held_since) >= STANDING_HOLD_MS {
+        return None;
+    }
+    envelope
+        .metadata
+        .insert(HELD_SINCE_METADATA.to_string(), held_since.to_string());
+    Some(envelope)
+}
+
+fn held_since_ms(envelope: &TransportEnvelope) -> Option<u64> {
+    envelope
+        .metadata
+        .get(HELD_SINCE_METADATA)
+        .and_then(|ms| ms.parse().ok())
 }
 
 #[cfg(test)]
@@ -489,6 +564,87 @@ mod tests {
         assert!(
             outcomes.is_empty(),
             "no ceremony runs for a coordinator without standing"
+        );
+    }
+
+    /// Task 196 (LAN run 174): a late joiner receives the coordinator's
+    /// invite before the coordinator's own join has synced to it. The
+    /// joiner holds the invite instead of refusing it, and runs the
+    /// ceremony once standing is observed; a coordinator that never gains
+    /// standing is refused after the bounded wait.
+    #[tokio::test(start_paused = true)]
+    async fn late_joiner_waits_for_the_coordinators_standing() {
+        let shared = crate::SharedTransport::new();
+        let a = runtime(&shared, 85);
+        let b = runtime(&shared, 86);
+        exchange_device_keys(&[&a, &b]).await;
+        let id =
+            |effects: &AuraEffectSystem| aura_guards::GuardContextProvider::authority_id(effects);
+        let invite = ChannelKeyInvite::new(scope(), 1, id(&a), [id(&a), id(&b)]).expect("invite");
+        // B observes the coordinator's standing only after a few rounds.
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let standing = {
+            let observed = observed.clone();
+            move |_invite: ChannelKeyInvite| {
+                let observed = observed.clone();
+                async move { Ok(observed.load(std::sync::atomic::Ordering::SeqCst)) }
+            }
+        };
+        let (a_key, b_outcomes) = futures::join!(
+            coordinate_channel_key_ceremony(&a, &invite, CEREMONY_MAX_POLLS),
+            async {
+                for round in 0u32.. {
+                    if round == 5 {
+                        observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    let outcomes = process_channel_key_invites(&b, &standing, CEREMONY_MAX_POLLS)
+                        .await
+                        .expect("process");
+                    if !outcomes.is_empty() {
+                        assert!(round >= 5, "no ceremony before standing is observed");
+                        return outcomes;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                unreachable!()
+            },
+        );
+        let a_key = a_key.expect("coordinator derives the epoch key");
+        assert_eq!(&a_key, b_outcomes[0].1.as_ref().expect("b derives"));
+
+        // A coordinator that never gains standing: the invite is held across
+        // rounds, then refused once held for the coordinator's attempt window.
+        let never = ChannelKeyInvite::new(scope(), 2, id(&a), [id(&a), id(&b)]).expect("invite");
+        a.send_device_payload(
+            b.device_id().uuid(),
+            CHANNEL_KEY_INVITE_CONTENT_TYPE,
+            aura_core::util::serialization::to_vec(&never).unwrap(),
+        )
+        .await
+        .expect("send");
+        let refuse = |_invite: ChannelKeyInvite| async { Ok(false) };
+        for _ in 0..3 {
+            assert!(process_channel_key_invites(&b, refuse, 4)
+                .await
+                .expect("process")
+                .is_empty());
+        }
+        let mut held = b
+            .take_inbound_envelope(is_invite_envelope)
+            .expect("the invite is still held");
+        let since = held_since_ms(&held).expect("held invites record when");
+        held.metadata.insert(
+            HELD_SINCE_METADATA.to_string(),
+            since.saturating_sub(STANDING_HOLD_MS).to_string(),
+        );
+        b.requeue_envelope(held);
+        assert!(process_channel_key_invites(&b, refuse, 4)
+            .await
+            .expect("process")
+            .is_empty());
+        assert!(
+            b.take_inbound_envelope(is_invite_envelope).is_err(),
+            "the invite is refused after the bounded wait"
         );
     }
 }

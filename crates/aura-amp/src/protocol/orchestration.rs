@@ -362,8 +362,10 @@ async fn derive_channel_message_key<E: SecureStorageEffects>(
             .secure_retrieve(&location, &[SecureStorageCapability::Read])
             .await
             .map_err(|e| AuraError::PermissionDenied {
+                // A member that joined after the epoch began holds its key
+                // only once the membership-change key ceremony includes it.
                 message: format!(
-                    "no channel key for epoch {} of {channel}",
+                    "channel keys pending: no key yet for epoch {} of {channel}",
                     header.chan_epoch
                 ),
                 source: Some(std::sync::Arc::new(e)),

@@ -151,7 +151,13 @@ where
     F: Fn(AuthorityId, Option<ChannelKeyScope>) -> Fut,
     Fut: std::future::Future<Output = Result<bool, AuraError>>,
 {
+    let now_ms = effects
+        .physical_time()
+        .await
+        .map_err(|error| AuraError::internal(format!("time error: {error}")))?
+        .ts_ms;
     let mut processed = 0;
+    let mut held = Vec::new();
     while let Ok(envelope) = effects.take_inbound_envelope(|envelope| decode(envelope).is_some()) {
         processed += 1;
         let source = envelope.source;
@@ -160,7 +166,15 @@ where
                 if is_known_peer(source, scope).await? {
                     announce_device_key(effects, source).await?;
                 } else {
-                    tracing::warn!(%source, "device key request from an unknown peer refused");
+                    // A ceremony peer's own join may not have synced here
+                    // yet; answer once its standing is observed (Task 196).
+                    match super::channel_key_ceremony::hold_for_standing(envelope, now_ms) {
+                        Some(envelope) => held.push(envelope),
+                        None => tracing::warn!(
+                            %source,
+                            "device key request from an unknown peer refused"
+                        ),
+                    }
                 }
             }
             Some(DeviceKeyMessage::Announce {
@@ -188,6 +202,10 @@ where
             }
             None => {}
         }
+    }
+    // Requeue after draining, so one round never takes a held request twice.
+    for envelope in held {
+        effects.requeue_envelope(envelope);
     }
     Ok(processed)
 }

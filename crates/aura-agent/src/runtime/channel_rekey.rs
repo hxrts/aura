@@ -25,9 +25,11 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use std::collections::BTreeSet;
 
-/// Receive polls a coordinator waits on members during one rekey attempt;
-/// an attempt that cannot finish is retried on a later round.
-pub(crate) const REKEY_MAX_POLLS: u32 = 200;
+/// Receive polls a coordinator waits on members during one rekey attempt:
+/// the members' own ceremony window, so a member that admits the invite late
+/// (once it observes the coordinator's standing, Task 196) still joins the
+/// live attempt. An attempt that cannot finish is retried on a later round.
+pub(crate) const REKEY_MAX_POLLS: u32 = super::channel_key_ceremony::CEREMONY_MAX_POLLS;
 
 /// The roster of `scope`'s current key epoch, when this member knows it.
 async fn current_roster(
