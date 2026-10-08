@@ -321,6 +321,17 @@ expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=10 bash "$
   --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.waited-ran"'
 [[ -e "$FREE_FILE.waited-ran" ]]
 wait
+# Gates also wait out volume admission: another build's live reservation
+# (20 - 6 < 15 GiB) blocks until that build exits.
+reset_case
+mkdir -p "$AURA_BUILD_SHARED_DIR/reservations"
+sleep 3 &
+holder_pid=$!
+printf '%s\n' $((6 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$holder_pid"
+expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=20 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.admitted-ran"'
+[[ -e "$FREE_FILE.admitted-ran" ]]
+wait "$holder_pid" 2>/dev/null || true
 # The gate recipes' cargo goes through the budget.
 for recipe in _policy-check _ownership-lint web-check; do
   awk -v r="$recipe" '$0 ~ "^"r"[ :]" {on=1; next} on && /^[^ \t]/ {on=0} on' "$repo_root/justfile" \

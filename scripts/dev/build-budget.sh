@@ -297,7 +297,11 @@ fi
 pre_free="$(free_kib)"
 pre_target="$(target_kib strict)"
 printf 'Pre-build: free=%s KiB target=%s KiB\n' "$pre_free" "$pre_target"
-admit_build || exit 1
+until admit_build; do
+  (( waited < wait_seconds )) || exit 1
+  sleep "$poll_seconds"
+  waited=$((waited + poll_seconds))
+done
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 profile="${AURA_BUILD_PROFILE:-unlabelled}"

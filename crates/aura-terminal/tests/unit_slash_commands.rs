@@ -60,6 +60,46 @@ async fn ensure_chat_channel(ctx: &Arc<IoContext>) {
         .expect("Failed to create chat channel for tests");
 }
 
+/// Task 186 (run 171): `/homeinvite Carol` with no contact named Carol must
+/// not look silent. The TUI publishes the command's semantic operation as
+/// failed (so lastop does not keep showing the previous operation) and shows
+/// an error toast.
+#[tokio::test]
+async fn unresolved_homeinvite_publishes_a_failed_operation_and_error_toast() {
+    use aura_app::ui::contract::{SemanticOperationKind, SemanticOperationPhase};
+    let (ctx, tx, mut rx, _dir) = setup_ctx("homeinvite-unknown").await;
+    let callbacks = CallbackRegistry::new(ctx.clone(), tx).chat;
+    ensure_chat_channel(&ctx).await;
+
+    callbacks.send("general".to_string(), "/homeinvite Carol".to_string());
+
+    let (mut failed, mut toast) = (None, None);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while failed.is_none() || toast.is_none() {
+            match rx.recv().await.expect("UiUpdate channel closed") {
+                UiUpdate::AuthoritativeOperationStatus { status, .. }
+                    if status.phase == SemanticOperationPhase::Failed =>
+                {
+                    failed = Some(status);
+                }
+                UiUpdate::ToastAdded(added) => toast = Some(added),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the failed operation and the toast are both published");
+    let failed = failed.expect("failed operation");
+    assert_eq!(failed.kind, SemanticOperationKind::CreateHomeInvitation);
+    let toast = toast.expect("toast");
+    assert_eq!(toast.id, "command");
+    assert_eq!(
+        toast.level,
+        aura_terminal::tui::components::ToastLevel::Error
+    );
+    assert!(toast.message.contains("/homeinvite"), "{}", toast.message);
+}
+
 #[tokio::test]
 async fn slash_who_emits_participants_toast() {
     let (ctx, tx, mut rx, _dir) = setup_ctx("who").await;

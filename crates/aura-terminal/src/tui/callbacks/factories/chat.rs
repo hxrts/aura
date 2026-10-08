@@ -108,159 +108,17 @@ impl ChatCallbacks {
                             .map(|runtime| runtime.authority_id())
                             .or_else(|| core.authority().copied())
                     };
-                    let report = match aura_app::ui::workflows::slash_commands::prepare(
+                    // One shared path parses, resolves, plans and executes; a
+                    // command that parsed but did not resolve still reports its
+                    // kind, so its semantic operation settles failed (Task 186).
+                    let report = aura_app::ui::workflows::slash_commands::prepare_and_execute(
                         strong_resolver.as_ref(),
                         ctx.app_core_raw(),
                         trimmed,
                         (!channel_id_clone.is_empty()).then_some(channel_id_clone.as_str()),
                         actor,
                     )
-                    .await
-                    {
-                        Ok(prepared) => {
-                            let feedback = match prepared.resolved() {
-                                aura_app::ui::workflows::strong_command::ResolvedCommand::Help {
-                                    ..
-                                } => {
-                                    match aura_app::ui::workflows::slash_commands::execute(
-                                        ctx.app_core_raw(),
-                                        &prepared,
-                                    )
-                                    .await
-                                    {
-                                        Ok(result) => {
-                                            aura_app::ui::workflows::slash_commands::feedback_for_execution_result(
-                                                &prepared, &result,
-                                            )
-                                        }
-                                        Err(error) => {
-                                            aura_app::ui::workflows::slash_commands::feedback_for_execute_error(
-                                                &prepared, &error,
-                                            )
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    let parsed = match aura_app::ui::workflows::strong_command::ParsedCommand::parse(trimmed) {
-                                        Ok(parsed) => parsed,
-                                        Err(error) => {
-                                            let prepare_error =
-                                                aura_app::ui::workflows::slash_commands::SlashCommandPrepareError::from(error);
-                                            let feedback =
-                                                aura_app::ui::workflows::slash_commands::feedback_for_prepare_error(&prepare_error);
-                                            let report =
-                                                aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
-                                                    metadata: None,
-                                                    feedback,
-                                                };
-                                            let feedback = report.feedback;
-                                            let toast = match feedback.toast_kind {
-                                                aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Success => {
-                                                    ToastMessage::success(feedback.topic, feedback.message)
-                                                }
-                                                aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Info => {
-                                                    ToastMessage::info(feedback.topic, feedback.message)
-                                                }
-                                                aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Error => {
-                                                    ToastMessage::error(feedback.topic, feedback.message)
-                                                }
-                                            };
-                                            send_ui_update_reliable(&tx, UiUpdate::ToastAdded(toast))
-                                                .await;
-                                            return;
-                                        }
-                                    };
-                                    let snapshot =
-                                        strong_resolver.capture_snapshot(ctx.app_core_raw()).await;
-                                    let resolved = match strong_resolver.resolve(parsed, &snapshot) {
-                                        Ok(resolved) => resolved,
-                                        Err(error) => {
-                                            let prepare_error =
-                                                aura_app::ui::workflows::slash_commands::SlashCommandPrepareError::from(error);
-                                            let feedback =
-                                                aura_app::ui::workflows::slash_commands::feedback_for_prepare_error(&prepare_error);
-                                            let report =
-                                                aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
-                                                    metadata: None,
-                                                    feedback,
-                                                };
-                                            let feedback = report.feedback;
-                                            let toast = match feedback.toast_kind {
-                                                aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Success => {
-                                                    ToastMessage::success(feedback.topic, feedback.message)
-                                                }
-                                                aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Info => {
-                                                    ToastMessage::info(feedback.topic, feedback.message)
-                                                }
-                                                aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Error => {
-                                                    ToastMessage::error(feedback.topic, feedback.message)
-                                                }
-                                            };
-                                            send_ui_update_reliable(&tx, UiUpdate::ToastAdded(toast))
-                                                .await;
-                                            return;
-                                        }
-                                    };
-                                    if let Err(error) = strong_resolver.plan(
-                                        resolved,
-                                        &snapshot,
-                                        Some(&channel_id_clone),
-                                        actor,
-                                    ) {
-                                        let prepare_error =
-                                            aura_app::ui::workflows::slash_commands::SlashCommandPrepareError::from(error);
-                                        let feedback =
-                                            aura_app::ui::workflows::slash_commands::feedback_for_prepare_error(&prepare_error);
-                                        let report =
-                                            aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
-                                                metadata: None,
-                                                feedback,
-                                            };
-                                        let feedback = report.feedback;
-                                        let toast = match feedback.toast_kind {
-                                            aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Success => {
-                                                ToastMessage::success(feedback.topic, feedback.message)
-                                            }
-                                            aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Info => {
-                                                ToastMessage::info(feedback.topic, feedback.message)
-                                            }
-                                            aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Error => {
-                                                ToastMessage::error(feedback.topic, feedback.message)
-                                            }
-                                        };
-                                        send_ui_update_reliable(&tx, UiUpdate::ToastAdded(toast))
-                                            .await;
-                                        return;
-                                    }
-                                    match aura_app::ui::workflows::strong_command::execute_planned(
-                                        ctx.app_core_raw(),
-                                        prepared.plan().clone(),
-                                    )
-                                    .await
-                                    {
-                                        Ok(result) => {
-                                            aura_app::ui::workflows::slash_commands::feedback_for_execution_result(
-                                                &prepared, &result,
-                                            )
-                                        }
-                                        Err(error) => {
-                                            aura_app::ui::workflows::slash_commands::feedback_for_execute_error(
-                                                &prepared, &error,
-                                            )
-                                        }
-                                    }
-                                }
-                            };
-                            aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
-                                metadata: Some(prepared.metadata().clone()),
-                                feedback,
-                            }
-                        }
-                        Err(error) => aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
-                            metadata: None,
-                            feedback: aura_app::ui::workflows::slash_commands::feedback_for_prepare_error(&error),
-                        },
-                    };
+                    .await;
                     if let Some(semantic) = report
                         .metadata
                         .as_ref()
