@@ -515,3 +515,49 @@ async fn kick_ends_the_shared_membership_episode_on_both_clients() -> Result<()>
     }
     net.finish().await
 }
+
+/// Task 187 (LAN run 171): the home creator admits a participant, designates
+/// him moderator and revokes it, through the real moderator workflows. Each
+/// committed role fact reports success, and the reduced HOMES_SIGNAL is the one
+/// source of the role: Member, then Moderator, then Member.
+#[tokio::test(start_paused = true)]
+async fn admit_op_deop_succeed_and_the_signal_follows_each_role() -> Result<()> {
+    use aura_app::ui::workflows::moderator;
+    use aura_app::views::home::HomeRole;
+
+    let net = SimNet::new();
+    let barbara = net.peer(101).await?;
+    let alex = net.peer(105).await?;
+    link_contacts(&barbara, &alex).await?;
+    let home = context::create_home(&barbara.app, Some("RoleHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+    let alex_id = alex.id;
+    let role = |app: Arc<RwLock<AppCore>>| async move {
+        home_view(&app, home)
+            .await
+            .and_then(|h| h.member(&alex_id).map(|m| m.role))
+    };
+    wait_until("Barbara lists Alex as a participant", || async {
+        role(barbara.app.clone()).await == Some(HomeRole::Participant)
+    })
+    .await?;
+
+    for (step, expected) in [
+        ("admit", HomeRole::Member),
+        ("op", HomeRole::Moderator),
+        ("deop", HomeRole::Member),
+    ] {
+        match step {
+            "admit" => moderator::admit_member_resolved(&barbara.app, alex_id).await,
+            "op" => moderator::grant_moderator_resolved(&barbara.app, alex_id).await,
+            _ => moderator::revoke_moderator_resolved(&barbara.app, alex_id).await,
+        }
+        .map_err(|e| anyhow!("{step} must succeed once its fact commits: {e}"))?;
+        wait_until(
+            &format!("after {step} the signal shows {expected:?}"),
+            || async { role(barbara.app.clone()).await == Some(expected) },
+        )
+        .await?;
+    }
+    net.finish().await
+}

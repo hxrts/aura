@@ -9,13 +9,13 @@ use crate::workflows::home_scope::best_home_for_context_by;
 use crate::workflows::home_scope::identify_materialized_channel_hint;
 use crate::workflows::home_scope::resolve_target_authority;
 use crate::workflows::moderation::governance_causal;
-use crate::workflows::observed_projection::{
-    homes_signal_snapshot, try_update_homes_projection_observed,
-};
+use crate::workflows::observed_projection::homes_signal_snapshot;
 use crate::workflows::runtime::{require_runtime, send_committed_fact, timeout_runtime_call};
 use crate::{views::home::HomeRole, AppCore};
 use async_lock::RwLock;
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+#[cfg(test)]
+use aura_core::types::identifiers::ChannelId;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_social::moderation::facts::{
@@ -27,50 +27,9 @@ use std::time::Duration;
 
 const MODERATOR_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
-fn apply_moderator_role_to_materialized_home(
-    homes: &mut crate::views::home::HomesState,
-    home_id: ChannelId,
-    target_id: AuthorityId,
-    actor: AuthorityId,
-    grant: bool,
-) -> Result<(), AuraError> {
-    let home_state = homes
-        .home_mut(&home_id)
-        .ok_or_else(|| AuraError::not_found(home_id.to_string()))?;
-    let member = home_state
-        .member_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
-    if grant {
-        if matches!(member.role, HomeRole::Moderator) {
-            return Err(AuraError::invalid(
-                "Target already has moderator designation",
-            ));
-        }
-        if !matches!(member.role, HomeRole::Member) {
-            return Err(AuraError::invalid(
-                "Only members can be designated as moderators",
-            ));
-        }
-        member.role = HomeRole::Moderator;
-        if actor == target_id {
-            home_state.my_role = HomeRole::Moderator;
-        }
-    } else {
-        if !matches!(member.role, HomeRole::Moderator) {
-            return Err(AuraError::invalid("Target is not a moderator"));
-        }
-        member.role = HomeRole::Member;
-        if actor == target_id {
-            home_state.my_role = HomeRole::Member;
-        }
-    }
-    Ok(())
-}
-
 #[aura_macros::strong_reference(domain = "home_scope")]
 #[derive(Debug, Clone)]
 struct ModeratorScope {
-    home_id: ChannelId,
     context_id: ContextId,
     home_state: crate::views::home::HomeState,
     peers: Vec<AuthorityId>,
@@ -157,7 +116,6 @@ async fn resolve_scope(
     .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
 
     Ok(ModeratorScope {
-        home_id,
         context_id,
         home_state,
         peers,
@@ -186,7 +144,6 @@ async fn current_moderator_scope(
             .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?
             .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
             return Ok(ModeratorScope {
-                home_id: active_home_id,
                 context_id,
                 home_state: home_state.clone(),
                 peers,
@@ -308,14 +265,9 @@ pub async fn grant_moderator_resolved(
     .await?;
     let fact = HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
         .to_generic();
-    let home_id = scope.home_id;
-    commit_role_fact(&runtime, "grant_moderator_resolved", scope, target_id, fact).await?;
-
-    // Observed UI mirror.
-    try_update_homes_projection_observed(app_core, |homes| {
-        apply_moderator_role_to_materialized_home(homes, home_id, target_id, actor, true)
-    })
-    .await
+    // The committed fact is the outcome: the runtime's governance reducer
+    // applies it to HOMES_SIGNAL, and the render snapshot follows that signal.
+    commit_role_fact(&runtime, "grant_moderator_resolved", scope, target_id, fact).await
 }
 
 /// Admit a home participant to the home's member set (Task 62; docs/115
@@ -353,20 +305,7 @@ pub async fn admit_member_resolved(
     .await?;
     let fact = HomeAdmitMemberFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
         .to_generic();
-    let home_id = scope.home_id;
-    commit_role_fact(&runtime, "admit_member_resolved", scope, target_id, fact).await?;
-
-    try_update_homes_projection_observed(app_core, |homes| {
-        let member = homes
-            .home_mut(&home_id)
-            .and_then(|home| home.member_mut(&target_id))
-            .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
-        if member.role.is_participant() {
-            member.role = HomeRole::Member;
-        }
-        Ok(())
-    })
-    .await
+    commit_role_fact(&runtime, "admit_member_resolved", scope, target_id, fact).await
 }
 
 /// Admit a home participant, named by contact name or authority id.
@@ -418,7 +357,6 @@ pub async fn revoke_moderator_resolved(
     .await?;
     let fact = HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
         .to_generic();
-    let home_id = scope.home_id;
     commit_role_fact(
         &runtime,
         "revoke_moderator_resolved",
@@ -426,11 +364,6 @@ pub async fn revoke_moderator_resolved(
         target_id,
         fact,
     )
-    .await?;
-
-    try_update_homes_projection_observed(app_core, |homes| {
-        apply_moderator_role_to_materialized_home(homes, home_id, target_id, actor, false)
-    })
     .await
 }
 
@@ -459,20 +392,6 @@ mod tests {
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
     use aura_core::crypto::hash::hash;
-
-    #[test]
-    fn moderator_enrichment_cannot_resurrect_removed_home() {
-        let mut homes = HomesState::new();
-        let home_id = ChannelId::from_bytes([91u8; 32]);
-        let member = AuthorityId::new_from_entropy([92u8; 32]);
-        for grant in [true, false] {
-            let result = apply_moderator_role_to_materialized_home(
-                &mut homes, home_id, member, member, grant,
-            );
-            assert!(matches!(result, Err(AuraError::NotFound { .. })));
-            assert!(homes.is_empty());
-        }
-    }
 
     #[tokio::test]
     async fn test_is_admin_no_home() {
@@ -553,7 +472,7 @@ mod tests {
         let scope = resolve_scope(&app_core, Some("slash-lab"))
             .await
             .expect("scope should resolve");
-        assert_eq!(scope.home_id, channel_id);
+        assert_eq!(scope.home_state.id, channel_id);
         assert!(
             scope.home_state.is_admin(),
             "resolve_scope should pick the admin-capable home"
@@ -648,7 +567,7 @@ mod tests {
             .await
             .expect("scope should resolve");
         assert_eq!(scope.context_id, channel_context);
-        assert_eq!(scope.home_id, channel_home_id);
+        assert_eq!(scope.home_state.id, channel_home_id);
     }
 
     #[tokio::test]
