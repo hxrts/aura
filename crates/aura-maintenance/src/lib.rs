@@ -6,6 +6,7 @@
 
 pub mod facts;
 pub mod gc;
+pub mod ota_view;
 pub mod policy;
 pub mod release;
 pub mod scope;
@@ -18,6 +19,7 @@ pub use facts::{
     UpgradeProposalMetadata, MAINTENANCE_FACT_SCHEMA_VERSION, MAINTENANCE_FACT_TYPE_ID,
 };
 pub use gc::{plan_dkg_transcript_gc, TranscriptGcPlan};
+pub use ota_view::{OtaRecommendation, OtaRelease, OtaScopeStage, OtaScopeUpgrade, OtaView};
 pub use policy::{
     AuraActivationTrustPolicy, AuraActivationWindow, AuraReleaseActivationPolicy,
     AuraReleaseDiscoveryPolicy, AuraReleaseSharingPolicy, AuraRollbackPreference,

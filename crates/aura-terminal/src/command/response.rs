@@ -88,6 +88,29 @@ pub struct CeremonyStatusView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OtaReleaseView {
+    pub release_id: String,
+    pub series_id: String,
+    pub version: String,
+    pub declared_by: Vec<String>,
+    pub artifacts: usize,
+    pub certificates: usize,
+    /// Recommended to this account.
+    pub recommended: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OtaUpgradeView {
+    pub scope: String,
+    pub to_release_id: String,
+    pub from_release_id: Option<String>,
+    /// `staged`, `cutover_approved`, `cutover_completed` or `rolled_back`.
+    pub stage: String,
+    pub approvals: usize,
+    pub rollbacks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NotificationView {
     /// `friend_request`, `invitation_received`, `invitation_sent` or
     /// `recovery_request`.
@@ -174,6 +197,11 @@ pub enum Response {
         ceremony_id: String,
     },
     CeremonyStatus(CeremonyStatusView),
+    OtaReleases(Vec<OtaReleaseView>),
+    OtaUpgrades(Vec<OtaUpgradeView>),
+    OtaPublished {
+        release_id: String,
+    },
     NeighborhoodCreated {
         neighborhood_id: String,
     },

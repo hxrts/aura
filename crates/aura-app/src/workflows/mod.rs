@@ -94,6 +94,7 @@ pub mod moderator;
 pub mod network;
 pub(crate) mod observed_projection;
 pub(crate) mod observed_snapshot;
+pub mod ota;
 pub(crate) mod parse;
 pub mod privacy;
 pub mod query;

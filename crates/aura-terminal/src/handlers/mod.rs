@@ -9,11 +9,11 @@
 //!
 //! - `init`, `threshold`: offline device-config tools
 //! - `sync`: the foreground sync daemon
-//! - `ota`, `budget`: not yet reachable from the parser (work/8.md Task 155)
+//! - `budget`: not yet reachable from the parser (work/8.md Task 155)
 //! - `scenarios`, `demo`: development builds only
 
 use crate::error::{TerminalError, TerminalResult};
-use crate::{OtaAction, SyncDaemonArgs};
+use crate::SyncDaemonArgs;
 
 #[cfg(feature = "terminal")]
 use crate::cli::tui::TuiArgs;
@@ -34,7 +34,6 @@ pub mod cli_output;
 pub mod config;
 pub mod handler_context;
 pub mod init;
-pub mod ota;
 pub mod sync;
 pub mod threshold;
 #[cfg(feature = "terminal")]
@@ -165,12 +164,6 @@ impl CliHandler {
         let effects = self.agent.runtime().effects();
         scenarios::handle_scenarios(&self.make_ctx(&effects, false), action).await?;
         Ok(CliOutput::new())
-    }
-
-    /// Handle OTA upgrade commands
-    pub async fn handle_ota(&self, action: &OtaAction) -> TerminalResult<CliOutput> {
-        let effects = self.agent.runtime().effects();
-        ota::handle_ota(&self.make_ctx(&effects, false), action).await
     }
 
     /// Run the foreground sync daemon

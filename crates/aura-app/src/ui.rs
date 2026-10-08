@@ -112,6 +112,7 @@ pub mod workflows {
     pub use crate::workflows::moderation;
     pub use crate::workflows::moderator;
     pub use crate::workflows::network;
+    pub use crate::workflows::ota;
     pub use crate::workflows::privacy;
     pub use crate::workflows::query;
     pub use crate::workflows::recovery_cli;

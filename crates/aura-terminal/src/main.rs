@@ -117,6 +117,14 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
         timeout,
         command,
     } = args;
+    // `aura ota publish` names files; the request carries their contents.
+    let command = match command {
+        Commands::OtaPublish {
+            manifest,
+            artifacts,
+        } => Commands::Run(ota_publish_request(&manifest, &artifacts)?),
+        other => other,
+    };
 
     // Commands that need no account or runtime.
     match &command {
@@ -295,6 +303,29 @@ async fn open_account(
 /// data directory (the TUI or `aura serve`) answers over its socket;
 /// otherwise this process opens the account's production runtime under the
 /// profile's exclusive lease, exactly as the TUI does.
+/// Read `aura ota publish`'s manifest (JSON) and artifact files into the
+/// self-contained request the command model and `aura rpc` share.
+fn ota_publish_request(
+    manifest: &std::path::Path,
+    artifacts: &[PathBuf],
+) -> Result<Request, CommandError> {
+    use base64::Engine as _;
+    let read = |path: &std::path::Path| {
+        std::fs::read(path)
+            .map_err(|e| CommandError::invalid(format!("cannot read {}: {e}", path.display())))
+    };
+    let manifest = serde_json::from_slice(&read(manifest)?)
+        .map_err(|e| CommandError::invalid(format!("{} is not JSON: {e}", manifest.display())))?;
+    let artifacts = artifacts
+        .iter()
+        .map(|path| read(path).map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)))
+        .collect::<Result<_, _>>()?;
+    Ok(Request::OtaPublish {
+        manifest,
+        artifacts,
+    })
+}
+
 async fn run_account_command(
     command: Commands,
     base_path: &std::path::Path,
@@ -399,6 +430,7 @@ async fn dispatch(
         | Commands::Serve
         | Commands::SyncDaemon(_)
         | Commands::AccountCreate { .. }
+        | Commands::OtaPublish { .. }
         | Commands::Replay(_)
         | Commands::Version => Err(aura_terminal::TerminalError::Operation(
             "command reached the offline tool dispatch".into(),

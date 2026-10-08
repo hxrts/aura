@@ -28,7 +28,6 @@ const HANDLER_MODULES: &[&str] = &[
     "handler_context.rs",
     "init.rs",
     "mod.rs",
-    "ota.rs",
     "scenarios",
     "sync.rs",
     "threshold.rs",

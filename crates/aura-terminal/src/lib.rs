@@ -198,37 +198,3 @@ pub enum ScenarioAction {
         detailed: bool,
     },
 }
-
-/// OTA upgrade subcommands
-#[derive(Debug, Clone)]
-pub enum OtaAction {
-    /// Submit a new upgrade proposal
-    Propose {
-        /// Source version (from)
-        from_version: String,
-        /// Target version (to)
-        to_version: String,
-        /// Upgrade type: soft, hard, or security
-        upgrade_type: String,
-        /// Download URL for the upgrade package
-        download_url: String,
-        /// Upgrade description
-        description: String,
-    },
-    /// Set user opt-in policy
-    Policy {
-        /// Policy type: auto, manual, security, soft-auto
-        policy: String,
-    },
-    /// Check upgrade status
-    Status,
-    /// Opt into a specific upgrade
-    OptIn {
-        /// Proposal ID to opt into
-        proposal_id: String,
-    },
-    /// List all upgrade proposals
-    List,
-    /// Show upgrade statistics
-    Stats,
-}

@@ -351,6 +351,35 @@ pub fn rotation_parser() -> impl Parser<Request> {
     construct!([status, cancel])
 }
 
+/// `aura ota` subcommands that are plain requests (`publish` reads files and
+/// is assembled by the binary).
+#[must_use]
+pub fn ota_parser() -> impl Parser<Request> {
+    let list = pure(Request::OtaList)
+        .to_options()
+        .command("list")
+        .help("Declared releases");
+    let status = pure(Request::OtaStatus)
+        .to_options()
+        .command("status")
+        .help("This account's staged and activated upgrades");
+    let release = positional::<String>("RELEASE").help("Release id (hex)");
+    let recommend = construct!(Request::OtaRecommend { release })
+        .to_options()
+        .command("recommend")
+        .help("Recommend a declared release to this account");
+    let release = positional::<String>("RELEASE").help("Release id (hex)");
+    let from = long("from")
+        .help("Release this account runs, when no completed cutover records it")
+        .argument::<String>("RELEASE")
+        .optional();
+    let stage = construct!(Request::OtaStage { from, release })
+        .to_options()
+        .command("stage")
+        .help("Stage a declared release for this account");
+    construct!([list, status, recommend, stage])
+}
+
 #[must_use]
 pub fn account_parser() -> impl Parser<Request> {
     pure(Request::AccountRefresh)

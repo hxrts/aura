@@ -429,6 +429,135 @@ async fn rotation_status_observes_a_started_guardian_ceremony() -> Result<()> {
     outcome
 }
 
+/// A release manifest signed by a real key, with one artifact described by
+/// content hash and size (docs/116 §4.1).
+fn signed_release(seed: u8, artifact: &[u8]) -> aura_maintenance::AuraReleaseManifest {
+    use aura_core::{Ed25519SigningKey, Hash32, SemanticVersion};
+    use aura_maintenance::*;
+    use std::collections::BTreeMap;
+    let key = Ed25519SigningKey::from_bytes([seed; 32]);
+    let h = |b: u8| Hash32::new([b; 32]);
+    let mut manifest = AuraReleaseManifest::new(
+        AuraReleaseSeriesId::new(h(seed)),
+        SemanticVersion::new(2, 0, u16::from(seed)),
+        aura_core::types::identifiers::AuthorityId::new_from_entropy([seed; 32]),
+        AuraReleaseProvenance::new(
+            format!("https://example.invalid/aura-{seed}.git"),
+            h(seed.wrapping_add(1)),
+            h(seed.wrapping_add(2)),
+            h(seed.wrapping_add(3)),
+            h(seed.wrapping_add(4)),
+            h(seed.wrapping_add(5)),
+        ),
+        vec![AuraArtifactDescriptor::new(
+            AuraArtifactKind::Binary,
+            "aura",
+            Some(AuraTargetPlatform::new("aarch64-darwin")),
+            AuraArtifactPackaging::TarZst,
+            "bin/aura",
+            None,
+            AuraRollbackRequirement::KeepPriorReleaseStaged,
+            Hash32::from_bytes(artifact),
+            artifact.len() as u64,
+        )],
+        AuraCompatibilityManifest::new(
+            AuraCompatibilityClass::BackwardCompatible,
+            None,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ),
+        Vec::new(),
+        AuraActivationProfile::new(false, false, Vec::new()),
+        BTreeMap::new(),
+        None,
+        None,
+        key.verifying_key().unwrap(),
+        key.sign(b"placeholder").unwrap(),
+    )
+    .unwrap();
+    manifest.signature = key.sign(&manifest.signature_payload().unwrap()).unwrap();
+    manifest
+}
+
+/// OTA through `aura rpc` (Task 182): a signed release and its artifact are
+/// published, listed and recommended, then staged for the account; a
+/// tampered manifest and an undeclared release are refused.
+#[tokio::test(start_paused = true)]
+async fn ota_release_publish_recommend_and_stage_through_rpc() -> Result<()> {
+    use base64::Engine as _;
+    let net = SimNet::new();
+    let peer = net.peer(121).await?;
+    let (mut client, server) = RpcClient::connect(&peer).await?;
+    let artifact = b"aura release artifact".to_vec();
+    let (current, next) = (signed_release(7, b"current"), signed_release(8, &artifact));
+    let id = |m: &aura_maintenance::AuraReleaseManifest| m.release_id.as_hash().to_string();
+    let (current_id, next_id) = (id(&current), id(&next));
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+
+    let script = async move {
+        assert_eq!(client.ok("ota_list", Value::Null).await?["data"], json!([]));
+        for (manifest, blob) in [(&current, b"current".as_slice()), (&next, &artifact)] {
+            let published = client
+                .ok(
+                    "ota_publish",
+                    json!({"manifest": manifest, "artifacts": [encode(blob)]}),
+                )
+                .await?;
+            assert_eq!(published["type"], "ota_published");
+            assert_eq!(published["data"]["release_id"], json!(id(manifest)));
+        }
+        // A manifest whose signed content was changed is refused.
+        let mut tampered = serde_json::to_value(&next)?;
+        tampered["metadata"] = json!({"channel": "forged"});
+        let refused = client
+            .call("ota_publish", json!({"manifest": tampered}))
+            .await?;
+        assert_eq!(refused["error"]["code"], "invalid_input", "{refused}");
+
+        client
+            .ok("ota_recommend", json!({"release": next_id}))
+            .await?;
+        let list = client.ok("ota_list", Value::Null).await?;
+        let next_view = list["data"]
+            .as_array()
+            .and_then(|r| r.iter().find(|r| r["release_id"] == json!(next_id)))
+            .cloned()
+            .ok_or_else(|| anyhow!("{list}"))?;
+        assert_eq!(next_view["artifacts"], 1, "{list}");
+        assert_eq!(next_view["recommended"], true, "{list}");
+
+        // Staging needs the release the account runs, and a declared target.
+        let no_from = client
+            .call("ota_stage", json!({"release": next_id}))
+            .await?;
+        assert_eq!(no_from["error"]["code"], "invalid_input", "{no_from}");
+        let undeclared = client
+            .call(
+                "ota_stage",
+                json!({"release": "00".repeat(32), "from": current_id}),
+            )
+            .await?;
+        assert_eq!(undeclared["error"]["code"], "not_found", "{undeclared}");
+        client
+            .ok("ota_stage", json!({"release": next_id, "from": current_id}))
+            .await?;
+        let status = client.ok("ota_status", Value::Null).await?;
+        assert_eq!(
+            status["data"][0]["to_release_id"],
+            json!(next_id),
+            "{status}"
+        );
+        assert_eq!(status["data"][0]["from_release_id"], json!(current_id));
+        assert_eq!(status["data"][0]["stage"], "staged");
+
+        client.shutdown().await?;
+        Ok::<(), anyhow::Error>(())
+    };
+    let (outcome, served) = tokio::join!(script, server);
+    served?;
+    outcome
+}
+
 /// A request line with a bad parameter fails with a typed error carrying
 /// its id; the session continues.
 #[tokio::test(start_paused = true)]
