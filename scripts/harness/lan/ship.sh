@@ -90,7 +90,7 @@ fi
 ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && git fetch -q origin && \
   [ -z \"\$(git status --porcelain --untracked-files=no)\" ] && git checkout -q main && git merge -q --ff-only $commit && \
   mkdir -p bin target/release $web_public crates/aura-web/public/assets .nix-ship && \
-  rm -f .nix-ship/runtime-* && ${root_cmds}true"
+  find .nix-ship -maxdepth 1 -name 'runtime-*' -delete && ${root_cmds}true"
 rsync -a "$aura_bin" "$AURA_E2E_REMOTE:$remote_root/bin/aura"
 rsync -a "$repl_bin" "$AURA_E2E_REMOTE:$remote_root/target/release/tool_repl"
 rsync -a "$tailwind" "$AURA_E2E_REMOTE:$remote_root/$tailwind"
