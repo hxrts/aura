@@ -253,6 +253,16 @@ waited=0
 lock_dir="$root/target/.aura-build-budget.lock"
 mkdir -p "$root/target"
 until mkdir "$lock_dir" 2>/dev/null; do
+  # A holder killed before its EXIT trap leaves its lock behind (Task 216):
+  # reclaim a lock whose recorded pid is no longer alive, as the admission
+  # lock does. A lock without a pid yet may be a holder starting up.
+  holder="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+  if [[ "$holder" =~ ^[0-9]+$ ]] && ! kill -0 "$holder" 2>/dev/null; then
+    echo "build-budget: reclaiming $lock_dir from dead holder pid $holder" >&2
+    rm -f "$lock_dir/pid"
+    rmdir "$lock_dir" 2>/dev/null || true
+    continue
+  fi
   if (( waited >= wait_seconds )); then
     echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
     exit 1
@@ -350,12 +360,17 @@ wait_seconds=0
 if (( status == 0 && no_prune == 1 )); then
   echo 'No-prune mode: post-build cache collection skipped'
 elif (( status == 0 )); then
+  # Cleanup is best effort: a sweep skipped because another builder is (or
+  # became) active leaves the build's own status (Task 212). Only a genuine
+  # sweep failure changes it.
   if idle_now; then
     if sweep apply; then :;
     else
       sweep_status=$?
       if (( sweep_status == 3 )); then
-        prune_safe_lanes apply
+        prune_safe_lanes apply || true
+      elif ! idle_now; then
+        echo 'build-budget: post-build sweep skipped because another builder started' >&2
       else
         echo 'build-budget: post-build sweep failed' >&2
         status=76
@@ -363,7 +378,6 @@ elif (( status == 0 )); then
     fi
   else
     echo 'build-budget: post-build sweep skipped because another builder started' >&2
-    status=76
   fi
 fi
 after_free="$(free_kib)"
