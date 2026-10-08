@@ -1,11 +1,16 @@
 //! Local Unix-socket transport for `aura rpc` sessions.
 //!
-//! A running node (the TUI, or `aura serve`) listens on `<data-dir>.sock`
-//! so several clients can attach to the one runtime that holds the
-//! account's profile. The socket is owner-only: its file mode is `0600`, and
-//! connections from another user id are refused. There is no network
-//! listener. CLI commands try the socket first ([`call`]) and only open the
-//! profile themselves when no node answers.
+//! A running node (the TUI, or `aura serve`) listens on a node socket so
+//! several clients can attach to the one runtime that holds the account's
+//! profile. Unix socket paths are short (about 104 bytes on macOS), so the
+//! socket lives in the user's runtime directory (`$XDG_RUNTIME_DIR`, else
+//! `$TMPDIR`, else `/tmp`) as `aura-<hash of the data dir>.sock`, and the
+//! node records that path in `<data-dir>.sock-path`, beside the data
+//! directory (outside the owned profile), where clients look it up. The
+//! socket is owner-only: its file mode is `0600`, and connections from
+//! another user id are refused. There is no network listener. CLI commands
+//! try the socket first ([`call`]) and only open the profile themselves when
+//! no node answers.
 
 use crate::command::{CommandContext, CommandError, ErrorCode, Request, Response};
 use crate::rpc;
@@ -17,25 +22,92 @@ use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
-/// The node socket for the account stored at `base_path`: a sibling of the
-/// data directory (`~/.aura` → `~/.aura.sock`). It stays outside the owned
+/// Longest socket path this module binds: under every platform's
+/// `sun_path` limit (104 bytes on macOS, 108 on Linux), with the NUL byte.
+const MAX_SOCKET_PATH: usize = 100;
+
+/// Where the node serving `base_path` records its socket path: a sibling of
+/// the data directory (`~/.aura` → `~/.aura.sock-path`), outside the owned
 /// profile directory, whose storage owns every entry inside it.
-#[must_use]
-pub fn socket_path(base_path: &Path) -> PathBuf {
+fn pointer_path(base_path: &Path) -> PathBuf {
     let name = base_path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "aura".to_string());
-    base_path.with_file_name(format!("{name}.sock"))
+    base_path.with_file_name(format!("{name}.sock-path"))
 }
 
-/// Removes the socket file when the server stops, however it stops.
-struct SocketFile(PathBuf);
+/// The short socket path a node for `base_path` binds: the user runtime
+/// directory and a hash of the data directory's absolute path, so any data
+/// directory depth fits. `/tmp` is used when the runtime directory itself
+/// is too deep.
+fn hosted_socket_path(base_path: &Path) -> PathBuf {
+    let absolute = std::fs::canonicalize(base_path).unwrap_or_else(|_| base_path.to_path_buf());
+    let digest = aura_core::hash::hash(absolute.as_os_str().as_encoded_bytes());
+    let name = format!("aura-{}.sock", hex::encode(&digest[..8]));
+    ["XDG_RUNTIME_DIR", "TMPDIR"]
+        .iter()
+        .filter_map(|var| std::env::var_os(var).map(PathBuf::from))
+        .map(|dir| dir.join(&name))
+        .find(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
+        .unwrap_or_else(|| Path::new("/tmp").join(name))
+}
 
-impl Drop for SocketFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+/// The node socket for the account stored at `base_path`: the path its node
+/// recorded, else the path a node for it would bind.
+#[must_use]
+pub fn socket_path(base_path: &Path) -> PathBuf {
+    std::fs::read_to_string(pointer_path(base_path))
+        .ok()
+        .map(|recorded| PathBuf::from(recorded.trim_end()))
+        .filter(|recorded| !recorded.as_os_str().is_empty())
+        .unwrap_or_else(|| hosted_socket_path(base_path))
+}
+
+/// A node socket bound for one data directory. Dropping it removes the
+/// socket file and the recorded path, however the server stops.
+pub struct HostedSocket {
+    listener: UnixListener,
+    path: PathBuf,
+    pointer: PathBuf,
+}
+
+impl HostedSocket {
+    /// The socket's path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
     }
+}
+
+impl Drop for HostedSocket {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(&self.pointer);
+    }
+}
+
+/// Host the node socket for the account at `base_path`: bind the short
+/// socket path and record it beside the data directory. Fails (rather than
+/// running without a socket) when another node already answers, the path
+/// cannot be bound, or the record cannot be written.
+pub async fn host(base_path: &Path) -> std::io::Result<HostedSocket> {
+    let path = hosted_socket_path(base_path);
+    if path.as_os_str().len() > MAX_SOCKET_PATH {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("node socket path {} is too long", path.display()),
+        ));
+    }
+    let listener = bind(&path).await?;
+    let pointer = pointer_path(base_path);
+    let hosted = HostedSocket {
+        listener,
+        path,
+        pointer,
+    };
+    std::fs::write(&hosted.pointer, format!("{}\n", hosted.path.display()))?;
+    Ok(hosted)
 }
 
 fn same_user(stream: &UnixStream) -> bool {
@@ -46,7 +118,7 @@ fn same_user(stream: &UnixStream) -> bool {
 
 /// Bind the node socket: refuse when another node already answers on it,
 /// replace a stale file, and restrict it to the owner.
-pub async fn bind(path: &Path) -> std::io::Result<UnixListener> {
+async fn bind(path: &Path) -> std::io::Result<UnixListener> {
     if path.exists() {
         if UnixStream::connect(path).await.is_ok() {
             return Err(std::io::Error::new(
@@ -61,15 +133,15 @@ pub async fn bind(path: &Path) -> std::io::Result<UnixListener> {
     Ok(listener)
 }
 
-/// Serve `aura rpc` sessions on `listener` until `stop` resolves; each
-/// connection is one session on the shared runtime.
+/// Serve `aura rpc` sessions on the hosted socket until `stop` resolves;
+/// each connection is one session on the shared runtime. The socket and its
+/// record are removed when serving ends.
 pub async fn serve(
     ctx: &CommandContext,
-    listener: UnixListener,
-    path: &Path,
+    hosted: HostedSocket,
     stop: impl Future<Output = ()>,
 ) -> std::io::Result<()> {
-    let _socket_file = SocketFile(path.to_path_buf());
+    let listener = &hosted.listener;
     let mut sessions = FuturesUnordered::new();
     tokio::pin!(stop);
     loop {

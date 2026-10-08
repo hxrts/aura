@@ -470,24 +470,23 @@ fn build_standard_io_context(
 }
 
 /// Serve `aura rpc` sessions on the account's node socket for as long as
-/// the TUI's startup task owner lives. A socket already answered by another
-/// node is left alone.
+/// the TUI's startup task owner lives. A socket that cannot be hosted fails
+/// the launch: CLI commands would otherwise try to open the profile this TUI
+/// holds.
 async fn host_node_socket(
     tasks: &UiTaskOwner,
     base_path: &std::path::Path,
     ctx: crate::command::CommandContext,
-) {
-    let socket = crate::rpc_socket::socket_path(base_path);
-    match crate::rpc_socket::bind(&socket).await {
-        Ok(listener) => tasks.spawn_cancellable(async move {
-            if let Err(error) =
-                crate::rpc_socket::serve(&ctx, listener, &socket, std::future::pending()).await
-            {
-                tracing::warn!(%error, "node socket stopped");
-            }
-        }),
-        Err(error) => tracing::warn!(%error, "node socket not hosted"),
-    }
+) -> crate::error::TerminalResult<()> {
+    let hosted = crate::rpc_socket::host(base_path).await.map_err(|error| {
+        crate::error::TerminalError::Operation(format!("node socket not hosted: {error}"))
+    })?;
+    tasks.spawn_cancellable(async move {
+        if let Err(error) = crate::rpc_socket::serve(&ctx, hosted, std::future::pending()).await {
+            tracing::warn!(%error, "node socket stopped");
+        }
+    });
+    Ok(())
 }
 
 /// Reconcile a staged account bootstrap into the runtime, as the first
@@ -816,7 +815,7 @@ async fn handle_tui_launch_with_bootstrap(
                         authority,
                     ),
                 )
-                .await;
+                .await?;
             }
 
             if let Some(device_enrollment_code) = pending_device_enrollment_code {

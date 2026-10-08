@@ -388,7 +388,7 @@ aura rpc
 {"id":2,"method":"subscribe","params":{"topics":["messages"]}}
 ```
 
-A running node, the TUI or `aura serve`, also listens on the owner-only local socket `<data-dir>.sock` (beside the data directory, e.g. `~/.aura.sock`) (mode `0600`, same-user connections only, no network listener). Every `aura` account command and `aura rpc` first try that socket, so they work while the TUI holds the account. With no node running, the CLI opens the account's production runtime itself under the profile's exclusive lease.
+A running node, the TUI or `aura serve`, also listens on an owner-only local socket (mode `0600`, same-user connections only, no network listener). Unix socket paths are short, so the socket lives in the user runtime directory (`$XDG_RUNTIME_DIR`, else `$TMPDIR`, else `/tmp`) as `aura-<hash>.sock`, and the node records its path in `<data-dir>.sock-path` beside the data directory. A node that cannot host its socket fails to start. Every `aura` account command and `aura rpc` first try that socket, so they work while the TUI holds the account. With no node running, the CLI opens the account's production runtime itself under the profile's exclusive lease.
 
 The protocol schema is published at `crates/aura-terminal/schema/aura-rpc-v1.json`, generated from the request and response types and kept in sync by `just ci-rpc-schema`.
 

@@ -45,7 +45,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   simulation runtime's nonproduction store.
 
 - One process holds an account's profile. A node (the TUI in production
-  mode, or `aura serve`) hosts `rpc_socket` at `<data-dir>.sock` (beside the data directory, e.g. `~/.aura.sock`): mode
+  mode, or `aura serve`) hosts `rpc_socket` at a short `aura-<hash of data dir>.sock` in the user runtime dir, recorded in `<data-dir>.sock-path` (hosting failure fails the launch): mode
   `0600`, same-uid peers only, no network listener. Account commands and
   `aura rpc` route to that socket first; otherwise the CLI opens the
   production runtime itself through `handlers::tui::open_production_runtime`,
