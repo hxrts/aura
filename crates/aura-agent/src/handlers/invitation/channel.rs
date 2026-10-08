@@ -574,6 +574,7 @@ impl<'a> InvitationChannelHandler<'a> {
         context_id: ContextId,
         channel_id: ChannelId,
         participant: AuthorityId,
+        episode: &InvitationId,
     ) -> AgentResult<()> {
         let started_at = effects
             .physical_time()
@@ -585,14 +586,21 @@ impl<'a> InvitationChannelHandler<'a> {
         )
         .map_err(|error| AgentError::effects(error.to_string()))?;
 
+        // The join names the accepted invitation's episode. An unnamed join
+        // after a kick or leave is refused as a rejoin, and whether it was
+        // refused depended on whether the inviter's copy of this episode had
+        // already synced (Task 193).
         let join_result = execute_with_timeout_budget(effects, &budget, || async {
             effects
-                .join_channel(ChannelJoinParams {
-                    context: context_id,
-                    channel: channel_id,
+                .commit_channel_membership(
+                    context_id,
+                    channel_id,
                     participant,
-                })
+                    aura_protocol::amp::ChannelParticipantEvent::Joined,
+                    Some(episode.to_string()),
+                )
                 .await
+                .map(|_| ())
         })
         .await;
 
@@ -878,8 +886,14 @@ impl<'a> InvitationChannelHandler<'a> {
 
         self.require_channel_checkpoint(effects, invite.context_id, invite.channel_id)
             .await?;
-        self.require_channel_join(effects, invite.context_id, invite.channel_id, own_id)
-            .await?;
+        self.require_channel_join(
+            effects,
+            invite.context_id,
+            invite.channel_id,
+            own_id,
+            &invite.invitation_id,
+        )
+        .await?;
 
         let existing_channel_name = self
             .handler

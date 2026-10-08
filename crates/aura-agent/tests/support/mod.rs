@@ -69,6 +69,8 @@ pub async fn check_runtimes_alive() -> Result<()> {
 const WAIT: Duration = Duration::from_secs(60);
 /// Virtual time between re-checks of a condition.
 const RECHECK: Duration = Duration::from_millis(50);
+/// Real time one wait may take before it reports a virtual-time stall.
+const WALL_WATCHDOG: Duration = Duration::from_secs(90);
 
 /// A test's runtimes: one shared transport and one virtual clock.
 pub struct SimNet {
@@ -253,7 +255,17 @@ where
     Fut: std::future::Future<Output = bool>,
 {
     let deadline = tokio::time::Instant::now() + WAIT;
+    let watchdog = aura_testkit::time::VirtualTimeStallWatchdog::start(WALL_WATCHDOG);
     loop {
+        // A wait that burns real time without reaching its virtual deadline
+        // is a livelock; fail fast instead of spinning for minutes.
+        if let Some(elapsed) = watchdog.stalled() {
+            return Err(anyhow!(
+                "{what}: virtual time stalled ({:?} of real time elapsed, {:?} of virtual time left)",
+                elapsed,
+                deadline.saturating_duration_since(tokio::time::Instant::now())
+            ));
+        }
         check_runtimes_alive()
             .await
             .map_err(|e| e.context(format!("while waiting for: {what}")))?;
@@ -342,12 +354,22 @@ pub async fn join_home(inviter: &Peer, invitee: &Peer, home: ChannelId) -> Resul
         },
     )
     .await?;
-    wait_until("invitee accepts the home invitation", || async {
-        invitation::accept_pending_channel_invitation(&invitee.app)
-            .await
-            .is_ok()
+    let last_error = std::cell::RefCell::new(None::<String>);
+    let accepted = wait_until("invitee accepts the home invitation", || async {
+        match invitation::accept_pending_channel_invitation(&invitee.app).await {
+            Ok(_) => true,
+            Err(error) => {
+                let error = error.to_string();
+                if last_error.borrow().as_deref() != Some(error.as_str()) {
+                    eprintln!("home invitation accept not yet possible: {error}");
+                }
+                *last_error.borrow_mut() = Some(error);
+                false
+            }
+        }
     })
-    .await?;
+    .await;
+    accepted.map_err(|e| e.context(format!("last accept error: {:?}", last_error.borrow())))?;
     wait_until("invitee materializes the home", || async {
         home_view(&invitee.app, home).await.is_some()
     })
