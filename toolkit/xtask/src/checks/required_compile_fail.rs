@@ -135,6 +135,7 @@ pub(super) fn run() -> Result<()> {
     }
     require_exact_capability_declaration_regressions()?;
     require_rng_custody_regressions()?;
+    require_selected_provider_custody_regressions()?;
     require_test_namespace_regressions()?;
     require_protocol_tree_regressions()?;
     require_spawn_configuration_regression()?;
@@ -216,6 +217,19 @@ fn require_rng_custody_regressions() -> Result<()> {
         &[
             "cloned_subsystems_continue_one_original_deterministic_stream",
             "independently_seeded_subsystems_remain_reproducible_without_shared_custody",
+        ],
+    )
+}
+// Tasks 547 and 605: first-attachment A/B provider substitution and an
+// unsupported selected provider must stay exact, executed native regressions.
+fn require_selected_provider_custody_regressions() -> Result<()> {
+    require_lib_regressions(
+        "hxrts-aura-agent",
+        "crates/aura-agent/src/runtime/subsystems/crypto.rs",
+        "runtime::subsystems::crypto",
+        &[
+            "selected_secret_handoff_rejects_replacement_and_preexisting_shared_registry",
+            "selected_native_provider_without_lifetime_support_retains_structural_unavailability",
         ],
     )
 }
