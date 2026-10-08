@@ -108,17 +108,58 @@ impl ChatCallbacks {
                             .map(|runtime| runtime.authority_id())
                             .or_else(|| core.authority().copied())
                     };
-                    // One shared path parses, resolves, plans and executes; a
-                    // command that parsed but did not resolve still reports its
-                    // kind, so its semantic operation settles failed (Task 186).
-                    let report = aura_app::ui::workflows::slash_commands::prepare_and_execute(
+                    // Prepare once (parse, resolve, plan), then execute the
+                    // prepared plan. A command that parsed but did not resolve
+                    // still reports its kind, so its semantic operation settles
+                    // failed (Task 186).
+                    let report = match aura_app::ui::workflows::slash_commands::prepare(
                         strong_resolver.as_ref(),
                         ctx.app_core_raw(),
                         trimmed,
                         (!channel_id_clone.is_empty()).then_some(channel_id_clone.as_str()),
                         actor,
                     )
-                    .await;
+                    .await
+                    {
+                        Ok(prepared) => {
+                            let executed = if matches!(
+                                prepared.resolved(),
+                                aura_app::ui::workflows::strong_command::ResolvedCommand::Help { .. }
+                            ) {
+                                aura_app::ui::workflows::slash_commands::execute(
+                                    ctx.app_core_raw(),
+                                    &prepared,
+                                )
+                                .await
+                            } else {
+                                aura_app::ui::workflows::strong_command::execute_planned(
+                                    ctx.app_core_raw(),
+                                    prepared.plan().clone(),
+                                )
+                                .await
+                            };
+                            let feedback = match executed {
+                                Ok(result) => {
+                                    aura_app::ui::workflows::slash_commands::feedback_for_execution_result(
+                                        &prepared, &result,
+                                    )
+                                }
+                                Err(error) => {
+                                    aura_app::ui::workflows::slash_commands::feedback_for_execute_error(
+                                        &prepared, &error,
+                                    )
+                                }
+                            };
+                            aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
+                                metadata: Some(prepared.metadata().clone()),
+                                feedback,
+                            }
+                        }
+                        Err(error) => aura_app::ui::workflows::slash_commands::SlashCommandExecutionReport {
+                            metadata: error.metadata(),
+                            feedback: aura_app::ui::workflows::slash_commands::feedback_for_prepare_error(&error),
+                        },
+                    };
                     if let Some(semantic) = report
                         .metadata
                         .as_ref()
