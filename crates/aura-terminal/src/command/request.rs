@@ -286,6 +286,8 @@ pub enum Request {
     DeviceRemove { device: String },
     /// Cancel a key-rotation ceremony.
     RotationCancel { ceremony_id: String },
+    /// Progress of a key-rotation ceremony this account runs.
+    RotationStatus { ceremony_id: String },
 
     /// Home storage budget.
     Budget,
@@ -508,6 +510,7 @@ pub fn all_request_examples() -> Vec<Request> {
         },
         Request::DeviceRemove { device: s() },
         Request::RotationCancel { ceremony_id: s() },
+        Request::RotationStatus { ceremony_id: s() },
         Request::Budget,
         Request::NotificationsList,
         Request::RecoveryStart {
@@ -609,6 +612,7 @@ pub fn all_request_examples() -> Vec<Request> {
             | Request::GuardiansSet { .. }
             | Request::DeviceRemove { .. }
             | Request::RotationCancel { .. }
+            | Request::RotationStatus { .. }
             | Request::Budget
             | Request::NotificationsList
             | Request::RecoveryStart { .. }

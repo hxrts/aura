@@ -140,6 +140,7 @@ async fn contact_home_and_messaging_flows_through_rpc() -> Result<()> {
     let (alex_id, barbara_id) = (alex.id.to_string(), barbara.id.to_string());
     let (mut a, alex_server) = RpcClient::connect(&alex).await?;
     let (mut b, barbara_server) = RpcClient::connect(&barbara).await?;
+    let barbara_peer = &barbara;
 
     // The script owns the clients: when it ends, either way, the sessions see EOF.
     let script = async move {
@@ -171,6 +172,11 @@ async fn contact_home_and_messaging_flows_through_rpc() -> Result<()> {
             })
             .await?;
         assert_eq!(event["data"]["sender_id"], json!(alex_id));
+        // The inbound message reaches the TUI's render snapshot too, and it
+        // agrees with the chat the workflows read (Task 166).
+        barbara_peer
+            .chat_views_agree_on(&home_id, "hello barbara")
+            .await?;
 
         // And back: Alex reads Barbara's reply in the channel history.
         b.ok(
@@ -351,6 +357,75 @@ async fn social_and_account_commands_through_rpc() -> Result<()> {
     let (outcome, alex_served, barbara_served) = tokio::join!(script, alex_server, barbara_server);
     alex_served?;
     barbara_served?;
+    outcome
+}
+
+/// A guardian ceremony started by one command is observed by its id alone
+/// through `rotation status` (Task 183); the kind comes from the runtime's
+/// record. An unknown id fails typed.
+#[tokio::test(start_paused = true)]
+async fn rotation_status_observes_a_started_guardian_ceremony() -> Result<()> {
+    let net = SimNet::new();
+    let alex = net.peer(111).await?;
+    let barbara = net.peer(115).await?;
+    let carol = net.peer(119).await?;
+    let (barbara_id, carol_id) = (barbara.id.to_string(), carol.id.to_string());
+    let (mut a, alex_server) = RpcClient::connect(&alex).await?;
+    let (mut b, barbara_server) = RpcClient::connect(&barbara).await?;
+    let (mut c, carol_server) = RpcClient::connect(&carol).await?;
+
+    let script = async move {
+        // Barbara and Carol accept Alex's guardian invitations.
+        for (guardian, id) in [(&mut b, &barbara_id), (&mut c, &carol_id)] {
+            let created = a
+                .ok("invite_create", json!({"invitee": id, "role": "guardian"}))
+                .await?;
+            let imported = guardian
+                .ok("invite_import", json!({"code": data(&created, "code")?}))
+                .await?;
+            guardian
+                .ok(
+                    "invite_accept",
+                    json!({"invitation_id": data(&imported, "invitation_id")?}),
+                )
+                .await?;
+        }
+        // The ceremony starts once Alex holds both acceptances.
+        let started = a
+            .call_until(
+                "Alex starts the guardian ceremony",
+                "guardians_set",
+                json!({"guardians": [barbara_id, carol_id], "threshold": 2}),
+                ok,
+            )
+            .await?;
+        let ceremony_id = data(&started["result"], "ceremony_id")?;
+        let status = a
+            .ok("rotation_status", json!({"ceremony_id": ceremony_id}))
+            .await?;
+        assert_eq!(status["type"], "ceremony_status", "{status}");
+        assert_eq!(status["data"]["ceremony_id"], json!(ceremony_id));
+        assert_eq!(status["data"]["kind"], "GuardianRotation", "{status}");
+        assert_eq!(status["data"]["total"], 2, "{status}");
+        assert_eq!(status["data"]["threshold"], 2, "{status}");
+        let unknown = a
+            .call(
+                "rotation_status",
+                json!({"ceremony_id": "no-such-ceremony"}),
+            )
+            .await?;
+        assert!(unknown["error"]["code"].is_string(), "{unknown}");
+
+        a.shutdown().await?;
+        b.shutdown().await?;
+        c.shutdown().await?;
+        Ok::<(), anyhow::Error>(())
+    };
+    let (outcome, a_served, b_served, c_served) =
+        tokio::join!(script, alex_server, barbara_server, carol_server);
+    a_served?;
+    b_served?;
+    c_served?;
     outcome
 }
 

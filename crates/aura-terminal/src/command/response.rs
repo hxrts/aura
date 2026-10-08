@@ -70,6 +70,24 @@ pub struct SettingsView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CeremonyStatusView {
+    pub ceremony_id: String,
+    /// The runtime's record of the ceremony kind, e.g. `GuardianRotation`.
+    pub kind: String,
+    pub accepted: u16,
+    pub total: u16,
+    pub threshold: u16,
+    pub complete: bool,
+    pub failed: bool,
+    pub error: Option<String>,
+    pub pending_epoch: Option<u64>,
+    /// `Provisional`, `CoordinatorSoftSafe` or `ConsensusFinalized`.
+    pub agreement_mode: String,
+    /// Whether the outcome can still be reverted (not consensus-finalized).
+    pub reversion_risk: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NotificationView {
     /// `friend_request`, `invitation_received`, `invitation_sent` or
     /// `recovery_request`.
@@ -155,6 +173,7 @@ pub enum Response {
     CeremonyStarted {
         ceremony_id: String,
     },
+    CeremonyStatus(CeremonyStatusView),
     NeighborhoodCreated {
         neighborhood_id: String,
     },
