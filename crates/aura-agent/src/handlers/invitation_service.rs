@@ -120,13 +120,15 @@ impl InvitationServiceApi {
                     ),
                 )
             })?;
-        public.require_manifest(manifest).map_err(|source| {
-            AgentError::EnrollmentManifest(
-                aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(Box::new(
-                    source,
-                )),
-            )
-        })?;
+        aura_invitation::shareable::require_transport_manifest(&public, manifest).map_err(
+            |source| {
+                AgentError::EnrollmentManifest(
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(
+                        Box::new(source),
+                    ),
+                )
+            },
+        )?;
         Ok((invitation, public, transport))
     }
 
@@ -329,8 +331,7 @@ impl InvitationServiceApi {
         use aura_signature::SecurityTranscript;
         issued.require_effects(self.effects.as_ref())?;
         Self::require_quorum_invitation_binding(invitation, issued.manifest())?;
-        approved
-            .require_manifest(issued.manifest())
+        aura_invitation::shareable::require_transport_manifest(approved, issued.manifest())
             .map_err(|source| {
                 AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(source)))
             })?;
@@ -1499,7 +1500,7 @@ impl InvitationServiceApi {
             .await
             .map_err(|e| {
                 crate::core::AgentError::EnrollmentManifest(
-                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Transcript(e),
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::RequiredTranscript(e),
                 )
             })?;
         #[cfg(test)]
@@ -2137,7 +2138,7 @@ impl InvitationServiceApi {
         )
         .await
         .map_err(|source| {
-            AgentError::EnrollmentManifest(EnrollmentManifestError::Transcript(source))
+            AgentError::EnrollmentManifest(EnrollmentManifestError::RequiredTranscript(source))
         })?;
         let code = shareable
             .to_signed_code_with_transport(
@@ -2359,20 +2360,19 @@ impl InvitationServiceApi {
 fn invitation_shareable_failure(source: ShareableInvitationError) -> AgentError {
     let cause = Arc::new(source);
     let error = match cause.as_ref() {
-        ShareableInvitationError::SerializationFailed => aura_core::AuraError::Serialization {
+        ShareableInvitationError::SerializationFailed(_) => aura_core::AuraError::Serialization {
             message: "serialize invitation transfer".into(),
             source: Some(cause),
         },
-        ShareableInvitationError::InvalidSenderProof
-        | ShareableInvitationError::VerificationFailed => aura_core::AuraError::Crypto {
+        ShareableInvitationError::InvalidSenderProof => aura_core::AuraError::Crypto {
             message: "verify invitation transfer".into(),
             source: Some(cause),
         },
         ShareableInvitationError::InvalidFormat
         | ShareableInvitationError::UnsupportedVersion(_)
         | ShareableInvitationError::SizeLimitExceeded(_)
-        | ShareableInvitationError::DecodingFailed
-        | ShareableInvitationError::ParsingFailed
+        | ShareableInvitationError::DecodingFailed(_)
+        | ShareableInvitationError::ParsingFailed(_)
         | ShareableInvitationError::MissingSenderProof
         | ShareableInvitationError::MissingChannelContext
         | ShareableInvitationError::MissingEnrollmentSetupBinding
@@ -3647,11 +3647,13 @@ mod enrollment_code_owner_tests {
         }
         for (original, expected) in [
             (
-                ShareableInvitationError::SerializationFailed,
+                ShareableInvitationError::SerializationFailed(Arc::new(
+                    serde_json::from_str::<serde_json::Value>("not json").unwrap_err(),
+                )),
                 Expected::Serialization,
             ),
             (
-                ShareableInvitationError::VerificationFailed,
+                ShareableInvitationError::InvalidSenderProof,
                 Expected::Crypto,
             ),
             (
@@ -3672,13 +3674,23 @@ mod enrollment_code_owner_tests {
                 ) | (aura_core::AuraError::Crypto { .. }, Expected::Crypto)
                     | (aura_core::AuraError::Invalid { .. }, Expected::Invalid)
             ));
+            let actual = std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<ShareableInvitationError>()
+                .unwrap();
             assert_eq!(
-                std::error::Error::source(&error)
-                    .unwrap()
-                    .downcast_ref::<ShareableInvitationError>()
-                    .unwrap(),
-                &retained
+                std::mem::discriminant(actual),
+                std::mem::discriminant(&retained)
             );
+            if let ShareableInvitationError::SerializationFailed(retained) = &retained {
+                let ShareableInvitationError::SerializationFailed(actual_source) = actual else {
+                    panic!("serialization source variant must survive conversion");
+                };
+                assert!(Arc::ptr_eq(actual_source, retained));
+                assert!(std::error::Error::source(actual)
+                    .unwrap()
+                    .is::<serde_json::Error>());
+            }
         }
     }
 }

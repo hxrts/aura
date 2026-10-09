@@ -4823,6 +4823,86 @@ async fn production_import_accepts_signed_self_certified_opaque_sender() {
 }
 
 #[tokio::test]
+async fn signed_import_clock_failure_preserves_source_and_publishes_nothing() {
+    use aura_core::effects::TimeError;
+    let receiver = create_test_authority(231);
+    let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(1_000));
+    let config = AgentConfig {
+        device_id: receiver.device_id(),
+        storage: StorageConfig {
+            base_path: tempfile::tempdir()
+                .unwrap()
+                .keep()
+                .join("clock-fault-import"),
+            secure_storage_backend: crate::core::config::SecureStorageBackend::FilesystemFallback,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let effects =
+        AuraEffectSystem::production_for_test_for_authority(config, receiver.authority_id())
+            .unwrap()
+            .with_physical_time_provider(clock.clone());
+    let handler = handler_for(receiver);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("signed-required-clock-fault"),
+        sender_id: AuthorityId::new_from_entropy(hash(&public_key)),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(2_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        &effects,
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: Some(effects.device_id()),
+            key_epoch: Some(1),
+        })
+        .unwrap();
+    let before = effects.list_keys(None).await.unwrap();
+    clock
+        .fail_next_observation(TimeError::OperationFailed {
+            reason: "required signed import observation fault".into(),
+        })
+        .await;
+    let failure = handler
+        .import_invitation_code(&effects, &code)
+        .await
+        .expect_err("clock failure cannot produce a validated import");
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+    let mut found = false;
+    while let Some(error) = cause {
+        if matches!(error.downcast_ref::<TimeError>(), Some(TimeError::OperationFailed { reason })
+            if reason == "required signed import observation fault")
+        {
+            found = true;
+        }
+        cause = error.source();
+    }
+    assert!(found, "original selected clock provider cause survives");
+    assert!(handler
+        .get_invitation(&shareable.invitation_id)
+        .await
+        .is_none());
+    assert_eq!(
+        effects.list_keys(None).await.unwrap(),
+        before,
+        "failed required validity cannot persist import, issuance, or publication records"
+    );
+}
+
+#[tokio::test]
 async fn production_import_rejects_self_certified_key_for_known_sender() {
     let receiver = create_test_authority(232);
     let effects = production_effects_for(&receiver);
@@ -5232,40 +5312,40 @@ async fn sender_hint_suffix_does_not_overwrite_trusted_descriptor_route() {
 #[test]
 fn shareable_invitation_invalid_format() {
     // Missing parts
-    assert_eq!(
-        ShareableInvitation::from_code("aura:v1").unwrap_err(),
+    assert!(matches!(
+        ShareableInvitation::from_code("aura:v2").unwrap_err(),
         ShareableInvitationError::InvalidFormat
-    );
+    ));
 
     // Wrong prefix
-    assert_eq!(
-        ShareableInvitation::from_code("badprefix:v1:abc").unwrap_err(),
+    assert!(matches!(
+        ShareableInvitation::from_code("badprefix:v2:abc").unwrap_err(),
         ShareableInvitationError::InvalidFormat
-    );
+    ));
 
     // Invalid version format
-    assert_eq!(
+    assert!(matches!(
         ShareableInvitation::from_code("aura:1:abc").unwrap_err(),
         ShareableInvitationError::InvalidFormat
-    );
+    ));
 }
 
 #[test]
 fn shareable_invitation_unsupported_version() {
     // Version 99 doesn't exist
-    assert_eq!(
+    assert!(matches!(
         ShareableInvitation::from_code("aura:v99:abc").unwrap_err(),
         ShareableInvitationError::UnsupportedVersion(99)
-    );
+    ));
 }
 
 #[test]
 fn shareable_invitation_decoding_failed() {
     // Not valid base64
-    assert_eq!(
-        ShareableInvitation::from_code("aura:v1:!!!invalid!!!").unwrap_err(),
-        ShareableInvitationError::DecodingFailed
-    );
+    assert!(matches!(
+        ShareableInvitation::from_code("aura:v2:!!!invalid!!!").unwrap_err(),
+        ShareableInvitationError::DecodingFailed(_)
+    ));
 }
 
 #[test]
@@ -5273,21 +5353,21 @@ fn shareable_invitation_parsing_failed() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     // Valid base64 but not valid JSON
     let bad_json = URL_SAFE_NO_PAD.encode("not json");
-    let code = format!("aura:v1:{}", bad_json);
-    assert_eq!(
+    let code = format!("aura:v2:{}", bad_json);
+    assert!(matches!(
         ShareableInvitation::from_code(&code).unwrap_err(),
-        ShareableInvitationError::ParsingFailed
-    );
+        ShareableInvitationError::ParsingFailed(_)
+    ));
 }
 
 #[test]
 fn shareable_invitation_rejects_oversized_payload_before_decode() {
     let payload = "A".repeat(ShareableInvitation::MAX_PAYLOAD_BASE64_CHARS + 1);
-    let code = format!("aura:v1:{payload}");
-    assert_eq!(
+    let code = format!("aura:v2:{payload}");
+    assert!(matches!(
         ShareableInvitation::from_code(&code).unwrap_err(),
         ShareableInvitationError::SizeLimitExceeded("payload")
-    );
+    ));
 }
 
 #[test]
@@ -5303,13 +5383,16 @@ fn shareable_invitation_rejects_oversized_json_fields() {
         expires_at: None,
         message: Some("x".repeat(ShareableInvitation::MAX_MESSAGE_BYTES + 1)),
     };
-    let json = serde_json::to_vec(&shareable).expect("json");
-    let code = format!("aura:v1:{}", URL_SAFE_NO_PAD.encode(json));
+    let json = serde_json::to_vec(
+        &serde_json::json!({"payload": shareable, "transport": {}, "proof": null}),
+    )
+    .expect("json");
+    let code = format!("aura:v2:{}", URL_SAFE_NO_PAD.encode(json));
 
-    assert_eq!(
+    assert!(matches!(
         ShareableInvitation::from_code(&code).unwrap_err(),
         ShareableInvitationError::SizeLimitExceeded("message")
-    );
+    ));
 }
 
 #[test]
@@ -5330,10 +5413,10 @@ fn shareable_invitation_rejects_many_colon_segments() {
             .expect("shareable invitation should serialize")
     );
 
-    assert_eq!(
+    assert!(matches!(
         ShareableInvitation::from_code(&code).unwrap_err(),
         ShareableInvitationError::InvalidFormat
-    );
+    ));
 }
 
 #[test]
@@ -5359,10 +5442,10 @@ fn shareable_invitation_rejects_oversized_sender_hint_segment() {
         URL_SAFE_NO_PAD.encode(sender_device_id.to_string())
     );
 
-    assert_eq!(
+    assert!(matches!(
         ShareableInvitation::from_code(&code).unwrap_err(),
         ShareableInvitationError::SizeLimitExceeded("sender_hint")
-    );
+    ));
 }
 
 #[test]
@@ -7969,62 +8052,66 @@ large_stack_async_test!(chat_intake_rejections_are_recorded_as_message_drops, {
 // another member (a forged leave in the participant's name, or a leave
 // attributed to a third party) is refused at intake, recorded in the
 // dropped-message log, and not committed.
-large_stack_async_test!(relayed_channel_membership_fact_from_non_author_is_dropped, {
-    use crate::reactive::MessageDropReason;
-    use aura_amp::{ChannelMembershipFact, ChannelParticipantEvent};
-    let authority = AuthorityId::new_from_entropy([216u8; 32]);
-    let relayer = AuthorityId::new_from_entropy([217u8; 32]);
-    let victim = AuthorityId::new_from_entropy([218u8; 32]);
-    let moderator = AuthorityId::new_from_entropy([219u8; 32]);
-    let config = AgentConfig::default();
-    let effects =
-        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
-    let _pipeline = start_test_reactive_pipeline(&effects).await;
-    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
-    let context_id = ContextId::new_from_entropy([220u8; 32]);
-    let channel_id = ChannelId::from_bytes([221u8; 32]);
-    let leave = || {
-        ChannelMembershipFact::new(
-            context_id,
-            channel_id,
-            victim,
-            ChannelParticipantEvent::Left,
-            aura_core::time::TimeStamp::OrderClock(aura_core::time::OrderTime([9; 32])),
-        )
-    };
-    // The victim's own leave, and a kick authored by a moderator, both
-    // relayed by `relayer`.
-    let forged = leave().to_generic();
-    let relayed = leave().authored_by(moderator).to_generic();
-    send_peer_relational_fact(&effects, authority, relayer, context_id, &forged, 1).await;
-    send_peer_relational_fact(&effects, authority, relayer, context_id, &relayed, 2).await;
-    let processed = handler
-        .process_contact_invitation_acceptances(effects.clone())
-        .await
-        .unwrap();
-    assert_eq!(processed, 0, "relayed membership facts are not processed");
+large_stack_async_test!(
+    relayed_channel_membership_fact_from_non_author_is_dropped,
+    {
+        use crate::reactive::MessageDropReason;
+        use aura_amp::{ChannelMembershipFact, ChannelParticipantEvent};
+        let authority = AuthorityId::new_from_entropy([216u8; 32]);
+        let relayer = AuthorityId::new_from_entropy([217u8; 32]);
+        let victim = AuthorityId::new_from_entropy([218u8; 32]);
+        let moderator = AuthorityId::new_from_entropy([219u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+        );
+        let _pipeline = start_test_reactive_pipeline(&effects).await;
+        let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+        let context_id = ContextId::new_from_entropy([220u8; 32]);
+        let channel_id = ChannelId::from_bytes([221u8; 32]);
+        let leave = || {
+            ChannelMembershipFact::new(
+                context_id,
+                channel_id,
+                victim,
+                ChannelParticipantEvent::Left,
+                aura_core::time::TimeStamp::OrderClock(aura_core::time::OrderTime([9; 32])),
+            )
+        };
+        // The victim's own leave, and a kick authored by a moderator, both
+        // relayed by `relayer`.
+        let forged = leave().to_generic();
+        let relayed = leave().authored_by(moderator).to_generic();
+        send_peer_relational_fact(&effects, authority, relayer, context_id, &forged, 1).await;
+        send_peer_relational_fact(&effects, authority, relayer, context_id, &relayed, 2).await;
+        let processed = handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 0, "relayed membership facts are not processed");
 
-    let (drops, total) = effects.message_drops();
-    assert_eq!(total, 2);
-    assert!(drops.iter().all(|drop| drop.peer_id == Some(relayer)));
-    assert_eq!(
-        drops[0].reason,
-        MessageDropReason::AuthorMismatch {
-            claimed_author: victim
-        }
-    );
-    assert_eq!(
-        drops[1].reason,
-        MessageDropReason::AuthorMismatch {
-            claimed_author: moderator
-        }
-    );
-    let committed = effects.load_committed_facts(authority).await.unwrap();
-    assert!(!committed.iter().any(|fact| matches!(
-        &fact.content,
-        FactContent::Relational(relational) if *relational == forged || *relational == relayed
-    )));
-});
+        let (drops, total) = effects.message_drops();
+        assert_eq!(total, 2);
+        assert!(drops.iter().all(|drop| drop.peer_id == Some(relayer)));
+        assert_eq!(
+            drops[0].reason,
+            MessageDropReason::AuthorMismatch {
+                claimed_author: victim
+            }
+        );
+        assert_eq!(
+            drops[1].reason,
+            MessageDropReason::AuthorMismatch {
+                claimed_author: moderator
+            }
+        );
+        let committed = effects.load_committed_facts(authority).await.unwrap();
+        assert!(!committed.iter().any(|fact| matches!(
+            &fact.content,
+            FactContent::Relational(relational) if *relational == forged || *relational == relayed
+        )));
+    }
+);
 
 // Task 162: a membership event written for another participant is accepted
 // only when its author has standing: a join from an admitted member (the
@@ -8049,7 +8136,8 @@ large_stack_async_test!(membership_written_for_another_requires_author_standing,
     let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
     let context_id = ContextId::new_from_entropy([227u8; 32]);
     let channel_id = ChannelId::from_bytes([228u8; 32]);
-    let token = |byte| aura_core::time::TimeStamp::OrderClock(aura_core::time::OrderTime([byte; 32]));
+    let token =
+        |byte| aura_core::time::TimeStamp::OrderClock(aura_core::time::OrderTime([byte; 32]));
     let inviter_join = ChannelMembershipFact::new(
         context_id,
         channel_id,
@@ -8093,10 +8181,16 @@ large_stack_async_test!(membership_written_for_another_requires_author_standing,
         .process_contact_invitation_acceptances(effects.clone())
         .await
         .unwrap();
-    assert_eq!(processed, 2, "the inviter's join and invited join are processed");
+    assert_eq!(
+        processed, 2,
+        "the inviter's join and invited join are processed"
+    );
 
     let (drops, total) = effects.message_drops();
-    assert_eq!(total, 1, "only the kick is refused; the stranger's join waits");
+    assert_eq!(
+        total, 1,
+        "only the kick is refused; the stranger's join waits"
+    );
     assert_eq!(drops[0].peer_id, Some(inviter));
     assert_eq!(
         drops[0].reason,
@@ -8136,15 +8230,26 @@ large_stack_async_test!(membership_written_for_another_requires_author_standing,
         token(5),
     )
     .to_generic();
-    send_peer_relational_fact(&effects, authority, stranger, context_id, &stranger_self_join, 5)
-        .await;
+    send_peer_relational_fact(
+        &effects,
+        authority,
+        stranger,
+        context_id,
+        &stranger_self_join,
+        5,
+    )
+    .await;
     send_peer_relational_fact(&effects, authority, stranger, context_id, &stranger_join, 6).await;
     let processed = handler
         .process_contact_invitation_acceptances(effects.clone())
         .await
         .unwrap();
     assert_eq!(processed, 2, "the stranger's join and the deferred join");
-    assert_eq!(effects.message_drops().1, 1, "the deferral was never a drop");
+    assert_eq!(
+        effects.message_drops().1,
+        1,
+        "the deferral was never a drop"
+    );
     let participants =
         aura_amp::channel_membership_observations(effects.as_ref(), context_id, channel_id)
             .await

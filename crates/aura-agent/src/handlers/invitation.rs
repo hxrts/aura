@@ -105,6 +105,37 @@ mod device_enrollment;
 pub(crate) use device_enrollment::EnrollmentVmTeardownFailure;
 pub(crate) mod enrollment_manifest_admission;
 pub(crate) mod enrollment_parent_archive;
+
+fn imported_invitation_verification_failure(
+    source: aura_invitation::shareable::ImportedInvitationVerificationError,
+) -> AgentError {
+    use aura_invitation::shareable::{
+        ImportedInvitationVerificationError, ShareableInvitationError,
+    };
+    let serialization = matches!(
+        &source,
+        ImportedInvitationVerificationError::Code(ShareableInvitationError::SerializationFailed(_))
+            | ImportedInvitationVerificationError::Verification(
+                aura_signature::TranscriptCryptoError::Encoding(_)
+            )
+    );
+    let verification = matches!(
+        &source,
+        ImportedInvitationVerificationError::Verification(
+            aura_signature::TranscriptCryptoError::Provider(_)
+        ) | ImportedInvitationVerificationError::Code(ShareableInvitationError::InvalidSenderProof)
+    );
+    let message = "verify imported invitation".to_owned();
+    let source = Some(Arc::new(source) as Arc<dyn std::error::Error + Send + Sync>);
+    AgentError::from(if serialization {
+        aura_core::AuraError::Serialization { message, source }
+    } else if verification {
+        aura_core::AuraError::Crypto { message, source }
+    } else {
+        aura_core::AuraError::Invalid { message, source }
+    })
+}
+
 /// Guard preparation owns its exact sender record and commands. It cannot
 /// authorize enrollment terminal mutation or be constructed by callers.
 /// Required sender storage custody; private fields prevent observed Invitation
@@ -2068,7 +2099,7 @@ impl InvitationHandler {
 
         let (shareable, sender_proof, transport_metadata) =
             ShareableInvitation::from_code_with_proof_and_transport(code)
-                .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
+                .map_err(|source| imported_invitation_verification_failure(source.into()))?;
         let sender_hint_addr = transport_metadata.sender_hint.clone();
         let sender_device_id = transport_metadata.sender_device_id;
         tracing::info!(
@@ -2099,7 +2130,16 @@ impl InvitationHandler {
             return Ok(existing);
         }
 
-        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Internal {
+                    message: "required invitation import validity clock failed".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?
+            .ts_ms;
         let own_id = self.context.authority.authority_id();
         let default_context_id = self.context.effect_context.context_id();
         #[cfg(test)]
@@ -2115,7 +2155,7 @@ impl InvitationHandler {
                     now_ms,
                 )
                 .await
-                .map_err(|error| AgentError::invalid(error.to_string()))?,
+                .map_err(imported_invitation_verification_failure)?,
             )
         };
         #[cfg(not(test))]
@@ -2127,7 +2167,7 @@ impl InvitationHandler {
             now_ms,
         )
         .await
-        .map_err(|error| AgentError::invalid(error.to_string()))?;
+        .map_err(imported_invitation_verification_failure)?;
         #[cfg(test)]
         let invitation = match &validated_import {
             Some(validated) => validated.invitation().clone(),
@@ -3627,10 +3667,7 @@ fn unverified_test_invitation(
     default_context_id: ContextId,
     now_ms: u64,
 ) -> AgentResult<Invitation> {
-    if shareable
-        .expires_at
-        .is_some_and(|expires_at| now_ms > expires_at)
-    {
+    if Invitation::is_expired_at(shareable.expires_at, now_ms) {
         return Err(AgentError::invalid("invite code expired"));
     }
     let context_id = if matches!(shareable.invitation_type, InvitationType::Channel { .. }) {

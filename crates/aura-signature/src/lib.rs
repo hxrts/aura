@@ -45,6 +45,7 @@ pub(crate) mod authority;
 pub mod event_validation;
 pub mod facts;
 pub mod guardian;
+pub mod invitation;
 pub mod messages;
 pub(crate) mod registry;
 pub mod session;
@@ -62,7 +63,7 @@ pub use transcript::{
     threshold_signing_context_transcript_bytes,
     verify_ed25519_threshold_signing_context_transcript, verify_ed25519_transcript,
     verify_frost_transcript, verify_threshold_signing_context_transcript,
-    RequiredTranscriptEncodingError, SecurityTranscript, TranscriptEnvelope,
+    RequiredTranscriptEncodingError, SecurityTranscript, TranscriptCryptoError, TranscriptEnvelope,
 };
 
 // Re-export identity validation functions

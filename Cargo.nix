@@ -14298,6 +14298,12 @@ library used by the other higher-level Hickory DNS crates.
             packageId = "aura-testkit";
           }
           {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
+            features = [ "test-support" ];
+          }
+          {
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
@@ -14305,6 +14311,7 @@ library used by the other higher-level Hickory DNS crates.
           }
         ];
         features = {
+          "test-support" = [ "aura-signature/test-support" ];
         };
         resolvedDefaultFeatures = [ "test-support" ];
       };
@@ -15214,6 +15221,10 @@ library used by the other higher-level Hickory DNS crates.
         ];
         dependencies = [
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
             name = "frost-ed25519";
             packageId = "frost-ed25519";
             features = [ "serialization" ];
@@ -15281,7 +15292,9 @@ library used by the other higher-level Hickory DNS crates.
             packageId = "trybuild";
           }
         ];
-
+        features = {
+        };
+        resolvedDefaultFeatures = [ "test-support" ];
       };
       "hxrts-aura-social" = rec {
         crateName = "hxrts-aura-social";
