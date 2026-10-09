@@ -57,7 +57,8 @@ pub fn claimed_moderation_actor(
                     crate::facts::SocialFact::AccessOverrideSet { actor_id, .. }
                     | crate::facts::SocialFact::AccessLevelCapabilitiesConfigured {
                         actor_id, ..
-                    },
+                    }
+                    | crate::facts::SocialFact::HomeModeSet { actor_id, .. },
                 ) => Some(actor_id),
                 _ => None,
             }

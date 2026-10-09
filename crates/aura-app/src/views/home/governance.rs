@@ -14,8 +14,8 @@ use aura_core::time::CausalTag;
 use aura_core::types::identifiers::AuthorityId;
 use aura_social::moderation::governance::{
     live_ban_tags, live_member_admission_tags, live_moderator_grant_tags, live_mute_tags,
-    membership_liveness, resolved_access_overrides, resolved_capability_config, sort_causally,
-    HomeGovernanceEvent, TaggedHomeGovernanceEvent,
+    membership_liveness, resolved_access_overrides, resolved_capability_config, resolved_mode,
+    sort_causally, HomeGovernanceEvent, TaggedHomeGovernanceEvent,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -284,6 +284,11 @@ pub fn reduce_home_governance(
     let mut kicks = authorized("moderate:kick", &|event| {
         matches!(event, HomeGovernanceEvent::Kick(_))
     });
+    // The channel mode register, written by moderators with manage_channel
+    // (Task 192); the reduced value is the only source of `mode_flags`.
+    home.mode_flags = resolved_mode(&authorized("manage_channel", &|event| {
+        matches!(event, HomeGovernanceEvent::Mode(_))
+    }));
     sort_causally(&mut bans);
     sort_causally(&mut mutes);
     sort_causally(&mut kicks);
@@ -429,6 +434,7 @@ mod tests {
         muted: BTreeSet<AuthorityId>,
         overrides: BTreeMap<AuthorityId, AccessLevel>,
         kicks: Vec<AuthorityId>,
+        mode: Option<String>,
     }
 
     fn reduce(events: &[Event], viewer: u8) -> Observed {
@@ -474,6 +480,7 @@ mod tests {
                 .map(|(k, v)| (*k, *v))
                 .collect(),
             kicks: home.kick_log.iter().map(|k| k.authority_id).collect(),
+            mode: home.mode_flags,
         }
     }
 
@@ -569,6 +576,25 @@ mod tests {
     // Task 62: a moderator admits a participant as a member, who can then be
     // designated moderator; the outcome does not depend on arrival order.
     // An admission written by a non-moderator member admits nobody.
+    #[test]
+    fn mode_register_ignores_unauthorized_writes_in_every_arrival_order() {
+        let set = |device, actor, flags: &str| {
+            tagged(HomeGovernanceEvent::Mode(SocialFact::home_mode_set_ms(
+                aura_core::types::identifiers::HomeId::from_bytes(*home_id().as_bytes()),
+                ctx(),
+                flags.to_string(),
+                who(actor),
+                1,
+                causal(device, HomeGovernanceKey::Mode, &[]),
+            )))
+        };
+        let authorized = set(1, OWNER, "+m");
+        let unauthorized = set(2, MEMBER, "+p");
+        let observed =
+            assert_permutation_invariant(&[authorized, unauthorized], |order| reduce(order, OWNER));
+        assert_eq!(observed.mode.as_deref(), Some("+m"));
+    }
+
     #[test]
     fn admitted_participant_becomes_member_then_moderator_in_every_order() {
         let admission = admit_by(1, OWNER, &[]);

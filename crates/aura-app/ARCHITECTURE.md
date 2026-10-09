@@ -43,6 +43,10 @@ The crate uses explicit concern-owned submodules.
 
 ## Invariants
 
+- Home channel mode is derived from authorized `SocialFact::HomeModeSet`
+  governance register writes. Settings workflows commit the fact and report
+  that commit; only governance reduction writes the observed `mode_flags`.
+
 - **Pure logic**: no runtime dependencies or impure I/O.
 - **Dependency inversion**: `aura-agent` depends on `aura-app`, never vice versa.
 - **Home governance projection**: `views::home::reduce_home_governance` derives

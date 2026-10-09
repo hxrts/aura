@@ -58,8 +58,8 @@ pub use notifications::{
     NO_AUTO_DISMISS, TOAST_TICK_RATE_MS,
 };
 pub use operations::{
-    ChannelModeUpdated, ContextChanged, DeviceEnrollmentStarted, DeviceRemovalStarted,
-    ExportedInvitation, ImportedInvitation, MfaPolicyUpdated, NicknameUpdated, OperationError,
+    ContextChanged, DeviceEnrollmentStarted, DeviceRemovalStarted, ExportedInvitation,
+    ImportedInvitation, MfaPolicyUpdated, NicknameUpdated, OperationError,
 };
 pub use recovery::{
     classify_threshold_security, format_recovery_status, security_level_hint, CeremonyProgress,

@@ -76,6 +76,8 @@ pub enum HomeGovernanceEvent {
     /// Capability configuration register write
     /// (`SocialFact::AccessLevelCapabilitiesConfigured`).
     CapabilityConfig(SocialFact),
+    /// Home channel mode register write (`SocialFact::HomeModeSet`).
+    Mode(SocialFact),
     /// Membership episode add (`SocialFact::MemberJoined`).
     MemberJoined(SocialFact),
     /// Membership episode reversal (`SocialFact::MemberLeft`).
@@ -155,6 +157,8 @@ pub enum HomeGovernanceKey {
     },
     /// Set the home's capability configuration.
     CapabilityConfig,
+    /// Set the home channel's mode flags.
+    Mode,
     /// `target` leaves the home.
     Leave {
         /// Leaving authority.
@@ -177,11 +181,13 @@ impl HomeGovernanceEvent {
             | Self::CapabilityConfig(SocialFact::AccessLevelCapabilitiesConfigured {
                 causal,
                 ..
-            }) => Some(causal),
+            })
+            | Self::Mode(SocialFact::HomeModeSet { causal, .. }) => Some(causal),
             Self::MemberLeft(SocialFact::MemberLeft { causal, .. }) => Some(causal),
             Self::MemberJoined(SocialFact::MemberJoined { .. }) => Some(&JOIN_CAUSAL),
             Self::AccessOverride(_)
             | Self::CapabilityConfig(_)
+            | Self::Mode(_)
             | Self::MemberJoined(_)
             | Self::MemberLeft(_) => None,
         }
@@ -203,11 +209,13 @@ impl HomeGovernanceEvent {
             | Self::CapabilityConfig(SocialFact::AccessLevelCapabilitiesConfigured {
                 actor_id,
                 ..
-            }) => Some(*actor_id),
+            })
+            | Self::Mode(SocialFact::HomeModeSet { actor_id, .. }) => Some(*actor_id),
             Self::MemberJoined(SocialFact::MemberJoined { authority_id, .. })
             | Self::MemberLeft(SocialFact::MemberLeft { authority_id, .. }) => Some(*authority_id),
             Self::AccessOverride(_)
             | Self::CapabilityConfig(_)
+            | Self::Mode(_)
             | Self::MemberJoined(_)
             | Self::MemberLeft(_) => None,
         }
@@ -227,6 +235,7 @@ impl HomeGovernanceEvent {
             Self::AdmitMember(f) => f.context_id,
             Self::AccessOverride(fact)
             | Self::CapabilityConfig(fact)
+            | Self::Mode(fact)
             | Self::MemberJoined(fact)
             | Self::MemberLeft(fact) => fact.context_id(),
         }
@@ -246,6 +255,7 @@ impl HomeGovernanceEvent {
             Self::AdmitMember(f) => f.to_generic(),
             Self::AccessOverride(fact)
             | Self::CapabilityConfig(fact)
+            | Self::Mode(fact)
             | Self::MemberJoined(fact)
             | Self::MemberLeft(fact) => fact.to_generic(),
         }
@@ -384,6 +394,7 @@ impl TaggedHomeGovernanceEvent {
                     SocialFact::AccessLevelCapabilitiesConfigured { .. } => {
                         HomeGovernanceEvent::CapabilityConfig(fact)
                     }
+                    SocialFact::HomeModeSet { .. } => HomeGovernanceEvent::Mode(fact),
                     SocialFact::MemberJoined { .. } => HomeGovernanceEvent::MemberJoined(fact),
                     SocialFact::MemberLeft { .. } => HomeGovernanceEvent::MemberLeft(fact),
                     _ => return Ok(None),
@@ -490,6 +501,10 @@ pub fn home_governance_causal(
         HomeGovernanceKey::CapabilityConfig => (
             Vec::new(),
             tags_where(&|event| matches!(event, HomeGovernanceEvent::CapabilityConfig(_))),
+        ),
+        HomeGovernanceKey::Mode => (
+            Vec::new(),
+            tags_where(&|event| matches!(event, HomeGovernanceEvent::Mode(_))),
         ),
         HomeGovernanceKey::Kick { target, .. } | HomeGovernanceKey::Leave { target } => (
             tags_where(&|event| {
@@ -666,6 +681,27 @@ pub fn resolved_capability_config(
             partial: left.partial.intersection(&right.partial).cloned().collect(),
             limited: left.limited.intersection(&right.limited).cloned().collect(),
         })
+}
+
+/// Effective home channel mode: the surviving mode writes; concurrent
+/// survivors resolve to the lexicographically greatest flags, so every
+/// replica picks the same mode whatever order the writes arrived in.
+#[must_use]
+pub fn resolved_mode(events: &[&TaggedHomeGovernanceEvent]) -> Option<String> {
+    let writes: Vec<_> = events
+        .iter()
+        .copied()
+        .filter(|event| matches!(event.event, HomeGovernanceEvent::Mode(_)))
+        .collect();
+    let survivors = register_survivors(&writes);
+    writes
+        .into_iter()
+        .filter(|write| survivors.contains(&write.tag))
+        .filter_map(|write| match &write.event {
+            HomeGovernanceEvent::Mode(SocialFact::HomeModeSet { flags, .. }) => Some(flags.clone()),
+            _ => None,
+        })
+        .max()
 }
 
 /// Sort governance facts into causal display order.
@@ -918,6 +954,48 @@ mod tests {
         let relaxed = set(1, AccessLevel::Partial, &[partial.clone(), limited.clone()]);
         let sequential = assert_permutation_invariant(&[partial, limited, relaxed], resolve);
         assert_eq!(sequential.get(&target), Some(&AccessLevel::Partial));
+    }
+
+    #[test]
+    fn mode_register_converges_and_observed_write_supersedes_concurrent_values() {
+        let set = |device: u8, flags: &str, observed: &[TaggedHomeGovernanceEvent]| {
+            tagged(HomeGovernanceEvent::Mode(SocialFact::home_mode_set_ms(
+                HomeId::from_bytes([4; 32]),
+                ctx(),
+                flags.to_string(),
+                who(1),
+                1,
+                causal(device, HomeGovernanceKey::Mode, observed),
+            )))
+        };
+        let moderated = set(1, "+m", &[]);
+        let RelationalFact::Generic { mut envelope, .. } = moderated.event.to_generic() else {
+            panic!("generic mode fact");
+        };
+        assert_eq!(envelope.schema_version, 6);
+        assert_eq!(
+            TaggedHomeGovernanceEvent::try_decode(ctx(), &envelope)
+                .unwrap()
+                .unwrap()
+                .tag,
+            moderated.tag
+        );
+        envelope.schema_version = 5;
+        assert!(TaggedHomeGovernanceEvent::try_decode(ctx(), &envelope).is_err());
+        let private = set(2, "+p", &[]);
+        let resolve = |events: &[TaggedHomeGovernanceEvent]| {
+            let refs: Vec<_> = events.iter().collect();
+            resolved_mode(&refs)
+        };
+        assert_eq!(
+            assert_permutation_invariant(&[moderated.clone(), private.clone()], resolve),
+            Some("+p".to_string())
+        );
+        let successor = set(1, "+i", &[moderated.clone(), private.clone()]);
+        assert_eq!(
+            assert_permutation_invariant(&[moderated, private, successor], resolve),
+            Some("+i".to_string())
+        );
     }
 
     #[test]

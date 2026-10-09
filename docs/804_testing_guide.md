@@ -726,6 +726,11 @@ assert!(matches!(response, Response::Channels(_)));
   `code` (for example `not_found` for an unknown ceremony id) and, with the
   real binary in `tests/cli_production.rs`, the process exit code it maps to
   (`not_found` exits 3).
+- Home settings that other members observe (channel mode, access, roles)
+  are committed facts reduced by the governance reducer, never local
+  projection edits. Test them on two simulation peers across a dropped link
+  and a restart (`home_two_member_moderation`), and assert the reduced
+  signal on both clients rather than the writer's local state.
 - A slash command whose target does not resolve settles its semantic
   operation failed with an error toast
   (`tests/unit_slash_commands.rs`), so lastop never keeps showing an earlier

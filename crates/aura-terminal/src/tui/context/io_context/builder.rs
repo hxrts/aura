@@ -172,7 +172,6 @@ impl IoContextBuilder {
 
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
-        let channel_modes = Arc::new(RwLock::new(HashMap::new()));
         let ceremony_handles = Arc::new(RwLock::new(HashMap::new()));
         let requested_shell_exit = Arc::new(std::sync::Mutex::new(None));
 
@@ -183,7 +182,6 @@ impl IoContextBuilder {
             account_files.clone(),
             invited_lan_peers.clone(),
             current_context.clone(),
-            channel_modes.clone(),
         );
 
         Ok(IoContext {
@@ -205,7 +203,6 @@ impl IoContextBuilder {
             demo_mobile_authority_id: self.demo_mobile_authority_id,
             invited_lan_peers,
             current_context,
-            channel_modes,
             ceremony_handles,
             tasks,
             pending_runtime_bootstrap: self.pending_runtime_bootstrap,

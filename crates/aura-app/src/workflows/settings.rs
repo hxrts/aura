@@ -5,9 +5,7 @@
 
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::error::WorkflowError;
-use crate::workflows::observed_projection::{
-    try_update_homes_projection_observed, try_update_recovery_projection_observed,
-};
+use crate::workflows::observed_projection::try_update_recovery_projection_observed;
 use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
@@ -245,10 +243,8 @@ pub async fn update_nickname(
 ///
 /// **What it does**: Sets channel-specific mode flags
 /// **Returns**: Unit result
-/// **Signal pattern**: Read-only operation (no emission)
-///
-/// This operation updates local channel preferences (e.g., notifications).
-/// The UI layer handles persistence to local storage.
+/// **Signal pattern**: Commit a home governance fact; the reduced homes signal
+/// supplies the mode on every member and after restart.
 pub async fn set_channel_mode(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: String,
@@ -286,8 +282,11 @@ pub async fn set_channel_mode(
 
 /// Channel modes are channel management: only a moderator of the home may
 /// set them (Task 11).
-fn require_mode_authority(home: &crate::views::home::HomeState) -> Result<(), AuraError> {
-    if home.is_admin() {
+fn require_mode_authority(
+    home: &crate::views::home::HomeState,
+    actor: &aura_core::types::identifiers::AuthorityId,
+) -> Result<(), AuraError> {
+    if home.is_moderator() && home.actor_may_moderate(actor, "manage_channel") {
         Ok(())
     } else {
         Err(AuraError::permission_denied(
@@ -317,30 +316,7 @@ pub async fn set_channel_mode_resolved(
             channel: resolved_channel.to_string(),
         })
     })?;
-    try_update_homes_projection_observed(app_core, |homes| {
-        let target_home_id = if homes.has_home(&resolved_channel) {
-            Some(resolved_channel)
-        } else {
-            homes
-                .iter()
-                .filter(|(_, home)| home.context_id == Some(context_id))
-                .max_by_key(|(_, home)| home.member_count)
-                .map(|(home_id, _)| *home_id)
-        };
-
-        let home_id = target_home_id.ok_or_else(|| {
-            AuraError::from(WorkflowError::MissingAuthoritativeHomeProjection {
-                context: context_id.to_string(),
-            })
-        })?;
-        let home = homes.home_mut(&home_id).ok_or_else(|| {
-            AuraError::permission_denied("Set channel mode requires a valid home context")
-        })?;
-        require_mode_authority(home)?;
-        home.mode_flags = Some(flags);
-        Ok(())
-    })
-    .await
+    commit_home_mode(app_core, resolved_channel, context_id, flags).await
 }
 
 async fn set_channel_mode_bound(
@@ -348,31 +324,90 @@ async fn set_channel_mode_bound(
     binding: AuthoritativeChannelBinding,
     flags: String,
 ) -> Result<(), AuraError> {
-    try_update_homes_projection_observed(app_core, |homes| {
-        let target_home_id = if homes.has_home(&binding.channel_id) {
-            Some(binding.channel_id)
-        } else {
-            homes
-                .iter()
-                .filter(|(_, home)| home.context_id == Some(binding.context_id))
-                .max_by_key(|(_, home)| home.member_count)
-                .map(|(home_id, _)| *home_id)
-        };
+    commit_home_mode(app_core, binding.channel_id, binding.context_id, flags).await
+}
 
-        let home_id = target_home_id.ok_or_else(|| {
-            AuraError::from(WorkflowError::MissingAuthoritativeHomeProjection {
-                context: binding.context_id.to_string(),
-            })
-        })?;
-        let home = homes.home_mut(&home_id).ok_or_else(|| {
-            AuraError::permission_denied("Set channel mode requires a valid home context")
-        })?;
-        require_mode_authority(home)?;
-        home.context_id = Some(binding.context_id);
-        home.mode_flags = Some(flags);
-        Ok(())
-    })
-    .await
+/// Commit the home channel's mode as a `SocialFact::HomeModeSet` register
+/// write and send it to the home's members (Task 192). The governance
+/// reducer derives `mode_flags` from the committed writes on every member,
+/// so this workflow does not write the projection; the commit is the outcome.
+async fn commit_home_mode(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: aura_core::types::identifiers::ContextId,
+    flags: String,
+) -> Result<(), AuraError> {
+    let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    let home_id = if homes.has_home(&channel_id) {
+        channel_id
+    } else {
+        homes
+            .iter()
+            .filter(|(_, home)| home.context_id == Some(context_id))
+            .max_by_key(|(_, home)| home.member_count)
+            .map(|(home_id, _)| *home_id)
+            .ok_or_else(|| {
+                AuraError::from(WorkflowError::MissingAuthoritativeHomeProjection {
+                    context: context_id.to_string(),
+                })
+            })?
+    };
+    let home = homes.home_state(&home_id).ok_or_else(|| {
+        AuraError::permission_denied("Set channel mode requires a valid home context")
+    })?;
+    let runtime = require_runtime(app_core).await?;
+    let actor = runtime.authority_id();
+    require_mode_authority(home, &actor)?;
+    let peers: Vec<_> = home.members.iter().map(|member| member.id).collect();
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "set_channel_mode",
+        "current_time_ms",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await?
+    .map_err(|e| super::error::runtime_call("Channel mode timestamp", e))?;
+    let causal = crate::workflows::moderation::governance_causal(
+        &runtime,
+        "set_channel_mode",
+        context_id,
+        aura_social::HomeGovernanceKey::Mode,
+    )
+    .await?;
+    let fact = aura_social::SocialFact::home_mode_set_ms(
+        aura_core::types::identifiers::HomeId::from_bytes(*home_id.as_bytes()),
+        context_id,
+        flags,
+        actor,
+        now_ms,
+        causal,
+    );
+    let fact = aura_journal::DomainFact::to_generic(&fact);
+    timeout_runtime_call(
+        &runtime,
+        "set_channel_mode",
+        "commit_relational_facts",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await?
+    .map_err(|e| super::error::runtime_call("Commit channel mode fact", e))?;
+    for peer in peers {
+        if peer == actor {
+            continue;
+        }
+        // One send for latency; relational-context sync delivers it if lost.
+        let _ = crate::workflows::runtime::send_committed_fact(
+            &runtime,
+            "channel_mode_fact_send",
+            peer,
+            context_id,
+            &fact,
+        )
+        .await;
+    }
+    Ok(())
 }
 
 /// Update guardian recovery threshold configuration.
@@ -484,9 +519,10 @@ mod tests {
         let channel_id = crate::workflows::chat_commands::normalize_channel_name("#general");
         let channel_id =
             crate::workflows::channel_ref::ChannelRef::parse(&channel_id).to_channel_id();
-        let creator = AuthorityId::new_from_entropy([9u8; 32]);
+        let creator = authority_id;
         let context = ContextId::new_from_entropy([7u8; 32]);
-        let home = HomeState::new(channel_id, Some("general".to_string()), creator, 0, context);
+        let mut home = HomeState::new(channel_id, Some("general".to_string()), creator, 0, context);
+        home.designate_creator_moderator(&creator, &authority_id);
         let mut homes = HomesState::default();
         let _ = homes.add_home(home);
         homes.select_home(Some(channel_id));
@@ -496,15 +532,45 @@ mod tests {
         runtime.set_materialized_channel_name_matches("general", vec![channel_id]);
         runtime.set_amp_channel_context(channel_id, context);
 
-        set_channel_mode(&app_core, "#general".to_string(), "+m".to_string())
+        // `#general` resolves to the home and passes the authority check; the
+        // offline bridge then refuses to author the mode fact. The mode itself
+        // is the reduced register fact (Task 192; aura-agent's
+        // channel_mode_is_a_fact_that_converges_on_both_members).
+        let error = set_channel_mode(&app_core, "#general".to_string(), "+m".to_string())
             .await
-            .expect("mode should be set for #general");
-
+            .expect_err("the offline bridge cannot author the mode fact");
+        assert!(
+            error.to_string().contains("offline mode"),
+            "resolution must succeed before fact authoring: {error}"
+        );
         let homes = read_signal(&app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
             .await
             .unwrap();
-        let home = homes.home_state(&channel_id).expect("home exists");
-        assert_eq!(home.mode_flags.as_deref(), Some("+m"));
+        assert_eq!(
+            homes
+                .home_state(&channel_id)
+                .expect("home exists")
+                .mode_flags,
+            None,
+            "no local projection write"
+        );
+    }
+
+    #[test]
+    fn channel_mode_requires_moderator_and_manage_channel_capability() {
+        let actor = AuthorityId::new_from_entropy([8; 32]);
+        let mut home = HomeState::new(
+            ChannelId::from_bytes([3; 32]),
+            Some("home".to_string()),
+            actor,
+            0,
+            ContextId::new_from_entropy([7; 32]),
+        );
+        assert!(require_mode_authority(&home, &actor).is_err());
+        home.designate_creator_moderator(&actor, &actor);
+        assert!(require_mode_authority(&home, &actor).is_ok());
+        home.set_access_override(actor, aura_social::AccessLevel::Limited);
+        assert!(require_mode_authority(&home, &actor).is_err());
     }
 
     #[tokio::test]

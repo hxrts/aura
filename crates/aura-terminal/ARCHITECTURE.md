@@ -78,6 +78,9 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   setup verifier pin or infer that the new device accepted enrollment.
 
 - Terminal interfaces must remain a presentation layer over aura-app.
+- Home channel mode comes from the reduced app homes signal after the
+  workflow commits its governance fact. The terminal keeps no separate mode
+  cache and a successful command response does not mutate observed mode.
 - Parity-critical IDs, focus semantics, and action metadata must come from `aura-app::ui_contract`, not frontend-local derivation.
 - Harness mode may add instrumentation or render-stability hooks but must not bypass normal execution semantics for parity-critical flows.
 - Terminal-local async task ownership must reuse the shared frontend task-root

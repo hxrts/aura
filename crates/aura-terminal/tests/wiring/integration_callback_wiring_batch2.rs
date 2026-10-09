@@ -402,7 +402,7 @@ async fn test_send_direct_message_adds_message() {
 /// Validates:
 /// 1. SetChannelMode requires Admin privileges (correct authorization)
 /// 2. Authorization errors are properly returned
-/// 3. get_channel_mode returns defaults for non-admin access
+
 #[tokio::test]
 async fn test_set_channel_mode_requires_admin() {
     println!("\n=== Set Channel Mode Requires Admin Test ===\n");
@@ -439,12 +439,6 @@ async fn test_set_channel_mode_requires_admin() {
         }
         Err(e) => panic!("Unexpected error: {e}"),
     }
-
-    // Phase 2: Verify get_channel_mode still works (returns default)
-    println!("\nPhase 2: Verify get_channel_mode returns default");
-    let mode = ctx.get_channel_mode(channel_id).await;
-    println!("  Channel mode (default or set): {mode:?}");
-    // Mode access should always work, even without admin rights
 
     println!("\n=== Set Channel Mode Requires Admin Test PASSED ===\n");
 }

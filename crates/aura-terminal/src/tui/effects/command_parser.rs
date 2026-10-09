@@ -972,16 +972,6 @@ pub enum AuraEvent {
         /// Actor who unpinned the message
         actor: String,
     },
-    /// Channel mode set
-    ChannelModeSet {
-        /// Channel/home ID
-        channel: String,
-        /// Mode flags
-        flags: String,
-        /// Actor who set the mode
-        actor: String,
-    },
-
     // === Authorization Events ===
     /// Command authorization denied
     AuthorizationDenied {
@@ -1143,8 +1133,7 @@ impl EventFilter {
             | AuraEvent::ModeratorRevoked { .. }
             | AuraEvent::TopicSet { .. }
             | AuraEvent::MessagePinned { .. }
-            | AuraEvent::MessageUnpinned { .. }
-            | AuraEvent::ChannelModeSet { .. } => self.moderation,
+            | AuraEvent::MessageUnpinned { .. } => self.moderation,
             AuraEvent::AuthorizationDenied { .. } => self.authorization,
             AuraEvent::Error { .. } | AuraEvent::Warning { .. } => self.errors,
             AuraEvent::Pong { .. } | AuraEvent::ShuttingDown => self.system,

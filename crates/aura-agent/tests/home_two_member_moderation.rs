@@ -357,9 +357,17 @@ async fn contact_and_governance_views_survive_restart() -> Result<()> {
         },
     )
     .await?;
+    // Task 192: the channel mode is a committed fact, so it survives too.
+    aura_app::ui::workflows::settings::set_channel_mode_resolved(
+        &barbara.app,
+        home,
+        "+mi".to_string(),
+    )
+    .await?;
     let limited_and_banned = |h: &aura_app::views::home::HomeState| {
         h.ban_list.contains_key(&alex.id)
             && h.access_override(&alex.id) == Some(aura_social::AccessLevel::Limited)
+            && h.mode_flags.as_deref() == Some("+mi")
     };
     wait_until("Barbara sees the override and the ban", || async {
         home_view(&barbara.app, home)
@@ -513,6 +521,61 @@ async fn kick_ends_the_shared_membership_episode_on_both_clients() -> Result<()>
         })
         .await?;
     }
+    net.finish().await
+}
+
+/// Task 192: the home channel's mode is a committed register fact, not a
+/// local projection edit. Barbara (moderator) sets `+m` while the link to
+/// Alex is partitioned; once it heals, context sync delivers the fact and
+/// both clients reduce the same mode. A member without manage_channel is
+/// refused before anything is committed.
+#[tokio::test(start_paused = true)]
+async fn channel_mode_is_a_fact_that_converges_on_both_members() -> Result<()> {
+    use aura_app::ui::workflows::settings;
+
+    let net = SimNet::new();
+    let barbara = net.peer(111).await?;
+    let alex = net.peer(115).await?;
+    link_contacts(&barbara, &alex).await?;
+    let home = context::create_home(&barbara.app, Some("ModeHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+    let alex_id = alex.id;
+    wait_until("Barbara lists Alex", || async {
+        home_view(&barbara.app, home)
+            .await
+            .is_some_and(|h| h.member(&alex_id).is_some())
+    })
+    .await?;
+
+    net.transport
+        .fault_link(barbara.id, alex.id, aura_agent::LinkFault::Drop);
+    settings::set_channel_mode_resolved(&barbara.app, home, "+m".to_string()).await?;
+    support::quiesce().await;
+    net.transport.heal_links();
+
+    for (who, app) in [("Barbara", &barbara.app), ("Alex", &alex.app)] {
+        wait_until(&format!("{who} reduces mode +m"), || async {
+            home_view(app, home)
+                .await
+                .is_some_and(|h| h.mode_flags.as_deref() == Some("+m"))
+        })
+        .await?;
+    }
+
+    // Alex is a participant, not a moderator: refused, nothing committed.
+    assert!(
+        settings::set_channel_mode_resolved(&alex.app, home, "+i".to_string())
+            .await
+            .is_err(),
+        "a participant must not set the channel mode"
+    );
+    support::quiesce().await;
+    assert_eq!(
+        home_view(&barbara.app, home)
+            .await
+            .and_then(|h| h.mode_flags),
+        Some("+m".to_string())
+    );
     net.finish().await
 }
 

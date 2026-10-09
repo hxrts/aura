@@ -70,46 +70,14 @@ async fn test_channel_mode_operations() {
     use std::sync::Arc;
 
     use aura_app::signal_defs::HOMES_SIGNAL;
-    use aura_app::views::home::{HomeRole, HomeState};
+    use aura_app::views::home::HomeState;
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
+    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use aura_terminal::tui::effects::EffectCommand;
-    use aura_terminal::tui::types::ChannelMode;
     use aura_testkit::MockRuntimeBridge;
-
-    use crate::support::IoContextTestEnvBuilder;
-
-    let mut mode = ChannelMode::default();
-    assert!(!mode.moderated);
-    assert!(!mode.private);
-    assert!(!mode.topic_protected);
-    assert!(!mode.invite_only);
-
-    mode.parse_flags("+mpt");
-    assert!(mode.moderated);
-    assert!(mode.private);
-    assert!(mode.topic_protected);
-    assert!(!mode.invite_only);
-    mode.parse_flags("-p");
-    assert!(mode.moderated);
-    assert!(!mode.private);
-    assert!(mode.topic_protected);
-    mode.parse_flags("+i");
-    assert!(mode.invite_only);
-
-    let mode_str = mode.to_string();
-    assert!(mode_str.contains('m'));
-    assert!(mode_str.contains('t'));
-    assert!(mode_str.contains('i'));
-    assert!(!mode_str.contains('p'));
-
-    let desc = mode.description();
-    assert!(desc.contains(&"Moderated"));
-    assert!(desc.contains(&"Topic Protected"));
-    assert!(desc.contains(&"Invite Only"));
-    assert!(!desc.contains(&"Private"));
 
     let cmd = EffectCommand::SetChannelMode {
         channel: "general".to_string(),
@@ -121,23 +89,33 @@ async fn test_channel_mode_operations() {
             if channel == "general" && flags == "+mpt"
     );
 
-    let test_dir =
-        std::env::temp_dir().join(format!("aura-channel-mode-test-{}", std::process::id()));
-    let env = IoContextTestEnvBuilder::new("channel-mode-test")
-        .with_base_path(test_dir)
-        .with_mock_runtime()
-        .with_device_id("test-device-channel-mode")
-        .with_mode(TuiMode::Production)
-        .create_account_as("ChannelModeTester")
-        .build()
-        .await;
-
     let home_id = ChannelId::from_bytes([0x30; 32]);
     let owner_id = AuthorityId::new_from_entropy([0x31; 32]);
     let home_context_id = ContextId::new_from_entropy([10u8; 32]);
+    let mock_bridge = Arc::new(MockRuntimeBridge::with_authority(owner_id));
+    mock_bridge
+        .set_amp_channel_context(home_id, home_context_id)
+        .await;
+    mock_bridge
+        .set_materialized_channel_name_matches("another-channel", vec![home_id])
+        .await;
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(aura_app::AppConfig::default(), mock_bridge.clone())
+            .expect("Failed to create AppCore"),
+    ));
+    let initialized = InitializedAppCore::new(app_core.clone()).await.unwrap();
+    let test_dir = tempfile::tempdir().unwrap();
+    let ctx = IoContext::builder()
+        .with_app_core(initialized)
+        .with_existing_account(true)
+        .with_base_path(test_dir.path().to_path_buf())
+        .with_device_id("test-device-channel-mode".to_string())
+        .with_mode(TuiMode::Production)
+        .build()
+        .unwrap();
 
     {
-        let core = env.app_core.write().await;
+        let core = app_core.write().await;
         let mut home = HomeState::new(
             home_id.clone(),
             Some("Test Home".to_string()),
@@ -145,7 +123,7 @@ async fn test_channel_mode_operations() {
             0,
             home_context_id,
         );
-        home.my_role = HomeRole::Member;
+        home.designate_creator_moderator(&owner_id, &owner_id);
         let mut homes = aura_app::views::home::HomesState::default();
         super::add_fixture_home(&mut homes, home);
         homes.select_home(Some(home_id));
@@ -154,44 +132,34 @@ async fn test_channel_mode_operations() {
             .expect("Failed to emit homes state");
     }
 
-    let mock_bridge = Arc::new(MockRuntimeBridge::new());
-    let _app_core = Arc::new(RwLock::new(
-        AppCore::with_runtime(aura_app::AppConfig::default(), mock_bridge.clone())
-            .expect("Failed to create AppCore"),
-    ));
-    mock_bridge
-        .set_amp_channel_context(home_id, home_context_id)
-        .await;
-    mock_bridge
-        .set_materialized_channel_name_matches("another-channel", vec![home_id])
-        .await;
-
-    let initial_mode = env.ctx.get_channel_mode("test-channel").await;
-    assert!(!initial_mode.moderated);
-    assert!(!initial_mode.private);
-
-    env.ctx.set_channel_mode("test-channel", "+mpi").await;
-    let updated_mode = env.ctx.get_channel_mode("test-channel").await;
-    assert!(updated_mode.moderated);
-    assert!(updated_mode.private);
-    assert!(updated_mode.invite_only);
-    assert!(!updated_mode.topic_protected);
-
-    env.ctx.set_channel_mode("test-channel", "-m+t").await;
-    let final_mode = env.ctx.get_channel_mode("test-channel").await;
-    assert!(!final_mode.moderated);
-    assert!(final_mode.private);
-    assert!(final_mode.invite_only);
-    assert!(final_mode.topic_protected);
-
-    let dispatch_result = env
-        .ctx
+    // The mode is a committed fact reduced into the homes signal (Task 192;
+    // aura-agent channel_mode_is_a_fact_that_converges_on_both_members); the
+    // TUI keeps no local mode copy.
+    let dispatch_result = ctx
         .dispatch(EffectCommand::SetChannelMode {
             channel: "another-channel".to_string(),
             flags: "+pt".to_string(),
         })
         .await;
-    assert!(dispatch_result.is_ok() || dispatch_result.is_err());
+    assert!(dispatch_result.is_ok(), "{dispatch_result:?}");
+    let facts = mock_bridge.get_committed_facts().await;
+    assert_eq!(facts.len(), 1, "mode dispatch must commit exactly once");
+    let aura_journal::fact::RelationalFact::Generic {
+        envelope,
+        context_id,
+    } = &facts[0]
+    else {
+        panic!("mode must be a domain fact");
+    };
+    assert_eq!(envelope.type_id.as_str(), "social");
+    assert_eq!(envelope.schema_version, 6);
+    assert_eq!(*context_id, home_context_id);
+    let homes = app_core.read().await.read(&*HOMES_SIGNAL).await.unwrap();
+    assert_eq!(
+        homes.home_state(&home_id).unwrap().mode_flags,
+        None,
+        "the frontend cannot manufacture the reducer's mode result"
+    );
 }
 
 #[tokio::test]

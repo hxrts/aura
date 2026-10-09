@@ -27,5 +27,5 @@ pub use recovery::{
     Guardian, GuardianApproval, GuardianStatus, PendingRequest, RecoveryState, RecoveryStatus,
     RecoveryTab,
 };
-pub use settings::{AuthorityInfo, ChannelMode, Device, MfaPolicy, SettingsSection};
+pub use settings::{AuthorityInfo, Device, MfaPolicy, SettingsSection};
 pub use shared::{short_id, KeyHint};
