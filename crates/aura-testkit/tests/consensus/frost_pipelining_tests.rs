@@ -10,13 +10,29 @@
 //! - WitnessState nonce lifecycle
 
 use aura_consensus::witness::{WitnessSet, WitnessState, WitnessTracker};
-use aura_core::{frost::NonceCommitment, types::Epoch, AuthorityId};
+use aura_core::{
+    crypto::tree_signing::FrostNonces, frost::NonceCommitment, types::Epoch, AuthorityId,
+};
 use aura_testkit::builders::keys::helpers::test_frost_key_shares;
 use rand::SeedableRng;
 
 /// Helper to create test authority IDs
 fn authority(seed: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([seed; 32])
+}
+
+/// Deterministic single-use nonces for signer `seed` over a fixed share.
+fn test_nonces(seed: u8) -> FrostNonces {
+    let signing_share = frost_ed25519::keys::SigningShare::deserialize([seed; 32])
+        .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
+    let mut rng = rand_chacha::ChaCha20Rng::from_seed([seed; 32]);
+    FrostNonces::generate_for_share(
+        frost_ed25519::Identifier::try_from(u16::from(seed))
+            .unwrap_or_else(|err| panic!("identifier: {err:?}")),
+        &signing_share,
+        &mut rng,
+    )
+    .unwrap_or_else(|err| panic!("nonce generation failed: {err:?}"))
 }
 
 /// Test fast path (1 RTT) consensus with cached commitments
@@ -43,25 +59,13 @@ async fn test_steady_state_single_rtt() {
     for (i, (_frost_id, key_package)) in key_packages.iter().enumerate() {
         let witness_id = witnesses[i];
 
-        // Generate nonce using the key package
-        let signing_share = key_package.signing_share();
+        // Generate nonces using the key package
         let mut rng = rand_chacha::ChaCha20Rng::from_seed([i as u8 + 10; 32]);
-        let nonces = frost_ed25519::round1::SigningNonces::new(signing_share, &mut rng);
-
-        // Use 1-indexed signer ID (FROST identifiers are 1-based)
-        let signer_id = (i + 1) as u16;
-        let commitment = NonceCommitment {
-            signer: signer_id,
-            commitment: nonces
-                .commitments()
-                .serialize()
-                .unwrap_or_else(|err| panic!("commitment serialization failed: {err:?}")),
-        };
-
-        let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
+        let nonces = FrostNonces::generate(key_package, &mut rng)
+            .unwrap_or_else(|err| panic!("nonce generation failed: {err:?}"));
 
         witness_set
-            .update_witness_nonce(witness_id, commitment, token, epoch)
+            .update_witness_nonce(witness_id, nonces, epoch)
             .await
             .unwrap_or_else(|err| panic!("update nonce failed: {err:?}"));
     }
@@ -81,6 +85,20 @@ async fn test_steady_state_single_rtt() {
         cached.len() >= 2,
         "Should have enough commitments for threshold"
     );
+
+    // Cached nonces move out of the shared witness state exactly once.
+    assert!(witness_set
+        .take_witness_nonce(witnesses[0], epoch)
+        .await
+        .is_some());
+    assert!(
+        witness_set
+            .take_witness_nonce(witnesses[0], epoch)
+            .await
+            .is_none(),
+        "a cached nonce must not be handed out for a second round"
+    );
+    assert_eq!(witness_set.collect_cached_commitments(epoch).await.len(), 2);
 }
 
 /// Test that epoch rotation invalidates cached nonces
@@ -94,25 +112,18 @@ async fn test_epoch_rotation_invalidation() {
     let epoch1 = Epoch::from(1);
     let epoch2 = Epoch::from(2);
 
-    // Cache a nonce in epoch 1
-    let commitment = NonceCommitment {
-        signer: 1,
-        commitment: vec![0u8; 66], // Placeholder commitment
-    };
-
-    // Create a valid nonce token using deterministic test key shares
+    // Cache nonces in epoch 1 using deterministic test key shares
     let (key_packages, _pubkey_package) = test_frost_key_shares(2, 3, 4242);
-    let signing_share = key_packages
+    let key_package = key_packages
         .values()
         .next()
-        .unwrap_or_else(|| panic!("test key share"))
-        .signing_share();
+        .unwrap_or_else(|| panic!("test key share"));
     let mut rng = rand_chacha::ChaCha20Rng::from_seed([7u8; 32]);
-    let nonces = frost_ed25519::round1::SigningNonces::new(signing_share, &mut rng);
-    let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
+    let nonces = FrostNonces::generate(key_package, &mut rng)
+        .unwrap_or_else(|err| panic!("nonce generation failed: {err:?}"));
 
     witness_set
-        .update_witness_nonce(witnesses[0], commitment.clone(), token, epoch1)
+        .update_witness_nonce(witnesses[0], nonces, epoch1)
         .await
         .unwrap_or_else(|err| panic!("update nonce failed: {err:?}"));
 
@@ -202,18 +213,7 @@ async fn test_witness_state_lifecycle() {
     );
 
     // Cache a nonce
-    let commitment = NonceCommitment {
-        signer: 5,
-        commitment: vec![5u8; 32],
-    };
-
-    let signing_share = frost_ed25519::keys::SigningShare::deserialize([5u8; 32])
-        .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
-    let mut rng = rand_chacha::ChaCha20Rng::from_seed([5u8; 32]);
-    let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
-    let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
-
-    state.set_next_nonce(commitment.clone(), token, epoch1);
+    state.set_next_nonce(test_nonces(5), epoch1);
 
     // Now should have cached nonce
     assert!(
@@ -250,13 +250,7 @@ async fn test_witness_state_lifecycle() {
     );
 
     // Invalidation
-    let signing_share2 = frost_ed25519::keys::SigningShare::deserialize([6u8; 32])
-        .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
-    let mut rng2 = rand_chacha::ChaCha20Rng::from_seed([6u8; 32]);
-    let nonces2 = frost_ed25519::round1::SigningNonces::new(&signing_share2, &mut rng2);
-    let token2 = aura_core::crypto::tree_signing::NonceToken::from(nonces2);
-
-    state.set_next_nonce(commitment, token2, epoch1);
+    state.set_next_nonce(test_nonces(6), epoch1);
     assert!(state.has_cached_nonce(epoch1));
 
     state.invalidate();

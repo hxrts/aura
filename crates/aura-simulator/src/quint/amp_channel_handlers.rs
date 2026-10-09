@@ -26,7 +26,7 @@ use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::{AuraError, Hash32, Result};
 use aura_journal::fact::ProtocolRelationalFact;
-use aura_journal::fact::{ChannelBootstrap, CommittedChannelEpochBump, RelationalFact};
+use aura_journal::fact::{ChannelBootstrap, RelationalFact};
 use aura_journal::DomainFact;
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
@@ -457,30 +457,53 @@ impl AmpChannelHarness {
         new_epoch: u64,
         participants: &[Arc<AuraAgent>],
     ) -> Result<()> {
-        let bump_id = Hash32::from_bytes(format!("amp-bump:{channel}:{new_epoch}").as_bytes());
-        let consensus_id =
-            Hash32::from_bytes(format!("amp-consensus:{channel}:{new_epoch}").as_bytes());
-
-        let proposal = aura_journal::fact::ProposedChannelEpochBump::new(
-            self.context_id,
-            channel,
-            new_epoch.saturating_sub(1),
-            new_epoch,
-            bump_id,
-            aura_journal::fact::ChannelBumpReason::Routine,
-        );
-        let bump = CommittedChannelEpochBump::from_proposal(&proposal, consensus_id, None);
-
-        for agent in participants {
-            let effects = agent.runtime().effects();
-            effects
-                .insert_relational_fact(RelationalFact::Protocol(
-                    ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump.clone()),
-                ))
-                .await
-                .map_err(|e| AuraError::internal(format!("commit bump fact failed: {e}")))?;
+        let effects: Vec<_> = participants
+            .iter()
+            .map(|agent| agent.runtime().effects())
+            .collect();
+        let fact = aura_agent::rekey_simulated_channel(self.context_id, channel, &effects).await?;
+        if fact.committed().new_epoch != new_epoch {
+            return Err(AuraError::invalid(
+                "native rekey committed an unexpected epoch",
+            ));
         }
-
+        let location =
+            SecureStorageLocation::amp_channel_base_key(&self.context_id, &channel, new_epoch);
+        let mut expected_key = None;
+        for agent in self.agents.values() {
+            let effects = agent.runtime().effects();
+            let is_member = participants
+                .iter()
+                .any(|participant| Arc::ptr_eq(participant, agent));
+            if is_member {
+                let committed = effects.load_committed_facts(agent.authority_id()).await?;
+                let evidence = fact.to_generic();
+                if !committed.iter().any(|entry| {
+                    matches!(&entry.content,
+                        aura_journal::fact::FactContent::Relational(actual) if actual == &evidence)
+                }) {
+                    return Err(AuraError::invalid(
+                        "member did not retain the native channel agreement evidence",
+                    ));
+                }
+                let key = effects
+                    .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                    .await?;
+                if expected_key
+                    .as_ref()
+                    .is_some_and(|expected| expected != &key)
+                {
+                    return Err(AuraError::invalid(
+                        "native ceremony produced divergent channel keys",
+                    ));
+                }
+                expected_key = Some(key);
+            } else if effects.secure_exists(&location).await? {
+                return Err(AuraError::invalid(
+                    "departed member retained the successor channel key",
+                ));
+            }
+        }
         Ok(())
     }
 }

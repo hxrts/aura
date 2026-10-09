@@ -1,5 +1,10 @@
 # Testing Guide
 
+Browser onboarding regressions must check guarded signal writes after async
+enrollment workflows, including identity persistence failures. Completion and
+error feedback use the browser retry helper; task spawning remains owned by
+the shared web task owner.
+
 For runtime tests that manually advance physical time, inject
 `aura_testkit::time::ManualPhysicalClock` before service assembly. Its sleeps wait
 for explicit clock advancement, so background cleanup loops cannot consume the
@@ -18,6 +23,18 @@ virtual time and re-check conditions at quiescent points (see
 `crates/aura-agent/tests/support`); never wait on wall-clock sleeps.
 
 ## AMP lifecycle replay
+
+The leave action drives the native runtime key ceremony and member consensus
+through the simulation factory's bounded, lexically owned peer drivers.
+Members must agree on canonical membership and epoch before the attempt.
+Each member verifies the resulting epoch commit against its own DKG group
+key before retaining the agreement evidence. The replay rereads that exact
+evidence from each member's canonical typed-fact store and checks identical
+successor base keys for remaining members and no successor key for Carol.
+This covers membership rekeying; the later observational transition-policy
+steps still do not establish native normal/emergency finalization.
+An adjacent regression enforces a 16 KiB caller-future budget for membership
+rekeying, alongside execution on the default test stack.
 
 `just ci-test` first runs `just ci-amp-lifecycle-trace`, which regenerates the
 seed-424242, 24-step AMP harness trace and compares it with

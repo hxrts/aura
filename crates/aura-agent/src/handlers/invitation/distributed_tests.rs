@@ -94,7 +94,7 @@ async fn device_enrollment_owned_sessions_exchange_request_accept_confirm() {
                 let round = session.advance_round(role, &peer_roles).await.expect("host round advances");
                 if let Some(blocked) = round.blocked_receive {
                     received.push(blocked.payload.clone());
-                    session.inject_blocked_receive(&blocked).expect("owner injects receive");
+                    session.inject_blocked_receive(blocked).expect("owner injects receive");
                 } else {
                     assert!(matches!(round.host_wait_status, AuraVmHostWaitStatus::Idle | AuraVmHostWaitStatus::Delivered), "unexpected host wait: {:?}", round.host_wait_status);
                     if matches!(round.step, StepResult::AllDone) {

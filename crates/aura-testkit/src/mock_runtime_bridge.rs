@@ -513,11 +513,21 @@ impl MockRuntimeBridge {
 
     /// Advance the mock time by the given milliseconds
     pub fn advance_time_ms(&self, ms: u64) {
-        self.current_time_ms
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
-                now.checked_add(ms)
-            })
-            .expect("explicit mock physical advance overflow");
+        let mut now = self.current_time_ms.load(Ordering::SeqCst);
+        loop {
+            let next = now
+                .checked_add(ms)
+                .expect("explicit mock physical advance overflow");
+            match self.current_time_ms.compare_exchange_weak(
+                now,
+                next,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(actual) => now = actual,
+            }
+        }
         self.physical_time_changed.notify_waiters();
     }
 

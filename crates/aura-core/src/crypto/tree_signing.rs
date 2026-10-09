@@ -24,7 +24,6 @@
 //! - FROST paper: https://eprint.iacr.org/2020/852
 
 use crate::crypto::hash;
-use crate::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use crate::errors::AuraError;
 use crate::{AttestedOp, TreeOpKind};
 use frost_ed25519 as frost;
@@ -115,111 +114,6 @@ impl Share {
     }
 }
 
-/// Nonce for FROST signing (secret)
-///
-/// Generated fresh for each signing operation. Must be bound to the signing
-/// context to prevent reuse across different operations.
-///
-/// This wraps the frost-ed25519 SigningNonces type.
-// Serde is retained for the explicit nonce persistence shape; Clone is kept for
-// the existing signing-session data flow. Debug remains manually redacted
-// because `value` is serialized signing nonce material.
-#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-pub struct Nonce {
-    /// Nonce identifier (for tracking)
-    pub id: [u8; 32],
-    /// Security-sensitive serialized signing nonces. Zeroized on drop.
-    #[serde(with = "serde_bytes")]
-    pub value: Vec<u8>,
-}
-
-impl fmt::Debug for Nonce {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Nonce")
-            .field("id", &self.id)
-            .field("value_len", &self.value.len())
-            .field("value", &"<redacted>")
-            .finish()
-    }
-}
-
-/// Token representing a cached nonce for pipelined commitment optimization
-///
-/// This wraps the actual FROST signing nonces in an opaque type that can be
-/// stored across consensus rounds. The token is tied to a specific epoch and
-/// becomes invalid when the epoch changes.
-#[derive(Debug, Clone)]
-pub struct NonceToken {
-    /// The actual FROST signing nonces (kept in memory, not serialized)
-    nonces: frost::round1::SigningNonces,
-}
-
-impl NonceToken {
-    /// Create from FROST signing nonces
-    pub fn from(nonces: frost::round1::SigningNonces) -> Self {
-        Self { nonces }
-    }
-
-    /// Get the FROST signing nonces
-    pub fn into_frost(self) -> frost::round1::SigningNonces {
-        self.nonces
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used)]
-impl NonceToken {
-    pub fn test_token() -> Self {
-        use rand::SeedableRng;
-
-        let share = frost::keys::SigningShare::deserialize([1u8; 32]).expect("valid signing share");
-        let mut rng = rand::rngs::StdRng::from_seed([9u8; 32]);
-        let nonces = frost::round1::SigningNonces::new(&share, &mut rng);
-        NonceToken::from(nonces)
-    }
-}
-
-impl Nonce {
-    /// Create from FROST signing nonces with a pre-generated ID
-    ///
-    /// Note: FROST nonces cannot be serialized as they contain secret data.
-    /// This stores only an identifier for tracking purposes.
-    ///
-    /// # Arguments
-    /// * `nonces` - The FROST signing nonces to wrap
-    /// * `id` - A 32-byte random ID for tracking, should be generated via RandomEffects
-    pub fn from_frost(
-        nonces: frost::round1::SigningNonces,
-        id: [u8; 32],
-    ) -> Result<Self, AuraError> {
-        // Serialize nonces for secure persistence or in-memory caching
-        let value = nonces
-            .serialize()
-            .map_err(|e| AuraError::crypto(format!("Failed to serialize FROST nonces: {e}")))?;
-        let value_bytes: &[u8] = value.as_ref();
-        if value_bytes.len() != MAX_NONCE_BYTES {
-            return Err(AuraError::crypto(format!(
-                "Invalid nonce length: {} (expected {MAX_NONCE_BYTES})",
-                value_bytes.len(),
-            )));
-        }
-
-        Ok(Self {
-            id,
-            value: value_bytes.to_vec(),
-        })
-    }
-
-    /// Convert to FROST signing nonces
-    ///
-    /// This is a security limitation: FROST nonces should not be reconstructed
-    /// from serialized data. Nonces must be generated fresh per signing operation,
-    /// kept in-memory, and never persisted.
-    pub fn to_frost(&self) -> Result<frost::round1::SigningNonces, AuraError> {
-        Err(AuraError::crypto("FROST nonces cannot be reconstructed from serialized data for security reasons. Generate fresh nonces for each signing operation."))
-    }
-}
-
 /// Commitment to a nonce (public)
 ///
 /// Sent to the coordinator during the commitment phase. Does not reveal
@@ -286,19 +180,6 @@ impl NonceCommitment {
             commitment: bytes,
         })
     }
-}
-
-/// Opened nonce (public)
-///
-/// Revealed after all commitments are collected. The coordinator verifies
-/// that it matches the earlier commitment.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct NonceOpen {
-    /// Signer identifier
-    pub signer: u16,
-    /// Revealed nonce value
-    #[serde(with = "serde_bytes")]
-    pub nonce: Vec<u8>,
 }
 
 /// Partial signature from one signer (public)
@@ -494,169 +375,202 @@ fn serialize_tree_op_for_binding(op: &TreeOpKind) -> Vec<u8> {
     buffer
 }
 
-/// Generate a nonce and its commitment using FROST
+/// One signer's FROST signing nonces, usable for exactly one signature share
+/// (docs/122 "Replay Protection").
 ///
-/// Creates a fresh random nonce and computes its cryptographic commitment
-/// using the FROST protocol's round 1 commitment generation.
+/// Not `Clone`, not serializable, and zeroized on drop: the secret never
+/// leaves this value. The public commitment is read from it for round one;
+/// signing needs a [`RetiredFrostNonces`], which only [`FrostNonces::retire`]
+/// produces after the retirement record is written, and signing consumes it.
 ///
-/// ## Security Requirements
-///
-/// - Nonce MUST be fresh for each signing operation
-/// - Nonce MUST be bound to the signing context
-/// - Nonce MUST be discarded after use (never reused)
-///
-/// ## Examples
-///
+/// ```compile_fail,E0599
+/// use aura_core::crypto::tree_signing::FrostNonces;
+/// fn clone_nonces(nonces: FrostNonces) -> (FrostNonces, FrostNonces) {
+///     (nonces.clone(), nonces)
+/// }
 /// ```
-/// use aura_core::crypto::tree_signing::generate_nonce_with_share;
 ///
-/// // Use generate_nonce_with_share for proper FROST nonces
-/// // let (nonce, commitment) = generate_nonce_with_share(1, &signing_share, &mut rng).unwrap();
-/// // Send commitment to coordinator
-/// // Keep nonce secret for signing round
+/// ```compile_fail,E0382
+/// use aura_core::crypto::tree_signing::RetiredFrostNonces;
+/// fn sign_twice(
+///     nonces: RetiredFrostNonces,
+///     package: &frost_ed25519::SigningPackage,
+///     key: &frost_ed25519::keys::KeyPackage,
+/// ) {
+///     let _first = nonces.sign(package, key);
+///     let _second = nonces.sign(package, key);
+/// }
 /// ```
-/// Generate nonce with a signing share for FROST operations
 ///
-/// This function requires a signing share to properly generate FROST nonces.
-/// Retrieve signing shares from SecureStorageEffects (see `generate_nonce_with_share_secure`)
-/// before calling this helper when running in production.
-pub fn generate_nonce_with_share(
-    signer_id: u16,
-    signing_share: &frost::keys::SigningShare,
-    rng: &mut (impl rand::RngCore + rand::CryptoRng),
-) -> Result<(Nonce, NonceCommitment), AuraError> {
-    // Use valid identifier - if signer_id is invalid, use 1 as fallback
-    let identifier = if let Ok(id) = frost::Identifier::try_from(signer_id) {
-        id
-    } else {
-        // 1 is always a valid identifier in FROST, this is safe
-        #[allow(clippy::unwrap_used)]
-        frost::Identifier::try_from(1).unwrap()
-    };
-
-    // Generate proper FROST nonces and commitments using the signing share
-    let (frost_nonce, frost_commitment) = frost::round1::commit(signing_share, rng);
-
-    // Create nonce ID for tracking
-    let mut nonce_id = [0u8; 32];
-    rng.fill_bytes(&mut nonce_id);
-
-    // Serialize signing nonces for secure storage via Nonce::from_frost.
-    let nonce = Nonce::from_frost(frost_nonce, nonce_id)?;
-    let commitment = NonceCommitment::from_frost(identifier, frost_commitment)?;
-
-    Ok((nonce, commitment))
+/// ```compile_fail,E0599
+/// use aura_core::crypto::tree_signing::FrostNonces;
+/// fn sign_unretired(
+///     nonces: FrostNonces,
+///     package: &frost_ed25519::SigningPackage,
+///     key: &frost_ed25519::keys::KeyPackage,
+/// ) {
+///     let _share = nonces.sign(package, key);
+/// }
+/// ```
+pub struct FrostNonces {
+    participant: u16,
+    nonces: frost::round1::SigningNonces,
+    commitment: NonceCommitment,
 }
 
-/// Generate nonce and persist it using SecureStorageEffects for proper reuse protection
-pub async fn generate_nonce_with_share_secure<E>(
-    signer_id: u16,
-    signing_share: &frost::keys::SigningShare,
-    rng: &mut (impl rand::RngCore + rand::CryptoRng),
-    storage: &E,
-    session_id: &str,
-) -> Result<(Nonce, NonceCommitment), crate::AuraError>
-where
-    E: SecureStorageEffects,
-{
-    let (nonce, commitment) = generate_nonce_with_share(signer_id, signing_share, rng)?;
-    let location = SecureStorageLocation::frost_nonce(session_id, signer_id);
-    storage
-        .secure_store(
-            &location,
-            &nonce.value,
-            &[
-                SecureStorageCapability::Read,
-                SecureStorageCapability::Write,
-                SecureStorageCapability::Delete,
-            ],
-        )
-        .await?;
-    Ok((nonce, commitment))
+impl fmt::Debug for FrostNonces {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FrostNonces")
+            .field("participant", &self.participant)
+            .field("nonces", &"<redacted>")
+            .finish()
+    }
 }
 
-/// Create a partial signature using FROST
-///
-/// Signs a message using the participant's signing share and nonce,
-/// producing a partial signature that can be aggregated by the coordinator.
-///
-/// ## Parameters
-///
-/// - `share`: The signer's secret signing share
-/// - `msg`: The message to sign (should be binding_message output)
-/// - `nonce`: The signing nonces generated in round 1
-/// - `commitments`: Map of all participants' nonce commitments (identifier -> commitment)
-///
-/// ## Returns
-///
-/// A partial signature that the coordinator will aggregate with others.
-///
-/// ## Errors
-///
-/// Returns error string if:
-/// - Share deserialization fails
-/// - Nonce deserialization fails
-/// - Commitment deserialization fails
-/// - FROST signing fails
-///
-/// ## Note
-///
-/// Create a partial signature using FROST with fresh nonces
-///
-/// This function performs the complete FROST signing flow:
-/// 1. Generates fresh nonces (for security)
-/// 2. Creates the signing package
-/// 3. Signs using the participant's share
-///
-/// ## Security Note
-///
-/// This function generates fresh nonces for security rather than reusing
-/// serialized nonces. This is the correct approach for FROST signatures.
-pub fn frost_sign_partial(
-    _share: &Share,
-    _msg: &[u8],
-    _nonce: &Nonce, // Ignored for security - we generate fresh nonces
-    _commitments: &BTreeMap<u16, NonceCommitment>,
-) -> Result<PartialSignature, AuraError> {
-    // For security reasons, this function requires a proper KeyPackage from DKG
-    // rather than just a SigningShare. This prevents misuse of shares.
-    Err(AuraError::crypto("FROST signing requires a complete KeyPackage from a DKG ceremony. Use frost_sign_partial_with_keypackage instead."))
-}
-
-/// Create a partial signature using FROST with a proper KeyPackage
-///
-/// This function performs secure FROST signing with a complete key package
-/// that includes all necessary cryptographic material from DKG.
-pub fn frost_sign_partial_with_keypackage(
-    key_package: &frost::keys::KeyPackage,
-    msg: &[u8],
-    commitments: &BTreeMap<u16, NonceCommitment>,
-    rng: &mut (impl rand::RngCore + rand::CryptoRng),
-) -> Result<PartialSignature, AuraError> {
-    let identifier = key_package.identifier();
-
-    // Generate fresh nonces for this signing operation (secure approach)
-    let (frost_nonce, _our_commitment) = frost::round1::commit(key_package.signing_share(), rng);
-
-    // Convert commitments to FROST format
-    let mut frost_commitments = BTreeMap::new();
-    for (signer_id, commitment) in commitments {
-        let frost_id = frost::Identifier::try_from(*signer_id)
-            .map_err(|e| AuraError::crypto(format!("Invalid signer ID {signer_id}: {e}")))?;
-        let frost_commit = commitment.to_frost()?;
-        frost_commitments.insert(frost_id, frost_commit);
+impl FrostNonces {
+    /// Fresh nonces for the signer holding `key_package`, from `rng` (the
+    /// caller's random effect or audited OS entropy).
+    pub fn generate(
+        key_package: &frost::keys::KeyPackage,
+        rng: &mut (impl rand::RngCore + rand::CryptoRng),
+    ) -> Result<Self, AuraError> {
+        Self::generate_for_share(*key_package.identifier(), key_package.signing_share(), rng)
     }
 
-    // Create signing package
-    let signing_package = frost::SigningPackage::new(frost_commitments, msg);
+    /// Fresh nonces for signer `identifier` holding `signing_share`.
+    pub fn generate_for_share(
+        identifier: frost::Identifier,
+        signing_share: &frost::keys::SigningShare,
+        rng: &mut (impl rand::RngCore + rand::CryptoRng),
+    ) -> Result<Self, AuraError> {
+        let (nonces, commitments) = frost::round1::commit(signing_share, rng);
+        let commitment = NonceCommitment::from_frost(identifier, commitments)?;
+        Ok(Self {
+            participant: commitment.signer,
+            nonces,
+            commitment,
+        })
+    }
 
-    // Create partial signature using FROST protocol with KeyPackage
-    let signature_share = frost::round2::sign(&signing_package, &frost_nonce, key_package)
-        .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))?;
+    /// The signer's FROST participant index.
+    pub fn participant(&self) -> u16 {
+        self.participant
+    }
 
-    // Convert to our format
-    let _signer_id = u16::from_be_bytes([0, identifier.serialize()[0]]);
-    Ok(PartialSignature::from_frost(*identifier, signature_share))
+    /// The public round-one commitment.
+    pub fn commitment(&self) -> &NonceCommitment {
+        &self.commitment
+    }
+
+    /// The public round-one commitment in the effect DTO shape.
+    pub fn public_commitment(&self) -> crate::effects::crypto::FrostPublicCommitment {
+        crate::effects::crypto::FrostPublicCommitment {
+            participant_index: self.participant,
+            commitment_bytes: self.commitment.commitment.clone(),
+        }
+    }
+
+    /// Record these nonces as retired in `log`, then return the only value
+    /// signing accepts. A log that already holds this commitment refuses.
+    pub async fn retire(
+        self,
+        log: &(impl FrostNonceRetirement + ?Sized),
+    ) -> Result<RetiredFrostNonces, AuraError> {
+        log.retire_frost_nonce(&FrostNonceRetirementRecord {
+            participant: self.participant,
+            commitment_digest: crate::Hash32(hash::hash(&self.commitment.commitment)),
+        })
+        .await?;
+        Ok(RetiredFrostNonces { nonces: self })
+    }
+}
+
+/// [`FrostNonces`] whose retirement is recorded; signing consumes it.
+pub struct RetiredFrostNonces {
+    nonces: FrostNonces,
+}
+
+impl fmt::Debug for RetiredFrostNonces {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RetiredFrostNonces")
+            .field("participant", &self.nonces.participant)
+            .finish()
+    }
+}
+
+impl RetiredFrostNonces {
+    /// The signer's FROST participant index.
+    pub fn participant(&self) -> u16 {
+        self.nonces.participant
+    }
+
+    /// The public round-one commitment these nonces were committed under.
+    pub fn commitment(&self) -> &NonceCommitment {
+        &self.nonces.commitment
+    }
+
+    /// Produce this signer's share over `package`, consuming the nonces. The
+    /// package must carry exactly this signer's commitment.
+    pub fn sign(
+        self,
+        package: &frost::SigningPackage,
+        key_package: &frost::keys::KeyPackage,
+    ) -> Result<frost::round2::SignatureShare, AuraError> {
+        let identifier = self.nonces.commitment.frost_identifier()?;
+        let own = self.nonces.commitment.to_frost()?;
+        if key_package.identifier() != &identifier
+            || package.signing_commitments().get(&identifier) != Some(&own)
+        {
+            return Err(AuraError::crypto(
+                "signing package does not carry this signer's nonce commitment",
+            ));
+        }
+        frost::round2::sign(package, &self.nonces.nonces, key_package)
+            .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))
+    }
+}
+
+/// The record a [`FrostNonceRetirement`] log keeps for one retired nonce.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FrostNonceRetirementRecord {
+    /// Signer participant index.
+    pub participant: u16,
+    /// Digest of the public commitment the nonces were committed under.
+    pub commitment_digest: crate::Hash32,
+}
+
+/// Where FROST nonce retirements are recorded before signing. An
+/// implementation must refuse a record it already holds. Nonces whose
+/// secret is persisted need a durable log; nonces that never leave process
+/// memory may use [`ProcessFrostNonceRetirement`].
+#[async_trait::async_trait]
+pub trait FrostNonceRetirement: Send + Sync {
+    /// Record `record` as retired, or refuse if it already is.
+    async fn retire_frost_nonce(
+        &self,
+        record: &FrostNonceRetirementRecord,
+    ) -> Result<(), AuraError>;
+}
+
+/// In-process retirement log for nonces that never leave memory (a restart
+/// drops them, so no durable record is needed).
+#[derive(Debug, Default)]
+pub struct ProcessFrostNonceRetirement {
+    retired: futures::lock::Mutex<std::collections::HashSet<FrostNonceRetirementRecord>>,
+}
+
+#[async_trait::async_trait]
+impl FrostNonceRetirement for ProcessFrostNonceRetirement {
+    async fn retire_frost_nonce(
+        &self,
+        record: &FrostNonceRetirementRecord,
+    ) -> Result<(), AuraError> {
+        let mut retired = self.retired.lock().await;
+        if !retired.insert(record.clone()) {
+            return Err(AuraError::crypto("FROST nonces already retired"));
+        }
+        Ok(())
+    }
 }
 
 /// Aggregate partial signatures using FROST
@@ -1141,20 +1055,68 @@ mod tests {
     }
 
     #[test]
-    fn test_nonce_and_commitment_sizes() {
+    fn test_nonce_commitment_size() {
         use rand::SeedableRng;
 
         let share = frost::keys::SigningShare::deserialize([1u8; 32]).expect("valid signing share");
         let mut rng = rand::rngs::StdRng::from_seed([2u8; 32]);
-        let (nonces, commitments) = frost::round1::commit(&share, &mut rng);
-
-        let nonce = Nonce::from_frost(nonces, [3u8; 32]).expect("nonce should serialize");
         let identifier = frost::Identifier::try_from(1u16).expect("valid identifier");
-        let commitment = NonceCommitment::from_frost(identifier, commitments)
-            .expect("commitment should serialize");
+        let nonces =
+            FrostNonces::generate_for_share(identifier, &share, &mut rng).expect("nonces generate");
+        assert_eq!(nonces.participant(), 1);
+        assert_eq!(nonces.commitment().commitment.len(), MAX_COMMITMENT_BYTES);
+    }
 
-        assert_eq!(nonce.value.len(), MAX_NONCE_BYTES);
-        assert_eq!(commitment.commitment.len(), MAX_COMMITMENT_BYTES);
+    /// Single-use FROST nonces (Task 171): signing needs a recorded
+    /// retirement, a log refuses the same nonces twice, and a share made
+    /// from retired nonces aggregates into a valid signature.
+    #[tokio::test]
+    async fn frost_nonces_are_retired_once_and_sign_once() {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::from_seed([7u8; 32]);
+        let (shares, public) =
+            frost::keys::generate_with_dealer(2, 2, frost::keys::IdentifierList::Default, &mut rng)
+                .expect("dealer keys");
+        let keys: Vec<frost::keys::KeyPackage> = shares
+            .into_values()
+            .map(|secret| frost::keys::KeyPackage::try_from(secret).expect("key package"))
+            .collect();
+        let log = ProcessFrostNonceRetirement::default();
+        let nonces: Vec<FrostNonces> = keys
+            .iter()
+            .map(|key| FrostNonces::generate(key, &mut rng).expect("nonces"))
+            .collect();
+        let commitments: BTreeMap<_, _> = nonces
+            .iter()
+            .map(|n| {
+                (
+                    n.commitment().frost_identifier().expect("id"),
+                    n.commitment().to_frost().expect("commitment"),
+                )
+            })
+            .collect();
+        let package = frost::SigningPackage::new(commitments, b"message");
+        let mut signature_shares = BTreeMap::new();
+        for (nonces, key) in nonces.into_iter().zip(&keys) {
+            let digest_record = FrostNonceRetirementRecord {
+                participant: nonces.participant(),
+                commitment_digest: crate::Hash32(hash::hash(&nonces.commitment().commitment)),
+            };
+            let retired = nonces.retire(&log).await.expect("first retirement");
+            assert!(
+                log.retire_frost_nonce(&digest_record).await.is_err(),
+                "a retired nonce cannot be retired again"
+            );
+            signature_shares.insert(
+                *key.identifier(),
+                retired.sign(&package, key).expect("share"),
+            );
+        }
+        let signature = frost::aggregate(&package, &signature_shares, &public).expect("aggregate");
+        public
+            .verifying_key()
+            .verify(b"message", &signature)
+            .expect("valid signature");
     }
 
     #[test]

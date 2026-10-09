@@ -963,15 +963,12 @@ mod enrollment_quorum_transport_tests {
             .await
             .unwrap();
         let commitments = [
-            first
-                .frost_public_commitment(1, &first_nonce)
-                .await
-                .unwrap(),
-            second
-                .frost_public_commitment(2, &second_nonce)
-                .await
-                .unwrap(),
+            first_nonce.public_commitment(),
+            second_nonce.public_commitment(),
         ];
+        let log = aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+        let first_nonce = first_nonce.retire(&log).await.unwrap();
+        let second_nonce = second_nonce.retire(&log).await.unwrap();
         let package = first
             .frost_create_public_signing_package(
                 &message,
@@ -985,7 +982,7 @@ mod enrollment_quorum_transport_tests {
             .frost_sign_share_for_message(
                 &package,
                 &keys.key_packages[0],
-                &first_nonce,
+                first_nonce,
                 &message,
                 &keys.public_key_package,
                 2,
@@ -996,7 +993,7 @@ mod enrollment_quorum_transport_tests {
             .frost_sign_share_for_message(
                 &package,
                 &keys.key_packages[1],
-                &second_nonce,
+                second_nonce,
                 &message,
                 &keys.public_key_package,
                 2,

@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::TOOL_API_VERSIONS;
-use crate::coordinator::HarnessCoordinator;
+use crate::coordinator::{wait_pattern_matches, HarnessCoordinator};
 use crate::determinism::SeedBundle;
 use crate::routing::ResolvedDialPath;
 use crate::tool_api::{ToolActionRecord, ToolApi, ToolPayload, ToolResponse};
@@ -70,7 +70,7 @@ impl ReplayRunner {
         let mut mismatches = 0_u64;
         for action in &bundle.actions {
             let actual = tool_api.handle_request(action.request.clone());
-            if !response_semantics_match(&actual, &action.response) {
+            if !action_response_semantics_match(&action.request, &actual, &action.response) {
                 mismatches = mismatches.saturating_add(1_u64);
             }
         }
@@ -85,33 +85,38 @@ impl ReplayRunner {
     }
 }
 
-fn response_semantics_match(left: &ToolResponse, right: &ToolResponse) -> bool {
-    match (left, right) {
-        (
+fn action_response_semantics_match(
+    request: &crate::tool_api::ToolRequest,
+    left: &ToolResponse,
+    right: &ToolResponse,
+) -> bool {
+    if let crate::tool_api::ToolRequest::WaitFor {
+        pattern,
+        selector: None,
+        ..
+    } = request
+    {
+        if let (
             ToolResponse::Ok {
                 payload: ToolPayload::DiagnosticScreenCapture(actual),
             },
             ToolResponse::Ok {
                 payload: ToolPayload::DiagnosticScreenCapture(expected),
             },
-        ) => diagnostic_capture_semantics_match(actual, expected),
-        _ => left == right,
+        ) = (left, right)
+        {
+            // PTY echo and application output can arrive in either capture.
+            // Both runs must satisfy the requested observation, not reproduce
+            // incidental extra output from the recorded capture.
+            return actual.matched == Some(true)
+                && expected.matched == Some(true)
+                && actual.screen_source == expected.screen_source
+                && actual.matched_view == expected.matched_view
+                && wait_pattern_matches(&actual.diagnostic_normalized_screen, pattern)
+                && wait_pattern_matches(&expected.diagnostic_normalized_screen, pattern);
+        }
     }
-}
-
-fn diagnostic_capture_semantics_match(
-    actual: &crate::tool_api::DiagnosticScreenCapture,
-    expected: &crate::tool_api::DiagnosticScreenCapture,
-) -> bool {
-    if actual.matched == Some(true) && expected.matched == Some(true) {
-        return actual.screen_source == expected.screen_source
-            && actual.matched_view == expected.matched_view
-            && actual
-                .diagnostic_normalized_screen
-                .contains(&expected.diagnostic_normalized_screen);
-    }
-
-    actual == expected
+    left == right
 }
 
 pub fn parse_bundle(payload: &str) -> Result<ReplayBundle> {
@@ -123,7 +128,7 @@ pub fn parse_bundle(payload: &str) -> Result<ReplayBundle> {
 
 #[cfg(test)]
 mod tests {
-    use super::response_semantics_match;
+    use super::action_response_semantics_match;
     use crate::config::ScreenSource;
     use crate::tool_api::{ClipboardPayload, DiagnosticScreenCapture, ToolPayload, ToolResponse};
 
@@ -141,7 +146,13 @@ mod tests {
         };
 
         assert!(
-            !response_semantics_match(&actual, &expected),
+            !action_response_semantics_match(
+                &crate::tool_api::ToolRequest::ReadClipboard {
+                    instance_id: "alice".to_string()
+                },
+                &actual,
+                &expected,
+            ),
             "typed replay matching must reject payload drift"
         );
     }
@@ -171,9 +182,28 @@ mod tests {
             }),
         };
 
-        assert!(
-            response_semantics_match(&actual, &expected),
-            "successful diagnostic waits should compare by matched meaning"
-        );
+        let request = crate::tool_api::ToolRequest::WaitFor {
+            instance_id: "alice".to_string(),
+            pattern: "phase2-replay".to_string(),
+            selector: None,
+            timeout_ms: 2000,
+            screen_source: ScreenSource::Default,
+        };
+        assert!(action_response_semantics_match(
+            &request, &actual, &expected
+        ));
+        assert!(action_response_semantics_match(
+            &request, &expected, &actual
+        ));
+        let absent = crate::tool_api::ToolRequest::WaitFor {
+            instance_id: "alice".to_string(),
+            pattern: "missing-output".to_string(),
+            selector: None,
+            timeout_ms: 2000,
+            screen_source: ScreenSource::Default,
+        };
+        assert!(!action_response_semantics_match(
+            &absent, &actual, &expected
+        ));
     }
 }

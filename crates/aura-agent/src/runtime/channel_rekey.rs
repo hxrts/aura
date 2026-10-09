@@ -3,11 +3,11 @@
 //! A membership change (an accepted invitation, a kick, a departure) applies
 //! at once as membership facts (A1). The channel's key then follows by
 //! consensus (A3): when a channel's observed members differ from the roster
-//! of its current key epoch, the lowest member authority coordinates a key
-//! ceremony among the members for the next epoch and a consensus on the
-//! bump, and publishes the [`ChannelEpochCommitFact`]. Every member holds
-//! the new epoch's key; a later joiner holds no earlier key, and a departed
-//! member no later one. One deterministic coordinator per change keeps
+//! of its current key epoch, the lowest remaining current key holder
+//! coordinates a key ceremony among the members for the next epoch and
+//! consensus on the bump, and publishes the [`ChannelEpochCommitFact`].
+//! Every member holds the new epoch's key; a later joiner holds no earlier
+//! key, and a departed member no later one. One deterministic coordinator per change keeps
 //! members from racing competing successor epochs.
 //!
 //! The current epoch's roster is the bootstrap dealer and recipients at
@@ -25,9 +25,11 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use std::collections::BTreeSet;
 
-/// Receive polls a coordinator waits on members during one rekey attempt;
-/// an attempt that cannot finish is retried on a later round.
-pub(crate) const REKEY_MAX_POLLS: u32 = 200;
+/// Receive polls a coordinator waits on members during one rekey attempt:
+/// the members' own ceremony window, so a member that admits the invite late
+/// (once it observes the coordinator's standing, Task 196) still joins the
+/// live attempt. An attempt that cannot finish is retried on a later round.
+pub(crate) const REKEY_MAX_POLLS: u32 = super::channel_key_ceremony::CEREMONY_MAX_POLLS;
 
 /// The roster of `scope`'s current key epoch, when this member knows it.
 async fn current_roster(
@@ -92,7 +94,10 @@ pub(crate) async fn rekey_channel_if_changed(
         ?roster,
         "channel members differ from the current key roster"
     );
-    if members.iter().next() != Some(&me) {
+    // The coordinator is the lowest member that holds the current epoch's
+    // key (a roster member with standing), never a member being added: a
+    // joiner holds no key to coordinate with (LAN run 176).
+    if coordinator(&roster, &members) != Some(me) {
         return Ok(RekeyOutcome::NotCoordinator);
     }
     rekey_channel(effects, scope, epoch, &roster, members, max_polls).await?;
@@ -145,4 +150,38 @@ pub(crate) async fn rekey_channel(
         .await
         .map_err(|error| AuraError::internal(error.to_string()))?;
     Ok(fact)
+}
+
+/// The rekey coordinator: the lowest current member of the current key
+/// roster.
+fn coordinator(
+    roster: &BTreeSet<AuthorityId>,
+    members: &BTreeSet<AuthorityId>,
+) -> Option<AuthorityId> {
+    roster.intersection(members).next().copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    /// LAN run 176: a joiner with the lowest id never coordinates; the
+    /// lowest member that holds the current key does.
+    #[test]
+    fn coordinator_is_the_lowest_current_key_holder_never_a_joiner() {
+        let (joiner, low, high) = (authority(1), authority(2), authority(3));
+        assert!(joiner < low && low < high);
+        let roster = BTreeSet::from([low, high]);
+        let members = BTreeSet::from([joiner, low, high]);
+        assert_eq!(coordinator(&roster, &members), Some(low));
+        // After a departure the remaining roster member coordinates.
+        assert_eq!(
+            coordinator(&roster, &BTreeSet::from([joiner, high])),
+            Some(high)
+        );
+    }
 }

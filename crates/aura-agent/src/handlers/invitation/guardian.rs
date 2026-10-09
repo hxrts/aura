@@ -692,7 +692,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                             confirmation_queued = true;
                         }
                         session
-                            .inject_blocked_receive(&blocked)
+                            .inject_blocked_receive(blocked)
                             .map_err(guardian_vm_failure)?;
                         continue;
                     }
@@ -908,7 +908,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                         confirmation_verified = true;
                     }
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(guardian_vm_failure)?;
                     continue;
                 }

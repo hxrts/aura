@@ -168,35 +168,9 @@ impl RegistrableHandler for CryptoHandlerAdapter {
             "frost_generate_keys" => {
                 Err(Self::secret_material_result_error(effect_type, operation))
             }
+            // Single-use nonces never cross a serialized boundary.
             "frost_generate_nonces" => {
-                let key_package: Vec<u8> =
-                    deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self
-                    .extended_handler(effect_type, operation)?
-                    .frost_generate_nonces(&key_package)
-                    .await
-                    .map_err(execution_failed)?;
-                serialize_operation_result(effect_type, operation, &result)
-            }
-            "frost_create_signing_package" => {
-                let params: (Vec<u8>, Vec<Vec<u8>>, Vec<u16>, Vec<u8>) =
-                    deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self
-                    .extended_handler(effect_type, operation)?
-                    .frost_create_signing_package(&params.0, &params.1, &params.2, &params.3)
-                    .await
-                    .map_err(execution_failed)?;
-                serialize_operation_result(effect_type, operation, &result)
-            }
-            "frost_sign_share" => {
-                let params: (FrostSigningPackage, Vec<u8>, Vec<u8>) =
-                    deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self
-                    .extended_handler(effect_type, operation)?
-                    .frost_sign_share(&params.0, &params.1, &params.2)
-                    .await
-                    .map_err(execution_failed)?;
-                serialize_operation_result(effect_type, operation, &result)
+                Err(Self::secret_material_result_error(effect_type, operation))
             }
             "frost_aggregate_signatures" => {
                 let params: (FrostSigningPackage, Vec<Vec<u8>>) =

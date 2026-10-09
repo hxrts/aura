@@ -549,8 +549,8 @@ pub struct WitnessState {
     /// Current epoch to detect when cached commitments become stale
     epoch: Epoch,
 
-    /// Precomputed nonce for the next consensus round
-    next_nonce: Option<(NonceCommitment, NonceToken)>,
+    /// Precomputed single-use nonces for the next consensus round
+    next_nonce: Option<FrostNonces>,
 
     /// Active consensus instances this witness is participating in
     active_instances: HashMap<ConsensusId, WitnessInstance>,
@@ -559,7 +559,9 @@ pub struct WitnessState {
 
 Key methods:
 - `get_next_commitment()`: Returns cached commitment if valid for current epoch
-- `take_nonce()`: Consumes cached nonce for use in current round
+- `take_nonce()`: Moves the cached nonces out for use in the current round
+
+`WitnessState` is not `Clone`, because it owns `FrostNonces`. The orchestrator takes cached nonces through `WitnessSet::take_witness_nonce`, which moves them out under the state lock. Two rounds therefore cannot sign with the same nonces. Signing first retires the nonces (`FrostNonces::retire`) and then consumes the `RetiredFrostNonces`. See `docs/122_ownership_model.md` "Replay Protection".
 - `set_next_nonce()`: Stores new nonce for future use
 - `invalidate()`: Clears cached state on epoch change
 
@@ -645,46 +647,22 @@ Adding pipelining to new consensus operations:
 3. Cache management: Store next nonce in `WitnessState` for future use
 4. Epoch handling: Always validate epoch before using cached commitments
 
-Example witness implementation:
+Example witness flow:
 
 ```rust
-pub async fn handle_sign_request<R: RandomEffects + ?Sized>(
-    &mut self,
-    consensus_id: ConsensusId,
-    aggregated_nonces: Vec<NonceCommitment>,
-    current_epoch: Epoch,
-    random: &R,
-) -> Result<ConsensusMessage> {
-    // Generate signature share
-    let share = self.create_signature_share(consensus_id, aggregated_nonces)?;
-    
-    // Generate or retrieve next-round commitment
-    let next_commitment = if let Some((commitment, _)) = self.witness_state.take_nonce(current_epoch) {
-        // Use cached nonce
-        Some(commitment)
-    } else {
-        // Generate fresh nonce
-        let (nonces, commitment) = self.generate_nonce(random).await?;
-        let token = NonceToken::from(nonces);
-        
-        // Cache for future
-        self.witness_state.set_next_nonce(commitment.clone(), token, current_epoch);
-        
-        Some(commitment)
-    };
-    
-    Ok(ConsensusMessage::SignShare {
-        consensus_id,
-        share,
-        next_commitment,
-        epoch: current_epoch,
-    })
-}
+// Move this round's nonces out of the shared state, retire them, sign once.
+let nonces = witness_set.take_witness_nonce(witness_id, epoch).await?;
+let share = orchestrator.sign_with_nonce(&transcript, share, nonces, &commitments).await?;
+
+// Cache fresh nonces for the next round; only the commitment is published.
+let next = witness_nonce(share, random).await?;
+let next_commitment = next.commitment().clone();
+witness_set.update_witness_nonce(witness_id, next, epoch).await?;
 ```
 
 ### 12.7 Security Considerations
 
-1. **Nonce Reuse Prevention**: Each nonce is used exactly once and tied to specific epoch
+1. **Nonce Reuse Prevention**: `FrostNonces` is neither `Clone` nor serializable. It must be retired before it signs, and signing consumes it by value. Each nonce is tied to a specific epoch.
 2. **Epoch Isolation**: Nonces from different epochs cannot be mixed
 3. **Forward Security**: Epoch rotation provides natural forward security boundary
 4. **Availability**: Fallback ensures consensus continues even without optimization

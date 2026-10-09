@@ -381,9 +381,11 @@ async fn test_send_direct_message_adds_message() {
 
     let msg = message.unwrap();
     assert_eq!(
-        msg.content, "<sealed message>",
-        "Runtime-backed DM payloads should surface as sealed placeholders"
+        msg.content, content,
+        "The sender's local echo should retain the sent DM text"
     );
+    assert!(msg.is_own, "The local echo should belong to the sender");
+    assert_eq!(msg.channel_id, channel.id);
     println!("  Message found: '{content}'", content = msg.content);
     println!("  Channel: {channel_id}", channel_id = msg.channel_id);
     println!("  Is own: {is_own}", is_own = msg.is_own);
@@ -972,10 +974,13 @@ async fn test_complete_dm_flow() {
         let dm_messages = chat.messages_for_channel(&dm_channel_id);
         assert_eq!(dm_messages.len(), 2, "Should have 2 messages in DM");
 
-        // Verify runtime-backed DM payloads are represented as sealed placeholders.
+        // The runtime persists sealed facts, while the sender sees readable local echoes.
+        let mut contents: Vec<_> = dm_messages.iter().map(|m| m.content.as_str()).collect();
+        contents.sort_unstable();
+        assert_eq!(contents, vec!["Hey Alice!", "How are you?"]);
         assert!(
-            dm_messages.iter().all(|m| m.content == "<sealed message>"),
-            "Runtime-backed DM payloads should stay sealed in chat state"
+            dm_messages.iter().all(|m| m.is_own),
+            "Both local echoes should belong to the sender"
         );
         println!("  DM channel: {dm_channel_id}");
         let message_count = dm_messages.len();

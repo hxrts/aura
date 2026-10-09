@@ -151,10 +151,8 @@ fn forbidden_raw_quorum_primitive(name: &str) -> bool {
         name,
         "frost_aggregate"
             | "frost_aggregate_signatures"
-            | "frost_sign_share"
             | "frost_sign_share_for_message"
             | "frost_generate_nonces"
-            | "frost_create_signing_package"
             | "frost_create_public_signing_package"
     )
 }
@@ -223,9 +221,9 @@ mod raw_threshold_owner_boundary_tests {
         assert!(validate_raw_threshold_owner_boundary(&invalid).is_err());
         for expression in [
             "effects.frost_aggregate_signatures(&package, &shares)",
-            "effects.frost_create_signing_package(&message, &nonces, &public, 2)",
+            "effects.frost_create_public_signing_package(&message, &commitments, &public, 2)",
             "CryptoExtendedEffects::frost_aggregate_signatures(effects, &package, &shares)",
-            "<Effects as CryptoExtendedEffects>::frost_create_signing_package(effects, &message, &nonces, &public, 2)",
+            "<Effects as CryptoExtendedEffects>::frost_create_public_signing_package(effects, &message, &commitments, &public, 2)",
         ] {
             let source = format!("impl RawService {{ async fn renamed(&self) {{ {expression}.await; }} }}");
             assert!(validate_raw_threshold_owner_boundary(&syn::parse_file(&source)?).is_err());

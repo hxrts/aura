@@ -15,15 +15,12 @@ use crate::{
     ConsensusId,
 };
 use aura_core::{
-    crypto::tree_signing::NonceToken,
     effects::{PhysicalTimeEffects, RandomEffects},
     frost::{NonceCommitment, Share},
     AuraError, AuthorityId, OperationId, Result,
 };
 use aura_guards::guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
-use frost_ed25519;
-use rand::SeedableRng;
 use std::collections::BTreeSet;
 use tracing::info;
 
@@ -171,11 +168,12 @@ impl ConsensusProtocol {
     where
         E: GuardEffects + GuardContextProvider + PhysicalTimeEffects,
     {
-        let (commitment, nonce_token) = self.generate_fresh_nonce_commitment(share, random).await?;
+        let nonces = crate::frost::witness_nonce(share, random).await?;
+        let commitment = nonces.commitment().clone();
 
-        // Cache nonce token for signing when SignRequest arrives
+        // Hold the nonces for signing when SignRequest arrives
         if let Some(instance) = self.instances.write().await.get_mut(&consensus_id) {
-            instance.nonce_token = Some(nonce_token);
+            instance.nonce_token = Some(nonces);
         }
 
         // Evaluate guards before sending NonceCommit to coordinator
@@ -214,15 +212,12 @@ impl ConsensusProtocol {
             .get_mut(&consensus_id)
             .ok_or_else(|| AuraError::invalid("Unknown consensus instance"))?;
 
-        let nonce_token = if let Some(token) = instance.nonce_token.take() {
-            token
-        } else {
-            // Fallback: generate a fresh nonce and append its commitment
-            let (commitment, nonce_token) =
-                self.generate_fresh_nonce_commitment(share, random).await?;
-            instance.tracker.add_nonce(self.authority_id, commitment);
-            nonce_token
-        };
+        // The nonces committed for this round sign once. Without them there is
+        // no commitment in the aggregated set to sign under.
+        let nonces = instance
+            .nonce_token
+            .take()
+            .ok_or_else(|| AuraError::invalid("no committed nonces for this consensus round"))?;
 
         let transcript = consensus_commit_transcript_bytes(
             consensus_id,
@@ -233,12 +228,10 @@ impl ConsensusProtocol {
         )?;
 
         // Sign using FROST with provided aggregated nonces
-        let signature = self.frost_orchestrator.sign_with_nonce(
-            &transcript,
-            share,
-            &nonce_token,
-            &aggregated_nonces,
-        )?;
+        let signature = self
+            .frost_orchestrator
+            .sign_with_nonce(&transcript, share, nonces, &aggregated_nonces)
+            .await?;
 
         // Compute result_id from operation
         // For deterministic execution, result_id = operation_hash.
@@ -280,35 +273,5 @@ impl ConsensusProtocol {
             epoch: self.config.epoch,
             evidence_delta,
         }))
-    }
-
-    fn deserialize_signing_share(share: &Share) -> Result<frost_ed25519::keys::SigningShare> {
-        frost_ed25519::keys::SigningShare::deserialize(
-            share
-                .value
-                .clone()
-                .try_into()
-                .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
-        )
-        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))
-    }
-
-    async fn generate_fresh_nonce_commitment(
-        &self,
-        share: &Share,
-        random: &(impl RandomEffects + ?Sized),
-    ) -> Result<(NonceCommitment, NonceToken)> {
-        let seed = random.random_bytes_32().await;
-        let mut rng = rand::rngs::StdRng::from_seed(seed);
-        let signing_share = Self::deserialize_signing_share(share)?;
-        let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
-        let commitment = NonceCommitment {
-            signer: share.identifier,
-            commitment: nonces
-                .commitments()
-                .serialize()
-                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
-        };
-        Ok((commitment, NonceToken::from(nonces)))
     }
 }

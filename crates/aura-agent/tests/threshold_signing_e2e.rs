@@ -569,7 +569,7 @@ mod real_frost_tests {
     /// Test FROST nonce generation
     #[tokio::test]
     async fn test_frost_nonce_generation() {
-        let effects = MockEffects::deterministic();
+        let effects = aura_effects::crypto::RealCryptoHandler::for_simulation_seed([0x17; 32]);
 
         // Generate keys first
         let keys = effects
@@ -586,13 +586,13 @@ mod real_frost_tests {
         assert!(result.is_ok(), "Nonce generation should succeed");
 
         let nonces = result.unwrap();
-        assert!(!nonces.is_empty(), "Nonces should not be empty");
+        assert_eq!(nonces.participant(), 1, "Nonces belong to the first signer");
     }
 
     /// Test complete FROST signing flow
     #[tokio::test]
     async fn test_frost_complete_signing_flow() {
-        let effects = MockEffects::deterministic();
+        let effects = aura_effects::crypto::RealCryptoHandler::for_simulation_seed([0x18; 32]);
 
         // 1. Generate keys
         let keys = effects
@@ -614,25 +614,41 @@ mod real_frost_tests {
         // 3. Create message to sign
         let message = b"test message for signing";
 
-        // 4. Create signing package
-        let participants = vec![1u16, 2u16];
+        // 4. Create signing package from public commitments only
         let signing_package = effects
-            .frost_create_signing_package(
+            .frost_create_public_signing_package(
                 message,
-                &[nonces_1.clone(), nonces_2.clone()],
-                &participants,
+                &[nonces_1.public_commitment(), nonces_2.public_commitment()],
                 public_key_package,
+                2,
             )
             .await
             .unwrap();
 
-        // 5. Create signature share
+        // 5. Retire each signer's nonces, then sign once
+        let retirement = aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+        let nonces_1 = nonces_1.retire(&retirement).await.unwrap();
+        let nonces_2 = nonces_2.retire(&retirement).await.unwrap();
         let share = effects
-            .frost_sign_share(&signing_package, key_package_1, &nonces_1)
+            .frost_sign_share_for_message(
+                &signing_package,
+                key_package_1,
+                nonces_1,
+                message,
+                public_key_package,
+                2,
+            )
             .await
             .unwrap();
         let share2 = effects
-            .frost_sign_share(&signing_package, key_package_2, &nonces_2)
+            .frost_sign_share_for_message(
+                &signing_package,
+                key_package_2,
+                nonces_2,
+                message,
+                public_key_package,
+                2,
+            )
             .await
             .unwrap();
 
@@ -649,7 +665,12 @@ mod real_frost_tests {
 
         // 7. Verify signature
         let verified = effects
-            .frost_verify(message, &signature, public_key_package)
+            .verify_signature(
+                message,
+                &signature,
+                public_key_package,
+                aura_core::crypto::single_signer::SigningMode::Threshold,
+            )
             .await
             .unwrap();
 

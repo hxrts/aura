@@ -420,7 +420,16 @@ impl RuntimeMaintenanceService {
                                 invite.scope.channel,
                             )
                             .await
-                            .map(|observed| observed.has_standing(invite.coordinator))
+                            // Ready once this member observes the standing of
+                            // the coordinator and of every other participant:
+                            // their device keys are fetched by that standing.
+                            .map(|observed| {
+                                observed.has_standing(invite.coordinator)
+                                    && invite
+                                        .participants
+                                        .iter()
+                                        .all(|participant| observed.has_standing(*participant))
+                            })
                         }
                     };
                 match crate::runtime::channel_key_ceremony::process_channel_key_invites(

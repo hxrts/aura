@@ -82,9 +82,9 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
 
     // FROST threshold signatures
     async fn frost_generate_keys(&self, threshold: u16, max_signers: u16) -> Result<FrostKeyGenResult, CryptoError>;
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError>;
-    async fn frost_create_signing_package(&self, message: &[u8], nonces: &[Vec<u8>], participants: &[u16], public_key_package: &[u8]) -> Result<FrostSigningPackage, CryptoError>;
-    async fn frost_sign_share(&self, signing_package: &FrostSigningPackage, key_share: &[u8], nonces: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<FrostNonces, CryptoError>;
+    async fn frost_create_public_signing_package(&self, message: &[u8], commitments: &[FrostPublicCommitment], public_key_package: &[u8], threshold: u16) -> Result<FrostSigningPackage, CryptoError>;
+    async fn frost_sign_share_for_message(&self, package: &FrostSigningPackage, local_key_share: &[u8], nonces: RetiredFrostNonces, expected_message: &[u8], expected_public_key_package: &[u8], expected_threshold: u16) -> Result<Vec<u8>, CryptoError>;
     async fn frost_aggregate_signatures(&self, signing_package: &FrostSigningPackage, signature_shares: &[Vec<u8>]) -> Result<Vec<u8>, CryptoError>;
     async fn frost_verify(&self, message: &[u8], signature: &[u8], group_public_key: &[u8]) -> Result<bool, CryptoError>;
     async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError>;

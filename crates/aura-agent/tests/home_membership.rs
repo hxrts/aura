@@ -153,6 +153,27 @@ async fn late_joiner_reads_only_post_join_messages_and_kick_rekeys() -> Result<(
     net.finish().await
 }
 
+// LAN run 176: a late joiner whose id is the lowest is keyed in by the
+// lowest member holding the current key; the joiner never coordinates.
+#[tokio::test(start_paused = true)]
+async fn late_joiner_with_the_lowest_id_is_keyed_in() -> Result<()> {
+    let net = SimNet::new();
+    let barbara = net.peer(111).await?;
+    let alex = net.peer(115).await?;
+    let carol = net.peer(101).await?;
+    assert!(carol.id < barbara.id && carol.id < alex.id);
+    link_contacts(&barbara, &alex).await?;
+    link_contacts(&barbara, &carol).await?;
+    let home = context::create_home(&barbara.app, Some("BarbHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+    join_home(&barbara, &carol, home).await?;
+    wait_lists_member(&[&barbara, &alex, &carol], home, &carol).await?;
+    wait_epoch(&[&barbara, &alex, &carol], home, 1).await?;
+    exchange(home, &carol, "hello from carol", &[&barbara, &alex]).await?;
+    exchange(home, &barbara, "welcome carol", &[&alex, &carol]).await?;
+    net.finish().await
+}
+
 // Task 11: moderator commands typed in the home channel succeed for its
 // moderator and are refused for a participant: /deop, /pin, /unpin, /mode.
 #[tokio::test(start_paused = true)]

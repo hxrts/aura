@@ -434,11 +434,6 @@ pub trait SecureStorageEffects: Send + Sync {
 
 /// Helper functions for common secure storage operations
 impl SecureStorageLocation {
-    /// Create a location for storing FROST nonces
-    pub fn frost_nonce(session_id: &str, participant_id: u16) -> Self {
-        Self::new("frost_nonces", format!("{session_id}_{participant_id}"))
-    }
-
     /// Create a location for storing signing shares
     pub fn signing_share(account_id: &str, epoch: u64, participant_id: u16) -> Self {
         Self::with_sub_key(
@@ -507,14 +502,6 @@ mod tests {
         assert_eq!(location.key, "key1");
         assert_eq!(location.sub_key, Some("subkey1".to_string()));
         assert_eq!(location.full_path(), "test/key1/subkey1");
-    }
-
-    #[test]
-    fn test_frost_nonce_location() {
-        let location = SecureStorageLocation::frost_nonce("session123", 1);
-        assert_eq!(location.namespace, "frost_nonces");
-        assert_eq!(location.key, "session123_1");
-        assert_eq!(location.full_path(), "frost_nonces/session123_1");
     }
 
     #[test]

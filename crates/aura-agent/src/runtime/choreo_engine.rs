@@ -3,6 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use aura_core::ownership::sequence::SequenceOwner;
+
+/// Sequence domain of frames delivered into a VM session edge.
+pub struct InboundVmFrame;
+
 use aura_core::conformance::{
     assert_effect_kinds_classified, AuraConformanceArtifactV1, AuraConformanceRunMetadataV1,
     AuraConformanceSurfaceV1, AuraVmDeterminismProfileV1, ConformanceSurfaceName,
@@ -314,6 +319,9 @@ pub struct AuraChoreoEngine<H: ProtocolMachineEffectHandler = AuraVmEffectHandle
     session_determinism_profiles: BTreeMap<SessionId, AuraVmProtocolExecutionPolicy>,
     session_runtime_selectors: BTreeMap<SessionId, AuraVmRuntimeSelector>,
     termination_budget_config: TerminationBudgetConfig,
+    /// Owners of each session edge's inbound frame sequence: the engine, not
+    /// the caller, assigns every delivered frame its sequence number.
+    inbound_frames: BTreeMap<(SessionId, String, String), SequenceOwner<InboundVmFrame>>,
 }
 
 impl Default for AuraChoreoEngine<AuraVmEffectHandler> {
@@ -392,6 +400,7 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
             session_determinism_profiles: BTreeMap::new(),
             session_runtime_selectors: BTreeMap::new(),
             termination_budget_config: TerminationBudgetConfig::default(),
+            inbound_frames: BTreeMap::new(),
         })
     }
 
@@ -547,6 +556,31 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
         self.backend
             .as_cooperative_mut()
             .expect("cooperative VM mutation requested for threaded runtime")
+    }
+
+    /// Deliver one inbound frame from `from` to `to`. The engine's per-edge
+    /// [`SequenceOwner`] admits exactly the next sequence for the frame; no
+    /// caller supplies or replays one.
+    pub(crate) fn deliver_inbound_frame(
+        &mut self,
+        sid: SessionId,
+        from: &str,
+        to: &str,
+        value: telltale_machine::coroutine::Value,
+    ) -> Result<(), String> {
+        let admission = self
+            .inbound_frames
+            .entry((sid, from.to_owned(), to.to_owned()))
+            .or_insert_with(|| SequenceOwner::starting_at(0))
+            .admit()
+            .map_err(|error| error.to_string())?;
+        self.vm_mut()
+            .sessions_mut()
+            .get_mut(sid)
+            .ok_or_else(|| format!("inbound frame for unknown VM session {sid}"))?
+            .send_with_sequence(from, to, value, admission.consume())
+            .map(|_| ())
+            .map_err(|error| format!("failed to deliver VM frame: {error}"))
     }
 
     /// Borrow the host effect handler.
@@ -803,6 +837,8 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
             }
         }
         self.active_sessions.remove(&sid);
+        self.inbound_frames
+            .retain(|(session, _, _), _| *session != sid);
         self.session_protocol_classes.remove(&sid);
         self.session_determinism_profiles.remove(&sid);
         self.session_runtime_selectors.remove(&sid);

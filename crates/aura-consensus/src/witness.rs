@@ -6,7 +6,7 @@
 
 use super::types::ConsensusId;
 use aura_core::{
-    crypto::tree_signing::NonceToken,
+    crypto::tree_signing::FrostNonces,
     frost::{NonceCommitment, PartialSignature},
     types::Epoch,
     AuthorityId, Hash32, Result,
@@ -160,22 +160,25 @@ impl WitnessSet {
         self.witnesses.len() >= self.threshold as usize
     }
 
-    /// Get or create witness state for a given authority
-    pub async fn get_or_create_state(&self, witness_id: AuthorityId, epoch: Epoch) -> WitnessState {
-        let mut states = self.states.write().await;
-
-        states
-            .entry(witness_id)
-            .or_insert_with(|| WitnessState::new(witness_id, epoch))
-            .clone()
+    /// Move the witness's cached next-round nonces out, under the state lock,
+    /// so no other round can take the same nonces.
+    pub async fn take_witness_nonce(
+        &self,
+        witness_id: AuthorityId,
+        epoch: Epoch,
+    ) -> Option<FrostNonces> {
+        self.states
+            .write()
+            .await
+            .get_mut(&witness_id)
+            .and_then(|state| state.take_nonce(epoch))
     }
 
     /// Update witness state with a new cached nonce
     pub async fn update_witness_nonce(
         &self,
         witness_id: AuthorityId,
-        commitment: NonceCommitment,
-        token: NonceToken,
+        nonces: FrostNonces,
         epoch: Epoch,
     ) -> Result<()> {
         let mut states = self.states.write().await;
@@ -184,7 +187,7 @@ impl WitnessSet {
             .entry(witness_id)
             .or_insert_with(|| WitnessState::new(witness_id, epoch));
 
-        state.set_next_nonce(commitment, token, epoch);
+        state.set_next_nonce(nonces, epoch);
         Ok(())
     }
 
@@ -221,8 +224,9 @@ impl WitnessSet {
     }
 }
 
-/// State for a single witness across consensus rounds
-#[derive(Debug, Clone)]
+/// State for a single witness across consensus rounds. Not `Clone`: it owns
+/// single-use FROST nonces.
+#[derive(Debug)]
 pub struct WitnessState {
     /// Witness identifier
     witness_id: AuthorityId,
@@ -231,7 +235,7 @@ pub struct WitnessState {
     epoch: Epoch,
 
     /// Cached nonce for next round (pipelining optimization)
-    next_nonce: Option<(NonceCommitment, NonceToken)>,
+    next_nonce: Option<FrostNonces>,
 
     /// Active consensus instances this witness is participating in
     active_instances: HashMap<ConsensusId, WitnessInstance>,
@@ -255,11 +259,11 @@ impl WitnessState {
             return None;
         }
 
-        self.next_nonce.as_ref().map(|(commitment, _)| commitment)
+        self.next_nonce.as_ref().map(FrostNonces::commitment)
     }
 
     /// Take the cached nonce for use in the current round
-    pub fn take_nonce(&mut self, current_epoch: Epoch) -> Option<(NonceCommitment, NonceToken)> {
+    pub fn take_nonce(&mut self, current_epoch: Epoch) -> Option<FrostNonces> {
         if self.epoch != current_epoch {
             // Epoch changed, invalidate cached nonce
             self.next_nonce = None;
@@ -271,9 +275,9 @@ impl WitnessState {
     }
 
     /// Cache a new nonce for the next round
-    pub fn set_next_nonce(&mut self, commitment: NonceCommitment, token: NonceToken, epoch: Epoch) {
+    pub fn set_next_nonce(&mut self, nonces: FrostNonces, epoch: Epoch) {
         self.epoch = epoch;
-        self.next_nonce = Some((commitment, token));
+        self.next_nonce = Some(nonces);
     }
 
     /// Check if we have a cached nonce ready
@@ -609,15 +613,12 @@ mod tests {
         witness_set
             .update_witness_nonce(
                 witnesses[0],
-                NonceCommitment {
-                    signer: 1,
-                    commitment: vec![1u8; 32],
-                },
-                // Note: In real usage, this would be a proper NonceToken
-                NonceToken::from(frost_ed25519::round1::SigningNonces::new(
+                FrostNonces::generate_for_share(
+                    frost_ed25519::Identifier::try_from(1u16).unwrap(),
                     &frost_ed25519::keys::SigningShare::deserialize([1u8; 32]).unwrap(),
                     &mut rand_chacha::ChaCha20Rng::from_seed([7u8; 32]),
-                )),
+                )
+                .unwrap(),
                 Epoch::from(1),
             )
             .await

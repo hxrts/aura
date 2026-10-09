@@ -299,6 +299,9 @@ pub use runtime::AuraEffectSystem;
 #[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
 pub use runtime::EffectSystemFactory;
 
+#[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
+pub use runtime::simulation_factory::rekey_simulated_channel;
+
 // Re-export core types for convenience (authority-first)
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use aura_core::types::identifiers::{AuthorityId, ContextId, SessionId};

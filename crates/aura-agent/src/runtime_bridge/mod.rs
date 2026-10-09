@@ -2571,6 +2571,25 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ));
         }
 
+        // A multifactor ceremony re-keys this account's own enrolled devices
+        // (their tree leaves authenticate the rotation). A device of another
+        // authority, such as a contact, is added through device enrollment
+        // first; refuse it here with a clear reason (Task 200).
+        let enrolled_tree = effects
+            .get_current_state()
+            .await
+            .map_err(map_tree_read_error)?;
+        if let Some(unenrolled) = parsed_devices.iter().find(|device| {
+            !enrolled_tree.leaves.values().any(|leaf| {
+                leaf.role == aura_core::tree::LeafRole::Device && leaf.device_id == **device
+            })
+        }) {
+            return Err(IntentError::validation_failed(format!(
+                "Device {unenrolled} is not enrolled in this account. Enroll the device \
+                 before including it in a multifactor ceremony."
+            )));
+        }
+
         let threshold_value = threshold_k.value();
         if threshold_value < 2 || threshold_value > total_n {
             return Err(IntentError::validation_failed(format!(

@@ -206,34 +206,6 @@ impl CryptoExtendedEffects for MockCryptoHandler {
         })
     }
 
-    async fn frost_generate_nonces(&self, _key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        Ok(vec![self.seed as u8; 64])
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        _nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        Ok(FrostSigningPackage {
-            message: message.to_vec(),
-            package: vec![self.seed as u8; 32],
-            participants: participants.to_vec(),
-            public_key_package: public_key_package.to_vec(),
-        })
-    }
-
-    async fn frost_sign_share(
-        &self,
-        _package: &FrostSigningPackage,
-        _key_share: &[u8],
-        _nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        Ok(vec![self.seed as u8; 64])
-    }
-
     async fn frost_aggregate_signatures(
         &self,
         _package: &FrostSigningPackage,

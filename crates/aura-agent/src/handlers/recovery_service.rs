@@ -19,8 +19,7 @@ use crate::runtime::services::{
 };
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::vm_host_bridge::{
-    decode_choice_label_wire, encode_choice_label_wire, AuraVmHostWaitStatus,
-    AuraVmRoundDisposition,
+    decode_choice_label_wire, AuraVmHostWaitStatus, AuraVmRoundDisposition,
 };
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
@@ -884,7 +883,7 @@ impl RecoveryServiceApi {
 
                 if let Some(blocked) = round.blocked_receive {
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -1444,7 +1443,7 @@ impl RecoveryServiceApi {
                     }
 
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -1651,16 +1650,15 @@ impl RecoveryServiceApi {
                         // choice directly selects its branch with the commit/abort
                         // message itself, so hand the VM the branch label for it.
                         if let (false, Some(label)) = (branch_label_seen, branch) {
-                            let mut selector = blocked.clone();
-                            selector.payload = encode_choice_label_wire(label);
+                            let selector = blocked.branch_selector(label);
                             session
-                                .inject_blocked_receive(&selector)
+                                .inject_blocked_receive(selector)
                                 .map_err(|error| AgentError::internal(error.to_string()))?;
                             continue;
                         }
                     }
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -2119,7 +2117,7 @@ impl RecoveryServiceApi {
                         completion_queued = true;
                     }
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -2301,7 +2299,7 @@ impl RecoveryServiceApi {
 
                 if let Some(blocked) = round.blocked_receive {
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -2521,7 +2519,7 @@ impl RecoveryServiceApi {
                     }
 
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -2931,7 +2929,7 @@ impl RecoveryServiceApi {
 
                 if let Some(blocked) = round.blocked_receive {
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
@@ -3177,7 +3175,7 @@ async fn execute_recovery_protocol_coordinator(
                     })?,
                 );
                 session
-                    .inject_blocked_receive(&blocked)
+                    .inject_blocked_receive(blocked)
                     .map_err(|error| AgentError::internal(error.to_string()))?;
                 continue;
             }

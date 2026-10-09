@@ -10,6 +10,21 @@ use aura_simulator::quint::{
     ITFLoader, QuintSimulationState,
 };
 
+#[test]
+fn membership_rekey_caller_future_is_bounded() {
+    let participants = [];
+    let future = aura_agent::rekey_simulated_channel(
+        aura_core::ContextId::new_from_entropy([202; 32]),
+        aura_core::types::identifiers::ChannelId::from_bytes([203; 32]),
+        &participants,
+    );
+    let bytes = std::mem::size_of_val(&future);
+    assert!(
+        bytes <= 16 * 1024,
+        "membership rekey caller future is {bytes} bytes"
+    );
+}
+
 #[tokio::test]
 async fn replay_amp_channel_lifecycle_trace() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
