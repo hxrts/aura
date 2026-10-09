@@ -982,6 +982,14 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 
 ### Build and Caching
 
+`just ci-harness-browser` and `just ci-harness-matrix-web` acquire the same
+checkout build budget before preparing browser tools, web assets or harness
+binaries. Nested invocations reuse the held admission. These lanes preserve
+existing tool caches and rely on the canonical sweep and admission policy;
+they do not delete build lanes when disk space is low. Use guarded
+`just prune-inactive-lane <lane> --apply` only for an idle lane. Isolated
+browser admission and command-failure fixtures run in `ci-build-cache-policy`.
+
 Route builds through `scripts/dev/build-budget.sh`. It writes to the
 checkout's own `target/` (it unsets `CARGO_TARGET_DIR`), sweeps that target to a
 per-checkout soft cap (`AURA_BUILD_TARGET_CAP_GIB`, default 10), and admits a
