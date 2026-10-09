@@ -96,13 +96,22 @@ semantic() { # instance, typed IntentAction JSON, original deadline (optional)
   jq -c '.payload' <<< "$response"
 }
 onboard() { # instance, account name: shared TUI/web contract
-  local deadline response
+  local deadline response snapshot authority_id
   deadline=$(lan_deadline)
   wait_snapshot "$1" '.screen == "onboarding"' '{}' "$deadline" >/dev/null || return
   semantic "$1" "$(jq -cn --arg name "$2" '{CreateAccount:{account_name:$name}}')" "$deadline" >/dev/null || return
   wait_snapshot "$1" '.readiness == "ready" and .screen == "neighborhood"' '{}' "$deadline" >/dev/null || return
+  snapshot=$(wait_snapshot "$1" '.screen=="neighborhood" and .readiness=="ready" and
+    ([.lists[]?|select(.id=="authorities")|.items[]?|
+      select(.selected and .confirmation=="confirmed" and (.id|type=="string") and (.id|length>0))]|length)==1' '{}' "$deadline") || return
+  authority_id=$(jq -er '[.lists[]|select(.id=="authorities")|.items[]|select(.selected and .confirmation=="confirmed")][0].id' <<< "$snapshot") || return
   response=$(req "$1" get_authority_id '' "$(lan_remaining "$deadline")") || return
-  jq -er 'select(.status=="ok")|.payload.authority_id' <<< "$response"
+  lan_evidence "$1" get_authority_id "$response" || return
+  lan_remaining "$deadline" >/dev/null || return
+  jq -e --arg authority "$authority_id" '.status=="ok" and .payload.authority_id==$authority' <<< "$response" >/dev/null || {
+    echo "runtime authority does not match the selected canonical authority for $1: $response" >&2; return 1;
+  }
+  printf '%s\n' "$authority_id"
 }
 open_screen() { # instance, shared screen id, original deadline
   local inst=$1 screen=$2 deadline=${3:-$(lan_deadline)}

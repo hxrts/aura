@@ -77,11 +77,24 @@ reset_fixture
   fi
   echo '{"status":"ok","payload":{"event":{"version":4,"snapshot":{"screen":"contacts","readiness":"ready"}}}}'
   echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"neighborhood","readiness":"ready"}}}}'
+  echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"neighborhood","readiness":"ready","lists":[]}}}}'
+  echo '{"status":"ok","payload":{"event":{"version":6,"snapshot":{"screen":"neighborhood","readiness":"ready","lists":[{"id":"authorities","items":[{"id":"runtime-owned-authority","selected":true,"confirmation":"confirmed"}]}]}}}}'
   echo '{"status":"ok","payload":{"authority_id":"runtime-owned-authority"}}'
 } > "$fixture_responses"
 [[ $(onboard alice Alice) == runtime-owned-authority ]]
-[[ $(cat "$fixture_index") == 5 ]]
-jq -se '[.[]|select(.method=="wait_for_ui_snapshot_event")|.params.after_version] == [null,null,4]' "$fixture_requests" >/dev/null
+[[ $(cat "$fixture_index") == 7 ]]
+jq -se '[.[]|select(.method=="wait_for_ui_snapshot_event")|.params.after_version] == [null,null,4,null,5]' "$fixture_requests" >/dev/null
+
+# The API result must match the authority selected by the pushed canonical view.
+sed '$s/runtime-owned-authority/different-authority/' "$fixture_responses" > "$fixture_root/mismatch"
+mv "$fixture_root/mismatch" "$fixture_responses"
+reset_fixture
+if onboard alice Alice > "$fixture_root/out" 2> "$fixture_root/error"; then
+  echo 'mismatched runtime authority incorrectly succeeded' >&2; exit 1
+fi
+grep -q 'runtime authority does not match' "$fixture_root/error"
+jq -se 'any(.[]; .method=="get_authority_id" and .response.payload.authority_id=="different-authority")' \
+  "$AURA_E2E_RUN_DIR/semantic-evidence-$AURA_E2E_RUN_TOKEN.jsonl" >/dev/null
 
 reset_fixture
 jq -c '.payload.handle.ui_operation=null' <<< "$receipt" > "$fixture_responses"
