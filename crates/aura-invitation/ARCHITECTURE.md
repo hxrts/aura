@@ -31,6 +31,11 @@ Invitation protocol for establishing relationships between authorities, includin
 
 ## Invariants
 
+- Canonical invitation and setup-binding shapes come from
+  `aura-core::invitation`; this crate owns feature capability selection and
+  lifecycle coordination. A decoded shape never establishes original issuance
+  or policy approval. There is one schema implementation across layers.
+
 - Enrollment invitation facts emit schema 2 and continue decoding schema-1
   canonical DAG-CBOR map payloads. Missing setup bindings remain absent during
   replay; historical decoding never manufactures response authorization.
