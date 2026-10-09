@@ -12,6 +12,16 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=env.sh
 . "$here/env.sh"
 cd "$AURA_E2E_ROOT"
+# Raw SSH commands must use the same pinned dependencies as local LAN runs.
+# Bootstrap before inspecting identities or mutating any retained run state.
+if [[ -z "${IN_NIX_SHELL:-}" ]]; then
+  nix_bin="${AURA_NIX_BIN:-/nix/var/nix/profiles/default/bin/nix}"
+  exec "$nix_bin" develop "$AURA_E2E_ROOT" --command bash "$here/drv.sh" "$@"
+fi
+command -v jq >/dev/null 2>&1 || {
+  echo 'LAN driver requires jq in the pinned Nix environment; no state changed' >&2
+  exit 127
+}
 D=$AURA_E2E_RUN_DIR
 FIFO=$D/repl.in OUT=$D/repl.out PIDF=$D/repl.pid SEQ=$D/repl.seq
 IDENTITY=$D/repl.identity.json

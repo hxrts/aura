@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Exercise the tracked LAN driver lifecycle against an isolated fake tool_repl.
 set -euo pipefail
+# This fixture supplies its own tools and never enters the real Nix shell.
+export IN_NIX_SHELL=fixture
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/aura-lan-retention-test.XXXXXX")"
@@ -144,5 +146,6 @@ if bash "$driver" start "$test_root/configs/lan.toml" >/dev/null 2>&1; then
   echo 'LAN driver accepted a token too short for the native harness' >&2; exit 1
 fi
 [[ ! -e "$runs/short" ]]
+bash "$repo_root/scripts/harness/lan/test-driver-environment.sh"
 bash "$repo_root/scripts/harness/lan/test-fresh.sh"
 echo 'LAN retention lifecycle tests passed'
