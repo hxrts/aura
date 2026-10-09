@@ -55,6 +55,8 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   onboarding before export, and scenarios own the account-creation prerequisite.
 
 - Config-first execution: invalid run or scenario configs fail before instance startup.
+- Scenario list counts use `u32` on the wire; comparison with a local snapshot
+  uses a checked index conversion, including the quarantined compatibility IR.
 - Instance isolation: each action is scoped by `instance_id` with unique `data_dir`.
 - Deterministic seeds: identical run config and seed produce identical seed bundles.
 - API compatibility: negotiation selects the highest shared tool API version or fails closed.

@@ -253,7 +253,7 @@ pub enum TriggerCondition {
     /// Trigger when specific message is observed
     MessageObserved(String),
     /// Trigger when threshold of participants reached
-    ParticipantThreshold(usize),
+    ParticipantThreshold(u32),
 }
 
 /// Criteria for determining attack success

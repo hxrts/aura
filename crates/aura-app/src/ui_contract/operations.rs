@@ -526,7 +526,7 @@ impl AuthoritativeSemanticFact {
                 RuntimeEventKind::ContactLinkReady,
                 RuntimeFact::ContactLinkReady {
                     authority_id: Some(authority_id.clone()),
-                    contact_count: Some(*contact_count as usize),
+                    contact_count: Some(u64::from(*contact_count)),
                 },
             )),
             Self::PendingHomeInvitationReady => Some((

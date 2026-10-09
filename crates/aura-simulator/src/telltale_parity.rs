@@ -5,7 +5,9 @@
 //! Callers provide conformance artifacts, while supported file/control-plane
 //! lanes require upstream Telltale 11 run sidecars for theorem-facing context.
 
-use crate::differential_tester::{DifferentialProfile, DifferentialReport, DifferentialTester};
+use crate::differential_tester::{
+    DifferentialProfile, DifferentialReport, DifferentialTester, DifferentialTesterError,
+};
 use aura_core::{AuraConformanceArtifactV1, ConformanceSurfaceName};
 use aura_testkit::load_conformance_artifact_file;
 use serde::{Deserialize, Serialize};
@@ -175,7 +177,7 @@ pub struct TelltaleParityReportV1 {
     /// First mismatch surface, when present.
     pub first_mismatch_surface: Option<ConformanceSurfaceName>,
     /// First mismatch step index, when present.
-    pub first_mismatch_step_index: Option<usize>,
+    pub first_mismatch_step_index: Option<u64>,
     /// Differential comparison report.
     pub differential: DifferentialReport,
     /// High-level Aura overlay derived from the authoritative upstream context.
@@ -326,6 +328,9 @@ struct TelltaleRunAnalysisSidecarV1 {
 /// Errors for file-based telltale parity lane.
 #[derive(Debug, thiserror::Error)]
 pub enum TelltaleParityError {
+    /// Differential report generation failed before publication.
+    #[error(transparent)]
+    Comparison(#[from] DifferentialTesterError),
     /// Failed to load one input artifact.
     #[error("failed loading conformance artifact from {path}: {message}")]
     LoadArtifact { path: String, message: String },
@@ -353,11 +358,17 @@ pub enum TelltaleParityError {
 /// Entry-point trait for telltale-backed parity checks.
 pub trait TelltaleParityRunner {
     /// Compare one telltale candidate against one Aura baseline artifact.
-    fn run_telltale_parity(&self, input: TelltaleParityInput) -> DifferentialReport;
+    fn run_telltale_parity(
+        &self,
+        input: TelltaleParityInput,
+    ) -> Result<DifferentialReport, DifferentialTesterError>;
 }
 
 impl TelltaleParityRunner for DifferentialTester {
-    fn run_telltale_parity(&self, input: TelltaleParityInput) -> DifferentialReport {
+    fn run_telltale_parity(
+        &self,
+        input: TelltaleParityInput,
+    ) -> Result<DifferentialReport, DifferentialTesterError> {
         let tester = DifferentialTester::new(input.profile);
         tester.compare(&input.baseline, &input.telltale_candidate)
     }
@@ -391,7 +402,7 @@ pub fn run_telltale_parity_file_lane(
         baseline,
         telltale_candidate: candidate,
         profile: input.profile,
-    });
+    })?;
     let upstream = load_upstream_context("aura-simulator:telltale-parity", &input.upstream)?;
 
     let report = TelltaleParityReportV1 {
@@ -748,18 +759,22 @@ mod tests {
         let baseline = artifact("aura", &["a", "b"]);
         let telltale_candidate = artifact("telltale_machine", &["b", "a"]);
         let runner = DifferentialTester::new(DifferentialProfile::Strict);
-        let strict_report = runner.run_telltale_parity(TelltaleParityInput {
-            baseline: baseline.clone(),
-            telltale_candidate: telltale_candidate.clone(),
-            profile: DifferentialProfile::Strict,
-        });
+        let strict_report = runner
+            .run_telltale_parity(TelltaleParityInput {
+                baseline: baseline.clone(),
+                telltale_candidate: telltale_candidate.clone(),
+                profile: DifferentialProfile::Strict,
+            })
+            .expect("portable strict report");
         assert!(!strict_report.equivalent);
 
-        let envelope_report = runner.run_telltale_parity(TelltaleParityInput {
-            baseline,
-            telltale_candidate,
-            profile: DifferentialProfile::EnvelopeBounded,
-        });
+        let envelope_report = runner
+            .run_telltale_parity(TelltaleParityInput {
+                baseline,
+                telltale_candidate,
+                profile: DifferentialProfile::EnvelopeBounded,
+            })
+            .expect("portable envelope report");
         assert!(envelope_report.equivalent);
     }
 

@@ -641,14 +641,20 @@ pub trait AuraVmSchedulerSignalsProvider {
 
 impl AuraVmProtocolExecutionPolicy {
     /// Lossless metadata snapshot suitable for conformance/trace artifacts.
-    #[must_use]
-    pub fn artifact_metadata(self) -> AuraVmDeterminismProfileV1 {
-        AuraVmDeterminismProfileV1 {
+    ///
+    /// Returns the original conversion error if a native bound cannot fit the wire range.
+    pub fn artifact_metadata(
+        self,
+    ) -> Result<AuraVmDeterminismProfileV1, std::num::TryFromIntError> {
+        Ok(AuraVmDeterminismProfileV1 {
             policy_ref: self.policy_ref.to_string(),
             protocol_class: self.protocol_class.to_string(),
             runtime_mode: self.runtime_mode.as_ref().to_string(),
             scheduler_envelope_class: self.scheduler_envelope_class.as_ref().to_string(),
-            declared_wave_width_bound: self.declared_wave_width_bound,
+            declared_wave_width_bound: self
+                .declared_wave_width_bound
+                .map(u64::try_from)
+                .transpose()?,
             determinism_mode: determinism_mode_ref(self.determinism_mode).to_string(),
             effect_determinism_tier: effect_determinism_tier_ref(self.effect_determinism_tier)
                 .to_string(),
@@ -656,7 +662,7 @@ impl AuraVmProtocolExecutionPolicy {
                 self.communication_replay_mode,
             )
             .to_string(),
-        }
+        })
     }
 }
 

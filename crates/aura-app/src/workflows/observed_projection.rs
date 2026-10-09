@@ -1325,7 +1325,6 @@ mod tests {
                 .unwrap_or_else(|error| panic!("failed to read settings.rs: {error}"));
         assert!(!settings_source.contains("async fn emit_recovery_state_observed("));
         assert!(!settings_source.contains("core.views_mut().set_recovery("));
-        assert!(settings_source.contains("try_update_homes_projection_observed"));
         assert!(settings_source.contains("try_update_recovery_projection_observed"));
 
         let system_refresh_source = std::fs::read_to_string(

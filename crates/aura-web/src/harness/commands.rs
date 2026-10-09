@@ -844,11 +844,16 @@ async fn execute_semantic_intent(
                     .await
                 },
                 move |controller, start| async move {
+                    let code_len = u64::try_from(start.enrollment_code.len()).map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "enrollment code length exceeds its wire range: {error}"
+                        ))
+                    })?;
                     controller.write_clipboard(&start.enrollment_code);
                     controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
                         manifest_transfer: start.manifest_transfer.clone(),
                         device_name: Some(success_device_name),
-                        code_len: Some(start.enrollment_code.len()),
+                        code_len: Some(code_len),
                         code: Some(start.enrollment_code),
                     });
                     Ok(())

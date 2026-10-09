@@ -5,6 +5,35 @@ use std::process::Command;
 
 use syn::File;
 
+/// A positive cfg predicate must require `test` in every admitted configuration.
+/// `not(test)` and `any(test, unix)` still admit production declarations.
+pub(crate) fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    fn requires_test(meta: &syn::Meta) -> bool {
+        match meta {
+            syn::Meta::Path(path) => path.is_ident("test"),
+            syn::Meta::List(list) if list.path.is_ident("all") || list.path.is_ident("any") => {
+                let Ok(items) = list.parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                ) else {
+                    return false;
+                };
+                if list.path.is_ident("all") {
+                    items.iter().any(requires_test)
+                } else {
+                    !items.is_empty() && items.iter().all(requires_test)
+                }
+            }
+            _ => false,
+        }
+    }
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("cfg")
+            && attr
+                .parse_args::<syn::Meta>()
+                .is_ok_and(|meta| requires_test(&meta))
+    })
+}
+
 pub(crate) struct ParsedRustFile {
     pub(crate) path: PathBuf,
     pub(crate) source: String,

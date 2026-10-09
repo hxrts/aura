@@ -280,7 +280,7 @@ pub struct AuraConformanceRunMetadataV1 {
     pub scenario: String,
     pub seed: Option<u64>,
     pub commit: Option<String>,
-    pub async_host_transcript_entries: Option<usize>,
+    pub async_host_transcript_entries: Option<u64>,
     pub async_host_transcript_digest_hex: Option<String>,
 }
 ```

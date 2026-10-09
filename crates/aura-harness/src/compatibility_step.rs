@@ -77,7 +77,7 @@ pub struct CompatibilityStep {
     pub operation_state: Option<OperationState>,
     pub list_id: Option<ListId>,
     pub item_id: Option<String>,
-    pub count: Option<usize>,
+    pub count: Option<u32>,
     pub confirmation: Option<ConfirmationState>,
     pub source_instance: Option<String>,
     pub peer_instance: Option<String>,

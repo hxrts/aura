@@ -40,6 +40,10 @@ finalization or cryptoshred evidence.
 - Effect-based only: All simulation via effect system (no globals).
 - Must NOT create persistent effect handlers (use aura-effects).
 - Must NOT implement multi-party coordination (use aura-protocol).
+- Serialized participant limits, trace loop indices and differential-report
+  indices use fixed-width integers. Differential report generation fails with
+  the original checked-conversion source before publishing an unrepresentable
+  index.
 
 ### InvariantSimulationDeterministicReplay
 

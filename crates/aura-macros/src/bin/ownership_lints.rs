@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 mod lint_support;
 
 use lint_support::{
-    collect_rust_files, collect_source_files, load_parsed_rust_files, load_source, ParsedRustFile,
+    collect_rust_files, collect_source_files, has_cfg_test_attr, load_parsed_rust_files,
+    load_source, ParsedRustFile,
 };
 use proc_macro2::Span;
 use quote::quote;
@@ -374,7 +375,7 @@ fn scan_file(
             return scan_semantic_owner_stable_wrapper(file, syntax);
         }
         LintMode::HarnessMoveOwnershipBoundary => {
-            return scan_harness_move_ownership_boundary(file, source);
+            return scan_harness_move_ownership_boundary(file, syntax);
         }
         LintMode::HarnessReadinessOwnership => {
             return scan_harness_readiness_ownership(file, source);
@@ -985,35 +986,6 @@ fn has_marker_attr(attrs: &[syn::Attribute], name: &str) -> bool {
                 .segments
                 .last()
                 .is_some_and(|segment| segment.ident == name)
-    })
-}
-
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    // Only configurations that logically require `test` exclude production code.
-    // In particular, not(test) and any(test, unix) are production configurations.
-    fn requires_test(meta: &syn::Meta) -> bool {
-        match meta {
-            syn::Meta::Path(path) => path.is_ident("test"),
-            syn::Meta::List(list) if list.path.is_ident("all") || list.path.is_ident("any") => {
-                let Ok(items) = list.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, Token![,]>::parse_terminated,
-                ) else {
-                    return false;
-                };
-                if list.path.is_ident("all") {
-                    items.iter().any(requires_test)
-                } else {
-                    !items.is_empty() && items.iter().all(requires_test)
-                }
-            }
-            _ => false,
-        }
-    }
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("cfg")
-            && attr
-                .parse_args::<syn::Meta>()
-                .is_ok_and(|meta| requires_test(&meta))
     })
 }
 
@@ -2598,19 +2570,264 @@ fn scan_async_session_ownership(file: &Path, source: &str) -> Vec<String> {
     )
 }
 
-fn scan_harness_move_ownership_boundary(file: &Path, source: &str) -> Vec<String> {
-    source_line_violations(
-        file,
-        source,
-        &[
-            "UiOperationHandle::new(",
-            "HarnessUiOperationHandle::new(",
-            "record_submission_handle(",
-            "HarnessUiCommandReceipt::Accepted",
-            "instance_id = Some(",
-        ],
-        HARNESS_MOVE_APPROVED_SUFFIXES,
-    )
+fn scan_harness_move_ownership_boundary(file: &Path, syntax: &File) -> Vec<String> {
+    if file_matches_suffix(file, HARNESS_MOVE_APPROVED_SUFFIXES) {
+        return Vec::new();
+    }
+    struct BoundaryPaths {
+        lines: std::collections::BTreeSet<usize>,
+    }
+    impl BoundaryPaths {
+        fn check_pair(&mut self, owner: &str, member: &str, span: Span) {
+            if matches!(
+                (owner, member),
+                ("UiOperationHandle" | "HarnessUiOperationHandle", "new")
+                    | ("HarnessUiCommandReceipt", "Accepted")
+            ) {
+                self.lines.insert(span.start().line);
+            }
+        }
+
+        // Inspect real macro path tokens, using the same token-tree pattern as
+        // the authoritative-fact policy. Literals and comments are not paths.
+        fn macro_tokens(&mut self, stream: proc_macro2::TokenStream) {
+            use proc_macro2::TokenTree;
+            if let Ok(block) = syn::parse2::<Block>(quote!({ #stream })) {
+                self.visit_block(&block);
+                return;
+            }
+            let tokens: Vec<_> = stream.into_iter().collect();
+            for window in tokens.windows(4) {
+                if let [TokenTree::Ident(owner), TokenTree::Punct(a), TokenTree::Punct(b), TokenTree::Ident(member)] =
+                    window
+                {
+                    if a.as_char() == ':' && b.as_char() == ':' {
+                        self.check_pair(&owner.to_string(), &member.to_string(), owner.span());
+                    }
+                }
+            }
+            for window in tokens.windows(2) {
+                if let [TokenTree::Ident(name), TokenTree::Group(arguments)] = window {
+                    if name == "record_submission_handle"
+                        && arguments.delimiter() == proc_macro2::Delimiter::Parenthesis
+                    {
+                        self.lines.insert(name.span().start().line);
+                    }
+                }
+            }
+            for (index, window) in tokens.windows(2).enumerate() {
+                if let [TokenTree::Ident(name), TokenTree::Punct(assign)] = window {
+                    if name != "instance_id" || assign.as_char() != '=' {
+                        continue;
+                    }
+                    let mut last_ident = None;
+                    for token in &tokens[index + 2..] {
+                        match token {
+                            TokenTree::Ident(ident) => last_ident = Some(ident),
+                            TokenTree::Punct(punct) if punct.as_char() == ':' => {}
+                            TokenTree::Group(group)
+                                if group.delimiter() == proc_macro2::Delimiter::Parenthesis =>
+                            {
+                                if last_ident.is_some_and(|ident| ident == "Some") {
+                                    self.lines.insert(name.span().start().line);
+                                }
+                                break;
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+            }
+            for token in tokens {
+                if let TokenTree::Group(group) = token {
+                    self.macro_tokens(group.stream());
+                }
+            }
+        }
+    }
+    impl<'ast> Visit<'ast> for BoundaryPaths {
+        fn visit_item(&mut self, node: &'ast Item) {
+            let attrs = match node {
+                Item::Fn(item) => &item.attrs,
+                Item::Mod(item) => &item.attrs,
+                Item::Impl(item) => &item.attrs,
+                Item::Trait(item) => &item.attrs,
+                Item::Const(item) => &item.attrs,
+                Item::Static(item) => &item.attrs,
+                Item::Struct(item) => &item.attrs,
+                Item::Enum(item) => &item.attrs,
+                Item::Type(item) => &item.attrs,
+                Item::Use(item) => &item.attrs,
+                Item::Macro(item) => &item.attrs,
+                Item::ForeignMod(item) => &item.attrs,
+                _ => return visit::visit_item(self, node),
+            };
+            if !has_cfg_test_attr(attrs) {
+                visit::visit_item(self, node);
+            }
+        }
+        fn visit_impl_item(&mut self, node: &'ast ImplItem) {
+            let attrs = match node {
+                ImplItem::Const(item) => &item.attrs,
+                ImplItem::Fn(item) => &item.attrs,
+                ImplItem::Type(item) => &item.attrs,
+                ImplItem::Macro(item) => &item.attrs,
+                _ => return visit::visit_impl_item(self, node),
+            };
+            if !has_cfg_test_attr(attrs) {
+                visit::visit_impl_item(self, node);
+            }
+        }
+        fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
+            let attrs = match node {
+                syn::TraitItem::Const(item) => &item.attrs,
+                syn::TraitItem::Fn(item) => &item.attrs,
+                syn::TraitItem::Type(item) => &item.attrs,
+                syn::TraitItem::Macro(item) => &item.attrs,
+                _ => return visit::visit_trait_item(self, node),
+            };
+            if !has_cfg_test_attr(attrs) {
+                visit::visit_trait_item(self, node);
+            }
+        }
+        fn visit_local(&mut self, node: &'ast Local) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_local(self, node);
+            }
+        }
+        fn visit_expr(&mut self, node: &'ast Expr) {
+            let attrs = match node {
+                Expr::Array(e) => &e.attrs,
+                Expr::Assign(e) => &e.attrs,
+                Expr::Async(e) => &e.attrs,
+                Expr::Await(e) => &e.attrs,
+                Expr::Binary(e) => &e.attrs,
+                Expr::Block(e) => &e.attrs,
+                Expr::Break(e) => &e.attrs,
+                Expr::Call(e) => &e.attrs,
+                Expr::Cast(e) => &e.attrs,
+                Expr::Closure(e) => &e.attrs,
+                Expr::Const(e) => &e.attrs,
+                Expr::Continue(e) => &e.attrs,
+                Expr::Field(e) => &e.attrs,
+                Expr::ForLoop(e) => &e.attrs,
+                Expr::Group(e) => &e.attrs,
+                Expr::If(e) => &e.attrs,
+                Expr::Index(e) => &e.attrs,
+                Expr::Infer(e) => &e.attrs,
+                Expr::Let(e) => &e.attrs,
+                Expr::Lit(e) => &e.attrs,
+                Expr::Loop(e) => &e.attrs,
+                Expr::Macro(e) => &e.attrs,
+                Expr::Match(e) => &e.attrs,
+                Expr::MethodCall(e) => &e.attrs,
+                Expr::Paren(e) => &e.attrs,
+                Expr::Path(e) => &e.attrs,
+                Expr::Range(e) => &e.attrs,
+                Expr::RawAddr(e) => &e.attrs,
+                Expr::Reference(e) => &e.attrs,
+                Expr::Repeat(e) => &e.attrs,
+                Expr::Return(e) => &e.attrs,
+                Expr::Struct(e) => &e.attrs,
+                Expr::Try(e) => &e.attrs,
+                Expr::TryBlock(e) => &e.attrs,
+                Expr::Tuple(e) => &e.attrs,
+                Expr::Unary(e) => &e.attrs,
+                Expr::Unsafe(e) => &e.attrs,
+                Expr::While(e) => &e.attrs,
+                Expr::Yield(e) => &e.attrs,
+                _ => return visit::visit_expr(self, node),
+            };
+            if !has_cfg_test_attr(attrs) {
+                visit::visit_expr(self, node);
+            }
+        }
+        fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_item_mod(self, node);
+            }
+        }
+        fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            if !has_cfg_test_attr(&node.attrs) && !has_test_attr(&node.attrs) {
+                visit::visit_item_fn(self, node);
+            }
+        }
+        fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_item_impl(self, node);
+            }
+        }
+        fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+            if !has_cfg_test_attr(&node.attrs) && !has_test_attr(&node.attrs) {
+                visit::visit_impl_item_fn(self, node);
+            }
+        }
+        fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_item_trait(self, node);
+            }
+        }
+        fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_trait_item_fn(self, node);
+            }
+        }
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            let mut segments = path.segments.iter().rev();
+            if let (Some(member), Some(owner)) = (segments.next(), segments.next()) {
+                self.check_pair(
+                    &owner.ident.to_string(),
+                    &member.ident.to_string(),
+                    owner.span(),
+                );
+            }
+            visit::visit_path(self, path);
+        }
+        fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+            if let Expr::Path(path) = strip_expression(&node.func) {
+                if path
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|part| part.ident == "record_submission_handle")
+                {
+                    self.lines.insert(node.span().start().line);
+                }
+            }
+            visit::visit_expr_call(self, node);
+        }
+        fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+            if node.method == "record_submission_handle" {
+                self.lines.insert(node.span().start().line);
+            }
+            visit::visit_expr_method_call(self, node);
+        }
+        fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
+            let instance_field = match strip_expression(&node.left) {
+                Expr::Field(field) => {
+                    matches!(&field.member, syn::Member::Named(name) if name == "instance_id")
+                }
+                Expr::Path(path) => path.path.is_ident("instance_id"),
+                _ => false,
+            };
+            let some_value = matches!(strip_expression(&node.right), Expr::Call(call)
+                if matches!(strip_expression(&call.func), Expr::Path(path)
+                    if path.path.segments.last().is_some_and(|part| part.ident == "Some")));
+            if instance_field && some_value {
+                self.lines.insert(node.span().start().line);
+            }
+            visit::visit_expr_assign(self, node);
+        }
+        fn visit_macro(&mut self, node: &'ast syn::Macro) {
+            self.macro_tokens(node.tokens.clone());
+            visit::visit_macro(self, node);
+        }
+    }
+    let mut paths = BoundaryPaths {
+        lines: Default::default(),
+    };
+    paths.visit_file(syntax);
+    paths.lines.into_iter().map(|line| format!("{}:{line}:1: forbidden harness move ownership escape hatch outside its sanctioned owner", file.display())).collect()
 }
 
 fn scan_harness_readiness_ownership(file: &Path, source: &str) -> Vec<String> {
@@ -3321,6 +3538,83 @@ mod tests {
     use super::scan_semantic_owner_stable_wrapper;
     use std::path::Path;
     use syn::parse_file;
+
+    #[test]
+    fn harness_move_boundary_excludes_only_lexical_test_code() {
+        let source = r#"
+            #[cfg(test)] mod tests { fn fixture() { HarnessUiCommandReceipt::Accepted(value); } }
+            #[cfg(all(unix, test))] const FIXTURE: Receipt = HarnessUiCommandReceipt::Accepted(value);
+            #[cfg(any(test, feature = "production"))]
+            fn mixed() { crate::contract::HarnessUiOperationHandle::new(id); }
+            mod tests_without_cfg { fn production() { crate::HarnessUiCommandReceipt::Accepted(value); } }
+            fn production_after_tests() { owner.record_submission_handle(value); }
+            fn diagnostics() {
+                let _ = "HarnessUiOperationHandle::new(id)";
+                // HarnessUiCommandReceipt::Accepted(value);
+                log!("record_submission_handle(value)");
+            }
+        "#;
+        let syntax = parse_file(source).expect("parse fixture");
+        let violations = super::scan_harness_move_ownership_boundary(
+            Path::new("crates/aura-harness/src/tool_api.rs"),
+            &syntax,
+        );
+        assert_eq!(violations.len(), 3, "{violations:#?}");
+    }
+
+    #[test]
+    fn harness_move_boundary_checks_qualified_paths_and_macro_tokens() {
+        let source = r#"
+            fn production() {
+                crate::ui::UiOperationHandle :: new(id);
+                publish!(crate::ui::HarnessUiOperationHandle::new(id));
+                publish!({ crate::HarnessUiCommandReceipt::Accepted { handle } });
+                publish!(owner.record_submission_handle(handle));
+                owner.instance_id = core::option::Option::Some(id);
+                publish!(owner.instance_id = core::option::Option::Some(id));
+            }
+            #[cfg(test)] fn fixture() { publish!(HarnessUiOperationHandle::new(id)); }
+        "#;
+        let syntax = parse_file(source).expect("parse fixture");
+        let violations = super::scan_harness_move_ownership_boundary(
+            Path::new("crates/aura-harness/src/tool_api.rs"),
+            &syntax,
+        );
+        assert_eq!(violations.len(), 6, "{violations:#?}");
+        assert!(super::scan_harness_move_ownership_boundary(
+            Path::new("crates/aura-harness/src/backend/local_pty.rs"),
+            &syntax
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn harness_move_boundary_tracks_associated_items_expressions_and_dsl_tokens() {
+        let source = r#"
+            impl Owner {
+                #[cfg(test)] const FIXTURE: Receipt = HarnessUiCommandReceipt::Accepted(value);
+                #[cfg(any(test, feature = "live"))]
+                const LIVE: Receipt = HarnessUiCommandReceipt::Accepted(value);
+            }
+            trait OwnerTrait {
+                #[cfg(all(test, unix))] const FIXTURE: Receipt = HarnessUiCommandReceipt::Accepted(value);
+                const LIVE: Receipt = HarnessUiCommandReceipt::Accepted(value);
+            }
+            fn scopes() {
+                #[cfg(test)] let fixture = HarnessUiCommandReceipt::Accepted(value);
+                #[cfg(test)] { HarnessUiOperationHandle::new(id); }
+                #[cfg(any(test, feature = "live"))] { HarnessUiOperationHandle::new(id); }
+                dsl!(opaque => owner.instance_id = core::option::Option::Some(id));
+                dsl!(opaque => crate::HarnessUiOperationHandle::new(id));
+            }
+        "#;
+        let syntax = parse_file(source).expect("parse fixture");
+        let violations = super::scan_harness_move_ownership_boundary(
+            Path::new("crates/aura-harness/src/tool_api.rs"),
+            &syntax,
+        );
+        assert_eq!(violations.len(), 5, "{violations:#?}");
+    }
 
     #[test]
     fn account_create_local_submission_rejects_actual_helper_and_direct_owner_calls() {

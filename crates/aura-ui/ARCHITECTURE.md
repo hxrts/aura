@@ -29,6 +29,10 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 
 ## Invariants
 
+- Runtime observation counts use the shared fixed-width contract. Native lengths
+  are checked before publication; conversion failures are diagnosed and cannot
+  publish a truncated count or advance the observed-device baseline.
+
 - Shared core remains platform agnostic; shell crates own platform interop.
 - Add-device submission requires the actual new device's user-transferred setup
   code. The shared modal renders separate name/setup fields with shared field IDs

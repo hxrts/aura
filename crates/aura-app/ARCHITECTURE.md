@@ -43,6 +43,9 @@ The crate uses explicit concern-owned submodules.
 
 ## Invariants
 
+- Shared scenario list counts are `u32` and runtime-event count observations
+  are `u64`, so their wire ranges do not depend on frontend pointer width.
+
 - Home channel mode is derived from authorized `SocialFact::HomeModeSet`
   governance register writes. Settings workflows commit the fact and report
   that commit; only governance reduction writes the observed `mode_flags`.

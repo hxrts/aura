@@ -534,6 +534,10 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
                                 .await
                                 .map_err(|_| SubscriptionFailureCode::SnapshotReadFailed)?
                         };
+                        let device_count = u64::try_from(settings.devices.len()).map_err(|error| {
+                            tracing::error!(%error, "device count exceeds runtime observation range");
+                            SubscriptionFailureCode::SnapshotReadFailed
+                        })?;
                         let current = settings
                             .devices
                             .iter()
@@ -558,7 +562,7 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
                             controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentAccepted {
                                 device_id: Some(device_id),
                                 device_name: Some(device_name),
-                                device_count: Some(settings.devices.len()),
+                                device_count: Some(device_count),
                             });
                         }
                         Ok(())

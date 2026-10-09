@@ -107,13 +107,23 @@ pub(super) async fn process_ui_update_match(
             pending_epoch: _,
             device_id: _,
         } => {
+            let code_len = match u64::try_from(enrollment_code.len()) {
+                Ok(count) => count,
+                Err(error) => {
+                    enqueue_toast!(
+                        format!("Could not encode enrollment code length: {error}"),
+                        crate::tui::state::ToastLevel::Error
+                    );
+                    return UiUpdateLoopAction::ContinueLoop;
+                }
+            };
             let _ = copy_to_clipboard(&enrollment_code);
             tui.with_mut(|state| {
                 state.settings.last_device_enrollment_code = enrollment_code.clone();
                 state.upsert_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
                     manifest_transfer: manifest_transfer.clone(),
                     device_name: Some(nickname_suggestion.clone()),
-                    code_len: Some(enrollment_code.len()),
+                    code_len: Some(code_len),
                     code: Some(enrollment_code.clone()),
                 });
                 if state.settings.pending_mobile_enrollment_autofill {

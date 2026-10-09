@@ -118,6 +118,15 @@ pub enum AuraChoreoEngineError {
         /// Conformance artifact failure reason.
         message: String,
     },
+    /// A native count could not be represented in the portable artifact.
+    #[error("conformance {field} exceeds the wire range: {source}")]
+    ConformanceCountOutOfRange {
+        /// Artifact field whose value could not be retained.
+        field: &'static str,
+        /// Original checked-conversion failure.
+        #[source]
+        source: std::num::TryFromIntError,
+    },
     /// Output-condition gate rejected an observable commit.
     #[error(
         "output-condition rejected (predicate={predicate_ref}, tick={tick:?}, witness={witness_ref:?}, digest={output_digest:?}, finalization_path={finalization_path:?})"
@@ -696,7 +705,7 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
         max_steps: usize,
         mut metadata: AuraConformanceRunMetadataV1,
     ) -> Result<(RunStatus, AuraConformanceArtifactV1), AuraChoreoEngineError> {
-        metadata.vm_determinism_profile = self.active_determinism_profile_metadata();
+        metadata.vm_determinism_profile = self.active_determinism_profile_metadata()?;
         let (status, effect_trace) = self.run_recording(max_steps)?;
         let normalized_observable = normalize_trace(&self.backend.observable_trace());
         let canonical_effects = canonical_effect_trace(&effect_trace);
@@ -774,7 +783,13 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
         host_transcript_metadata: Option<(usize, String)>,
     ) -> Result<(RunStatus, AuraConformanceArtifactV1), AuraChoreoEngineError> {
         if let Some((entry_count, digest_hex)) = host_transcript_metadata {
-            metadata.async_host_transcript_entries = Some(entry_count);
+            metadata.async_host_transcript_entries =
+                Some(u64::try_from(entry_count).map_err(|source| {
+                    AuraChoreoEngineError::ConformanceCountOutOfRange {
+                        field: "async_host_transcript_entries",
+                        source,
+                    }
+                })?);
             metadata.async_host_transcript_digest_hex = Some(digest_hex);
         }
         self.run_recording_conformance(max_steps, metadata)
@@ -856,14 +871,20 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
     }
 
     /// Determinism and envelope metadata surfaced at the session boundary.
+    /// Native bounds must fit the portable artifact; conversion errors retain their source.
     pub fn session_determinism_profile_metadata(
         &self,
         sid: SessionId,
-    ) -> Option<AuraVmDeterminismProfileV1> {
+    ) -> Result<Option<AuraVmDeterminismProfileV1>, AuraChoreoEngineError> {
         self.session_determinism_profiles
             .get(&sid)
             .copied()
             .map(AuraVmProtocolExecutionPolicy::artifact_metadata)
+            .transpose()
+            .map_err(|source| AuraChoreoEngineError::ConformanceCountOutOfRange {
+                field: "declared_wave_width_bound",
+                source,
+            })
     }
 
     /// Whether a tracked session requires envelope-diff validation.
@@ -1190,9 +1211,16 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
             })
     }
 
-    fn active_determinism_profile_metadata(&self) -> Option<AuraVmDeterminismProfileV1> {
+    fn active_determinism_profile_metadata(
+        &self,
+    ) -> Result<Option<AuraVmDeterminismProfileV1>, AuraChoreoEngineError> {
         self.dominant_determinism_policy()
             .map(AuraVmProtocolExecutionPolicy::artifact_metadata)
+            .transpose()
+            .map_err(|source| AuraChoreoEngineError::ConformanceCountOutOfRange {
+                field: "declared_wave_width_bound",
+                source,
+            })
     }
 }
 
@@ -1412,6 +1440,7 @@ mod tests {
         assert_eq!(
             engine
                 .session_determinism_profile_metadata(sid)
+                .expect("portable metadata")
                 .map(|metadata| (
                     metadata.runtime_mode,
                     metadata.scheduler_envelope_class,
@@ -1477,6 +1506,7 @@ mod tests {
         assert_eq!(
             engine
                 .session_determinism_profile_metadata(sid)
+                .expect("portable metadata")
                 .map(|metadata| (
                     metadata.runtime_mode,
                     metadata.scheduler_envelope_class,

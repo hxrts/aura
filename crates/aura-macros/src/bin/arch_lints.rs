@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 #[path = "../lint_support.rs"]
 mod lint_support;
 
-use lint_support::{collect_rust_files, collect_tracked_rust_files, load_parsed_rust_files};
+use lint_support::{
+    collect_rust_files, collect_tracked_rust_files, has_cfg_test_attr, load_parsed_rust_files,
+};
 use proc_macro2::Span;
 use quote::ToTokens;
 use syn::spanned::Spanned;
@@ -822,11 +824,7 @@ fn scan_style(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     }
 
     if !is_test_like_path(&path) && !path.starts_with("crates/aura-testkit/") {
-        for item in &syntax.items {
-            if let Item::Struct(item_struct) = item {
-                maybe_flag_serialized_usize_fields(file, item_struct, &mut violations);
-            }
-        }
+        scan_serialized_usize(file, syntax, &mut violations);
     }
 
     violations
@@ -1020,41 +1018,158 @@ fn is_vec_of_string(ty: &syn::Type) -> bool {
     inner_type.path.is_ident("String")
 }
 
-fn maybe_flag_serialized_usize_fields(
-    file: &Path,
-    item_struct: &ItemStruct,
-    violations: &mut Vec<String>,
-) {
-    if !has_serialize_derive(&item_struct.attrs) {
-        return;
-    }
+fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("derive")
+            && attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+                )
+                .is_ok_and(|paths| {
+                    paths.iter().any(|path| {
+                        path.segments
+                            .last()
+                            .is_some_and(|segment| segment.ident == name)
+                    })
+                })
+    })
+}
 
-    for field in &item_struct.fields {
-        if let syn::Type::Path(type_path) = &field.ty {
-            if type_path.path.is_ident("usize") {
-                violations.push(format_violation(
-                    file,
-                    field.ty.span(),
-                    format!(
-                        "serialized struct `{}` may not use `usize` fields; use a fixed-width integer",
-                        item_struct.ident
-                    ),
-                ));
+fn serde_skips(attrs: &[syn::Attribute], direction: &str) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("serde") {
+            return false;
+        }
+        let Ok(items) = attr
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+        else {
+            return false;
+        };
+        items
+            .iter()
+            .any(|meta| meta.path().is_ident("skip") || meta.path().is_ident(direction))
+    })
+}
+
+fn scan_serialized_usize(file: &Path, syntax: &File, violations: &mut Vec<String>) {
+    use syn::visit::{self, Visit};
+
+    struct WireFields<'a> {
+        file: &'a Path,
+        violations: &'a mut Vec<String>,
+    }
+    impl WireFields<'_> {
+        fn fields(
+            &mut self,
+            name: &syn::Ident,
+            attrs: &[Attribute],
+            variant_attrs: &[Attribute],
+            fields: &syn::Fields,
+        ) {
+            let serializes =
+                has_derive(attrs, "Serialize") && !serde_skips(variant_attrs, "skip_serializing");
+            let deserializes = has_derive(attrs, "Deserialize")
+                && !serde_skips(variant_attrs, "skip_deserializing");
+            if !serializes && !deserializes {
+                return;
+            }
+            for field in fields {
+                if has_cfg_test_attr(&field.attrs) {
+                    continue;
+                }
+                let on_wire = (serializes && !serde_skips(&field.attrs, "skip_serializing"))
+                    || (deserializes && !serde_skips(&field.attrs, "skip_deserializing"));
+                if !on_wire {
+                    continue;
+                }
+                struct Widths(Vec<Span>);
+                impl<'ast> Visit<'ast> for Widths {
+                    fn visit_type_path(&mut self, ty: &'ast syn::TypePath) {
+                        // PhantomData's generic arguments have no wire representation.
+                        let path: Vec<_> = ty
+                            .path
+                            .segments
+                            .iter()
+                            .map(|part| part.ident.to_string())
+                            .collect();
+                        if path == ["PhantomData"]
+                            || path == ["std", "marker", "PhantomData"]
+                            || path == ["core", "marker", "PhantomData"]
+                        {
+                            return;
+                        }
+                        if path == ["usize"]
+                            || path == ["std", "primitive", "usize"]
+                            || path == ["core", "primitive", "usize"]
+                        {
+                            self.0.push(ty.span());
+                        }
+                        visit::visit_type_path(self, ty);
+                    }
+                }
+                let mut widths = Widths(Vec::new());
+                widths.visit_type(&field.ty);
+                for span in widths.0 {
+                    self.violations.push(format_violation(self.file, span, format!("serialized type `{name}` may not use `usize` fields; use a fixed-width integer")));
+                }
             }
         }
     }
-}
-
-fn has_serialize_derive(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("derive") {
-            return false;
+    impl<'ast> Visit<'ast> for WireFields<'_> {
+        fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+            if !has_cfg_test_attr(&item.attrs) {
+                visit::visit_item_mod(self, item);
+            }
         }
-        match &attr.meta {
-            Meta::List(list) => list.tokens.to_string().contains("Serialize"),
-            _ => false,
+        fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+            if !has_cfg_test_attr(&item.attrs)
+                && !item.attrs.iter().any(|attr| {
+                    attr.path()
+                        .segments
+                        .last()
+                        .is_some_and(|part| part.ident == "test")
+                })
+            {
+                visit::visit_item_fn(self, item);
+            }
         }
-    })
+        fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+            if !has_cfg_test_attr(&item.attrs) {
+                visit::visit_item_impl(self, item);
+            }
+        }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            if !has_cfg_test_attr(&item.attrs) {
+                visit::visit_impl_item_fn(self, item);
+            }
+        }
+        fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+            if !has_cfg_test_attr(&item.attrs) {
+                visit::visit_item_trait(self, item);
+            }
+        }
+        fn visit_trait_item_fn(&mut self, item: &'ast syn::TraitItemFn) {
+            if !has_cfg_test_attr(&item.attrs) {
+                visit::visit_trait_item_fn(self, item);
+            }
+        }
+        fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+            if !has_cfg_test_attr(&item.attrs) {
+                self.fields(&item.ident, &item.attrs, &[], &item.fields);
+            }
+        }
+        fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+            if has_cfg_test_attr(&item.attrs) {
+                return;
+            }
+            for variant in &item.variants {
+                if !has_cfg_test_attr(&variant.attrs) && !serde_skips(&variant.attrs, "skip") {
+                    self.fields(&item.ident, &item.attrs, &variant.attrs, &variant.fields);
+                }
+            }
+        }
+    }
+    WireFields { file, violations }.visit_file(syntax);
 }
 
 fn maybe_flag_constant_without_units(
@@ -1466,6 +1581,79 @@ mod tests {
         is_frontend_portability_path, is_frontend_task_owner_adapter_path,
         is_semantic_bridge_contract_path,
     };
+
+    fn wire_violations(source: &str) -> Vec<String> {
+        let syntax = syn::parse_file(source).unwrap();
+        let mut violations = Vec::new();
+        super::scan_serialized_usize(
+            std::path::Path::new("crates/example/src/wire.rs"),
+            &syntax,
+            &mut violations,
+        );
+        violations
+    }
+
+    #[test]
+    fn serialized_width_checks_enum_fields_and_nested_containers() {
+        let violations = wire_violations(
+            r#"
+            #[derive(serde::Serialize, serde::Deserialize)]
+            enum Reply { Named { count: usize }, Tuple(Option<Vec<usize>>), Qualified(core::primitive::usize), Fixed(u64) }
+            mod nested {
+                #[derive(Serialize)]
+                struct Wire { counts: std::collections::BTreeMap<String, usize> }
+            }
+        "#,
+        );
+        assert_eq!(violations.len(), 4, "{violations:?}");
+    }
+
+    #[test]
+    fn serialized_width_checks_only_actual_wire_values() {
+        let violations = wire_violations(
+            r#"
+            #[derive(Serialize, Deserialize)]
+            struct Wire<T> {
+                #[serde(skip)] internal: usize,
+                marker: std::marker::PhantomData<usize>,
+                generic: T,
+                fixed: Option<u32>,
+                #[serde(skip_serializing)] input_count: usize,
+            }
+            #[derive(Serialize)]
+            struct Output { #[serde(skip_serializing)] internal: usize }
+            #[derive(Deserialize)]
+            struct Input { #[serde(skip_deserializing)] internal: usize }
+            #[derive(NotSerialize)]
+            struct Internal { count: usize }
+            #[derive(Serialize)]
+            enum OutputVariant { #[serde(skip_serializing)] Internal(usize), Fixed(u64) }
+            #[derive(Serialize, Deserialize)]
+            enum Reply { #[serde(skip)] Internal(usize), Fixed(u64) }
+        "#,
+        );
+        assert_eq!(violations.len(), 1, "{violations:?}");
+    }
+
+    #[test]
+    fn serialized_width_test_scope_requires_positive_test_cfg() {
+        let violations = wire_violations(
+            r#"
+            #[cfg(all(test, feature = "fixture"))]
+            mod fixture { #[derive(Serialize)] struct Wire { count: usize } }
+            #[cfg(any(test, unix))]
+            mod mixed { #[derive(Serialize)] struct Wire { count: usize } }
+            #[cfg(not(test))]
+            #[derive(Serialize)] struct Production { count: usize }
+            #[cfg(test)]
+            #[derive(Serialize)] struct Fixture { count: usize }
+            // A preceding fixture does not exempt the rest of this file.
+            #[derive(Serialize)] struct Later { count: usize }
+            mod tests { #[derive(Serialize)] struct NotTestScoped { count: usize } }
+        "#,
+        );
+        assert_eq!(violations.len(), 4, "{violations:?}");
+    }
 
     #[test]
     fn frontend_portability_scope_covers_shared_frontend_owners() {

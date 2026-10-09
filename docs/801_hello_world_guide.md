@@ -392,6 +392,8 @@ A running node, the TUI or `aura serve`, also listens on an owner-only local soc
 
 The protocol schema is published at `crates/aura-terminal/schema/aura-rpc-v1.json`, generated from the request and response types and kept in sync by `just ci-rpc-schema`.
 
+RPC response counts use unsigned 64-bit integers. Chat history and search limits use unsigned 32-bit integers, checked before conversion to the workflow's local collection limit. These ranges are the same on native and browser-sized targets. Subscription event payloads use `serde_json::Value`, whose numeric representation already bounds their counts independently of pointer width.
+
 The first line written is a hello line with the protocol version, methods and event topics. Each response carries the request's `id` and the same `result` or `error` that `aura --json` prints. After `subscribe`, event lines (`{"type":"event","topic":"messages",...}`) interleave with responses; a subscriber that falls behind gets one `resync` event with a fresh snapshot. The session ends on EOF or `{"method":"shutdown"}`.
 
 Command output is printed plainly. Add `-v` to also print runtime diagnostics.

@@ -197,17 +197,17 @@ pub enum RuntimeFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         manifest_transfer: Option<super::EnrollmentManifestTransferInput>,
         device_name: Option<String>,
-        code_len: Option<usize>,
+        code_len: Option<u64>,
         code: Option<String>,
     },
     DeviceEnrollmentAccepted {
         device_id: Option<String>,
         device_name: Option<String>,
-        device_count: Option<usize>,
+        device_count: Option<u64>,
     },
     ContactLinkReady {
         authority_id: Option<String>,
-        contact_count: Option<usize>,
+        contact_count: Option<u64>,
     },
     HomeCreated {
         name: String,
