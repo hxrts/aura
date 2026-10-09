@@ -171,25 +171,6 @@ impl MfaPolicyUpdated {
     }
 }
 
-/// Result of updating channel mode.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChannelModeUpdated {
-    /// Channel ID that was updated
-    pub channel_id: String,
-    /// Mode flags that were applied
-    pub flags: String,
-}
-
-impl ChannelModeUpdated {
-    /// Create a new channel mode update result.
-    pub fn new(channel_id: impl Into<String>, flags: impl Into<String>) -> Self {
-        Self {
-            channel_id: channel_id.into(),
-            flags: flags.into(),
-        }
-    }
-}
-
 /// Result of changing context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextChanged {
@@ -343,13 +324,6 @@ mod tests {
 
         let disabled = MfaPolicyUpdated::new(false);
         assert!(!disabled.require_mfa);
-    }
-
-    #[test]
-    fn test_channel_mode_updated() {
-        let update = ChannelModeUpdated::new("chan-123", "+m+s");
-        assert_eq!(update.channel_id, "chan-123");
-        assert_eq!(update.flags, "+m+s");
     }
 
     #[test]

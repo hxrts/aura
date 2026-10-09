@@ -225,8 +225,8 @@ pub mod types {
     };
     // Operation result types
     pub use crate::views::operations::{
-        ChannelModeUpdated, ContextChanged, DeviceEnrollmentStarted, DeviceRemovalStarted,
-        ExportedInvitation, ImportedInvitation, MfaPolicyUpdated, NicknameUpdated, OperationError,
+        ContextChanged, DeviceEnrollmentStarted, DeviceRemovalStarted, ExportedInvitation,
+        ImportedInvitation, MfaPolicyUpdated, NicknameUpdated, OperationError,
     };
     // Wizard step types
     pub use crate::effects::reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
