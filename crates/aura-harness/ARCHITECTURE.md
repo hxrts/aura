@@ -32,6 +32,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - `executor.rs` — Semantic and compatibility scenario execution with deterministic budgets.
 - `replay.rs` — Replay bundle validation and typed response conformance.
 - `preflight.rs` — Capability, binary, storage, port, and SSH baseline checks plus semantic-lane admission.
+- `scripts/harness/lan/` — External process tooling: one kernel lifecycle owner serializes driver start/stop/finish and exact-token batch finalization. Launch identities bind the token, PID birth, executable and checkout; unknown ownership retains evidence without signalling. Batch interruption drains its owned command before independently finalizing both hosts. This infrastructure ownership never authors semantic business completion.
 - `backend/` — Local PTY and SSH backend adapters.
 
 ## Invariants

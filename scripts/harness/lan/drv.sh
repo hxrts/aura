@@ -7,6 +7,8 @@
 #                                send a request, print the matching response line
 #   drv.sh stop                  shut down the REPL and its children
 #   drv.sh finish success|failed record outcome after evidence capture
+#   drv.sh finalize <token> success|failed
+#                                stop and finish only the exact owned batch
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=env.sh
@@ -30,15 +32,43 @@ RETENTION_ROOT_FILE=$D/retention-root
 RETENTION_RUN_FILE=$D/retention-run-id
 RETENTION_TOOL=$AURA_E2E_ROOT/scripts/dev/retain-e2e-runs.sh
 
+# Keep one persistent lock inode outside the replaceable run directory. Kernel
+# custody releases dead holders; a leftover file does not constitute a lock.
+# FD9 is closed on the background service so it cannot retain this short owner.
+case "${1:-}" in
+  start|stop|finish|finalize)
+    mkdir -p "$(dirname "$D")"
+    lifecycle_lock="$D.lifecycle.lock"
+    [[ ! -L "$lifecycle_lock" ]] || { echo 'LAN lifecycle lock is a symlink; refusing mutation' >&2; exit 1; }
+    exec 9>>"$lifecycle_lock"
+    case "$(uname -s)" in
+      Darwin) /usr/bin/lockf -t 0 9 ;;
+      Linux) flock -n 9 ;;
+      *) echo 'unsupported LAN lifecycle lock platform; refusing mutation' >&2; exit 1 ;;
+    esac || { echo 'another LAN lifecycle owner holds the lock; refusing mutation' >&2; exit 1; }
+    ;;
+esac
+
+require_run_token() {
+  local expected=$1
+  [[ "$expected" =~ ^[a-z0-9][a-z0-9-]*$ && ${#expected} -ge 16 &&
+     -f "$RETENTION_RUN_FILE" && ! -L "$RETENTION_RUN_FILE" &&
+     "$(cat "$RETENTION_RUN_FILE")" == "$expected" ]] || {
+    echo 'batch run identity is absent or different; retaining state without signalling' >&2; return 1;
+  }
+}
+
 # PID presence is insufficient authority to signal a process: the PID may
 # have been reused. Keep the launch birth and exact command/cwd evidence.
 process_birth() { LC_ALL=C ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
 process_cwd() { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1; }
 verify_repl_identity() {
-  local pid=$1 birth expected_birth expected_exe expected_config cwd args
+  local pid=$1 birth expected_birth expected_exe expected_config cwd args run_token
   [[ "$pid" =~ ^[1-9][0-9]*$ && -f "$IDENTITY" ]] || return 1
+  run_token=$(cat "$RETENTION_RUN_FILE") || return 1
   jq -e --argjson pid "$pid" --arg root "$physical_repo" \
-    '.pid==$pid and .checkout==$root' "$IDENTITY" >/dev/null || return 1
+    --arg token "$run_token" \
+    '.pid==$pid and .checkout==$root and .run_token==$token' "$IDENTITY" >/dev/null || return 1
   birth=$(process_birth "$pid") || return 1
   expected_birth=$(jq -er '.birth' "$IDENTITY") || return 1
   [[ -n "$birth" && "$birth" == "$expected_birth" ]] || return 1
@@ -51,6 +81,50 @@ verify_repl_identity() {
   # Both shapes require the exact launched binary and config, never a basename.
   [[ "$args" == "$expected_exe --config $expected_config "* || \
      "$args" == *"bash $expected_exe --config $expected_config "* ]]
+}
+
+stop_owned_run() {
+  local expected=${1:-} repl_pid
+  [[ -z "$expected" ]] || require_run_token "$expected"
+  if [[ -f "$PIDF" ]]; then
+    repl_pid=$(cat "$PIDF")
+    verify_repl_identity "$repl_pid" || {
+      echo 'LAN PID ownership is missing/stale/mismatched; retaining state without signalling' >&2; return 1;
+    }
+    # TERM enters the REPL's shared stop_all owner. Revalidate exact batch and
+    # PID birth/cwd/executable together immediately before signalling.
+    [[ -z "$expected" ]] || require_run_token "$expected"
+    verify_repl_identity "$repl_pid" || return 1
+    kill -TERM "$repl_pid"
+    for _ in {1..20}; do
+      kill -0 "$repl_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$repl_pid" 2>/dev/null; then
+      echo "LAN REPL $repl_pid did not stop; retaining active run state" >&2
+      return 1
+    fi
+  elif [[ -f "$IDENTITY" ]]; then
+    echo 'LAN launch identity exists without PID state; retaining evidence for inspection' >&2; return 1
+  fi
+  require_no_owned_harness
+  [[ -z "$expected" ]] || require_run_token "$expected"
+  rm -f "$PIDF" "$IDENTITY"
+  echo stopped
+}
+
+finish_owned_run() {
+  local outcome=$1 expected=${2:-} run_token runs_root
+  [[ "$outcome" == success || "$outcome" == failed ]] || { echo 'finish outcome must be success or failed' >&2; return 2; }
+  require_no_owned_harness
+  [[ ! -f "$PIDF" && ! -f "$IDENTITY" ]] || { echo 'stop the LAN driver before recording an outcome' >&2; return 1; }
+  [[ -f "$RETENTION_ROOT_FILE" && -f "$RETENTION_RUN_FILE" ]] || {
+    echo 'this LAN run has no retention metadata; inspect it manually' >&2; return 1;
+  }
+  run_token=$(cat "$RETENTION_RUN_FILE")
+  runs_root=$(cat "$RETENTION_ROOT_FILE")
+  [[ -z "$expected" ]] || require_run_token "$expected"
+  bash "$RETENTION_TOOL" --root "$runs_root" finish "$run_token" "$outcome"
 }
 owned_harness_processes() {
   local pid executable cwd open_path name process_list
@@ -81,7 +155,9 @@ owned_harness_processes() {
 }
 require_no_owned_harness() {
   local active
-  active=$(owned_harness_processes) || return 1
+  # Read-only inspection does not own lifecycle mutation. Avoid leaving a
+  # descriptor owner in its command-substitution shell if this driver dies.
+  active=$(exec 9>&-; owned_harness_processes) || return 1
   [[ -z "$active" ]] || {
     echo "owned LAN harness processes remain ($active); retaining state, inspect their exact ownership before recovery" >&2; return 1;
   }
@@ -150,13 +226,13 @@ start)
   # Hold the FIFO open so the REPL never sees EOF.
   nohup bash -c 'exec 3<>"$1"; exec nice -n 5 "$2" --config "$3" --idle-timeout-ms 0 <&3' \
     lan-tool-repl "$FIFO" "$AURA_E2E_TOOL_REPL" "$2" \
-    >"$OUT" 2>"$D/repl.err" </dev/null &
+    >"$OUT" 2>"$D/repl.err" </dev/null 9>&- &
   repl_pid=$!
   birth=$(process_birth "$repl_pid")
   [[ -n "$birth" ]] || { echo 'LAN process exited before launch identity was captured' >&2; exit 1; }
   jq -cn --argjson pid "$repl_pid" --arg birth "$birth" --arg checkout "$physical_repo" \
-    --arg executable "$AURA_E2E_TOOL_REPL" --arg config "$2" \
-    '{pid:$pid,birth:$birth,checkout:$checkout,executable:$executable,config:$config}' > "$IDENTITY"
+    --arg executable "$AURA_E2E_TOOL_REPL" --arg config "$2" --arg token "$AURA_E2E_RUN_TOKEN" \
+    '{pid:$pid,birth:$birth,checkout:$checkout,executable:$executable,config:$config,run_token:$token}' > "$IDENTITY"
   printf '%s\n' "$repl_pid" > "$PIDF"
   echo "started pid $repl_pid"
   ;;
@@ -194,39 +270,17 @@ req)
   echo "TIMEOUT id=$n" >&2; exit 1
   ;;
 stop)
-  if [[ -f "$PIDF" ]]; then
-    repl_pid=$(cat "$PIDF")
-    verify_repl_identity "$repl_pid" || {
-      echo 'LAN PID ownership is missing/stale/mismatched; retaining state without signalling' >&2; exit 1;
-    }
-    # ctrlc's termination feature routes TERM through the REPL's existing
-    # stop_all owner. Never signal arbitrary children or a process group.
-    verify_repl_identity "$repl_pid" || exit 1
-    kill -TERM "$repl_pid"
-    for _ in {1..20}; do
-      kill -0 "$repl_pid" 2>/dev/null || break
-      sleep 0.1
-    done
-    if kill -0 "$repl_pid" 2>/dev/null; then
-      echo "LAN REPL $repl_pid did not stop; retaining active run state" >&2
-      exit 1
-    fi
-  elif [[ -f "$IDENTITY" ]]; then
-    echo 'LAN launch identity exists without PID state; retaining evidence for inspection' >&2; exit 1
-  fi
-  require_no_owned_harness
-  rm -f "$PIDF" "$IDENTITY"
-  echo stopped
+  stop_owned_run
   ;;
 finish)
   [[ "${2:-}" == success || "${2:-}" == failed ]] || { echo 'usage: drv.sh finish success|failed' >&2; exit 2; }
-  require_no_owned_harness
-  [[ ! -f "$PIDF" && ! -f "$IDENTITY" ]] || { echo 'stop the LAN driver before recording an outcome' >&2; exit 1; }
-  [[ -f "$RETENTION_ROOT_FILE" && -f "$RETENTION_RUN_FILE" ]] || {
-    echo 'this LAN run has no retention metadata; inspect it manually' >&2; exit 1;
-  }
-  bash "$RETENTION_TOOL" --root "$(cat "$RETENTION_ROOT_FILE")" \
-    finish "$(cat "$RETENTION_RUN_FILE")" "$2"
+  finish_owned_run "$2"
   ;;
-*) echo "usage: $0 start <config>|req <json> [timeout]|stop|finish success|failed" >&2; exit 2;;
+finalize)
+  [[ $# == 3 && ( "$3" == success || "$3" == failed ) ]] || { echo 'usage: drv.sh finalize <expected-token> success|failed' >&2; exit 2; }
+  require_run_token "$2"
+  stop_owned_run "$2"
+  finish_owned_run "$3" "$2"
+  ;;
+*) echo "usage: $0 start <config>|req <json> [timeout]|stop|finish success|failed|finalize <token> success|failed" >&2; exit 2;;
 esac
