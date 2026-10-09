@@ -21,19 +21,14 @@ local_config="${AURA_E2E_LOCAL_CONFIG:-configs/harness/lan-host-a.toml}"
 remote_config="${AURA_E2E_REMOTE_CONFIG:-configs/harness/lan-host-b.toml}"
 remote_nix="${AURA_E2E_REMOTE_NIX:-/nix/var/nix/profiles/default/bin/nix}"
 
-"$AURA_E2E_DRV" stop >/dev/null 2>&1 || true
-ssh "$AURA_E2E_REMOTE" "cd $AURA_E2E_REMOTE_ROOT && scripts/harness/lan/drv.sh stop >/dev/null 2>&1; \
-  AURA_E2E_RUN_TOKEN=$AURA_E2E_RUN_TOKEN $remote_nix develop --command \
-  scripts/harness/lan/drv.sh start $remote_config" | tail -1
+"$AURA_E2E_DRV" stop
+printf -v remote_command 'cd %q && scripts/harness/lan/drv.sh stop && AURA_E2E_RUN_TOKEN=%q %q develop --command scripts/harness/lan/drv.sh start %q' \
+  "$AURA_E2E_REMOTE_ROOT" "$AURA_E2E_RUN_TOKEN" "$remote_nix" "$remote_config"
+ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "$remote_command" | tail -1
 (cd "$AURA_E2E_ROOT" && nix develop --command "$AURA_E2E_DRV" start "$local_config" | tail -1)
 
-for inst in alex-tui barbara-tui alex-tui2; do
-  until [ "$(st "$inst" .screen 2>/dev/null)" = '"onboarding"' ]; do sleep 5; done
-done
-a=$(onboard_tui alex-tui Alex); b=$(onboard_tui barbara-tui Barbara); c=$(onboard_tui alex-tui2 Carol)
+a=$(onboard alex-tui Alex); b=$(onboard barbara-tui Barbara); c=$(onboard alex-tui2 Carol)
 echo "A=$a B=$b C=$c" | tee "$AURA_E2E_RUN_DIR/ids-$AURA_E2E_RUN_TOKEN"
-sleep 10
 link alex-tui barbara-tui
 link alex-tui alex-tui2
-sleep 15
 contacts alex-tui; contacts barbara-tui; contacts alex-tui2

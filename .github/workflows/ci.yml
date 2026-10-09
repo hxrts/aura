@@ -32,8 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: build-cache-policy
       - run: nix develop .#ci --command just ci-build-cache-policy
       - name: Failure bundle
         if: failure()
@@ -48,8 +46,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: format
       - run: nix develop .#ci --command just ci-format
       - name: Failure bundle
         if: failure()
@@ -64,9 +60,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: clippy
-          enable-store-cache: false
       - run: nix develop .#ci --command just ci-clippy
       - name: Failure bundle
         if: failure()
@@ -81,8 +74,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: build
       - run: nix develop .#ci --command just ci-build
       - name: Failure bundle
         if: failure()
@@ -97,8 +88,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: arch
       - run: nix develop .#ci --command just check-arch --quick
       - name: Failure bundle
         if: failure()
@@ -113,8 +102,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: security-audit
       - run: nix develop .#ci --command just ci-security-audit
       - name: Failure bundle
         if: failure()
@@ -129,8 +116,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: user-flow-coverage
       - run: nix develop .#ci --command just ci-user-flow-coverage
       - name: Failure bundle
         if: failure()
@@ -147,8 +132,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: user-flow-policy
       - run: nix develop .#ci --command just ci-user-flow-policy
       - name: Failure bundle
         if: failure()
@@ -172,8 +155,6 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY/CodeQL" || true
           df -h
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: shared-flow-policy
       - run: nix develop .#ci --command just ci-shared-flow-policy
         env:
           CARGO_BUILD_JOBS: 4
@@ -195,9 +176,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: test
-          enable-store-cache: false
       - name: Create swap space
         run: |
           if [ -f /swapfile ]; then

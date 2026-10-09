@@ -38,6 +38,19 @@ fn signals_runtime_boundary(error: aura_core::AuraError) -> RuntimeBridgeError {
 }
 
 impl AppCore {
+    /// Attach the graph receiver before returning a frontend subscription.
+    /// Callers may read their initial snapshot or declare subscription health
+    /// only after this future completes, closing the subscribe/read race.
+    pub async fn subscribe_attached<T>(
+        &self,
+        signal: &Signal<T>,
+    ) -> Result<SignalStream<T>, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.subscribe_attached(signal).await
+    }
+
     /// Initialize all application signals with default values.
     pub(super) async fn ensure_signals_registered(&mut self) -> Result<(), RuntimeBridgeError> {
         if let Some(runtime) = self.runtime.as_ref() {
@@ -251,5 +264,41 @@ impl ReactiveEffects for AppCore {
 
     async fn invalidate_queries(&self, changed: &FactPredicate) {
         self.reactive.invalidate_queries(changed).await;
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod attached_subscription_tests {
+    use super::*;
+    use crate::AppConfig;
+
+    #[tokio::test]
+    async fn attached_subscription_receives_the_first_immediate_update() {
+        let core = AppCore::new(AppConfig::default()).unwrap();
+        let signal = Signal::new("attached_subscription_immediate_update");
+        core.register(&signal, String::new()).await.unwrap();
+        let mut stream = core.subscribe_attached(&signal).await.unwrap();
+        assert_eq!(
+            core.reactive().graph().subscriber_count(signal.id()).await,
+            1
+        );
+        core.emit(&signal, "first-update".to_string())
+            .await
+            .unwrap();
+        assert_eq!(stream.recv().await.unwrap(), "first-update");
+    }
+
+    #[tokio::test]
+    async fn attached_subscription_rejects_unregistered_signals() {
+        let core = AppCore::new(AppConfig::default()).unwrap();
+        let signal = Signal::<String>::new("attached_subscription_unregistered");
+        assert!(matches!(
+            core.subscribe_attached(&signal).await,
+            Err(ReactiveError::SignalNotFound { .. })
+        ));
+        assert_eq!(
+            core.reactive().graph().subscriber_count(signal.id()).await,
+            0
+        );
     }
 }

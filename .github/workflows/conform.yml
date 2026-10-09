@@ -27,8 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: conformance
       - name: Verify policy wiring
         run: nix develop .#ci --command just ci-conformance-policy
       - name: Run conformance gate
@@ -59,8 +57,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: itf-conformance
       - run: nix develop .#ci --command just ci-conformance-itf
       - name: Failure bundle
         if: failure()
@@ -75,8 +71,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: differential
       - name: Build Lean oracle
         run: nix develop --command just lean-oracle-build
       - name: Run differential tests
@@ -94,8 +88,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: choreo-parity
       - name: Run parity gates
         run: nix develop .#ci --command just ci-choreo-parity
         env:
@@ -120,8 +112,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: property-monitor
       - name: Run property-monitored simulations
         run: nix develop .#ci --command just ci-property-monitor
       - name: Upload property artifacts
@@ -144,8 +134,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: effects
       - run: nix develop .#ci --command just ci-effects
       - name: Failure bundle
         if: failure()
@@ -160,8 +148,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: agent-wasm
       - name: Check WASM backends
         run: nix develop .#ci --command just ci-agent-wasm
         env:

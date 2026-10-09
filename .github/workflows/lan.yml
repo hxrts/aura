@@ -22,8 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: lan-smoke
       - run: nix develop --command just ci-lan-smoke
       - name: Failure bundle
         if: failure()
@@ -39,8 +37,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: lan-deep
       - run: nix develop --command just ci-lan-deep
       - name: Failure bundle
         if: failure()

@@ -1,15 +1,5 @@
 name: Setup Nix
-description: Install Nix with disk cleanup and caching
-
-inputs:
-  cache-name:
-    description: Cache key suffix for Nix store
-    required: false
-    default: default
-  enable-store-cache:
-    description: Whether to restore/save the shared /nix/store cache
-    required: false
-    default: "true"
+description: Install Nix with disk cleanup and binary substitution
 
 runs:
   using: composite
@@ -67,20 +57,10 @@ runs:
           keep-derivations = false
           keep-outputs = false
 
-    - name: Cache Nix store
-      if: inputs.enable-store-cache == 'true'
-      uses: actions/cache@v4
-      with:
-        path: /nix/store
-        key: ${{ runner.os }}-nix-${{ inputs.cache-name }}-${{ hashFiles('flake.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-nix-${{ inputs.cache-name }}-
-          ${{ runner.os }}-nix-
-
     - name: Garbage collect Nix store
       shell: bash
       run: |
-        # Remove unreachable store paths to save space before/after caching
+        # Remove unreachable store paths to save space before CI builds
         nix-collect-garbage --delete-old || true
         echo "Disk space after Nix GC:"
         df -h /

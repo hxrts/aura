@@ -16,7 +16,8 @@ use aura_app::ui::contract::{
 use aura_app::ui_contract::ProjectionRevision;
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UiSnapshotEvent {
     pub snapshot: UiSnapshot,
     pub version: u64,

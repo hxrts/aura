@@ -873,6 +873,14 @@ impl HarnessCoordinator {
         Ok(Some(event))
     }
 
+    /// Exact coordinator-owned profile path for this configured instance.
+    pub fn instance_data_dir(&self, instance_id: &str) -> Result<&Path> {
+        self.instance_data_dirs
+            .get(instance_id)
+            .map(PathBuf::as_path)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))
+    }
+
     pub fn backend_kind(&self, instance_id: &str) -> Result<&'static str> {
         let backend = self
             .backends

@@ -36,6 +36,12 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Invariants
 
+- The LAN driver signals only a REPL whose retained birth, executable, config
+  and checkout identity match the live process. Missing or mismatched identity
+  and surviving checkout-owned harness IPC fail closed without discarding run
+  evidence. TERM enters the REPL's existing owned shutdown; arbitrary child
+  process signalling is forbidden.
+
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;
   raw authority IDs, demo autofill and discovery metadata cannot replace the
@@ -53,6 +59,15 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Instance isolation: each action is scoped by `instance_id` with unique `data_dir`.
 - Deterministic seeds: identical run config and seed produce identical seed bundles.
 - API compatibility: negotiation selects the highest shared tool API version or fails closed.
+- Serialized `submit_semantic_command` accepts a typed shared intent and derives
+  its canonical contract once at the tool boundary. It returns the original
+  submission receipt, operation-instance handle, value, and canonical contract.
+  Required handles are checked against that contract; immediate account creation
+  uses the new shell readiness/screen postcondition rather than its old handle.
+  `instance_metadata` exposes the exact coordinator-owned profile path without
+  opening or modifying it. Serialized
+  `wait_for_ui_snapshot_event` preserves the pushed snapshot and backend version;
+  an absent event is a bounded observation timeout, never semantic success.
 - Monotonic event identifiers: event stream IDs strictly increase and preserve append-only ordering.
 - Bounded execution: step and global scenario budgets cap execution time with diagnostic timeouts.
 - Secure SSH defaults: strict host key checking stays enabled with enforced fingerprint policy.
@@ -219,6 +234,7 @@ cargo test -p aura-harness
 
 | What breaks if wrong | Invariant | Test location | Status |
 |---------------------|-----------|--------------|--------|
+| LAN automation loses operation identity, resets its deadline, or treats a timeout as success | ObservationUsesAuthoritativeSemanticState | `src/tool_api.rs` tests; `scripts/harness/lan/test-semantic.sh` | Covered |
 | Tool API maps wrong operation | DeterministicReplayInputs | `tests/phases/phase1_tool_api.rs` | Covered |
 | State machine invalid transition | SharedFlowExecutionIsSemantic | `tests/phases/phase3_state_machine.rs` | Covered |
 | Reliability under failure | — | `tests/phases/phase4_reliability.rs` | Covered |

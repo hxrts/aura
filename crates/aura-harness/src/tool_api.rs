@@ -3,6 +3,7 @@
 //! Defines request/response types and dispatch logic for the harness tool API,
 //! enabling test clients to send input, capture screens, and query instance state.
 
+use aura_app::scenario_contract::{IntentAction, SharedActionContract, SubmissionContract};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -202,12 +203,57 @@ pub struct DiagnosticContactListPayload {
     pub diagnostic_toast: Option<ToastSnapshot>,
 }
 
+/// Original receipt with the canonical shared contract used for this submission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticCommandPayload {
+    #[serde(flatten)]
+    pub response: SemanticCommandResponse,
+    pub contract: SharedActionContract,
+}
+
+impl SemanticCommandPayload {
+    fn new(
+        contract: SharedActionContract,
+        response: SemanticCommandResponse,
+    ) -> anyhow::Result<Self> {
+        if let SubmissionContract::OperationHandle { operation_id, .. } = &contract.submission {
+            let handle = response.handle.ui_operation.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "semantic receipt is missing required operation handle {operation_id:?}"
+                )
+            })?;
+            anyhow::ensure!(
+                handle.id() == operation_id,
+                "semantic receipt operation handle does not match canonical contract"
+            );
+        }
+        Ok(Self { response, contract })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstanceMetadataPayload {
+    pub instance_id: String,
+    pub data_dir: std::path::PathBuf,
+}
+
+/// A bounded authoritative subscription wait; `None` is not semantic success.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiSnapshotEventPayload {
+    pub event: Option<UiSnapshotEvent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolPayload {
     Negotiation(ToolNegotiationPayload),
     DiagnosticScreenCapture(DiagnosticScreenCapture),
     UiSnapshot(Box<UiSnapshot>),
+    InstanceMetadata(InstanceMetadataPayload),
+    SemanticCommand(Box<SemanticCommandPayload>),
+    UiSnapshotEvent(Box<UiSnapshotEventPayload>),
     Status(ToolStatusPayload),
     ContactInvitationCreated(ContactInvitationCreatedPayload),
     TailLog(TailLogPayload),
@@ -238,6 +284,18 @@ pub enum ToolRequest {
     },
     UiState {
         instance_id: String,
+    },
+    InstanceMetadata {
+        instance_id: String,
+    },
+    SubmitSemanticCommand {
+        instance_id: String,
+        intent: IntentAction,
+    },
+    WaitForUiSnapshotEvent {
+        instance_id: String,
+        timeout_ms: u64,
+        after_version: Option<u64>,
     },
     SendKeys {
         instance_id: String,
@@ -457,6 +515,38 @@ impl ToolApi {
                 .coordinator
                 .ui_snapshot(&instance_id)
                 .map(|snapshot| ToolPayload::UiSnapshot(Box::new(snapshot))),
+            ToolRequest::InstanceMetadata { instance_id } => self
+                .coordinator
+                .instance_data_dir(&instance_id)
+                .map(|data_dir| {
+                    ToolPayload::InstanceMetadata(InstanceMetadataPayload {
+                        instance_id: instance_id.clone(),
+                        data_dir: data_dir.to_path_buf(),
+                    })
+                }),
+            ToolRequest::SubmitSemanticCommand {
+                instance_id,
+                intent,
+            } => {
+                let request = SemanticCommandRequest::new(intent);
+                let contract = request.contract.clone();
+                self.submit_semantic_command(&instance_id, request)
+                    .and_then(|response| SemanticCommandPayload::new(contract, response))
+                    .map(|payload| ToolPayload::SemanticCommand(Box::new(payload)))
+            }
+            ToolRequest::WaitForUiSnapshotEvent {
+                instance_id,
+                timeout_ms,
+                after_version,
+            } => self
+                .wait_for_ui_snapshot_event(
+                    &instance_id,
+                    Duration::from_millis(timeout_ms),
+                    after_version,
+                )
+                .map(|event| {
+                    ToolPayload::UiSnapshotEvent(Box::new(UiSnapshotEventPayload { event }))
+                }),
             ToolRequest::SendKeys { instance_id, keys } => {
                 self.coordinator.send_keys(&instance_id, &keys).map(|_| {
                     ToolPayload::Status(ToolStatusPayload {
@@ -691,6 +781,234 @@ impl ToolApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lan_semantic_driver_regression_fixtures() {
+        use aura_app::scenario_contract::{SemanticSubmissionHandle, UiOperationHandle};
+        use aura_app::ui::contract::{OperationId, OperationInstanceId};
+
+        let receipt = |intent: IntentAction, operation_id: OperationId| {
+            let mut response = SemanticCommandResponse::accepted_without_value();
+            response.handle = SemanticSubmissionHandle {
+                ui_operation: Some(UiOperationHandle::new(
+                    operation_id,
+                    OperationInstanceId("original-7".into()),
+                )),
+            };
+            serde_json::to_string(&ToolResponse::Ok {
+                payload: ToolPayload::SemanticCommand(Box::new(
+                    SemanticCommandPayload::new(intent.contract(), response)
+                        .expect("canonical fixture receipt"),
+                )),
+            })
+            .expect("serialize real wire receipt")
+        };
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let output = std::process::Command::new("bash")
+            .arg(root.join("scripts/harness/lan/test-semantic.sh"))
+            .current_dir(&root)
+            .env("AURA_E2E_ROOT", &root)
+            .env(
+                "AURA_LAN_FIXTURE_RECEIPT",
+                receipt(
+                    IntentAction::AcceptContactInvitation {
+                        code: "original-code".into(),
+                    },
+                    OperationId::invitation_accept_contact(),
+                ),
+            )
+            .env(
+                "AURA_LAN_FIXTURE_IMMEDIATE_RECEIPT",
+                receipt(
+                    IntentAction::CreateAccount {
+                        account_name: "Alice".into(),
+                    },
+                    OperationId::account_create(),
+                ),
+            )
+            .env_remove("BASH_ENV")
+            .output()
+            .expect("run deterministic LAN driver fixtures");
+        assert!(
+            output.status.success(),
+            "LAN driver fixtures failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn semantic_wire_round_trip_preserves_intent_and_operation_instance() {
+        use aura_app::scenario_contract::{SemanticSubmissionHandle, UiOperationHandle};
+        use aura_app::ui::contract::{OperationId, OperationInstanceId};
+        let request = ToolRequest::SubmitSemanticCommand {
+            instance_id: "alice".into(),
+            intent: IntentAction::AcceptContactInvitation {
+                code: "original-code".into(),
+            },
+        };
+        let encoded = serde_json::to_string(&request).expect("encode request");
+        let decoded: ToolRequest = serde_json::from_str(&encoded).expect("decode request");
+        assert_eq!(decoded, request);
+        let mut receipt = SemanticCommandResponse::accepted_without_value();
+        receipt.handle = SemanticSubmissionHandle {
+            ui_operation: Some(UiOperationHandle::new(
+                OperationId::invitation_accept_contact(),
+                OperationInstanceId("original-instance-7".into()),
+            )),
+        };
+        let response = ToolResponse::Ok {
+            payload: ToolPayload::SemanticCommand(Box::new(
+                SemanticCommandPayload::new(
+                    IntentAction::AcceptContactInvitation {
+                        code: "code".into(),
+                    }
+                    .contract(),
+                    receipt,
+                )
+                .expect("matching receipt"),
+            )),
+        };
+        let encoded = serde_json::to_string(&response).expect("encode receipt");
+        let decoded: ToolResponse = serde_json::from_str(&encoded).expect("decode receipt");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn canonical_submission_contract_rejects_missing_or_wrong_operation_handle() {
+        use aura_app::scenario_contract::{SemanticSubmissionHandle, UiOperationHandle};
+        use aura_app::ui::contract::{OperationId, OperationInstanceId};
+        let contract = IntentAction::AcceptContactInvitation {
+            code: "code".into(),
+        }
+        .contract();
+        assert!(SemanticCommandPayload::new(
+            contract.clone(),
+            SemanticCommandResponse::accepted_without_value()
+        )
+        .is_err());
+        let mut wrong = SemanticCommandResponse::accepted_without_value();
+        wrong.handle = SemanticSubmissionHandle {
+            ui_operation: Some(UiOperationHandle::new(
+                OperationId::create_home(),
+                OperationInstanceId("wrong".into()),
+            )),
+        };
+        assert!(SemanticCommandPayload::new(contract, wrong).is_err());
+        let immediate = IntentAction::CreateAccount {
+            account_name: "Alice".into(),
+        }
+        .contract();
+        assert!(SemanticCommandPayload::new(
+            immediate,
+            SemanticCommandResponse::accepted_without_value()
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn snapshot_event_wire_preserves_backend_version_and_projection_revision() {
+        let mut snapshot = UiSnapshot::loading(aura_app::ui::contract::ScreenId::Neighborhood);
+        snapshot.revision.semantic_seq = 37;
+        snapshot.revision.render_seq = Some(42);
+        for event in [
+            Some(UiSnapshotEvent {
+                snapshot,
+                version: 91,
+            }),
+            None,
+        ] {
+            let response = ToolResponse::Ok {
+                payload: ToolPayload::UiSnapshotEvent(Box::new(UiSnapshotEventPayload { event })),
+            };
+            let encoded = serde_json::to_string(&response).expect("encode event");
+            let decoded: ToolResponse = serde_json::from_str(&encoded).expect("decode event");
+            assert_eq!(decoded, response);
+        }
+        let request = ToolRequest::WaitForUiSnapshotEvent {
+            instance_id: "alice".into(),
+            timeout_ms: 250,
+            after_version: Some(91),
+        };
+        let encoded = serde_json::to_string(&request).expect("encode wait");
+        assert_eq!(
+            serde_json::from_str::<ToolRequest>(&encoded).expect("decode wait"),
+            request
+        );
+    }
+
+    #[test]
+    fn instance_metadata_returns_exact_owned_profile_without_starting_runtime() {
+        let temp = tempfile::tempdir().expect("profile root");
+        let profile = temp.path().join("actor-profile");
+        let config: RunConfig = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "run": { "name": "metadata-tool-test", "artifact_dir": temp.path().join("artifacts") },
+            "instances": [{ "id": "alice", "mode": "local", "data_dir": profile, "bind_address": "127.0.0.1:41001" }],
+        })).expect("config");
+        let mut api =
+            ToolApi::new(HarnessCoordinator::from_run_config(&config).expect("coordinator"));
+        let response = api.handle_request(ToolRequest::InstanceMetadata {
+            instance_id: "alice".into(),
+        });
+        let expected = ToolResponse::Ok {
+            payload: ToolPayload::InstanceMetadata(InstanceMetadataPayload {
+                instance_id: "alice".into(),
+                data_dir: profile.clone(),
+            }),
+        };
+        assert_eq!(response, expected);
+        let encoded = serde_json::to_string(&response).expect("encode metadata");
+        assert_eq!(
+            serde_json::from_str::<ToolResponse>(&encoded).expect("decode metadata"),
+            expected
+        );
+        assert!(
+            !profile.exists(),
+            "metadata must not create or open a profile"
+        );
+    }
+
+    #[test]
+    fn semantic_wire_dispatch_fails_closed_and_records_exact_request() {
+        let temp = tempfile::tempdir().expect("dispatch fixture root");
+        let mut config: RunConfig = toml::from_str(
+            "schema_version = 1\ninstances = []\n[run]\nname = 'tool-wire-dispatch'\n",
+        )
+        .expect("config");
+        config.run.artifact_dir = Some(temp.path().join("artifacts"));
+        let mut api =
+            ToolApi::new(HarnessCoordinator::from_run_config(&config).expect("coordinator"));
+        for request in [
+            ToolRequest::InstanceMetadata {
+                instance_id: "missing".into(),
+            },
+            ToolRequest::SubmitSemanticCommand {
+                instance_id: "missing".into(),
+                intent: IntentAction::CreateAccount {
+                    account_name: "Alice".into(),
+                },
+            },
+            ToolRequest::WaitForUiSnapshotEvent {
+                instance_id: "missing".into(),
+                timeout_ms: 0,
+                after_version: Some(91),
+            },
+        ] {
+            let encoded = serde_json::to_string(&request).expect("encode request");
+            let decoded = serde_json::from_str(&encoded).expect("decode request");
+            let response = api.handle_request(decoded);
+            assert_eq!(
+                response,
+                ToolResponse::Error {
+                    message: "unknown instance_id: missing".into()
+                }
+            );
+            assert_eq!(
+                api.action_log().last(),
+                Some(&ToolActionRecord { request, response })
+            );
+        }
+    }
 
     #[test]
     fn diagnostic_screen_capture_serializes_explicit_diagnostic_field_names() {
