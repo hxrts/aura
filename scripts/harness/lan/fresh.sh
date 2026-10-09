@@ -5,8 +5,9 @@
 #
 # Usage: AURA_E2E_REMOTE=user@host scripts/harness/lan/fresh.sh <run-token>
 #
-# Both hosts need the same commit built (scripts/harness/lan/build.sh) and the
-# remote checkout at $AURA_E2E_REMOTE_ROOT. Each host renders its config with
+# Build on Host A and ship the exact commit's prebuilt binaries, web bundle,
+# and runtime Nix closure with scripts/harness/lan/ship.sh; do not build on Air.
+# The remote checkout is $AURA_E2E_REMOTE_ROOT. Each host renders its config with
 # its own LAN address (AURA_E2E_HOST_ADDR, detected by default). Settings: see
 # env.sh.
 set -euo pipefail

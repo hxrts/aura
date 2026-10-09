@@ -288,6 +288,7 @@
           ++ toolkitSupport.buildInputs
           # Linux-only: patchbay network simulation dependencies
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            util-linux # flock for tracked LAN lifecycle custody
             iproute2  # tc command for traffic control
             nftables  # nft command for NAT rules
             iptables  # iptables-legacy for some nftables compat
@@ -415,7 +416,8 @@
           ]
           ++ toolkitSupport.packages
           ++ toolkitCommands
-          ++ toolkitSupport.buildInputs;
+          ++ toolkitSupport.buildInputs
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ util-linux ];
 
           shellHook = ''
             ${toolkitSupport.shellHook}

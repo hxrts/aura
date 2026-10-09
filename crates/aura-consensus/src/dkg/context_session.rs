@@ -13,11 +13,12 @@ use super::frost_rounds::{participant_identifier, round_one, round_three, round_
 use super::types::DkgConfig;
 use aura_core::{AuraError, AuthorityId, Result};
 use frost_ed25519::keys::dkg::{round1, round2};
-use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
+use frost_ed25519::keys::{KeyPackage, PublicKeyPackage, VerifiableSecretSharingCommitment};
 use frost_ed25519::Identifier;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Seals and opens round-two packages between participants.
 #[async_trait::async_trait]
@@ -62,13 +63,57 @@ pub struct Outgoing {
     pub message: ContextDkgMessage,
 }
 
-/// The finished DKG for this participant.
-#[derive(Debug, Clone)]
+/// The finished native DKG for this exact participant and original config.
+/// Completion proves native key generation, not application policy approval.
+/// A caller cannot replace the retained threshold or participant mapping.
+///
+/// ```compile_fail,E0451
+/// use aura_consensus::dkg::context_session::ContextDkgOutput;
+/// fn forge() -> ContextDkgOutput {
+///     ContextDkgOutput {
+///         key_package: todo!(),
+///         public_key_package: todo!(),
+///         config: todo!(),
+///         participant: todo!(),
+///         vss_commitment: todo!(),
+///     }
+/// }
+/// ```
+#[derive(Debug)]
 pub struct ContextDkgOutput {
-    /// This participant's share and verifying material.
-    pub key_package: KeyPackage,
-    /// The group key and every participant's verifying share.
-    pub public_key_package: PublicKeyPackage,
+    key_package: KeyPackage,
+    public_key_package: PublicKeyPackage,
+    config: DkgConfig,
+    participant: AuthorityId,
+    vss_commitment: VerifiableSecretSharingCommitment,
+}
+
+impl ContextDkgOutput {
+    /// The original configuration consumed by this native session.
+    pub fn config(&self) -> &DkgConfig {
+        &self.config
+    }
+
+    /// The exact local participant whose native share completed.
+    pub fn participant(&self) -> AuthorityId {
+        self.participant
+    }
+
+    /// Borrow native private material for the sanctioned retention boundary.
+    pub fn key_package(&self) -> &KeyPackage {
+        &self.key_package
+    }
+
+    /// Borrow the original native public package without inferring a threshold.
+    pub fn public_key_package(&self) -> &PublicKeyPackage {
+        &self.public_key_package
+    }
+
+    /// Original aggregate polynomial commitment for audited share repair.
+    /// Its public package was checked against the original native output.
+    pub fn vss_commitment(&self) -> &VerifiableSecretSharingCommitment {
+        &self.vss_commitment
+    }
 }
 
 enum Phase {
@@ -85,6 +130,7 @@ pub struct ContextDkgSession {
     round_one: BTreeMap<Identifier, round1::Package>,
     round_two: BTreeMap<Identifier, round2::Package>,
     pending_round_two: Vec<ContextDkgMessage>,
+    own_commitment: VerifiableSecretSharingCommitment,
 }
 
 fn codec(error: impl std::fmt::Display) -> AuraError {
@@ -100,6 +146,7 @@ impl ContextDkgSession {
         rng: &mut R,
     ) -> Result<(Self, Outgoing)> {
         let (secret, package) = round_one(&config, me, rng)?;
+        let own_commitment = package.commitment().clone();
         let broadcast = Outgoing {
             to: config
                 .participants
@@ -121,6 +168,7 @@ impl ContextDkgSession {
                 round_one: BTreeMap::new(),
                 round_two: BTreeMap::new(),
                 pending_round_two: Vec::new(),
+                own_commitment,
             },
             broadcast,
         ))
@@ -236,12 +284,42 @@ impl ContextDkgSession {
             if self.round_two.len() == self.others() {
                 let (key_package, public_key_package) =
                     round_three(secret, &self.round_one, &self.round_two)?;
+                let commitments: Vec<_> = std::iter::once(&self.own_commitment)
+                    .chain(self.round_one.values().map(|package| package.commitment()))
+                    .collect();
+                let vss_commitment =
+                    frost_core::keys::sum_commitments(&commitments).map_err(|source| {
+                        AuraError::Crypto {
+                            message: "retain original context DKG commitment".into(),
+                            source: Some(Arc::new(source)),
+                        }
+                    })?;
+                let identifiers = public_key_package
+                    .verifying_shares()
+                    .keys()
+                    .copied()
+                    .collect();
+                let reconstructed =
+                    PublicKeyPackage::from_commitment(&identifiers, &vss_commitment).map_err(
+                        |source| AuraError::Crypto {
+                            message: "validate original context DKG commitment".into(),
+                            source: Some(Arc::new(source)),
+                        },
+                    )?;
+                if reconstructed != public_key_package {
+                    return Err(AuraError::invalid(
+                        "aggregate DKG commitment differs from original public package",
+                    ));
+                }
                 self.phase = Phase::Done;
                 return Ok((
                     outgoing,
                     Some(ContextDkgOutput {
                         key_package,
                         public_key_package,
+                        config: self.config.clone(),
+                        participant: self.me,
+                        vss_commitment,
                     }),
                 ));
             }
@@ -353,6 +431,63 @@ mod tests {
                 .iter()
                 .all(|output| output.public_key_package.verifying_key() == group));
         }
+    }
+
+    #[tokio::test]
+    async fn original_aggregate_commitment_repairs_the_exact_native_share() {
+        let original = config(2, 3);
+        let outputs = run(&original, true).await;
+        for (output, participant) in outputs.iter().zip(&original.participants) {
+            assert_eq!(output.config(), &original);
+            assert_eq!(output.participant(), *participant);
+            assert_eq!(output.vss_commitment(), outputs[0].vss_commitment());
+        }
+        let target = *outputs[2].key_package().identifier();
+        let helpers: Vec<_> = outputs[..2]
+            .iter()
+            .map(|output| *output.key_package().identifier())
+            .collect();
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(217);
+        let deltas: Vec<_> = outputs[..2]
+            .iter()
+            .map(|output| {
+                let share = frost_ed25519::keys::SecretShare::new(
+                    *output.key_package().identifier(),
+                    *output.key_package().signing_share(),
+                    output.vss_commitment().clone(),
+                );
+                frost_core::keys::repairable::repair_share_step_1(
+                    &helpers, &share, &mut rng, target,
+                )
+                .unwrap()
+            })
+            .collect();
+        let sigmas: Vec<_> = helpers
+            .iter()
+            .map(|helper| {
+                let received: Vec<_> = deltas.iter().map(|row| *row.get(helper).unwrap()).collect();
+                frost_core::keys::repairable::repair_share_step_2::<frost_ed25519::Ed25519Sha512>(
+                    &received,
+                )
+            })
+            .collect();
+        let repair = |target, commitment| {
+            frost_core::keys::repairable::repair_share_step_3::<frost_ed25519::Ed25519Sha512>(
+                &sigmas, target, commitment,
+            )
+        };
+        let repaired = KeyPackage::try_from(repair(target, outputs[0].vss_commitment())).unwrap();
+        assert_eq!(
+            repaired.signing_share(),
+            outputs[2].key_package().signing_share()
+        );
+        assert_eq!(
+            repaired.verifying_key(),
+            outputs[2].key_package().verifying_key()
+        );
+        assert!(KeyPackage::try_from(repair(helpers[0], outputs[0].vss_commitment())).is_err());
+        let foreign = run(&config(3, 3), false).await;
+        assert!(KeyPackage::try_from(repair(target, foreign[0].vss_commitment())).is_err());
     }
 
     #[tokio::test]
