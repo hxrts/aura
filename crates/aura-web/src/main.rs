@@ -400,7 +400,9 @@ mod tests {
         assert!(source.contains("write_signal_with_retry("));
         assert!(source.contains("\"clear importing_code after device enrollment import\""));
         assert!(source.contains("\"publish device enrollment import error\""));
-        assert!(source.contains("\"publish device enrollment scheduling error\""));
+        assert!(source.contains("shared_web_task_owner().spawn_local(async move"));
+        assert!(!source.contains("import_error.set(Some(error))"));
+        assert!(!source.contains("importing_code.set(false)"));
         assert!(source.contains("\"clear creating_account after account creation\""));
         assert!(source.contains("\"publish account creation error\""));
         assert!(!source.contains("let _ = importing_code.try_write().map"));

@@ -1,5 +1,10 @@
 # Testing Guide
 
+Browser onboarding regressions must check guarded signal writes after async
+enrollment workflows, including identity persistence failures. Completion and
+error feedback use the browser retry helper; task spawning remains owned by
+the shared web task owner.
+
 For runtime tests that manually advance physical time, inject
 `aura_testkit::time::ManualPhysicalClock` before service assembly. Its sleeps wait
 for explicit clock advancement, so background cleanup loops cannot consume the

@@ -335,17 +335,38 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     Ok(completed)=>{
                         match workflows::persist_completed_enrollment_identity(&app,&completed,&active_storage_prefix()).await {
                             Ok(())=>controller.finalize_account_setup(ScreenId::Neighborhood),
-                            Err(error)=>{controller.runtime_error_toast(error.user_message());import_error.set(Some(error));}
+                            Err(error)=>{
+                                controller.runtime_error_toast(error.user_message());
+                                write_signal_with_retry(
+                                    import_error,
+                                    Some(error),
+                                    WebUiOperation::ImportDeviceEnrollmentCode,
+                                    "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
+                                    "publish device enrollment import error",
+                                );
+                            }
                         }
                     }
                     Err(error)=>{
                         let error=WebUiError::operation(WebUiOperation::ImportDeviceEnrollmentCode,
                             "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",error.to_string()).with_source(error);
                         controller.set_account_setup_state(false,"",Some(error.user_message()));
-                        import_error.set(Some(error));
+                        write_signal_with_retry(
+                            import_error,
+                            Some(error),
+                            WebUiOperation::ImportDeviceEnrollmentCode,
+                            "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
+                            "publish device enrollment import error",
+                        );
                     }
                 }
-                importing_code.set(false);
+                write_signal_with_retry(
+                    importing_code,
+                    false,
+                    WebUiOperation::ImportDeviceEnrollmentCode,
+                    "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
+                    "clear importing_code after device enrollment import",
+                );
             });
         }
     });

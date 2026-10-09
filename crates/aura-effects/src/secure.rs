@@ -3037,9 +3037,22 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 Self::descriptor_error("acknowledge protected original secure value", source)
             })?;
             if !published {
-                return Err(SecureStorageError::storage(
-                    "protected secure publication conflicted",
-                ));
+                let original = directory
+                    .read(&path, true)
+                    .map_err(|source| {
+                        Self::descriptor_error("read winning immutable publication", source)
+                    })?
+                    .ok_or_else(|| {
+                        SecureStorageError::storage("winning immutable publication disappeared")
+                    })?;
+                let (_, protected) =
+                    self.decrypt_fallback_record_with_protection(location, &original)?;
+                if !protected {
+                    return Err(SecureStorageError::storage(
+                        "winning immutable publication is not protected",
+                    ));
+                }
+                return Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists);
             }
             Ok(if created {
                 aura_core::effects::secure::ImmutableSecureStoreOutcome::Created
@@ -3814,9 +3827,14 @@ mod tests {
             .await
             .expect_err("symlinked record path should be rejected");
 
-        assert!(
-            error.to_string().contains("not a private regular file"),
-            "unexpected error: {error:?}"
+        use std::error::Error;
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("symlink rejection preserves the native IO cause");
+        assert_eq!(
+            source.raw_os_error(),
+            Some(rustix::io::Errno::LOOP.raw_os_error())
         );
         assert_eq!(
             fs::read(&target).expect("target preserved"),
