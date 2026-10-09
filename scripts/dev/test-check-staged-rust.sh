@@ -45,7 +45,6 @@ new_case() {
   mkdir -p "$repo/scripts/dev"
   git -C "$repo" init -q
   git -C "$repo" config core.hooksPath "$fixture/no-hooks"
-  cp "$here/check-staged-rust.sh" "$repo/scripts/dev/check-staged-rust.sh"
   cat > "$repo/scripts/dev/build-budget.sh" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail

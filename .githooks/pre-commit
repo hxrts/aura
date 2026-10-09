@@ -2,5 +2,5 @@
 set -euo pipefail
 
 # One canonical staged-path check covers ignored files and actual Cargo owners.
-repo_root=$(git rev-parse --show-toplevel)
-exec bash "$repo_root/scripts/dev/check-staged-rust.sh"
+hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec bash "$hook_dir/../scripts/dev/check-staged-rust.sh"
