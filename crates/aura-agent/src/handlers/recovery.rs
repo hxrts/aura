@@ -503,9 +503,7 @@ impl RecoveryHandler {
         let verified =
             verify_ed25519_transcript(effects, &transcript, &approval.signature, &trusted_key)
                 .await
-                .map_err(|error| {
-                    AgentError::effects(format!("guardian approval verification failed: {error}"))
-                })?;
+                .map_err(AgentError::from)?;
         if !verified {
             return Err(AgentError::effects(
                 "guardian approval signature did not verify".to_string(),
@@ -692,6 +690,71 @@ mod tests {
     use crate::core::AgentConfig;
     use aura_core::effects::CryptoCoreEffects;
     use aura_signature::sign_ed25519_transcript;
+
+    #[tokio::test]
+    async fn configured_guardian_verifier_failure_preserves_native_source() {
+        use aura_testkit::stateful_effects::custom_provider::{
+            CustomCryptoProbe, CustomEd25519Fault, CustomProviderProbe,
+        };
+        let profile = tempfile::tempdir().unwrap();
+        let authority = AuthorityId::new_from_entropy([208; 32]);
+        let guardian = AuthorityId::new_from_entropy([209; 32]);
+        let crypto = std::sync::Arc::new(CustomCryptoProbe::default());
+        let provider = std::sync::Arc::new(CustomProviderProbe::default());
+        let agent = crate::AgentBuilder::custom()
+            .with_crypto(crypto.clone())
+            .with_storage(provider.clone())
+            .with_time(std::sync::Arc::new(
+                aura_testkit::time::ManualPhysicalClock::new(1_000),
+            ))
+            .with_random(provider.clone())
+            .with_console(provider.clone())
+            .authority(authority)
+            .testing_mode()
+            .with_config(AgentConfig {
+                storage: StorageConfig {
+                    base_path: profile.path().to_path_buf(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .build()
+            .await
+            .unwrap();
+        let effects = agent.runtime().effects();
+        let handler = RecoveryHandler::new(AuthorityContext::new(authority)).unwrap();
+        let request = RecoveryRequest {
+            recovery_id: RecoveryId::new("configured-required-guardian-provider"),
+            account_authority: authority,
+            operation: RecoveryOperation::RemoveDevice { leaf_index: 0 },
+            justification: "provider source regression".into(),
+            guardians: vec![guardian],
+            threshold: 1,
+            requested_at: 1_000,
+            prestate_hash: Hash32::from_value(&"original-recovery-state").unwrap(),
+            expires_at: None,
+        };
+        let approval = signed_test_approval(&effects, &request, guardian, 1_000, None).await;
+        let before = provider.stored_bytes().await;
+        crypto.set_ed25519_fault(Some(CustomEd25519Fault::Verify));
+        let failure = handler
+            .verify_guardian_approval_signature(&effects, &request, &approval)
+            .await
+            .expect_err("selected verifier outage cannot approve recovery");
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+        let mut original = None;
+        while let Some(error) = cause {
+            if let Some(found) = error.downcast_ref::<CustomEd25519Fault>() {
+                original = Some(*found);
+            }
+            cause = error.source();
+        }
+        assert_eq!(
+            original.map(|found| found as usize),
+            Some(CustomEd25519Fault::Verify as usize)
+        );
+        assert_eq!(provider.stored_bytes().await, before);
+    }
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);

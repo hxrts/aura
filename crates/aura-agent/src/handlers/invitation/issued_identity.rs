@@ -309,21 +309,7 @@ pub(crate) async fn export_owned_invitation_code(
         private.as_ref(),
     )
     .await
-    .map_err(|source| {
-        let encoding = matches!(source, aura_signature::TranscriptCryptoError::Encoding(_));
-        let source = Some(Arc::new(source) as Arc<dyn std::error::Error + Send + Sync>);
-        AgentError::Aura(if encoding {
-            AuraError::Serialization {
-                message: "encode original invitation signing transcript".into(),
-                source,
-            }
-        } else {
-            AuraError::Crypto {
-                message: "sign original invitation transfer".into(),
-                source,
-            }
-        })
-    })?;
+    .map_err(AgentError::from)?;
     shareable
         .to_signed_code_with_transport(
             ShareableInvitationSenderProof {

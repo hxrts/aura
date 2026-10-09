@@ -624,6 +624,14 @@ issuance or publication. An observational clock fallback cannot satisfy this
 required validity check. Physical expiration remains local validity evidence,
 never distributed ordering or renewed ceremony time.
 
+Native authentication challenge issuance and signed-response verification require
+the selected physical-time provider. Provider failures retain their native
+causes. An issuance clock failure cannot create a pending challenge; failed
+required verification cannot publish an authenticated result or fact. The
+original signed expiry is excluded from the validity interval, consistently
+with authentication guards and views; retries cannot replace that endpoint
+with a newly constructed window.
+
 Guardian recovery key reads require the original private and public pair. A
 missing half or a mismatched pair cannot authorize replacement. Fresh allocation
 and required reads share the actual runtime's exclusive keypair lease, and fresh
