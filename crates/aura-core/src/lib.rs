@@ -87,8 +87,11 @@ pub mod context;
 pub mod crypto;
 /// Pure effect interfaces (no implementations)
 pub mod effects;
+
 /// Unified error handling
 pub mod errors;
+/// Canonical invitation schema; observations do not grant admission authority.
+pub mod invitation;
 /// Core message envelopes and versioning
 pub mod messages;
 /// Repo-wide ownership, transfer, and terminality primitives

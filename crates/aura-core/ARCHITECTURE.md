@@ -4,6 +4,11 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
+`invitation` owns the canonical invitation wire/cache schema and setup binding.
+These serializable values are observations, not issuance, admission, original
+policy approval or journal-commit evidence. Feature capability policy stays in
+`aura-invitation`; lower-layer admission must retain its independent owner.
+
 The AMP error interface includes `RejoinRequiresMembershipEvidence` with exact context,
 channel and participant diagnostics. This typed refusal identifies an
 unversioned membership mutation failure; it supplies no successor capability.
