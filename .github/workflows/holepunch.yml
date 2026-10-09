@@ -20,8 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: holepunch-daily-smoke
       - name: Enable unprivileged user namespaces for patchbay
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run daily smoke and flake report
@@ -47,8 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: holepunch-nightly
       - name: Enable unprivileged user namespaces for patchbay
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run Tier 3 nightly stress suites
@@ -75,8 +71,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: holepunch-nightly-verify
       - name: Download nightly artifacts
         uses: actions/download-artifact@v4
         with:
@@ -98,8 +92,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: holepunch-weekly-triage
       - name: Generate flaky triage report
         run: nix develop --command just ci-holepunch-flaky-triage
       - name: Upload flaky triage report
@@ -123,8 +115,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: holepunch-weekly-audit
       - name: Validate patchbay / patchbay-vm pinning
         run: nix develop --command just ci-holepunch-toolchain-audit
       - name: Upload toolchain audit report

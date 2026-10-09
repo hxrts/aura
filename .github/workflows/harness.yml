@@ -22,8 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-build
       - run: nix develop --command just ci-harness-build
       - name: Failure bundle
         if: failure()
@@ -38,8 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-contract
       - run: nix develop --command just ci-harness-contract
       - name: Failure bundle
         if: failure()
@@ -54,8 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-ui-state-evented
       - run: nix develop .#ci --command just ci-harness-ui-state-evented
       - name: Failure bundle
         if: failure()
@@ -70,8 +64,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-matrix-inventory
       - run: nix develop --command just ci-harness-matrix-inventory
       - name: Failure bundle
         if: failure()
@@ -86,8 +78,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-shared-intent
       - run: nix develop --command just ci-harness-shared-intent-contract
       - name: Failure bundle
         if: failure()
@@ -103,8 +93,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-replay
       - run: nix develop --command just ci-harness-replay
       - name: Failure bundle
         if: failure()
@@ -119,8 +107,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-browser
       - run: nix develop .#ci --command just ci-harness-browser
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
@@ -145,8 +131,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-matrix-tui
       - run: nix develop --command just ci-harness-matrix-tui
       - name: Failure bundle
         if: failure()
@@ -162,8 +146,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-matrix-web
       - run: nix develop .#ci --command just ci-harness-matrix-web
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"

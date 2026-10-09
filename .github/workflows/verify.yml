@@ -23,9 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: lean
-          enable-store-cache: false
       - name: Build proofs
         run: nix develop --command just ci-lean-build
       - name: Check for incomplete proofs
@@ -43,9 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: telltale-bridge
-          enable-store-cache: false
       - name: Bridge cross-validation
         run: nix develop .#ci --command just ci-telltale-bridge
       - name: Upload bridge artifacts
@@ -69,9 +63,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: kani
-          enable-store-cache: false
       - name: Run Kani proofs
         run: nix develop .#nightly --command just ci-kani
       - name: Failure bundle

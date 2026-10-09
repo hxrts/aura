@@ -19,8 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: quint-typecheck
       - run: nix develop --command just ci-quint-typecheck
       - name: Failure bundle
         if: failure()
@@ -36,8 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: quint-verify
       - run: nix develop --command just ci-quint-verify
       - name: Failure bundle
         if: failure()

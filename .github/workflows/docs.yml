@@ -44,8 +44,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: crate-links
       - run: nix develop .#ci --command just ci-crates-doc-links
       - name: Failure bundle
         if: failure()
@@ -60,8 +58,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: text-formatting
       - run: nix develop .#ci --command just ci-text-formatting
       - name: Failure bundle
         if: failure()
@@ -76,8 +72,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: semantic-drift-v2
       - run: nix develop .#ci --command just ci-docs-semantic-drift
       - name: Failure bundle
         if: failure()
@@ -93,8 +87,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: docs-build
       - run: nix develop --command just ci-book
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
