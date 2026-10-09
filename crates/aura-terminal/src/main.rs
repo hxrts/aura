@@ -370,18 +370,18 @@ async fn run_account_command(
             Ok(Outcome::quiet())
         }
         _ => {
-            let listener = rpc_socket::bind(&socket)
+            let hosted = rpc_socket::host(base_path)
                 .await
                 .map_err(|e| CommandError::new(ErrorCode::Unavailable, format!("serve: {e}")))?;
             eprintln!(
                 "aura serve: {} online at {}; Ctrl+C to stop",
                 runtime.authority,
-                socket.display()
+                hosted.path().display()
             );
             let stop = async {
                 let _ = tokio::signal::ctrl_c().await;
             };
-            rpc_socket::serve(&ctx, listener, &socket, stop)
+            rpc_socket::serve(&ctx, hosted, stop)
                 .await
                 .map_err(|e| CommandError::new(ErrorCode::Failed, format!("serve: {e}")))?;
             let mut summary = CliOutput::new();

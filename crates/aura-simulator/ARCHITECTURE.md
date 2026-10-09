@@ -28,6 +28,13 @@ Deterministic simulation runtime for testing and protocol verification. Implemen
 
 ## Invariants
 
+The AMP lifecycle leave action delegates membership rekeying to the agent's
+simulation factory. It retains native consensus evidence and checks equal
+successor keys for remaining members and key absence for departed members.
+The simulator does not construct epoch certificates. Later observational
+normal/emergency transition steps remain model checks rather than native
+finalization or cryptoshred evidence.
+
 - Deterministic execution: Same seed produces identical execution paths.
 - No real delays: Simulated time advances without actual delays.
 - Effect-based only: All simulation via effect system (no globals).

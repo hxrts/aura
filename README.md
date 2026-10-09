@@ -2,8 +2,6 @@
 
 Aura is a private peer-to-peer communication system built around three core requirements. ① The network must function without dedicated relays, DNS, or central software distribution authority. ② Account access must survive device loss. ③ Communication must preserve confidentiality and metadata privacy, with bounded forward secrecy. Everything else in the design follows from these constraints.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hxrts/aura)
-
 ## Architecture
 
 Aura implements a choreographic programming model that projects global protocols into local session types. The architecture is organized into layers, separating interfaces from implementations and isolating impure evaluation through algebraic effects.

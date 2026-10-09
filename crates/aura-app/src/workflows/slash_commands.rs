@@ -281,8 +281,25 @@ pub struct SlashCommandExecutionReport {
 pub enum SlashCommandPrepareError {
     #[error(transparent)]
     Parse(#[from] CommandError),
-    #[error(transparent)]
-    Resolve(#[from] CommandResolverError),
+    /// A parsed command whose targets did not resolve or plan. Its kind is
+    /// known, so a parity-critical command still settles a failed operation.
+    #[error("{source}")]
+    Resolve {
+        kind: SlashCommandKind,
+        #[source]
+        source: CommandResolverError,
+    },
+}
+
+impl SlashCommandPrepareError {
+    /// Metadata of the command that failed, when it parsed.
+    #[must_use]
+    pub fn metadata(&self) -> Option<SlashCommandMetadata> {
+        match self {
+            Self::Parse(_) => None,
+            Self::Resolve { kind, .. } => Some(kind.metadata()),
+        }
+    }
 }
 
 /// Parse, resolve, classify, and plan a slash command.
@@ -294,10 +311,13 @@ pub async fn prepare(
     actor: Option<AuthorityId>,
 ) -> Result<PreparedSlashCommand, SlashCommandPrepareError> {
     let parsed = ParsedCommand::parse(input)?;
+    let kind = SlashCommandKind::from_parsed(&parsed);
+    let failed = |source| SlashCommandPrepareError::Resolve { kind, source };
     let snapshot = resolver.capture_snapshot(app_core).await;
-    let resolved = resolver.resolve(parsed, &snapshot)?;
-    let kind = SlashCommandKind::from_resolved(&resolved);
-    let plan = resolver.plan(resolved.clone(), &snapshot, current_channel_hint, actor)?;
+    let resolved = resolver.resolve(parsed, &snapshot).map_err(failed)?;
+    let plan = resolver
+        .plan(resolved.clone(), &snapshot, current_channel_hint, actor)
+        .map_err(failed)?;
     Ok(PreparedSlashCommand {
         kind,
         metadata: kind.metadata(),
@@ -343,7 +363,7 @@ pub async fn prepare_and_execute(
             }
         }
         Err(error) => SlashCommandExecutionReport {
-            metadata: None,
+            metadata: error.metadata(),
             feedback: feedback_for_prepare_error(&error),
         },
     }
@@ -356,17 +376,29 @@ pub fn feedback_for_prepare_error(error: &SlashCommandPrepareError) -> SlashComm
             classify_chat_command_error(parse).0,
             classify_chat_command_error(parse).1,
         ),
-        SlashCommandPrepareError::Resolve(resolve) => (
-            resolve.to_string(),
-            classify_command_resolver_error(resolve).0,
-            classify_command_resolver_error(resolve).1,
+        SlashCommandPrepareError::Resolve { kind, source } => (
+            format!("/{name}: {source}", name = kind.as_str()),
+            classify_command_resolver_error(source).0,
+            classify_command_resolver_error(source).1,
         ),
     };
+    // A parity-critical command that parsed but did not resolve still ends
+    // its semantic operation, failed (Task 186).
+    let terminal_settlement = error
+        .metadata()
+        .and_then(|metadata| metadata.semantic_operation)
+        .map(|_| {
+            SlashCommandTerminalSettlement::Failed(classification_to_semantic_error(
+                status,
+                reason,
+                message.clone(),
+            ))
+        });
     SlashCommandFeedback {
         topic: "command",
         toast_kind: SlashCommandToastKind::Error,
         message: command_outcome_message(message, status, reason, None),
-        terminal_settlement: None,
+        terminal_settlement,
     }
 }
 
@@ -468,6 +500,39 @@ pub fn feedback_for_execution_result(
 }
 
 impl SlashCommandKind {
+    /// The kind of a parsed command, known before its targets resolve.
+    #[must_use]
+    pub const fn from_parsed(command: &ParsedCommand) -> Self {
+        match command {
+            ParsedCommand::Msg { .. } => Self::Msg,
+            ParsedCommand::Me { .. } => Self::Me,
+            ParsedCommand::Nick { .. } => Self::Nick,
+            ParsedCommand::Who => Self::Who,
+            ParsedCommand::Whois { .. } => Self::Whois,
+            ParsedCommand::Leave => Self::Leave,
+            ParsedCommand::Join { .. } => Self::Join,
+            ParsedCommand::Help { .. } => Self::Help,
+            ParsedCommand::Neighborhood { .. } => Self::Neighborhood,
+            ParsedCommand::NhAdd { .. } => Self::NhAdd,
+            ParsedCommand::NhLink { .. } => Self::NhLink,
+            ParsedCommand::HomeInvite { .. } => Self::HomeInvite,
+            ParsedCommand::HomeAccept => Self::HomeAccept,
+            ParsedCommand::Kick { .. } => Self::Kick,
+            ParsedCommand::Ban { .. } => Self::Ban,
+            ParsedCommand::Unban { .. } => Self::Unban,
+            ParsedCommand::Mute { .. } => Self::Mute,
+            ParsedCommand::Unmute { .. } => Self::Unmute,
+            ParsedCommand::Invite { .. } => Self::Invite,
+            ParsedCommand::Topic { .. } => Self::Topic,
+            ParsedCommand::Pin { .. } => Self::Pin,
+            ParsedCommand::Unpin { .. } => Self::Unpin,
+            ParsedCommand::Op { .. } => Self::Op,
+            ParsedCommand::Deop { .. } => Self::Deop,
+            ParsedCommand::Admit { .. } => Self::Admit,
+            ParsedCommand::Mode { .. } => Self::Mode,
+        }
+    }
+
     #[must_use]
     pub const fn from_resolved(command: &ResolvedCommand) -> Self {
         match command {
@@ -955,5 +1020,57 @@ mod tests {
             report.feedback.terminal_settlement,
             report.feedback.message
         );
+    }
+
+    /// Task 186 (run 171): `/homeinvite Carol` with no contact named Carol
+    /// fails to resolve. The report still names the command's semantic
+    /// operation and settles it failed with an error toast, so the frontend
+    /// publishes a failed operation instead of leaving the previous one.
+    #[tokio::test]
+    async fn unresolved_target_settles_the_commands_operation_failed() {
+        let app_core = crate::testing::default_test_app_core();
+        let report = prepare_and_execute(
+            &CommandResolver::default(),
+            &app_core,
+            "/homeinvite Carol",
+            None,
+            Some(AuthorityId::new_from_entropy([0x4a; 32])),
+        )
+        .await;
+        let metadata = report.metadata.expect("a parsed command reports its kind");
+        assert_eq!(
+            metadata.semantic_operation.map(|operation| operation.kind),
+            SlashCommandKind::HomeInvite
+                .metadata()
+                .semantic_operation
+                .map(|operation| operation.kind)
+        );
+        assert!(
+            matches!(
+                report.feedback.terminal_settlement,
+                Some(SlashCommandTerminalSettlement::Failed(_))
+            ),
+            "{:?}",
+            report.feedback
+        );
+        assert_eq!(report.feedback.toast_kind, SlashCommandToastKind::Error);
+        assert!(
+            report.feedback.message.contains("/homeinvite"),
+            "{}",
+            report.feedback.message
+        );
+
+        // A line that does not parse names no command and no operation.
+        let unparsed = prepare_and_execute(
+            &CommandResolver::default(),
+            &app_core,
+            "/nosuchcommand",
+            None,
+            None,
+        )
+        .await;
+        assert!(unparsed.metadata.is_none());
+        assert!(unparsed.feedback.terminal_settlement.is_none());
+        assert_eq!(unparsed.feedback.toast_kind, SlashCommandToastKind::Error);
     }
 }

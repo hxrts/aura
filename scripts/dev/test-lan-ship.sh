@@ -66,6 +66,37 @@ grep -q 'nix-store" --add-root "$links/runtime-' "$ship"
 if grep -q 'aura-lan-terminal\|aura-lan-harness' "$ship" "$repo_root/justfile" "$repo_root/flake.nix"; then
   echo 'the crate2nix LAN ship build is still referenced' >&2; exit 1
 fi
+# Task 209: the local and remote harness stop before the first budgeted build
+# (tool_repl and aura are build consumers), and the build waits its turn.
+first_build="$(grep -n 'build-budget.sh --lane lan-ship' "$ship" | head -1 | cut -d: -f1)"
+local_stop="$(grep -n 'bash "$here/drv.sh" stop' "$ship" | head -1 | cut -d: -f1)"
+remote_stop="$(grep -n 'scripts/harness/lan/drv.sh stop' "$ship" | head -1 | cut -d: -f1)"
+[[ -n "$local_stop" && -n "$remote_stop" && -n "$first_build" ]] || {
+  echo 'ship.sh must stop the local and remote harness' >&2; exit 1;
+}
+(( local_stop < first_build && remote_stop < first_build )) || {
+  echo 'ship.sh stops the harness after building' >&2; exit 1;
+}
+grep -q 'export AURA_BUILD_WAIT_SECONDS="${AURA_BUILD_WAIT_SECONDS:-[0-9]' "$ship"
+
+# Commands sent over ssh run in the remote login shell, which may be zsh: an
+# unmatched glob there fails the command (nomatch). Outside single quotes the
+# remote commands (and the root commands interpolated into them) must carry
+# no glob characters.
+remote_cmds="$(awk '/ssh -o BatchMode=yes "\$AURA_E2E_REMOTE" "/ {on = 1}
+  on {print}
+  on && !/\\$/ {on = 0}
+  /root_cmds\+=/ {print}' "$ship")"
+[[ -n "$remote_cmds" ]] || { echo 'no remote commands found in ship.sh' >&2; exit 1; }
+unquoted="$(sed -E "s/'[^']*'//g" <<< "$remote_cmds")"
+if grep -nE '[*?]' <<< "$unquoted"; then
+  echo 'ship.sh sends an unquoted glob to the remote shell' >&2; exit 1
+fi
+# The check catches the zsh failure it guards against.
+if ! sed -E "s/'[^']*'//g" <<< 'mkdir -p .nix-ship && rm -f .nix-ship/runtime-* && true' | grep -qE '[*?]'; then
+  echo 'glob check misses an unquoted remote glob' >&2; exit 1
+fi
+
 # The lan profile keeps release optimization without whole-program LTO.
 awk '/^\[profile.lan\]/{on=1; next} /^\[/{on=0} on' "$repo_root/Cargo.toml" > "$test_root/lan-profile"
 grep -q '^inherits = "release"' "$test_root/lan-profile"

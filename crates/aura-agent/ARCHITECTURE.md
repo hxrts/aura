@@ -46,6 +46,14 @@ complete; replacing the issuance parameter alone does not prove those contracts.
 
 ## Key Modules
 
+The simulation factory owns a bounded membership-rekey driver for closed sets
+of simulation runtimes. It requires matching canonical membership and epoch,
+delegates device-key exchange, DKG and agreement to the native runtime owners,
+and verifies each commit against the recipient's retained DKG group key.
+Peer futures remain lexically owned; completion or failure cancels the drivers.
+The adapter cannot accept production runtimes or synthesize agreement evidence.
+The lifecycle regression enforces a 16 KiB caller-future budget for this adapter.
+
 The public invitation acceptance facade boxes its private delegated future
 before awaiting it. The caller retains lexical ownership and cancellation;
 acceptance does not create a task merely to control stack allocation.

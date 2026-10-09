@@ -848,27 +848,35 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     if !rg_exists(&[
         "-n".into(),
-        "workflows::strong_command::execute_planned".into(),
+        "workflows::slash_commands::prepare_and_execute".into(),
         repo_relative(repo_root.join("crates/aura-terminal/src/tui/callbacks/factories")),
         "-g".into(),
         "*.rs".into(),
     ])? {
         audit.push(
-            "arch(workflows): callbacks/factories must call workflows::strong_command::execute_planned",
+            "arch(workflows): callbacks/factories must delegate to the shared slash-command workflow",
         );
     }
 
-    let factories_hits = rg_lines(&[
+    let shared_plan_hits = rg_lines(&[
         "-n".into(),
-        "strong_resolver\\.plan\\(".into(),
-        repo_relative(repo_root.join("crates/aura-terminal/src/tui/callbacks/factories")),
+        "\\.plan\\(".into(),
+        repo_relative(repo_root.join("crates/aura-app/src/workflows/slash_commands.rs")),
         "-g".into(),
         "*.rs".into(),
     ])?;
-    if factories_hits.is_empty() {
+    if shared_plan_hits.is_empty() {
         audit.push(
-            "arch(workflows): callbacks/factories must plan resolved commands before execution",
+            "arch(workflows): shared slash-command workflow must plan resolved commands before execution",
         );
+    }
+
+    if !rg_exists(&[
+        "-n".into(),
+        "execute_planned\\(".into(),
+        repo_relative(repo_root.join("crates/aura-app/src/workflows/slash_commands.rs")),
+    ])? {
+        audit.push("arch(workflows): shared slash-command workflow must execute its plan");
     }
 
     audit.push_matches(

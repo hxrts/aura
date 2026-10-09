@@ -134,6 +134,169 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
     }
 }
 
+/// Drive a membership rekey with a closed set of simulation runtimes.
+///
+/// Every supplied runtime must observe the exact same canonical membership.
+/// The native owners exchange device keys, run DKG and authenticate consensus
+/// witnesses; this adapter neither supplies keys nor constructs certificates.
+/// All peer drivers are lexically owned and cancelled when the attempt ends.
+#[cfg(feature = "simulation")]
+pub async fn rekey_simulated_channel(
+    context: aura_core::ContextId,
+    channel: aura_core::types::identifiers::ChannelId,
+    participants: &[Arc<AuraEffectSystem>],
+) -> Result<aura_amp::ChannelEpochCommitFact, aura_core::AuraError> {
+    use super::channel_consensus::ChannelConsensusWitness;
+    use super::channel_key_ceremony::{process_channel_key_invites, ChannelKeyInvite};
+    use super::channel_rekey::{rekey_channel, REKEY_MAX_POLLS};
+    use super::context_dkg::{load_roster, ChannelKeyScope};
+    use super::device_key_exchange::{process_device_key_messages, runtime_known_peer};
+    use aura_core::effects::{ExecutionMode, PhysicalTimeEffects};
+    use aura_core::AuraError;
+    use aura_journal::DomainFact;
+    use aura_protocol::amp::AmpJournalEffects;
+    use aura_protocol::effects::AuraEffects;
+    use std::collections::BTreeSet;
+
+    if participants.len() < 2
+        || participants
+            .iter()
+            .any(|effects| !matches!(effects.execution_mode(), ExecutionMode::Simulation { .. }))
+    {
+        return Err(AuraError::invalid(
+            "rekey requires simulation member runtimes",
+        ));
+    }
+    let scope = ChannelKeyScope { context, channel };
+    let members: BTreeSet<_> = participants
+        .iter()
+        .map(|effects| aura_guards::GuardContextProvider::authority_id(effects.as_ref()))
+        .collect();
+    if members.len() != participants.len() {
+        return Err(AuraError::invalid("duplicate simulation rekey member"));
+    }
+    let state =
+        aura_protocol::amp::get_channel_state(participants[0].as_ref(), context, channel).await?;
+    for effects in participants {
+        let observed: BTreeSet<_> =
+            aura_amp::channel_membership_observations(effects.as_ref(), context, channel)
+                .await?
+                .participants()
+                .collect();
+        let peer_state =
+            aura_protocol::amp::get_channel_state(effects.as_ref(), context, channel).await?;
+        // Message generations and locally retained bootstrap metadata need
+        // not match. Membership and the parent key epoch must agree before
+        // this attempt; the coordinator retains the original parent roster.
+        if observed != members || peer_state.chan_epoch != state.chan_epoch {
+            return Err(AuraError::invalid(format!(
+                "simulation rekey canonical state disagreement: observed={observed:?}, expected={members:?}, epoch={}, expected_epoch={}",
+                peer_state.chan_epoch, state.chan_epoch,
+            )));
+        }
+    }
+    let roster: BTreeSet<_> = if state.chan_epoch == 0 {
+        let bootstrap = state
+            .bootstrap
+            .as_ref()
+            .ok_or_else(|| AuraError::not_found("current channel bootstrap roster"))?;
+        bootstrap
+            .recipients
+            .iter()
+            .copied()
+            .chain(std::iter::once(bootstrap.dealer))
+            .collect()
+    } else {
+        load_roster(participants[0].as_ref(), scope, state.chan_epoch)
+            .await?
+            .0
+            .participants
+            .into_iter()
+            .collect()
+    };
+    let coordinator_id = roster
+        .intersection(&members)
+        .next()
+        .copied()
+        .ok_or_else(|| AuraError::permission_denied("no retained member can coordinate rekey"))?;
+    let coordinator = participants
+        .iter()
+        .find(|effects| {
+            aura_guards::GuardContextProvider::authority_id(effects.as_ref()) == coordinator_id
+        })
+        .ok_or_else(|| AuraError::not_found("simulation coordinator"))?;
+    let peers = participants.iter().filter(|effects| {
+        aura_guards::GuardContextProvider::authority_id(effects.as_ref()) != coordinator_id
+    });
+    let peer_drivers = futures::future::try_join_all(peers.map(|effects| async move {
+        let witness = ChannelConsensusWitness::default();
+        for _ in 0..REKEY_MAX_POLLS {
+            process_device_key_messages(effects, |peer, scope| {
+                runtime_known_peer(effects, peer, scope)
+            })
+            .await?;
+            let outcomes = process_channel_key_invites(
+                effects,
+                |invite: ChannelKeyInvite| async move {
+                    let observed = aura_amp::channel_membership_observations(
+                        effects.as_ref(),
+                        invite.scope.context,
+                        invite.scope.channel,
+                    )
+                    .await?;
+                    Ok(invite.scope == scope
+                        && observed.has_standing(invite.coordinator)
+                        && invite
+                            .participants
+                            .iter()
+                            .all(|member| observed.has_standing(*member)))
+                },
+                REKEY_MAX_POLLS,
+            )
+            .await?;
+            for (_, outcome) in outcomes {
+                outcome?;
+            }
+            witness
+                .process(effects, |requested, from| async move {
+                    Ok(requested == scope
+                        && aura_amp::channel_membership_observations(
+                            effects.as_ref(),
+                            context,
+                            channel,
+                        )
+                        .await?
+                        .has_standing(from))
+                })
+                .await?;
+            effects.sleep_ms(50).await?;
+        }
+        Err::<(), AuraError>(AuraError::internal(
+            "simulation rekey peer deadline exceeded",
+        ))
+    }));
+    let fact = tokio::select! {
+        result = Box::pin(rekey_channel(coordinator, scope, state.chan_epoch, &roster, members, REKEY_MAX_POLLS)) => result?,
+        result = peer_drivers => {
+            result?;
+            return Err(AuraError::internal("simulation rekey peers ended before agreement"));
+        }
+    };
+    for effects in participants {
+        let (_, public) = load_roster(effects, scope, state.chan_epoch + 1).await?;
+        fact.verify_with(&aura_core::crypto::tree_signing::PublicKeyPackage::from(
+            public,
+        ))?;
+        effects
+            .insert_relational_fact(fact.committed_bump_fact())
+            .await?;
+        effects
+            .commit_relational_facts(vec![fact.to_generic()])
+            .await?;
+    }
+    Ok(fact)
+}
+
 #[cfg(all(test, feature = "simulation"))]
 mod tests {
     use super::*;

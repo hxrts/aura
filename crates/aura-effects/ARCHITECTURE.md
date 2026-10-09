@@ -29,6 +29,11 @@ record inventory and secure retrieval failures preserve their native causes.
 
 ## Invariants
 
+- Concurrent immutable filesystem publication reports `AlreadyExists` only
+  after authenticating the winning protected record and acknowledging its
+  directory. Missing, corrupt, or mutable winners fail closed; the losing
+  writer never replaces the winning ciphertext.
+
 - Platform secure retrieval reports exact-location `SecureStorageRecordMissing`
   only for keyring `NoEntry`; denied access and provider outages retain their
   native keyring causes. Noninteractive unit coverage enforces this distinction

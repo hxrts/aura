@@ -817,9 +817,14 @@ mod tests {
         assert!(!model.has_secondary_device());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
-            Some("Enrollment code entered; import requires runtime confirmation")
+            Some("Enrollment code, signed manifest, and separately transferred initiator verifier are required")
         );
         assert!(model.operations.is_empty());
+        assert!(matches!(
+            model.active_modal.as_ref(),
+            Some(ActiveModal::ImportDeviceEnrollmentCode(state))
+                if state.value == "CODE-123" && !state.can_submit()
+        ));
     }
 
     #[test]

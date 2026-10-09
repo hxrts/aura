@@ -13,3 +13,7 @@ path = "process_lock.rs"
 [dependencies]
 fs2 = "=0.4.3"
 thiserror = "2"
+
+# Own workspace root: a nested checkout (.claude/worktrees/*) must not resolve
+# this host-only package to an enclosing checkout's workspace.
+[workspace]

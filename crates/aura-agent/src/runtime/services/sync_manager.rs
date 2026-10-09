@@ -798,13 +798,18 @@ impl SyncServiceManager {
 
         use std::sync::atomic::Ordering;
         // Back off after authorization denials instead of retrying every tick.
-        if self
-            .shared
-            .denial_skip_remaining
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
-            .is_ok()
-        {
-            return Err(SyncManagerError::AuthorizationBackoff);
+        let remaining = &self.shared.denial_skip_remaining;
+        let mut observed = remaining.load(Ordering::Acquire);
+        while let Some(next) = observed.checked_sub(1) {
+            match remaining.compare_exchange_weak(
+                observed,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Err(SyncManagerError::AuthorizationBackoff),
+                Err(actual) => observed = actual,
+            }
         }
 
         let now_ms = effects

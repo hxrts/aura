@@ -1528,7 +1528,7 @@ fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
     }
 }
 
-fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
+pub(crate) fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
     wait_pattern_candidates(pattern)
         .iter()
         .any(|candidate| normalized_screen.contains(candidate))

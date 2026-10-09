@@ -22,6 +22,10 @@ export OPEN_TARGET_FILE="$test_root/open-target"
 export DU_FAIL_ONCE_FILE="$test_root/du-fail-once"
 export DU_EMPTY_FILE="$test_root/du-empty"
 export AURA_BUILD_TARGET_CAP_GIB=8
+# Cases choose their own waits; a caller's AURA_BUILD_WAIT_SECONDS (gates and
+# ship.sh export one) must not turn an expected refusal into a long wait.
+export AURA_BUILD_WAIT_SECONDS=0
+unset AURA_BUILD_BUDGET_HELD
 export PROJECT_ROOT="$project"
 export AURA_BUILD_SHARED_DIR="$test_root/shared"
 export PATH="$fakebin:$PATH"
@@ -321,6 +325,94 @@ expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=10 bash "$
   --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.waited-ran"'
 [[ -e "$FREE_FILE.waited-ran" ]]
 wait
+# Gates also wait out volume admission: another build's live reservation
+# (20 - 6 < 15 GiB) blocks until that build exits.
+reset_case
+mkdir -p "$AURA_BUILD_SHARED_DIR/reservations"
+sleep 3 &
+holder_pid=$!
+printf '%s\n' $((6 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$holder_pid"
+expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=20 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.admitted-ran"'
+[[ -e "$FREE_FILE.admitted-ran" ]]
+wait "$holder_pid" 2>/dev/null || true
+# Task 209: a transient builder in this checkout (e.g. rust-analyzer's rustc)
+# is waited out under AURA_BUILD_WAIT_SECONDS, both before the build and in
+# the over-cap sweep; without a wait the build is refused at once.
+reset_case
+printf 'rustc\n' > "$ACTIVE_FILE"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.busy-ran"'
+[[ ! -e "$FREE_FILE.busy-ran" ]]
+rg -q 'another builder or harness consumer is active' "$test_root/output"
+for size_gib in 6 9; do
+  reset_case
+  printf '%s\n' $((size_gib * 1024 * 1024)) > "$SIZE_FILE"
+  printf 'rustc\n' > "$ACTIVE_FILE"
+  (sleep 2; rm -f "$ACTIVE_FILE") &
+  expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=10 bash "$repo_root/scripts/dev/build-budget.sh" \
+    --root "$project" --lane test -- sh -c 'touch "$FREE_FILE.idle-ran"'
+  [[ -e "$FREE_FILE.idle-ran" ]]
+  rm -f "$FREE_FILE.idle-ran"
+  wait
+done
+# Task 212: a post-build sweep skipped because another builder is active,
+# whether it started before the sweep or during its preview, keeps the
+# build's own exit status (it was 76).
+reset_case
+expect_status 0 run_budget -- sh -c 'printf "rustc\n" > "$ACTIVE_FILE"'
+rg -q 'post-build sweep skipped because another builder started' "$test_root/output"
+reset_case
+touch "$RACE_ON_PREVIEW_FILE"
+expect_status 0 run_budget -- sh -c 'exit 0'
+rg -q 'post-build sweep skipped because another builder started' "$test_root/output"
+reset_case
+expect_status 3 run_budget -- sh -c 'printf "rustc\n" > "$ACTIVE_FILE"; exit 3'
+# Task 216: a checkout lock left by a holder killed before its EXIT trap is
+# reclaimed (logged) without waiting; a lock held by a live pid, or one with
+# no pid yet, still blocks.
+reset_case
+sh -c 'exit 0' &
+dead_pid=$!
+wait "$dead_pid" 2>/dev/null || true
+mkdir "$project/target/.aura-build-budget.lock"
+printf '%s\n' "$dead_pid" > "$project/target/.aura-build-budget.lock/pid"
+expect_status 0 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.reclaimed-ran"'
+[[ -e "$FREE_FILE.reclaimed-ran" ]]
+rg -q "reclaiming .* from dead holder pid $dead_pid" "$test_root/output"
+reset_case
+sleep 30 &
+live_pid=$!
+mkdir "$project/target/.aura-build-budget.lock"
+printf '%s\n' "$live_pid" > "$project/target/.aura-build-budget.lock/pid"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.live-ran"'
+[[ ! -e "$FREE_FILE.live-ran" ]]
+kill "$live_pid"; wait "$live_pid" 2>/dev/null || true
+reset_case
+mkdir "$project/target/.aura-build-budget.lock"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.nopid-ran"'
+[[ ! -e "$FREE_FILE.nopid-ran" ]]
+# Task 218: a build waiting for volume admission releases the checkout lock,
+# so a prune (which needs that lock) can free space; the build then admits.
+reset_case
+printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
+(
+  for _ in $(seq 1 150); do
+    if mkdir "$project/target/.aura-build-budget.lock" 2>/dev/null; then
+      printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
+      touch "$FREE_FILE.pruned"
+      rmdir "$project/target/.aura-build-budget.lock"
+      exit 0
+    fi
+    sleep 0.2
+  done
+  exit 1
+) &
+pruner=$!
+expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=30 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test -- sh -c 'touch "$FREE_FILE.admitted-after-prune"'
+wait "$pruner"
+[[ -e "$FREE_FILE.pruned" && -e "$FREE_FILE.admitted-after-prune" ]]
+[[ ! -d "$project/target/.aura-build-budget.lock" ]]
 # The gate recipes' cargo goes through the budget.
 for recipe in _policy-check _ownership-lint web-check; do
   awk -v r="$recipe" '$0 ~ "^"r"[ :]" {on=1; next} on && /^[^ \t]/ {on=0} on' "$repo_root/justfile" \

@@ -144,17 +144,32 @@ impl Drop for TaskCompletionLease {
 }
 
 impl TaskCompletion {
+    // Keep the same acquire/release update semantics across stable and nightly
+    // toolchains, where fetch_update has been renamed to try_update.
+    fn update_state(&self, update: impl Fn(usize) -> Option<usize>) -> Result<usize, usize> {
+        let mut state = self.state.load(Ordering::Acquire);
+        loop {
+            let next = update(state).ok_or(state)?;
+            match self
+                .state
+                .compare_exchange_weak(state, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(previous) => return Ok(previous),
+                Err(actual) => state = actual,
+            }
+        }
+    }
+
     fn admit(self: &Arc<Self>) -> Option<TaskCompletionLease> {
-        self.state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
-                if state < TASK_ADMISSION_CLOSED - 2 {
-                    Some(state + 1)
-                } else {
-                    None
-                }
-            })
-            .ok()
-            .map(|_| TaskCompletionLease(self.clone()))
+        self.update_state(|state| {
+            if state < TASK_ADMISSION_CLOSED - 2 {
+                Some(state + 1)
+            } else {
+                None
+            }
+        })
+        .ok()
+        .map(|_| TaskCompletionLease(self.clone()))
     }
 
     async fn drained(&self) {
@@ -188,8 +203,7 @@ impl FrontendTaskSpawnerImpl {
         // closing public admission. Its own destruction is part of drainage.
         if self
             .completion
-            .state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .update_state(|state| {
                 if state & TASK_ADMISSION_CLOSED == 0 {
                     Some((state | TASK_ADMISSION_CLOSED) + 1)
                 } else {

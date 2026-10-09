@@ -144,13 +144,8 @@ pub(super) fn prelink_process_checkpoint(path: &str) -> Result<(), AuraError> {
     {
         return Ok(());
     }
-    let marker = std::env::var_os("AURA_LIFETIME_PRELINK_MARKER")
-        .ok_or_else(|| invalid("prelink fixture marker absent"))?;
-    std::fs::write(marker, path)
-        .map_err(|source| source_error("prelink fixture checkpoint", source))?;
-    loop {
-        std::thread::park();
-    }
+    crate::profile_directory::park_at_process_checkpoint(path)
+        .map_err(|source| source_error("prelink fixture checkpoint", source))
 }
 
 fn finish_staged_publication(
@@ -1280,12 +1275,7 @@ mod tests {
         for target in ["birth", "handed", BORN, INDEX, READY, HANDED, MARKER] {
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(
-                &profile,
-                &temporary.path().join("checkpoint"),
-                &format!("after-link:{target}"),
-            )
-            .await?;
+            killed_original_stage(&profile, &format!("after-link:{target}")).await?;
             let storage = selected(&profile)?;
             let provider = backend(&storage).owned_directory()?;
             let parent = match target {
@@ -1376,7 +1366,7 @@ mod tests {
         ] {
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(&profile, &temporary.path().join("checkpoint"), target).await?;
+            killed_original_stage(&profile, target).await?;
             let storage = selected(&profile)?;
             let provider = backend(&storage);
             let original = legacy_migration::require_preparing_original_anchor(owned(&storage))?;
@@ -1413,12 +1403,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("checkpoint"),
-            "mutable-index-ready",
-        )
-        .await?;
+        killed_original_stage(&profile, "mutable-index-ready").await?;
         let storage = selected(&profile)?;
         let directory = backend(&storage).owned_directory()?;
         let before = directory.read_bounded(std::path::Path::new(INDEX), false, MAX_INDEX_BYTES)?;
@@ -1439,12 +1424,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("original");
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("checkpoint"),
-            "mutable-index-ready",
-        )
-        .await?;
+        killed_original_stage(&profile, "mutable-index-ready").await?;
         let storage = selected(&profile)?;
         let directory = backend(&storage).owned_directory()?;
         let observation = directory
@@ -1466,12 +1446,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("checkpoint"),
-            "mutable-index-ready",
-        )
-        .await?;
+        killed_original_stage(&profile, "mutable-index-ready").await?;
         let selected_storage = selected(&profile)?;
         let staged_ciphertext = backend(&selected_storage)
             .owned_directory()?
@@ -1515,12 +1490,7 @@ mod tests {
         for substitute_source in [false, true] {
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(
-                &profile,
-                &temporary.path().join("checkpoint"),
-                "mutable-index-ready",
-            )
-            .await?;
+            killed_original_stage(&profile, "mutable-index-ready").await?;
             let storage = selected(&profile)?;
             let directory = backend(&storage).owned_directory()?;
             let observation = directory
@@ -1592,20 +1562,10 @@ mod tests {
         ] {
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(
-                &profile,
-                &temporary.path().join("initial"),
-                "mutable-index-ready",
-            )
-            .await?;
+            killed_original_stage(&profile, "mutable-index-ready").await?;
             // A separate actual creator reopens original evidence and is killed
             // inside the owned cutover, never a fabricated journal fixture.
-            killed_original_stage(
-                &profile,
-                &temporary.path().join("cutover"),
-                &format!("cutover:{point}"),
-            )
-            .await?;
+            killed_original_stage(&profile, &format!("cutover:{point}")).await?;
             let storage = selected(&profile)?;
             let original = legacy_migration::require_preparing_original_anchor(owned(&storage))?;
             let initialized = initialize(owned(&storage))?;
@@ -1643,12 +1603,7 @@ mod tests {
             for fault in [Fault::Loss, Fault::ForeignInode, Fault::CorruptCiphertext] {
                 let temporary = tempfile::tempdir()?;
                 let profile = temporary.path().join("profile");
-                killed_original_stage(
-                    &profile,
-                    &temporary.path().join("checkpoint"),
-                    "mutable-index-ready",
-                )
-                .await?;
+                killed_original_stage(&profile, "mutable-index-ready").await?;
                 let storage = selected(&profile)?;
                 initialize(owned(&storage))?;
                 let physical = profile.join("secure_store");
@@ -1724,12 +1679,7 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("checkpoint"),
-            "mutable-index-ready",
-        )
-        .await?;
+        killed_original_stage(&profile, "mutable-index-ready").await?;
         let storage = selected(&profile)?;
         initialize(owned(&storage))?;
         let directory = backend(&storage).owned_directory()?;
@@ -1784,24 +1734,9 @@ mod tests {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("ready"),
-            "mutable-index-ready",
-        )
-        .await?;
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("handed"),
-            "mutable-index-handed",
-        )
-        .await?;
-        killed_original_stage(
-            &profile,
-            &temporary.path().join("exchange"),
-            "cutover:exchange",
-        )
-        .await?;
+        killed_original_stage(&profile, "mutable-index-ready").await?;
+        killed_original_stage(&profile, "mutable-index-handed").await?;
+        killed_original_stage(&profile, "cutover:exchange").await?;
         let storage = selected(&profile)?;
         let original = legacy_migration::require_preparing_original_anchor(owned(&storage))?;
         let initialized = initialize(owned(&storage))?;
@@ -1829,9 +1764,9 @@ mod tests {
     }
     async fn killed_original_stage(
         profile: &std::path::Path,
-        marker: &std::path::Path,
         target: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::BufRead;
         let executable = std::env::current_exe()?;
         let mut child = KilledChild(
             std::process::Command::new(executable)
@@ -1841,23 +1776,28 @@ mod tests {
                 ])
                 .env("AURA_LIFETIME_PRELINK_PROFILE", profile)
                 .env("AURA_LIFETIME_PRELINK_TARGET", target)
-                .env("AURA_LIFETIME_PRELINK_MARKER", marker)
-                .stdout(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
                 .spawn()?,
         );
-        use aura_core::effects::time::PhysicalTimeEffects;
-        let time = crate::time::PhysicalTimeHandler::new();
-        let started = time.physical_time().await?;
-        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
-            &started,
-            std::time::Duration::from_secs(10),
-        )?;
-        while !marker.exists() {
-            if let Some(status) = child.0.try_wait()? {
-                return Err(format!("prelink child exited: {status}").into());
+        // The child announces the exact checkpoint on stdout before parking;
+        // end of output without it means the child exited first. Readiness
+        // never races a wall-clock budget, so child startup under build load
+        // cannot fail the fixture.
+        let expected = format!(
+            "{}{target}",
+            crate::profile_directory::PROCESS_CHECKPOINT_SENTINEL
+        );
+        let stdout = child.0.stdout.take().ok_or("prelink child stdout")?;
+        let mut reached = false;
+        for line in std::io::BufReader::new(stdout).lines() {
+            if line? == expected {
+                reached = true;
+                break;
             }
-            let remaining = budget.remaining_at(&time.physical_time().await?)?;
-            time.sleep_ms(remaining.as_millis().min(10) as u64).await?;
+        }
+        if !reached {
+            let status = child.0.wait()?;
+            return Err(format!("prelink child exited before {target}: {status}").into());
         }
         child.0.kill()?;
         assert!(
@@ -1865,8 +1805,15 @@ mod tests {
             "actual creator must die before target link"
         );
         // A killed process's advisory lock can be released slightly after
-        // `wait` returns (macOS exit ordering). Wait, within the same budget,
-        // until the profile is actually free before the caller reopens it.
+        // `wait` returns (macOS exit ordering). Wait until the profile is
+        // actually free before the caller reopens it; the budget starts only
+        // after the kill.
+        use aura_core::effects::time::PhysicalTimeEffects;
+        let time = crate::time::PhysicalTimeHandler::new();
+        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &time.physical_time().await?,
+            std::time::Duration::from_secs(10),
+        )?;
         loop {
             match crate::profile_storage::FilesystemProfileStorageHandler::new(
                 profile.to_path_buf(),
@@ -1902,7 +1849,7 @@ mod tests {
             eprintln!("checking original pre-link target: {target}");
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(&profile, &temporary.path().join("checkpoint"), target).await?;
+            killed_original_stage(&profile, target).await?;
             let storage = selected(&profile)?;
             let selected = backend(&storage).owned_directory()?;
             let directory = if ["lifecycle", "birth", "handed"].contains(&target) {

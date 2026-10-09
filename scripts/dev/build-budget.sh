@@ -149,13 +149,22 @@ admit_build() {
   printf '%s\n' $((reserve_gib * 1024 * 1024)) > "$reservation"
   rm -f "$lock/pid"; rmdir "$lock"
 }
+idle_now() {
+  busy="$(active_consumers)"
+  [[ -z "$busy" ]]
+}
+# Wait (AURA_BUILD_WAIT_SECONDS, shared with the lock and admission waits)
+# for this checkout's other builders and harness consumers, e.g. a transient
+# rustc from rust-analyzer, before sweeping or building.
 require_idle() {
-  local found
-  found="$(active_consumers)"
-  if [[ -n "$found" ]]; then
-    echo "build-budget: refusing to sweep/build while another builder or harness consumer is active: $found" >&2
-    return 1
-  fi
+  until idle_now; do
+    if (( ${waited:-0} >= ${wait_seconds:-0} )); then
+      echo "build-budget: refusing to sweep/build while another builder or harness consumer is active: $busy" >&2
+      return 1
+    fi
+    sleep "$poll_seconds"
+    waited=$(( ${waited:-0} + poll_seconds ))
+  done
 }
 target_has_open_files() {
   local open_files
@@ -243,15 +252,36 @@ wait_seconds="${AURA_BUILD_WAIT_SECONDS:-0}"
 waited=0
 lock_dir="$root/target/.aura-build-budget.lock"
 mkdir -p "$root/target"
-until mkdir "$lock_dir" 2>/dev/null; do
-  if (( waited >= wait_seconds )); then
-    echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
-    exit 1
-  fi
-  sleep "$poll_seconds"
-  waited=$((waited + poll_seconds))
-done
-printf '%s\n' "$$" > "$lock_dir/pid"
+holds_lock=0
+acquire_checkout_lock() {
+  until mkdir "$lock_dir" 2>/dev/null; do
+    # A holder killed before its EXIT trap leaves its lock behind (Task 216):
+    # reclaim a lock whose recorded pid is no longer alive, as the admission
+    # lock does. A lock without a pid yet may be a holder starting up.
+    holder="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    if [[ "$holder" =~ ^[0-9]+$ ]] && ! kill -0 "$holder" 2>/dev/null; then
+      echo "build-budget: reclaiming $lock_dir from dead holder pid $holder" >&2
+      rm -f "$lock_dir/pid"
+      rmdir "$lock_dir" 2>/dev/null || true
+      continue
+    fi
+    if (( waited >= wait_seconds )); then
+      echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
+      exit 1
+    fi
+    sleep "$poll_seconds"
+    waited=$((waited + poll_seconds))
+  done
+  printf '%s\n' "$$" > "$lock_dir/pid"
+  holds_lock=1
+}
+release_checkout_lock() {
+  (( holds_lock == 1 )) || return 0
+  rm -f "$lock_dir/pid"
+  rmdir "$lock_dir" 2>/dev/null || true
+  holds_lock=0
+}
+acquire_checkout_lock
 child_pid=''
 stop_owned_group() {
   local pid="$1" attempt
@@ -269,18 +299,13 @@ cleanup() {
     wait "$child_pid" 2>/dev/null || true
   fi
   [[ -z "$reservation" ]] || rm -f "$reservation"
-  rm -f "$lock_dir/pid"
-  rmdir "$lock_dir" 2>/dev/null || true
+  release_checkout_lock
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-until require_idle 2>/dev/null; do
-  if (( waited >= wait_seconds )); then require_idle || exit $?; fi
-  sleep "$poll_seconds"
-  waited=$((waited + poll_seconds))
-done
+require_idle || exit $?
 if (( before_target > cap_kib || before_free < min_free_kib )); then
   if (( no_prune == 1 )); then
     echo 'build-budget: no-prune mode cannot recover the required headroom or target cap' >&2
@@ -297,7 +322,16 @@ fi
 pre_free="$(free_kib)"
 pre_target="$(target_kib strict)"
 printf 'Pre-build: free=%s KiB target=%s KiB\n' "$pre_free" "$pre_target"
-admit_build || exit 1
+until admit_build; do
+  (( waited < wait_seconds )) || exit 1
+  # Free space comes from prune-inactive-lane, which needs this checkout's
+  # lock; release it while waiting for admission (Task 218: run 175's ship
+  # held it and deadlocked the prune that would have admitted it).
+  release_checkout_lock
+  sleep "$poll_seconds"
+  waited=$((waited + poll_seconds))
+  acquire_checkout_lock
+done
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 profile="${AURA_BUILD_PROFILE:-unlabelled}"
@@ -336,15 +370,22 @@ child_pid=''
 post_build_target="$(target_kib)"
 (( post_build_target > peak_target )) && peak_target="$post_build_target"
 
+# The build is done: its post-build sweep never waits for other builders.
+wait_seconds=0
 if (( status == 0 && no_prune == 1 )); then
   echo 'No-prune mode: post-build cache collection skipped'
 elif (( status == 0 )); then
-  if require_idle; then
+  # Cleanup is best effort: a sweep skipped because another builder is (or
+  # became) active leaves the build's own status (Task 212). Only a genuine
+  # sweep failure changes it.
+  if idle_now; then
     if sweep apply; then :;
     else
       sweep_status=$?
       if (( sweep_status == 3 )); then
-        prune_safe_lanes apply
+        prune_safe_lanes apply || true
+      elif ! idle_now; then
+        echo 'build-budget: post-build sweep skipped because another builder started' >&2
       else
         echo 'build-budget: post-build sweep failed' >&2
         status=76
@@ -352,7 +393,6 @@ elif (( status == 0 )); then
     fi
   else
     echo 'build-budget: post-build sweep skipped because another builder started' >&2
-    status=76
   fi
 fi
 after_free="$(free_kib)"

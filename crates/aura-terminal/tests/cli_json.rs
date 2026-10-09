@@ -118,10 +118,9 @@ async fn every_command_emits_valid_json() {
     let net = SimNet::new();
     let peer = net.peer(71).await.unwrap();
     let data_dir = tempfile::tempdir().unwrap();
-    let path = rpc_socket::socket_path(data_dir.path());
-    let listener = rpc_socket::bind(&path).await.unwrap();
+    let hosted = rpc_socket::host(data_dir.path()).await.unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = rpc_socket::serve(&peer.ctx, listener, &path, async {
+    let server = rpc_socket::serve(&peer.ctx, hosted, async {
         let _ = stopped.await;
     });
     let dir = data_dir.path().to_path_buf();

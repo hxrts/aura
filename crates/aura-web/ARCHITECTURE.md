@@ -49,6 +49,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   app facade. Browser compilation enforces the private-field boundary; it
   must not be relaxed to accommodate a stale frontend caller.
 - Shared UI behavior remains in `aura-ui`.
+- Onboarding enrollment completion and error signal writes use the guarded
+  browser retry helper after async workflow execution, including persistence
+  failures, so signal contention does not panic or silently lose feedback.
 - Browser shell DOM-id resolution reuses the shared typed helper surface from
   `aura-ui` rather than re-opening `web_dom_id().expect(...)` chains at each
   browser callsite.

@@ -386,6 +386,7 @@
             pkg-config
             openssl
             cargoDeny
+            cargo-sweep
 
             # Task runner
             just

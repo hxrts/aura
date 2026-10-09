@@ -76,6 +76,9 @@ Shared commands are typed `IntentAction` requests (account creation, device enro
   substitute for a terminal result.
 - A staged browser import or bootstrap handoff reports staging. The follow-up
   operation settles only after the runtime ceremony outcome is observed.
+- Guardian acceptance uses a distinct follow-up operation. It succeeds only
+  after the principal's verified binding acknowledgment; local acceptance or
+  a click is not a terminal result.
 
 See [Testing Guide](804_testing_guide.md) for semantic command usage.
 
