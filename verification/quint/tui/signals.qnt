@@ -39,6 +39,7 @@ module tui_signal_propagation {
 
   // Command result
   type CommandResult =
+    | NotRun
     | Success
     | Failure(str)
 
@@ -84,7 +85,7 @@ module tui_signal_propagation {
     messages' = [],
     emittedSignals' = Set(),
     lastCommand' = ImportInvitation({ code: "" }),
-    lastResult' = Success
+    lastResult' = NotRun
   }
 
   // ============ COMMAND ACTIONS ============
@@ -95,7 +96,7 @@ module tui_signal_propagation {
     if (code != "") all {
       // Success: add contact and emit signal
       contacts' = contacts.union(Set(senderId)),
-      emittedSignals' = Set(ContactsSignal),
+      emittedSignals' = Set(ContactsSignal, InvitationsSignal),
       lastResult' = Success,
       // Unchanged
       channels' = channels,
@@ -189,6 +190,7 @@ module tui_signal_propagation {
   // Failed commands MUST NOT emit signals
   val failedCommandsNoSignal: bool =
     match lastResult {
+      | NotRun => true
       | Failure(_) => emittedSignals == Set()
       | Success => true
     }
@@ -205,12 +207,27 @@ module tui_signal_propagation {
 
   // ============ TEST SCENARIOS ============
 
+  run initialSignalInvariantTest = {
+    init.then(all {
+      assert(lastResult == NotRun),
+      assert(allInvariants),
+      contacts' = contacts,
+      channels' = channels,
+      invitations' = invitations,
+      messages' = messages,
+      emittedSignals' = emittedSignals,
+      lastCommand' = lastCommand,
+      lastResult' = lastResult
+    })
+  }
+
   // Test: Import invitation adds contact and emits signal
   run importInvitationTest = {
     init
     .then(importInvitation("valid_code", "alice-id"))
     .then(all {
       assert(lastResult == Success),
+      assert(allInvariants),
       assert(contacts.contains("alice-id")),
       assert(emittedSignals.contains(ContactsSignal)),
       contacts' = contacts,
