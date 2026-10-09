@@ -24,19 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: gaurav-nelson/github-action-markdown-link-check@v1
-        with:
-          use-quiet-mode: "yes"
-          use-verbose-mode: "yes"
-          config-file: ".github/config/markdown-link-check.json"
-          base-branch: "main"
-          folder-path: "docs"
+      - uses: ./.github/actions/setup-nix
+      - run: nix develop --command just ci-docs-links
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: nix develop --command just ci-book
+          replay-command: nix develop --command just ci-docs-links
 
   crate-links:
     name: Crate Doc Links
