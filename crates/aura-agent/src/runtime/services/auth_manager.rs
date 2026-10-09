@@ -90,6 +90,11 @@ impl AuthManager {
             .cloned()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn pending_challenge_count(&self) -> usize {
+        self.state.read().await.pending_challenges.len()
+    }
+
     /// Remove a cached challenge.
     pub async fn remove_challenge(&self, challenge_id: &str) -> Option<AuthChallenge> {
         with_state_mut_validated(

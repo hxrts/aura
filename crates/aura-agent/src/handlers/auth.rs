@@ -11,7 +11,9 @@ use aura_authentication::capabilities::AuthenticationCapability;
 use aura_authentication::AuthFact;
 #[cfg(test)]
 use aura_core::effects::CryptoCoreEffects;
-use aura_core::effects::{CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects};
+use aura_core::effects::{
+    CryptoExtendedEffects, PhysicalTimeEffects, RandomCoreEffects, RandomExtendedEffects,
+};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{FlowCost, Hash32};
 use aura_guards::chain::create_send_guard;
@@ -19,13 +21,25 @@ use aura_guards::{
     DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
     VerifiedIngressMetadata,
 };
-use aura_protocol::effects::EffectApiEffects;
 use aura_signature::session::SessionScope;
 #[cfg(test)]
 use aura_signature::sign_ed25519_transcript;
 use aura_signature::{verify_ed25519_transcript, verify_frost_transcript, SecurityTranscript};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+async fn required_auth_timestamp(effects: &AuraEffectSystem) -> AgentResult<u64> {
+    effects
+        .physical_time()
+        .await
+        .map(|time| time.ts_ms)
+        .map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Internal {
+                message: "required authentication validity clock failed".into(),
+                source: Some(Arc::new(source)),
+            })
+        })
+}
 
 /// Extract the group public key (32 bytes) from a serialized FROST PublicKeyPackage
 fn extract_group_public_key(public_key_package: &[u8]) -> AgentResult<Vec<u8>> {
@@ -226,7 +240,7 @@ impl AuthHandler {
         // Generate random challenge bytes
         let challenge_bytes = effects.random_bytes(32).await;
 
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
+        let current_time = required_auth_timestamp(effects).await?;
         let challenge_id = format!("challenge-{}", effects.random_uuid().await.simple());
         let scope = SessionScope::Protocol {
             protocol_type: "authentication".to_string(),
@@ -236,7 +250,9 @@ impl AuthHandler {
             challenge_id: challenge_id.clone(),
             challenge_bytes,
             created_at: current_time,
-            expires_at: current_time + 300_000, // 5 minute expiry
+            expires_at: current_time.checked_add(300_000).ok_or_else(|| {
+                AgentError::invalid("authentication challenge expiry exceeds physical-time range")
+            })?, // Original 5 minute local expiry
             authority_id: self.context.authority.authority_id(),
             context_id: self.context.authority.default_context_id(),
             device_id: self.device_id(),
@@ -262,7 +278,7 @@ impl AuthHandler {
         response: &VerifiedAuthResponse,
     ) -> AgentResult<AuthResult> {
         let response = response.payload();
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
+        let current_time = required_auth_timestamp(effects).await?;
 
         // Look up the challenge
         let challenge = self
@@ -284,7 +300,7 @@ impl AuthHandler {
         };
 
         // Check expiration
-        if current_time > challenge.expires_at {
+        if aura_authentication::view::is_expired_at(challenge.expires_at, current_time) {
             // Remove expired challenge
             self.challenge_manager
                 .remove_challenge(&response.challenge_id)
@@ -444,7 +460,7 @@ impl AuthHandler {
             trusted_key.bytes(),
         )
         .await
-        .map_err(|e| AgentError::effects(format!("signature verification failed: {e}")))?;
+        .map_err(AgentError::from)?;
 
         Ok(verified)
     }
@@ -537,7 +553,7 @@ impl AuthHandler {
 
         let signature = sign_ed25519_transcript(effects, &transcript, &private_key)
             .await
-            .map_err(|e| AgentError::effects(format!("failed to sign challenge: {e}")))?;
+            .map_err(AgentError::from)?;
 
         Ok(AuthResponse {
             signature,
@@ -722,6 +738,262 @@ mod tests {
     use super::*;
     use crate::core::{default_context_id_for_authority, AgentConfig, AuthorityContext};
     use aura_core::types::identifiers::AuthorityId;
+    use aura_testkit::stateful_effects::custom_provider::{
+        CustomCryptoProbe, CustomEd25519Fault, CustomProviderProbe,
+    };
+
+    struct AuthProviderFixture {
+        _profile: tempfile::TempDir,
+        authority: AuthorityId,
+        agent: crate::AuraAgent,
+        crypto: Arc<CustomCryptoProbe>,
+        provider: Arc<CustomProviderProbe>,
+        clock: Arc<aura_testkit::time::ManualPhysicalClock>,
+    }
+
+    impl AuthProviderFixture {
+        async fn new(seed: u8) -> Self {
+            let profile = tempfile::tempdir().unwrap();
+            let authority = AuthorityId::new_from_entropy([seed; 32]);
+            let crypto = Arc::new(CustomCryptoProbe::default());
+            let provider = Arc::new(CustomProviderProbe::default());
+            let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(1_000));
+            let agent = crate::AgentBuilder::custom()
+                .with_crypto(crypto.clone())
+                .with_storage(provider.clone())
+                .with_time(clock.clone())
+                .with_random(provider.clone())
+                .with_console(provider.clone())
+                .authority(authority)
+                .testing_mode()
+                .with_config(AgentConfig {
+                    storage: crate::core::config::StorageConfig {
+                        base_path: profile.path().to_path_buf(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .build()
+                .await
+                .unwrap();
+            Self {
+                _profile: profile,
+                authority,
+                agent,
+                crypto,
+                provider,
+                clock,
+            }
+        }
+
+        fn handler(&self) -> AuthHandler {
+            AuthHandler::new(AuthorityContext::new(self.authority)).unwrap()
+        }
+
+        async fn signed_response(
+            &self,
+            handler: &AuthHandler,
+            challenge: &AuthChallenge,
+        ) -> VerifiedAuthResponse {
+            let effects = self.agent.runtime().effects();
+            let response = handler
+                .sign_challenge_with_ephemeral_key_for_tests(&effects, challenge)
+                .await
+                .unwrap();
+            // Explicit fixture trust tests the actual handler, not enrollment provenance.
+            handler
+                .key_resolver
+                .register_device_key(
+                    challenge.device_id,
+                    response.legacy_untrusted_public_key.clone(),
+                )
+                .unwrap();
+            handler.build_response_ingress(response).unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_auth_sign_and_verify_failures_preserve_native_source() {
+        let fixture = AuthProviderFixture::new(207).await;
+        let crypto = &fixture.crypto;
+        let provider = &fixture.provider;
+        let effects = fixture.agent.runtime().effects();
+        let handler = fixture.handler();
+        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let ingress = fixture.signed_response(&handler, &challenge).await;
+        let before = provider.stored_bytes().await;
+        let journal_before = effects
+            .load_committed_facts(fixture.authority)
+            .await
+            .unwrap();
+        for fault in [CustomEd25519Fault::Sign, CustomEd25519Fault::Verify] {
+            crypto.set_ed25519_fault(Some(fault));
+            let failure = match fault {
+                CustomEd25519Fault::Sign => handler
+                    .sign_challenge_with_ephemeral_key_for_tests(&effects, &challenge)
+                    .await
+                    .expect_err("selected signer outage cannot issue response"),
+                CustomEd25519Fault::Verify => handler
+                    .verify_response(&effects, &ingress)
+                    .await
+                    .expect_err("selected verifier outage cannot authenticate"),
+                CustomEd25519Fault::Generate => unreachable!(),
+            };
+            let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+            let mut original = None;
+            while let Some(error) = cause {
+                if let Some(found) = error.downcast_ref::<CustomEd25519Fault>() {
+                    original = Some(*found);
+                }
+                cause = error.source();
+            }
+            assert_eq!(original.map(|found| found as usize), Some(fault as usize));
+            assert!(
+                handler
+                    .challenge_manager
+                    .get_challenge(&challenge.challenge_id)
+                    .await
+                    .is_some(),
+                "failed provider cannot consume challenge as authenticated"
+            );
+            assert_eq!(
+                provider.stored_bytes().await,
+                before,
+                "failed provider cannot publish authentication facts"
+            );
+            assert_eq!(
+                effects
+                    .load_committed_facts(fixture.authority)
+                    .await
+                    .unwrap(),
+                journal_before,
+                "failed verifier cannot publish committed authentication facts"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn required_auth_clock_failures_publish_no_challenge_or_authentication() {
+        use aura_core::effects::TimeError;
+        let fixture = AuthProviderFixture::new(211).await;
+        let effects = fixture.agent.runtime().effects();
+        let handler = fixture.handler();
+        let storage_before = fixture.provider.stored_bytes().await;
+        let journal_before = effects
+            .load_committed_facts(fixture.authority)
+            .await
+            .unwrap();
+        fixture
+            .clock
+            .fail_next_observation(TimeError::OperationFailed {
+                reason: "required challenge issuance observation".into(),
+            })
+            .await;
+        let failure = handler
+            .create_challenge(&effects)
+            .await
+            .expect_err("clock failure cannot issue a challenge");
+        assert_native_clock_cause(&failure, "required challenge issuance observation");
+        assert_eq!(handler.challenge_manager.pending_challenge_count().await, 0);
+        assert_eq!(fixture.provider.stored_bytes().await, storage_before);
+        assert_eq!(
+            effects
+                .load_committed_facts(fixture.authority)
+                .await
+                .unwrap(),
+            journal_before
+        );
+
+        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let ingress = fixture.signed_response(&handler, &challenge).await;
+        let storage_before = fixture.provider.stored_bytes().await;
+        let journal_before = effects
+            .load_committed_facts(fixture.authority)
+            .await
+            .unwrap();
+        fixture
+            .clock
+            .fail_next_observation(TimeError::OperationFailed {
+                reason: "required signed response validity observation".into(),
+            })
+            .await;
+        let failure = handler
+            .verify_response(&effects, &ingress)
+            .await
+            .expect_err("clock failure cannot authenticate signed response");
+        assert_native_clock_cause(&failure, "required signed response validity observation");
+        let retained = handler
+            .challenge_manager
+            .get_challenge(&challenge.challenge_id)
+            .await
+            .expect("original challenge remains pending");
+        assert_eq!(retained.created_at, challenge.created_at);
+        assert_eq!(retained.expires_at, challenge.expires_at);
+        assert_eq!(fixture.provider.stored_bytes().await, storage_before);
+        assert_eq!(
+            effects
+                .load_committed_facts(fixture.authority)
+                .await
+                .unwrap(),
+            journal_before
+        );
+    }
+
+    fn assert_native_clock_cause(failure: &AgentError, expected_reason: &str) {
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(failure);
+        let mut found = false;
+        while let Some(error) = cause {
+            if matches!(error.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::OperationFailed { reason }) if reason == expected_reason)
+            {
+                found = true;
+            }
+            cause = error.source();
+        }
+        assert!(found, "original selected clock provider cause survives");
+    }
+
+    #[tokio::test]
+    async fn signed_authentication_excludes_the_original_expiry_endpoint() {
+        let fixture = AuthProviderFixture::new(212).await;
+        let effects = fixture.agent.runtime().effects();
+        for offset in [-1i64, 0, 1] {
+            fixture.clock.set_time(1_000);
+            let handler = fixture.handler();
+            let challenge = handler.create_challenge(&effects).await.unwrap();
+            let ingress = fixture.signed_response(&handler, &challenge).await;
+            let original_expiry = challenge.expires_at;
+            let now_ms = original_expiry.checked_add_signed(offset).unwrap();
+            fixture.clock.set_time(now_ms);
+            let journal_before = effects
+                .load_committed_facts(fixture.authority)
+                .await
+                .unwrap();
+            let result = handler.verify_response(&effects, &ingress).await.unwrap();
+            assert_eq!(result.authenticated, offset < 0);
+            assert_eq!(result.authenticated_at, now_ms);
+            assert_eq!(challenge.expires_at, original_expiry);
+            if offset >= 0 {
+                assert_eq!(
+                    effects
+                        .load_committed_facts(fixture.authority)
+                        .await
+                        .unwrap(),
+                    journal_before,
+                    "expired signed response cannot publish authentication facts"
+                );
+            } else {
+                assert_ne!(
+                    effects
+                        .load_committed_facts(fixture.authority)
+                        .await
+                        .unwrap(),
+                    journal_before,
+                    "valid signed response exercises actual fact publication"
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn auth_status_requires_authorized_context() {

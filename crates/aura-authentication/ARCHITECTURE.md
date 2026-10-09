@@ -32,6 +32,10 @@ End-to-end authentication protocol including challenge-response flows, session m
 
 - Facts must be reduced under their matching `ContextId`.
 - Session and request identifiers are treated as stable binding keys.
+- Local authentication validity excludes its original expiration endpoint. The
+  shared pure `view::is_expired_at` predicate governs guards, views, and native
+  challenge verification; required selected-provider clock failures cannot
+  become issued challenges, authenticated responses, or authentication facts.
 - Recovery and guardian approval flows are consensus-gated (Category C).
 - Authentication challenge verification must resolve trusted device or
   threshold keys from enrolled authority state; response-supplied key material

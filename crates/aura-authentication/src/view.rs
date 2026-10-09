@@ -142,7 +142,7 @@ impl AuthView {
     pub fn is_session_active(&self, session_id: &str, now_ms: u64) -> bool {
         self.active_sessions
             .get(session_id)
-            .map(|s| s.expires_at_ms > now_ms)
+            .map(|s| !is_expired_at(s.expires_at_ms, now_ms))
             .unwrap_or(false)
     }
 
@@ -183,6 +183,12 @@ impl AuthView {
     }
 }
 
+/// Local authentication validity excludes the original expiration endpoint.
+/// This comparison conveys no distributed ordering or agreement evidence.
+pub const fn is_expired_at(expires_at_ms: u64, now_ms: u64) -> bool {
+    now_ms >= expires_at_ms
+}
+
 fn collect_expired_ids<T>(
     entries: &HashMap<String, T>,
     now_ms: u64,
@@ -190,7 +196,7 @@ fn collect_expired_ids<T>(
 ) -> Vec<String> {
     entries
         .iter()
-        .filter(|(_, entry)| expires_at_ms(entry) <= now_ms)
+        .filter(|(_, entry)| is_expired_at(expires_at_ms(entry), now_ms))
         .map(|(id, _)| id.clone())
         .collect()
 }
@@ -658,6 +664,12 @@ mod tests {
         let expired = view.get_expired_sessions(1500);
         assert_eq!(expired.len(), 1);
         assert!(expired.contains(&"session_old".to_string()));
+        assert!(view.is_session_active("session_old", 999));
+        assert!(!view.is_session_active("session_old", 1000));
+        assert_eq!(
+            view.get_expired_sessions(1000),
+            vec!["session_old".to_owned()]
+        );
     }
 
     #[test]

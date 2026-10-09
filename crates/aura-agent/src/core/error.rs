@@ -115,3 +115,17 @@ impl AgentError {
         Self::Config(msg.into())
     }
 }
+
+impl From<aura_signature::TranscriptCryptoError> for AgentError {
+    fn from(source: aura_signature::TranscriptCryptoError) -> Self {
+        match source {
+            aura_signature::TranscriptCryptoError::Encoding(source) => {
+                Self::Aura(AuraError::Serialization {
+                    message: "required security transcript encoding failed".into(),
+                    source: Some(std::sync::Arc::new(source)),
+                })
+            }
+            aura_signature::TranscriptCryptoError::Provider(source) => Self::Aura(source),
+        }
+    }
+}

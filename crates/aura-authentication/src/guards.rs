@@ -491,7 +491,7 @@ pub fn check_challenge_expiry(
     snapshot: &GuardSnapshot,
     expires_at_ms: u64,
 ) -> Option<GuardOutcome> {
-    if snapshot.now_ms > expires_at_ms {
+    if crate::view::is_expired_at(expires_at_ms, snapshot.now_ms) {
         Some(deny(GuardReject {
             code: "challenge-expired",
             category: "auth",
@@ -985,6 +985,12 @@ mod tests {
         // Not expired
         let result = check_challenge_expiry(&snapshot, 2000);
         assert!(result.is_none());
+
+        let result = check_challenge_expiry(&snapshot, snapshot.now_ms);
+        assert!(
+            result.unwrap().is_denied(),
+            "expiration endpoint is excluded"
+        );
 
         // Expired
         let result = check_challenge_expiry(&snapshot, 500);
