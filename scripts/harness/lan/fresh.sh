@@ -27,13 +27,8 @@ ssh "$AURA_E2E_REMOTE" "cd $AURA_E2E_REMOTE_ROOT && scripts/harness/lan/drv.sh s
   scripts/harness/lan/drv.sh start $remote_config" | tail -1
 (cd "$AURA_E2E_ROOT" && nix develop --command "$AURA_E2E_DRV" start "$local_config" | tail -1)
 
-for inst in alex-tui barbara-tui alex-tui2; do
-  until [ "$(st "$inst" .screen 2>/dev/null)" = '"onboarding"' ]; do sleep 5; done
-done
-a=$(onboard_tui alex-tui Alex); b=$(onboard_tui barbara-tui Barbara); c=$(onboard_tui alex-tui2 Carol)
+a=$(onboard alex-tui Alex); b=$(onboard barbara-tui Barbara); c=$(onboard alex-tui2 Carol)
 echo "A=$a B=$b C=$c" | tee "$AURA_E2E_RUN_DIR/ids-$AURA_E2E_RUN_TOKEN"
-sleep 10
 link alex-tui barbara-tui
 link alex-tui alex-tui2
-sleep 15
 contacts alex-tui; contacts barbara-tui; contacts alex-tui2

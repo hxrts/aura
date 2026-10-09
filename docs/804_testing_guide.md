@@ -108,6 +108,25 @@ Use this lane matrix when selecting harness mode.
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot and readiness waits.
 
+LAN automation uses the same command plane through the tool REPL's
+`submit_semantic_command` request. Its typed `IntentAction` constructs one
+canonical request on the server; the response retains the original receipt
+and shared action contract. Follow that contract's submission kind: required
+operation handles must match the exact operation and instance through terminal
+success, failure, or cancellation. Immediate account creation instead requires
+the reloaded shell's Neighborhood screen and Ready state; a pre-reload handle
+does not prove that outcome.
+
+`wait_for_ui_snapshot_event` carries the backend event version as
+`after_version`, independently of the snapshot's projection revision. Advance
+that cursor while preserving the original observation deadline. A null event
+is an observation timeout, never success. Command acceptance, diagnostic
+`wait_for`, rendered text, and fixed delays cannot establish completion.
+The LAN helpers retain command receipts and pushed snapshot evidence in the
+configured run outputs. Native RPC clients obtain the exact owned profile
+directory from `instance_metadata` and connect to its recorded running-node
+socket; they must not open another runtime over a profile held by the TUI.
+
 Native TUI harness IPC is part of that shared compatibility surface now. In
 explicit harness mode the command socket and semantic snapshot mirrors are
 scoped under `AURA_HARNESS_INSTANCE_TRANSIENT_ROOT`, and command submission
