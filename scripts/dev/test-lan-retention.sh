@@ -144,4 +144,5 @@ if bash "$driver" start "$test_root/configs/lan.toml" >/dev/null 2>&1; then
   echo 'LAN driver accepted a token too short for the native harness' >&2; exit 1
 fi
 [[ ! -e "$runs/short" ]]
+bash "$repo_root/scripts/harness/lan/test-fresh.sh"
 echo 'LAN retention lifecycle tests passed'
