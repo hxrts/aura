@@ -113,6 +113,10 @@ ownership and complete native/browser restart coverage remain required.
 
 ## Invariants
 
+- Conformance artifact metadata retains native runtime bounds through checked
+  fixed-width conversions. Conversion failure is source-bearing and prevents
+  artifact publication; it cannot erase a declared scheduler bound.
+
 - A production profile's secure-storage provider is selected once, by
   `AuraEffectSystem::select_profile_secure_storage` (configured backend plus
   the profile's exclusive owner). Runtime assembly and the profile's

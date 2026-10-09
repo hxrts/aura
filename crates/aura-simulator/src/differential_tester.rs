@@ -41,7 +41,7 @@ pub struct DifferentialMismatch {
     /// Surface where mismatch occurred.
     pub surface: Option<ConformanceSurfaceName>,
     /// Optional step index of first mismatch.
-    pub step_index: Option<usize>,
+    pub step_index: Option<u64>,
     /// Human-readable mismatch detail.
     pub detail: String,
 }
@@ -66,6 +66,13 @@ pub struct DifferentialReport {
 /// Differential-testing errors.
 #[derive(Debug, thiserror::Error)]
 pub enum DifferentialTesterError {
+    /// A local index could not be retained in the portable report.
+    #[error("differential step index exceeds the wire range: {source}")]
+    CountOutOfRange {
+        /// Original checked-conversion failure.
+        #[source]
+        source: std::num::TryFromIntError,
+    },
     /// Failed loading a conformance artifact file.
     #[error("failed loading conformance artifact: {message}")]
     LoadArtifact {
@@ -104,35 +111,38 @@ impl DifferentialTester {
     }
 
     /// Compare baseline/candidate conformance artifacts.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns the original conversion source if a mismatch index cannot fit the report.
     pub fn compare(
         &self,
         baseline: &AuraConformanceArtifactV1,
         candidate: &AuraConformanceArtifactV1,
-    ) -> DifferentialReport {
+    ) -> Result<DifferentialReport, DifferentialTesterError> {
         let mismatch = match self.profile {
             DifferentialProfile::EnvelopeBounded => {
                 let report = compare_artifacts(baseline, candidate, &self.registry);
-                report.first_mismatch.map(map_mismatch)
+                report.first_mismatch.map(map_mismatch).transpose()?
             }
-            DifferentialProfile::Strict => strict_mismatch(baseline, candidate),
+            DifferentialProfile::Strict => strict_mismatch(baseline, candidate)?,
         };
 
-        DifferentialReport {
+        Ok(DifferentialReport {
             profile: self.profile,
             equivalent: mismatch.is_none(),
             mismatch,
             baseline_target: baseline.metadata.target.clone(),
             candidate_target: candidate.metadata.target.clone(),
             scenario: baseline.metadata.scenario.clone(),
-        }
+        })
     }
 
     /// Compare artifacts loaded from disk.
     ///
     /// # Errors
     ///
-    /// Returns load errors for malformed/missing files.
+    /// Returns load errors for malformed/missing files or a report-index conversion error.
     pub fn compare_files(
         &self,
         baseline_path: impl AsRef<Path>,
@@ -148,20 +158,21 @@ impl DifferentialTester {
                 message: error.to_string(),
             }
         })?;
-        Ok(self.compare(&baseline, &candidate))
+        self.compare(&baseline, &candidate)
     }
 
     /// Assert candidate run stays within admitted differential envelope.
     ///
     /// # Errors
     ///
-    /// Returns [`DifferentialTesterError::EnvelopeViolation`] on mismatch.
+    /// Returns [`DifferentialTesterError::EnvelopeViolation`] on mismatch, or a
+    /// source-bearing conversion error when the mismatch index cannot be retained.
     pub fn assert_envelope_satisfied(
         &self,
         baseline: &AuraConformanceArtifactV1,
         candidate: &AuraConformanceArtifactV1,
     ) -> Result<(), DifferentialTesterError> {
-        let report = self.compare(baseline, candidate);
+        let report = self.compare(baseline, candidate)?;
         if report.equivalent {
             return Ok(());
         }
@@ -178,7 +189,7 @@ impl DifferentialTester {
 fn strict_mismatch(
     baseline: &AuraConformanceArtifactV1,
     candidate: &AuraConformanceArtifactV1,
-) -> Option<DifferentialMismatch> {
+) -> Result<Option<DifferentialMismatch>, DifferentialTesterError> {
     for surface in ConformanceSurfaceName::REQUIRED {
         let baseline_entries = baseline
             .surfaces
@@ -198,21 +209,30 @@ fn strict_mismatch(
         let max_len = baseline_entries.len().max(candidate_entries.len());
         let first_idx =
             (0..max_len).find(|idx| baseline_entries.get(*idx) != candidate_entries.get(*idx));
-        return Some(DifferentialMismatch {
+        return Ok(Some(DifferentialMismatch {
             surface: Some(surface),
-            step_index: first_idx,
+            step_index: wire_step_index(first_idx)?,
             detail: "strict profile mismatch".to_string(),
-        });
+        }));
     }
-    None
+    Ok(None)
 }
 
-fn map_mismatch(mismatch: ConformanceMismatch) -> DifferentialMismatch {
-    DifferentialMismatch {
+fn wire_step_index(index: Option<usize>) -> Result<Option<u64>, DifferentialTesterError> {
+    index
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|source| DifferentialTesterError::CountOutOfRange { source })
+}
+
+fn map_mismatch(
+    mismatch: ConformanceMismatch,
+) -> Result<DifferentialMismatch, DifferentialTesterError> {
+    Ok(DifferentialMismatch {
         surface: Some(mismatch.surface),
-        step_index: mismatch.step_index,
+        step_index: wire_step_index(mismatch.step_index)?,
         detail: mismatch.detail,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -257,7 +277,9 @@ mod tests {
         let baseline = artifact_with_effect_order(&["a", "b"]);
         let candidate = artifact_with_effect_order(&["b", "a"]);
         let tester = DifferentialTester::new(DifferentialProfile::Strict);
-        let report = tester.compare(&baseline, &candidate);
+        let report = tester
+            .compare(&baseline, &candidate)
+            .expect("portable report");
         assert!(!report.equivalent);
         assert!(report.mismatch.is_some());
     }
@@ -267,7 +289,9 @@ mod tests {
         let baseline = artifact_with_effect_order(&["a", "b"]);
         let candidate = artifact_with_effect_order(&["b", "a"]);
         let tester = DifferentialTester::new(DifferentialProfile::EnvelopeBounded);
-        let report = tester.compare(&baseline, &candidate);
+        let report = tester
+            .compare(&baseline, &candidate)
+            .expect("portable report");
         assert!(report.equivalent, "commutative reordering should pass");
     }
 }

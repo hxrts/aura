@@ -3171,7 +3171,7 @@ fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> boo
             return false;
         };
         if let Some(count) = step.count {
-            if list.items.len() != count {
+            if usize::try_from(count).ok() != Some(list.items.len()) {
                 return false;
             }
         }

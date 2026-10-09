@@ -70,6 +70,20 @@ impl CommandContext {
     }
 }
 
+fn wire_count(label: &str, count: usize) -> Result<u64, CommandError> {
+    u64::try_from(count).map_err(|_| {
+        CommandError::new(
+            ErrorCode::Failed,
+            format!("{label} exceeds the RPC count range"),
+        )
+    })
+}
+
+fn message_limit(limit: u32) -> Result<usize, CommandError> {
+    usize::try_from(limit)
+        .map_err(|_| CommandError::invalid("message limit exceeds this runtime's capacity"))
+}
+
 fn parse<T: FromStr>(label: &str, raw: &str) -> Result<T, CommandError>
 where
     T::Err: std::fmt::Display,
@@ -359,8 +373,8 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                 nickname: s.nickname_suggestion,
                 threshold_k: s.threshold_k,
                 threshold_n: s.threshold_n,
-                devices: s.devices.len(),
-                contacts: s.contact_count,
+                devices: wire_count("device count", s.devices.len())?,
+                contacts: wire_count("contact count", s.contact_count)?,
             }))
         }
         Request::AuthorityList => {
@@ -418,6 +432,7 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
         } => {
             let channel = channel(ctx, &selector).await?;
             let sender = sender.map(|s| parse_authority("sender", &s)).transpose()?;
+            let limit = limit.map(message_limit).transpose()?;
             let messages = messaging::channel_history(app, channel.id, limit, sender).await;
             Ok(Response::Messages(
                 messages.iter().map(message_view).collect(),
@@ -507,6 +522,7 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                 None => None,
             };
             let sender = sender.map(|s| parse_authority("sender", &s)).transpose()?;
+            let limit = message_limit(limit)?;
             let found = messaging::search_messages(app, &query, channel_id, sender, limit).await;
             Ok(Response::Messages(found.iter().map(message_view).collect()))
         }
@@ -807,7 +823,7 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                         format!("{} {}{current}", d.id, d.name)
                     })
                     .collect(),
-                contacts: s.contact_count,
+                contacts: wire_count("contact count", s.contact_count)?,
             }))
         }
         Request::SettingsMfa { require } => {
@@ -1079,10 +1095,16 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
             Ok(done("Sync requested", None))
         }
         Request::PeerAdd { peer } => Ok(Response::Peers {
-            connected: network::add_peer(app, parse_authority("peer", &peer)?).await?,
+            connected: wire_count(
+                "connected peer count",
+                network::add_peer(app, parse_authority("peer", &peer)?).await?,
+            )?,
         }),
         Request::PeerRemove { peer } => Ok(Response::Peers {
-            connected: network::remove_peer(app, &parse_authority("peer", &peer)?).await?,
+            connected: wire_count(
+                "connected peer count",
+                network::remove_peer(app, &parse_authority("peer", &peer)?).await?,
+            )?,
         }),
 
         Request::AmpInspect { context, channel } => {
@@ -1153,19 +1175,27 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
             Ok(Response::OtaReleases(
                 view.releases
                     .values()
-                    .map(|r| OtaReleaseView {
-                        release_id: r.release_id.as_hash().to_string(),
-                        series_id: r.series_id.as_hash().to_string(),
-                        version: r.version.to_string(),
-                        declared_by: r.declared_by.iter().map(ToString::to_string).collect(),
-                        artifacts: view.artifacts.get(&r.release_id).map_or(0, |a| a.len()),
-                        certificates: view.certificates.get(&r.release_id).map_or(0, |c| c.len()),
-                        recommended: view
-                            .recommendations
-                            .iter()
-                            .any(|rec| rec.release_id == r.release_id && rec.scope == mine),
+                    .map(|r| {
+                        Ok(OtaReleaseView {
+                            release_id: r.release_id.as_hash().to_string(),
+                            series_id: r.series_id.as_hash().to_string(),
+                            version: r.version.to_string(),
+                            declared_by: r.declared_by.iter().map(ToString::to_string).collect(),
+                            artifacts: wire_count(
+                                "artifact count",
+                                view.artifacts.get(&r.release_id).map_or(0, |a| a.len()),
+                            )?,
+                            certificates: wire_count(
+                                "certificate count",
+                                view.certificates.get(&r.release_id).map_or(0, |c| c.len()),
+                            )?,
+                            recommended: view
+                                .recommendations
+                                .iter()
+                                .any(|rec| rec.release_id == r.release_id && rec.scope == mine),
+                        })
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, CommandError>>()?,
             ))
         }
         Request::OtaStatus => {
@@ -1175,21 +1205,23 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                 view.upgrades
                     .values()
                     .filter(|u| u.scope == mine)
-                    .map(|u| OtaUpgradeView {
-                        scope: format!("authority {}", ctx.authority_id),
-                        to_release_id: u.to_release_id.as_hash().to_string(),
-                        from_release_id: u.from_release_id.map(|f| f.as_hash().to_string()),
-                        stage: match u.stage {
-                            OtaScopeStage::Staged => "staged",
-                            OtaScopeStage::CutoverApproved => "cutover_approved",
-                            OtaScopeStage::CutoverCompleted => "cutover_completed",
-                            OtaScopeStage::RolledBack => "rolled_back",
-                        }
-                        .to_string(),
-                        approvals: u.approvals.len(),
-                        rollbacks: u.rollbacks.iter().cloned().collect(),
+                    .map(|u| {
+                        Ok(OtaUpgradeView {
+                            scope: format!("authority {}", ctx.authority_id),
+                            to_release_id: u.to_release_id.as_hash().to_string(),
+                            from_release_id: u.from_release_id.map(|f| f.as_hash().to_string()),
+                            stage: match u.stage {
+                                OtaScopeStage::Staged => "staged",
+                                OtaScopeStage::CutoverApproved => "cutover_approved",
+                                OtaScopeStage::CutoverCompleted => "cutover_completed",
+                                OtaScopeStage::RolledBack => "rolled_back",
+                            }
+                            .to_string(),
+                            approvals: wire_count("approval count", u.approvals.len())?,
+                            rollbacks: u.rollbacks.iter().cloned().collect(),
+                        })
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, CommandError>>()?,
             ))
         }
         Request::OtaPublish {

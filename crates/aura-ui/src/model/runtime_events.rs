@@ -191,6 +191,14 @@ impl UiController {
         enrollment_code: &str,
         manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     ) {
+        let code_len = match u64::try_from(enrollment_code.len()) {
+            Ok(length) => length,
+            Err(error) => {
+                tracing::error!(%error, "enrollment code length exceeds runtime observation range");
+                self.runtime_error_toast("Enrollment code metadata exceeds the supported range");
+                return;
+            }
+        };
         let mut model = write_model(&self.model);
         model.modal_hint = "Add Device — Step 2 of 3".to_string();
         model.active_modal = Some(ActiveModal::AddDevice(AddDeviceModalState {
@@ -204,7 +212,7 @@ impl UiController {
         model.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
             manifest_transfer,
             device_name: Some(name.to_string()),
-            code_len: Some(enrollment_code.len()),
+            code_len: Some(code_len),
             code: Some(enrollment_code.to_string()),
         });
         drop(model);

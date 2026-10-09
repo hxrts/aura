@@ -28,6 +28,8 @@ Define storage domain types and fact-based state management for content-addresse
 - Storage changes recorded as `StorageFact` for journals.
 - Authority model: operations attributed to `AuthorityId`.
 - CRDT merge for distributed storage state.
+- Serialized search limits are `u32`; collection consumers perform their own
+  checked conversion to a local index width.
 
 ### InvariantStoreContentAddressIntegrity
 

@@ -1088,11 +1088,13 @@ pub fn close_and_reap_vm_session(
 pub fn collect_vm_session_artifacts(
     engine: &AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     sid: SessionId,
-) -> Result<AuraVmSessionArtifactSnapshot, String> {
+) -> Result<AuraVmSessionArtifactSnapshot, super::choreo_engine::AuraChoreoEngineError> {
     if !engine.active_sessions().contains(&sid) {
-        return Err(format!(
-            "cannot collect artifacts for inactive VM session {sid}"
-        ));
+        return Err(
+            super::choreo_engine::AuraChoreoEngineError::ConformanceArtifact {
+                message: format!("cannot collect artifacts for inactive VM session {sid}"),
+            },
+        );
     }
     let semantic_objects = engine.vm_semantic_objects();
     let finalization_paths = semantic_objects
@@ -1106,7 +1108,7 @@ pub fn collect_vm_session_artifacts(
         .collect();
     Ok(AuraVmSessionArtifactSnapshot {
         session_id: sid,
-        determinism_profile: engine.session_determinism_profile_metadata(sid),
+        determinism_profile: engine.session_determinism_profile_metadata(sid)?,
         requires_envelope_artifact: engine.session_requires_envelope_artifact(sid),
         effect_trace: engine.vm_effect_trace(),
         canonical_effect_trace: engine.canonical_vm_effect_trace(),
@@ -1777,6 +1779,7 @@ mod tests {
 
         let metadata = engine
             .session_determinism_profile_metadata(sid)
+            .expect("portable metadata")
             .expect("determinism metadata recorded");
         assert_eq!(metadata.runtime_mode, "cooperative");
         assert_eq!(metadata.scheduler_envelope_class, "exact");
@@ -1787,7 +1790,10 @@ mod tests {
         );
 
         close_and_reap_vm_session(&mut engine, sid).expect("session closes");
-        assert!(engine.session_determinism_profile_metadata(sid).is_none());
+        assert!(engine
+            .session_determinism_profile_metadata(sid)
+            .expect("portable metadata")
+            .is_none());
         assert!(!engine.session_requires_envelope_artifact(sid));
         assert!(engine.session_runtime_selector(sid).is_none());
 

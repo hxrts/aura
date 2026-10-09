@@ -65,7 +65,7 @@ pub enum TransportError {
     #[error("Transport ingress capacity exceeded ({capacity} envelopes)")]
     IngressCapacityExceeded {
         /// Actual configured runtime queue bound.
-        capacity: usize,
+        capacity: u64,
     },
     /// Failed to send message to destination
     #[error("Transport send failed to {destination}: {reason}")]

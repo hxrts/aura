@@ -65,7 +65,7 @@ impl std::str::FromStr for ExportFormat {
     }
 }
 
-fn default_search_limit() -> usize {
+fn default_search_limit() -> u32 {
     20
 }
 
@@ -88,7 +88,7 @@ pub enum Request {
     ChatHistory {
         channel: String,
         #[serde(default)]
-        limit: Option<usize>,
+        limit: Option<u32>,
         #[serde(default)]
         sender: Option<String>,
     },
@@ -122,7 +122,7 @@ pub enum Request {
         #[serde(default)]
         sender: Option<String>,
         #[serde(default = "default_search_limit")]
-        limit: usize,
+        limit: u32,
     },
     /// A channel's history in a portable format.
     ChatExport {
@@ -695,5 +695,19 @@ mod tests {
         let search: Request =
             serde_json::from_str(r#"{"method":"chat_search","params":{"query":"x"}}"#).unwrap();
         assert!(matches!(search, Request::ChatSearch { limit: 20, .. }));
+    }
+
+    #[test]
+    fn message_limits_have_the_same_wire_range_on_every_platform() {
+        for (method, params) in [
+            ("chat_history", serde_json::json!({"channel": "general"})),
+            ("chat_search", serde_json::json!({"query": "x"})),
+        ] {
+            let mut request = serde_json::json!({"method": method, "params": params});
+            request["params"]["limit"] = serde_json::json!(u32::MAX);
+            assert!(serde_json::from_value::<Request>(request.clone()).is_ok());
+            request["params"]["limit"] = serde_json::json!(u64::from(u32::MAX) + 1);
+            assert!(serde_json::from_value::<Request>(request).is_err());
+        }
     }
 }

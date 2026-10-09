@@ -12,9 +12,9 @@ pub struct SimulatorContext {
     /// Seed for deterministic simulation
     pub seed: u64,
     /// Number of participants in the simulation
-    pub participants: Option<usize>,
+    pub participants: Option<u32>,
     /// Threshold for operations requiring consensus
-    pub threshold: Option<usize>,
+    pub threshold: Option<u32>,
 }
 
 impl SimulatorContext {
@@ -36,7 +36,7 @@ impl SimulatorContext {
     }
 
     /// Set the number of participants and threshold
-    pub fn with_participants(mut self, participants: usize, threshold: usize) -> Self {
+    pub fn with_participants(mut self, participants: u32, threshold: u32) -> Self {
         self.participants = Some(participants);
         self.threshold = Some(threshold);
         self

@@ -125,7 +125,7 @@ pub enum Expectation {
     },
     ListCountIs {
         list: ListId,
-        count: usize,
+        count: u32,
     },
     ListItemConfirmation {
         list: ListId,
@@ -172,7 +172,7 @@ pub struct SemanticScenarioFileStep {
     pub modal_id: Option<ModalId>,
     pub list_id: Option<ListId>,
     pub item_id: Option<String>,
-    pub count: Option<usize>,
+    pub count: Option<u32>,
     pub value: Option<String>,
     pub key: Option<InputKey>,
     pub repeat: Option<u16>,
