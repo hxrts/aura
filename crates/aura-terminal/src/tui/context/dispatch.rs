@@ -6,7 +6,7 @@
 //! - Emitting `ERROR_SIGNAL` on all error paths
 
 use aura_core::{AuthorityId, ContextId};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -18,7 +18,6 @@ use super::{SnapshotHelper, ToastHelper};
 use crate::error::{TerminalError, TerminalResult};
 use crate::tui::components::copy_to_clipboard;
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
-use crate::tui::types::ChannelMode;
 
 const BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME: &str = ".bootstrap-runtime-handoff-ready";
 
@@ -231,7 +230,6 @@ pub struct DispatchHelper {
 
     // Local, UI-only state updates driven by OpResponse.
     current_context: Arc<RwLock<Option<String>>>,
-    channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
 }
 
@@ -244,7 +242,6 @@ impl DispatchHelper {
         account_files: AccountFilesHelper,
         invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
         current_context: Arc<RwLock<Option<String>>>,
-        channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     ) -> Self {
         Self {
             operational,
@@ -252,7 +249,6 @@ impl DispatchHelper {
             toasts,
             account_files,
             current_context,
-            channel_modes,
             invited_lan_peers,
         }
     }
@@ -387,12 +383,6 @@ impl DispatchHelper {
         match response {
             OpResponse::ContextChanged { context_id } => {
                 *self.current_context.write().await = context_id;
-                Ok(())
-            }
-            OpResponse::ChannelModeSet { channel_id, flags } => {
-                let mut modes = self.channel_modes.write().await;
-                let mode = modes.entry(channel_id).or_default();
-                mode.parse_flags(&flags);
                 Ok(())
             }
             OpResponse::NicknameUpdated { name: _ } => Ok(()),
@@ -572,7 +562,6 @@ mod tests {
     use crate::tui::effects::EffectCommand;
     use crate::tui::effects::OperationalHandler;
     use crate::tui::tasks::UiTaskOwner;
-    use crate::tui::types::ChannelMode;
     use crate::TerminalError;
 
     async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
@@ -624,9 +613,6 @@ mod tests {
             ),
             Arc::new(RwLock::new(std::collections::HashSet::new())),
             Arc::new(RwLock::new(None)),
-            Arc::new(RwLock::new(
-                std::collections::HashMap::<String, ChannelMode>::new(),
-            )),
         )
     }
 

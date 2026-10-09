@@ -53,7 +53,6 @@ use crate::tui::context::{
 };
 use crate::tui::effects::{EffectCommand, OpFailureCode, OpResponse, OperationalHandler};
 use crate::tui::tasks::UiTaskOwner;
-use crate::tui::types::ChannelMode;
 
 use crate::tui::hooks::{
     ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot, HomeSnapshot,
@@ -105,7 +104,6 @@ pub struct IoContext {
     demo_mobile_authority_id: Option<String>,
     invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
     current_context: Arc<RwLock<Option<String>>>,
-    channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     ceremony_handles: Arc<RwLock<HashMap<String, StoredCeremonyHandle>>>,
     tasks: Arc<UiTaskOwner>,
     pending_runtime_bootstrap: bool,
@@ -962,21 +960,6 @@ impl IoContext {
 
     pub async fn forget_key_rotation_ceremony(&self, ceremony_id: &str) {
         self.ceremony_handles.write().await.remove(ceremony_id);
-    }
-
-    pub async fn get_channel_mode(&self, channel_id: &str) -> ChannelMode {
-        self.channel_modes
-            .read()
-            .await
-            .get(channel_id)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub async fn set_channel_mode(&self, channel_id: &str, flags: &str) {
-        let mut modes = self.channel_modes.write().await;
-        let mode = modes.entry(channel_id.to_string()).or_default();
-        mode.parse_flags(flags);
     }
 
     // =========================================================================

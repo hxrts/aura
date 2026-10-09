@@ -898,7 +898,7 @@ pub struct SocialFactKey {
 /// These facts represent social-related state changes in the journal,
 /// including blocks, members, moderators, and neighborhoods.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "social", schema_version = 5, context = "context_id")]
+#[domain_fact(type_id = "social", schema_version = 6, context = "context_id")]
 pub enum SocialFact {
     /// Home created
     HomeCreated {
@@ -1002,6 +1002,23 @@ pub enum SocialFact {
         /// configuration tags, logical clock.
         causal: CausalMetadata,
     },
+    /// The home channel's mode flags (e.g. `+m`), a register per home
+    /// reduced as a causal register.
+    HomeModeSet {
+        /// Home whose mode changed.
+        home_id: HomeId,
+        /// Relational context for the home.
+        context_id: ContextId,
+        /// Mode flags as entered (`+m`, `+mpi`, ...).
+        flags: String,
+        /// Moderator who set the mode; authorized during reduction.
+        actor_id: AuthorityId,
+        /// When the mode was set.
+        set_at: PhysicalTime,
+        /// Register metadata: write tag, superseded observed mode tags,
+        /// logical clock.
+        causal: CausalMetadata,
+    },
     /// Home storage updated
     StorageUpdated {
         /// Home whose storage changed
@@ -1077,8 +1094,8 @@ impl SocialFact {
     ) -> Result<Self, aura_core::types::facts::FactError> {
         aura_core::types::facts::try_decode_envelope(
             &aura_core::types::facts::FactTypeId::from(SOCIAL_FACT_TYPE_ID),
-            5,
-            5,
+            6,
+            6,
             envelope,
         )
     }
@@ -1114,6 +1131,7 @@ impl SocialFact {
             SocialFact::AccessLevelCapabilitiesConfigured { configured_at, .. } => {
                 configured_at.ts_ms
             }
+            SocialFact::HomeModeSet { set_at, .. } => set_at.ts_ms,
             SocialFact::StorageUpdated { updated_at, .. } => updated_at.ts_ms,
             SocialFact::NeighborhoodCreated { created_at, .. } => created_at.ts_ms,
             SocialFact::HomeJoinedNeighborhood { joined_at, .. } => joined_at.ts_ms,
@@ -1175,6 +1193,10 @@ impl SocialFact {
             }
             SocialFact::AccessLevelCapabilitiesConfigured { home_id, .. } => SocialFactKey {
                 sub_type: "access-level-capabilities-configured",
+                data: home_id.as_bytes().to_vec(),
+            },
+            SocialFact::HomeModeSet { home_id, .. } => SocialFactKey {
+                sub_type: "home-mode-set",
                 data: home_id.as_bytes().to_vec(),
             },
             SocialFact::StorageUpdated { home_id, .. } => SocialFactKey {
@@ -1404,6 +1426,25 @@ impl SocialFact {
             limited_caps,
             actor_id,
             configured_at: Self::physical_time(configured_at_ms),
+            causal,
+        }
+    }
+
+    /// Create a HomeModeSet fact with millisecond timestamp.
+    pub fn home_mode_set_ms(
+        home_id: HomeId,
+        context_id: ContextId,
+        flags: String,
+        actor_id: AuthorityId,
+        set_at_ms: u64,
+        causal: CausalMetadata,
+    ) -> Self {
+        Self::HomeModeSet {
+            home_id,
+            context_id,
+            flags,
+            actor_id,
+            set_at: Self::physical_time(set_at_ms),
             causal,
         }
     }

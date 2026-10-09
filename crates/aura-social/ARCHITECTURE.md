@@ -36,10 +36,13 @@ Neighborhood-plane topology and moderation layer providing home management, neig
 - Membership and moderatorship changes should follow approved workflows.
 - Home relationships define trust boundaries.
 - Home governance facts (bans, mutes, kicks, moderator grants and revocations,
-  access overrides, capability configuration; schema 2) carry writer-stamped
+  access overrides, capability configuration and channel mode; SocialFact schema 6) carry writer-stamped
   `CausalMetadata`. `moderation::governance` reduces them independently of
   arrival order: observed-remove sets for bans, mutes and grants, multi-value
-  registers for overrides and configuration (docs/115 §3.4).
+  registers for overrides, configuration and channel mode (docs/115 §3.4).
+  Mode writes supersede observed tags; concurrent surviving writes resolve
+  by the same deterministic flag ordering on every replica. Their actor must
+  hold the home's `manage_channel` capability.
 
 ### InvariantSocialBoundaryScopedMembership
 

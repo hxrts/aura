@@ -75,12 +75,10 @@ pub async fn handle_settings(
         }
 
         EffectCommand::SetChannelMode { channel, flags } => {
-            // Delegate to workflow
+            // The workflow commits the mode fact; the homes signal carries the
+            // reduced mode (Task 192), so the TUI keeps no local mode copy.
             match set_channel_mode(app_core, channel.clone(), flags.clone()).await {
-                Ok(()) => Some(Ok(OpResponse::ChannelModeSet {
-                    channel_id: channel.clone(),
-                    flags: flags.clone(),
-                })),
+                Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }

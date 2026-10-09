@@ -150,13 +150,6 @@ pub enum OpResponse {
         /// The new context ID (None to clear)
         context_id: Option<String>,
     },
-    /// Channel mode updated (for SetChannelMode command)
-    ChannelModeSet {
-        /// Channel ID that was updated
-        channel_id: String,
-        /// Mode flags that were applied
-        flags: String,
-    },
     /// Display name/nickname updated
     NicknameUpdated {
         /// The new display name

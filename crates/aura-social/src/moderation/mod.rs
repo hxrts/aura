@@ -21,8 +21,8 @@ pub use facts::{
 pub use governance::{
     causal_order, home_governance_causal, live_ban_tags, live_member_admission_tags,
     live_moderator_grant_tags, live_mute_tags, observed_governance_vector,
-    resolved_access_overrides, resolved_capability_config, sort_causally, HomeGovernanceEvent,
-    HomeGovernanceKey, TaggedHomeGovernanceEvent,
+    resolved_access_overrides, resolved_capability_config, resolved_mode, sort_causally,
+    HomeGovernanceEvent, HomeGovernanceKey, TaggedHomeGovernanceEvent,
 };
 pub use query::{
     is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,

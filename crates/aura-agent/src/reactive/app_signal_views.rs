@@ -2452,7 +2452,7 @@ mod tests {
             .unwrap()
             .revision;
         for (type_id, view) in views {
-            // Social facts are at schema 5 (lifecycle causal metadata), kicks at
+            // Social facts are at schema 6 (channel mode register), kicks at
             // schema 4 (membership episodes),
             // other home governance facts at schema 3 and contact facts at
             // schema 2 (causal stamps), as are chat facts (revision causality);
@@ -2463,7 +2463,7 @@ mod tests {
                 | RECOVERY_FACT_TYPE_ID
                 | CHAT_FACT_TYPE_ID => 2,
                 INVITATION_FACT_TYPE_ID => 3,
-                SOCIAL_FACT_TYPE_ID => 5,
+                SOCIAL_FACT_TYPE_ID => 6,
                 HOME_KICK_FACT_TYPE_ID => 4,
                 HOME_BAN_FACT_TYPE_ID
                 | HOME_UNBAN_FACT_TYPE_ID
