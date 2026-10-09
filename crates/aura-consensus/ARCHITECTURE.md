@@ -128,6 +128,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 | proposal/share/transcript/evidence types | `MoveOwned` | Exclusive proposal, share, and transcript authority remains explicit and value-based. |
 | `protocol/`, `frost/`, witness/round coordinators | `ActorOwned` where long-lived | Coordinator ownership is explicit only where lifecycle/supervision matters; not the default for all logic. |
 | `relational/`, `dkg/` orchestration adapters | `MoveOwned`, selective `ActorOwned` | Cross-authority coordination and DKG orchestration remain explicit about owner boundaries. |
+| `dkg::ContextDkgOutput` | `MoveOwned` | Private construction retains the original DKG configuration, local participant, native key packages, and aggregate VSS commitment. Native consistency is not application policy approval. |
 | Observed-only surfaces | none | Projection/diagnostics stay downstream of consensus truth. |
 
 ### Capability-Gated Points
@@ -140,6 +141,15 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 ### Strategy
 
 Consensus safety invariants are the highest-consequence tests in the system. `tests/safety/` validates equivocation detection, guard enforcement, and protocol coherence. `tests/contracts/` validates wire format stability and DKG transcript correctness. Inline tests cover the pure state machine.
+
+Context DKG completion sums the original round-one commitments using the pinned
+native FROST primitive and checks the reconstructed public package against the
+completed ceremony package. The retained aggregate supports native share
+repair without generating a replacement dealer polynomial. Callers must retain
+the independently approved policy and ceremony custody alongside this output;
+matching public mathematics alone cannot authorize enrollment or resharing.
+The runtime retention adapter rejects a configuration or local participant
+different from the completed native output before writing any key material.
 
 ### Commands
 
