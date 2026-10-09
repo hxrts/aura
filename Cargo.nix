@@ -2961,6 +2961,22 @@ with optional architecture-specific hardware acceleration
             packageId = "toml 0.8.23";
           }
         ];
+        devDependencies = [
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "test-support" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" "test-util" ];
+          }
+        ];
         features = {
         };
         resolvedDefaultFeatures = [ "default" ];
@@ -13120,7 +13136,7 @@ library used by the other higher-level Hickory DNS crates.
           "web-dominator" = [ "wasm" "signals" "dep:dominator" ];
           "web-js" = [ "wasm" ];
         };
-        resolvedDefaultFeatures = [ "android" "app-internals" "callbacks" "debug-serialize" "default" "host" "instrumented" "ios" "mobile" "native" "signals" "uniffi" "wasm" "web-dominator" "web-js" ];
+        resolvedDefaultFeatures = [ "android" "app-internals" "callbacks" "debug-serialize" "default" "host" "instrumented" "ios" "mobile" "native" "signals" "test-support" "uniffi" "wasm" "web-dominator" "web-js" ];
       };
       "hxrts-aura-authentication" = rec {
         crateName = "hxrts-aura-authentication";

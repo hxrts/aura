@@ -179,7 +179,7 @@ pub struct ObservationSurfaceMethod {
 }
 
 pub const BROWSER_OBSERVATION_SURFACE_GLOBAL: &str = "__AURA_HARNESS_OBSERVE__";
-pub const BROWSER_OBSERVATION_SURFACE_API_VERSION: u32 = 1;
+pub const BROWSER_OBSERVATION_SURFACE_API_VERSION: u32 = 2;
 
 pub const BROWSER_OBSERVATION_SURFACE_METHODS: &[ObservationSurfaceMethod] = &[
     ObservationSurfaceMethod {
@@ -233,7 +233,7 @@ pub const BROWSER_OBSERVATION_SURFACE_METHODS: &[ObservationSurfaceMethod] = &[
     },
 ];
 
-pub const TUI_OBSERVATION_SURFACE_API_VERSION: u32 = 1;
+pub const TUI_OBSERVATION_SURFACE_API_VERSION: u32 = 2;
 
 pub const TUI_OBSERVATION_SURFACE_METHODS: &[ObservationSurfaceMethod] = &[
     ObservationSurfaceMethod {

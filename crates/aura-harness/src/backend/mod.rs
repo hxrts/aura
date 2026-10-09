@@ -804,6 +804,7 @@ mod tests {
                 },
                 quiescence: QuiescenceSnapshot::settled(),
                 projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
+                home_modes: Vec::new(),
                 selections: Vec::new(),
                 lists: Vec::new(),
                 messages: Vec::new(),

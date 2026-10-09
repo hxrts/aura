@@ -146,6 +146,30 @@ pub fn compare_ui_snapshots_for_parity(
     tui: &UiSnapshot,
 ) -> Vec<UiParityMismatch> {
     let mut mismatches = Vec::new();
+    let home_modes = |snapshot: &UiSnapshot| {
+        let mut modes = snapshot
+            .home_modes
+            .iter()
+            .map(|home| {
+                (
+                    home.channel_id.clone(),
+                    home.context_id.clone(),
+                    home.mode_flags.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        modes.sort();
+        modes
+    };
+    let web_modes = home_modes(web);
+    let tui_modes = home_modes(tui);
+    if web_modes != tui_modes {
+        mismatches.push(UiParityMismatch {
+            field: "home_modes",
+            web: format!("{web_modes:?}"),
+            tui: format!("{tui_modes:?}"),
+        });
+    }
 
     if web.screen != tui.screen {
         mismatches.push(UiParityMismatch {
@@ -274,4 +298,41 @@ pub fn uncovered_ui_parity_mismatches(web: &UiSnapshot, tui: &UiSnapshot) -> Vec
         .into_iter()
         .filter(|mismatch| !parity_mismatch_is_covered_by_exception(web, tui, mismatch))
         .collect()
+}
+
+#[cfg(test)]
+mod home_mode_tests {
+    use super::*;
+    use crate::ui_contract::HomeModeSnapshot;
+
+    #[test]
+    fn parity_compares_canonical_mode_and_context_independent_of_order() {
+        let mut web = UiSnapshot::loading(ScreenId::Neighborhood);
+        web.home_modes = vec![
+            HomeModeSnapshot {
+                channel_id: "a".into(),
+                context_id: "context-a".into(),
+                mode_flags: Some("mi".into()),
+            },
+            HomeModeSnapshot {
+                channel_id: "b".into(),
+                context_id: "context-b".into(),
+                mode_flags: None,
+            },
+        ];
+        let mut tui = web.clone();
+        tui.home_modes.reverse();
+        assert!(compare_ui_snapshots_for_parity(&web, &tui).is_empty());
+        tui.home_modes[0].mode_flags = Some("m".into());
+        assert_eq!(
+            compare_ui_snapshots_for_parity(&web, &tui)[0].field,
+            "home_modes"
+        );
+        tui = web.clone();
+        tui.home_modes[0].context_id = "other-context".into();
+        assert_eq!(
+            compare_ui_snapshots_for_parity(&web, &tui)[0].field,
+            "home_modes"
+        );
+    }
 }

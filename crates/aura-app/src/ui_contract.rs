@@ -28,7 +28,9 @@ mod projection_observations;
 mod shared_flow_support;
 mod snapshots;
 
-pub use projection_observations::{observed_chat_projection, observed_contacts_projection};
+pub use projection_observations::{
+    observed_chat_projection, observed_contacts_projection, observed_home_modes,
+};
 
 pub use harness_metadata::{
     BrowserCacheBoundary, BrowserCacheBoundaryMetadata, BrowserHarnessBridgeMethod,
@@ -76,9 +78,10 @@ pub use snapshots::{
     next_projection_revision, validate_harness_shell_structure, validate_render_convergence,
     AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
     AmpTransitionState, AuthoritativeSemanticFactsSnapshot, HarnessShellMode,
-    HarnessShellStructureSnapshot, ListItemSnapshot, ListSnapshot, MessageDropDirection,
-    MessageDropSnapshot, MessageSnapshot, OperationSnapshot, ProjectionRevision,
-    QuiescenceSnapshot, QuiescenceState, RenderHeartbeat, RuntimeEventKind, RuntimeEventSnapshot,
-    RuntimeFact, SelectionSnapshot, SubscriptionFailureCode, SubscriptionHealthSnapshot,
-    SubscriptionHealthState, SupervisedTaskFailureSnapshot, ToastSnapshot, UiSnapshot,
+    HarnessShellStructureSnapshot, HomeModeSnapshot, ListItemSnapshot, ListSnapshot,
+    MessageDropDirection, MessageDropSnapshot, MessageSnapshot, OperationSnapshot,
+    ProjectionRevision, QuiescenceSnapshot, QuiescenceState, RenderHeartbeat, RuntimeEventKind,
+    RuntimeEventSnapshot, RuntimeFact, SelectionSnapshot, SubscriptionFailureCode,
+    SubscriptionHealthSnapshot, SubscriptionHealthState, SupervisedTaskFailureSnapshot,
+    ToastSnapshot, UiSnapshot,
 };
