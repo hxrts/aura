@@ -8,6 +8,18 @@ use crate::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, I
 use crate::DeviceId;
 use serde::{Deserialize, Serialize};
 
+/// Public transfer routing fields covered by the canonical invitation transcript.
+/// Decoding these fields never establishes issuer standing or policy approval.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareableInvitationTransportMetadata {
+    /// Optional public sender locator bound into the signature.
+    #[serde(default)]
+    pub sender_hint: Option<String>,
+    /// Original physical sending device bound into the signature.
+    #[serde(default)]
+    pub sender_device_id: Option<DeviceId>,
+}
+
 /// Untrusted invitation wire binding. Runtime authorization requires matching
 /// this binding to an exact locally retained, signed setup request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,7 +178,12 @@ pub struct Invitation {
 impl Invitation {
     /// Check if invitation is expired
     pub fn is_expired(&self, now_ms: u64) -> bool {
-        self.expires_at.map(|exp| now_ms >= exp).unwrap_or(false)
+        Self::is_expired_at(self.expires_at, now_ms)
+    }
+
+    /// Pure local validity predicate shared by import and acceptance.
+    pub fn is_expired_at(expires_at: Option<u64>, now_ms: u64) -> bool {
+        expires_at.is_some_and(|expiry| now_ms >= expiry)
     }
 
     /// Check if invitation is pending

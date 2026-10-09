@@ -95,14 +95,14 @@ impl EnrollmentSigningIntent {
                 Arc::new(source),
             )
         })?;
-        self.transport
-            .require_manifest(&self.manifest)
-            .map_err(|source| {
+        crate::shareable::require_transport_manifest(&self.transport, &self.manifest).map_err(
+            |source| {
                 AuraError::crypto_with_source(
                     "validate declared public transport intent",
                     Arc::new(source),
                 )
-            })?;
+            },
+        )?;
         let expected = EnrollmentInitialRequestTranscript::from_manifest(&self.manifest).map_err(
             |source| {
                 AuraError::crypto_with_source("derive declared initial request", Arc::new(source))

@@ -2,6 +2,21 @@
 
 ## Purpose
 
+`invitation` owns the canonical bounded transfer codec and signature transcript.
+Its validated-import observation proves code integrity under the embedded key;
+it does not prove original issuance, trusted issuer standing, committed policy
+or runtime admission. Feature enrollment-manifest comparison remains in
+`aura-invitation`, consuming the shared public transcript observation.
+
+Shared Ed25519 transcript signing and verification retain either the required
+canonical encoding failure or the selected provider's native error through
+`TranscriptCryptoError`. A false verification result remains distinct from a
+provider outage. Native sources are process-local and do not grant approval.
+Import validity uses the canonical invitation expiry predicate: the local
+interval excludes its expiry endpoint. The codec rejects obsolete version-one
+transfers and bare legacy payloads; test-only unsigned fixtures use the same
+current envelope shape and cannot mint import evidence.
+
 Define identity semantics and signature verification logic, combining cryptographic verification with authority lifecycle management and session validation.
 
 ## Scope

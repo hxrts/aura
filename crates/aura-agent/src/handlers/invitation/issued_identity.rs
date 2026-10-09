@@ -4,10 +4,8 @@ use crate::handlers::rendezvous_identity::{
     require_active_identity_signing_context, require_identity_keys,
     require_issued_identity_signing_context,
 };
-use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::AuraError;
-use aura_signature::SecurityTranscript;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum IssuedInvitationIdentityError {
@@ -305,24 +303,27 @@ pub(crate) async fn export_owned_invitation_code(
         .map_err(AgentError::EnrollmentManifest)?;
     let private = zeroize::Zeroizing::new(private);
     let shareable = ShareableInvitation::from(issued.invitation());
-    let transcript = shareable
-        .signing_transcript_with_transport(transport)
-        .required_transcript_bytes()
-        .map_err(|source| {
-            AgentError::Aura(AuraError::Serialization {
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects,
+        &shareable.signing_transcript_with_transport(transport),
+        private.as_ref(),
+    )
+    .await
+    .map_err(|source| {
+        let encoding = matches!(source, aura_signature::TranscriptCryptoError::Encoding(_));
+        let source = Some(Arc::new(source) as Arc<dyn std::error::Error + Send + Sync>);
+        AgentError::Aura(if encoding {
+            AuraError::Serialization {
                 message: "encode original invitation signing transcript".into(),
-                source: Some(Arc::new(source)),
-            })
-        })?;
-    let signature = effects
-        .ed25519_sign(&transcript, private.as_ref())
-        .await
-        .map_err(|source| {
-            AgentError::Aura(AuraError::Crypto {
+                source,
+            }
+        } else {
+            AuraError::Crypto {
                 message: "sign original invitation transfer".into(),
-                source: Some(Arc::new(source)),
-            })
-        })?;
+                source,
+            }
+        })
+    })?;
     shareable
         .to_signed_code_with_transport(
             ShareableInvitationSenderProof {

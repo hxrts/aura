@@ -117,6 +117,8 @@ pub enum EnrollmentManifestError {
     Signature,
     #[error("manifest transcript failed")]
     Transcript(#[from] aura_signature::AuthenticationError),
+    #[error("manifest required signing or verification transcript failed")]
+    RequiredTranscript(#[from] aura_signature::TranscriptCryptoError),
     #[error("manifest cryptography failed")]
     Crypto(#[source] aura_core::AuraError),
 }

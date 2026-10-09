@@ -616,6 +616,14 @@ the existing domain/schema/payload wire envelope; encoding failure occurs before
 signing or verification. Invalid signature results remain distinct from a failed
 cryptographic provider invocation.
 
+Required invitation import validity uses the selected physical-time provider and
+the canonical expiration boundary: an invitation is expired when `now >= expiry`.
+A failed required observation preserves its original provider cause and cannot
+produce a validated import, persist an invitation, or authorize subsequent
+issuance or publication. An observational clock fallback cannot satisfy this
+required validity check. Physical expiration remains local validity evidence,
+never distributed ordering or renewed ceremony time.
+
 Guardian recovery key reads require the original private and public pair. A
 missing half or a mismatched pair cannot authorize replacement. Fresh allocation
 and required reads share the actual runtime's exclusive keypair lease, and fresh

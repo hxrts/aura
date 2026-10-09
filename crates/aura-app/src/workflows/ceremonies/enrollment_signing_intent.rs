@@ -161,12 +161,14 @@ pub fn select_user_transferred_enrollment_signing_intent(
             Arc::new(source),
         )
     })?;
-    transport.require_manifest(&manifest).map_err(|source| {
-        AuraError::crypto_with_source(
-            "bind exact public transport intent to selected manifest",
-            Arc::new(source),
-        )
-    })?;
+    aura_invitation::shareable::require_transport_manifest(&transport, &manifest).map_err(
+        |source| {
+            AuraError::crypto_with_source(
+                "bind exact public transport intent to selected manifest",
+                Arc::new(source),
+            )
+        },
+    )?;
     Ok(UserTransferredEnrollmentSigningIntent {
         manifest,
         transport,

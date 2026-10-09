@@ -153,6 +153,12 @@ pub(super) fn native_cause_kind(
                     Some(Kind::Validation)
                 }
                 Manifest::Signature | Manifest::Transcript(_) => Some(Kind::Crypto),
+                Manifest::RequiredTranscript(aura_signature::TranscriptCryptoError::Encoding(
+                    _,
+                )) => Some(Kind::Serialization),
+                Manifest::RequiredTranscript(aura_signature::TranscriptCryptoError::Provider(
+                    _,
+                )) => None,
                 Manifest::Runtime(_) | Manifest::Boundary(_) | Manifest::Crypto(_) => None,
             };
             if let Some(kind) = kind {
@@ -277,6 +283,33 @@ pub(super) fn bridge_runtime_service_unavailable_with_cause(
 mod native_tests {
     use super::*;
     use std::error::Error;
+
+    #[test]
+    fn required_manifest_transcript_keeps_codec_and_provider_categories() {
+        use aura_app::runtime_bridge::RuntimeBridgeErrorKind as Kind;
+        use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+        use aura_signature::{RequiredTranscriptEncodingError, TranscriptCryptoError};
+        let encoding = EnrollmentManifestError::RequiredTranscript(
+            TranscriptCryptoError::Encoding(RequiredTranscriptEncodingError::EmptyDomain),
+        );
+        assert_eq!(native_cause_kind(&encoding), Kind::Serialization);
+        assert!(encoding
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<RequiredTranscriptEncodingError>());
+        let provider = EnrollmentManifestError::RequiredTranscript(
+            TranscriptCryptoError::Provider(aura_core::AuraError::storage("provider failure")),
+        );
+        assert_eq!(native_cause_kind(&provider), Kind::Storage);
+        assert!(provider
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<aura_core::AuraError>());
+    }
 
     #[test]
     fn native_required_categories_survive_wrappers_without_diagnostic_inference() {

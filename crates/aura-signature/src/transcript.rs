@@ -32,6 +32,31 @@ impl std::error::Error for RequiredTranscriptEncodingError {
     }
 }
 
+/// Native required transcript failure. A provider outage is not an invalid proof.
+#[derive(Debug)]
+pub enum TranscriptCryptoError {
+    Encoding(RequiredTranscriptEncodingError),
+    Provider(aura_core::AuraError),
+}
+
+impl std::fmt::Display for TranscriptCryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Encoding(source) => write!(f, "encode cryptographic transcript: {source}"),
+            Self::Provider(source) => write!(f, "transcript cryptographic provider: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for TranscriptCryptoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Encoding(source) => Some(source),
+            Self::Provider(source) => Some(source),
+        }
+    }
+}
+
 /// Stable envelope wrapped around every security-critical signing payload.
 ///
 /// The envelope keeps protocol domain and schema version outside the payload so
@@ -176,18 +201,18 @@ pub async fn sign_ed25519_transcript<E, T>(
     crypto: &E,
     transcript: &T,
     private_key: &[u8],
-) -> Result<Vec<u8>>
+) -> std::result::Result<Vec<u8>, TranscriptCryptoError>
 where
     E: CryptoEffects + Send + Sync + ?Sized,
     T: SecurityTranscript + ?Sized,
 {
-    let bytes = transcript.transcript_bytes()?;
+    let bytes = transcript
+        .required_transcript_bytes()
+        .map_err(TranscriptCryptoError::Encoding)?;
     crypto
         .ed25519_sign(&bytes, private_key)
         .await
-        .map_err(|error| AuthenticationError::CryptoError {
-            details: format!("Ed25519 transcript signing failed: {error}"),
-        })
+        .map_err(TranscriptCryptoError::Provider)
 }
 
 /// Verify an Ed25519 signature over a typed transcript.
@@ -196,18 +221,18 @@ pub async fn verify_ed25519_transcript<E, T>(
     transcript: &T,
     signature: &[u8],
     public_key: &[u8],
-) -> Result<bool>
+) -> std::result::Result<bool, TranscriptCryptoError>
 where
     E: CryptoEffects + Send + Sync + ?Sized,
     T: SecurityTranscript + ?Sized,
 {
-    let bytes = transcript.transcript_bytes()?;
+    let bytes = transcript
+        .required_transcript_bytes()
+        .map_err(TranscriptCryptoError::Encoding)?;
     crypto
         .ed25519_verify(&bytes, signature, public_key)
         .await
-        .map_err(|error| AuthenticationError::CryptoError {
-            details: format!("Ed25519 transcript verification failed: {error}"),
-        })
+        .map_err(TranscriptCryptoError::Provider)
 }
 
 /// Verify a FROST aggregate signature over a typed transcript.
