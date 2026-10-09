@@ -129,6 +129,8 @@ pub mod queries;
 pub mod runtime_bridge;
 pub mod scenario_contract;
 pub mod signal_defs;
+#[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]
+pub mod test_support;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod thresholds;

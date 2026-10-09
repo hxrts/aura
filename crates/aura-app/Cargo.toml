@@ -42,6 +42,9 @@ wasm = [
 
 # Development Features
 
+# Native frontend integration fixture publication through existing owners.
+test-support = []
+
 # Debug-level messaging chatter; warnings are always compiled in.
 instrumented = []
 debug-serialize = []

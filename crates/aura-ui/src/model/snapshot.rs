@@ -198,6 +198,7 @@ impl UiModel {
             readiness: readiness_owner::account_gate_readiness(self.account_ready()),
             revision: self.semantic_revision,
             projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
+            home_modes: Vec::new(),
             quiescence: QuiescenceSnapshot::derive(
                 readiness_owner::account_gate_readiness(self.account_ready()),
                 open_modal,
@@ -249,6 +250,16 @@ impl UiController {
         self.semantic_model_snapshot()
     }
 
+    fn observe_app_snapshot(&self, snapshot: &mut UiSnapshot) {
+        if let Some(core) = self.app_core.try_read() {
+            let app_snapshot = core.snapshot();
+            snapshot.projection_source_revisions = app_snapshot.projection_source_revisions;
+            snapshot.home_modes = aura_app::ui::contract::observed_home_modes(&app_snapshot.homes);
+        } else {
+            *snapshot = UiSnapshot::loading(snapshot.screen);
+        }
+    }
+
     pub fn semantic_model_snapshot(&self) -> UiSnapshot {
         let mut snapshot = self
             .model
@@ -256,9 +267,7 @@ impl UiController {
             .ok()
             .map(|model| model.semantic_snapshot())
             .unwrap_or_else(|| UiSnapshot::loading(ScreenId::Neighborhood));
-        if let Some(core) = self.app_core.try_read() {
-            snapshot.projection_source_revisions = core.snapshot().projection_source_revisions;
-        }
+        self.observe_app_snapshot(&mut snapshot);
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid semantic model snapshot export: {error}"));
@@ -266,9 +275,7 @@ impl UiController {
     }
 
     pub fn publish_ui_snapshot(&self, mut snapshot: UiSnapshot) {
-        if let Some(core) = self.app_core.try_read() {
-            snapshot.projection_source_revisions = core.snapshot().projection_source_revisions;
-        }
+        self.observe_app_snapshot(&mut snapshot);
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid published UI snapshot: {error}"));

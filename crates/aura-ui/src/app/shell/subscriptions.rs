@@ -61,8 +61,10 @@ where
 {
     if signal() != next {
         signal.set(next);
-        controller.request_rerender();
     }
+    // A canonical projection can change fields absent from its rendered view.
+    // Every completed owned refresh must republish the semantic observation.
+    controller.request_rerender();
 }
 
 fn schedule_coalesced_runtime_refresh<T, Loader, Fut>(
@@ -205,7 +207,7 @@ fn supervise_signal<T, F, Fut>(
         loop {
             let attachment = {
                 let core = controller.app_core().read().await;
-                core.subscribe(signal)
+                core.subscribe_attached(signal).await
             };
             let stream = attachment.map(|stream| {
                 futures::stream::unfold(stream, |mut stream| async move {
@@ -695,6 +697,158 @@ mod tests {
             futures::future::pending::<()>().await;
         });
         rsx! { div {} }
+    }
+
+    fn drain_virtual_dom(dom: &mut dioxus::dioxus_core::VirtualDom) {
+        use futures::FutureExt;
+        dom.render_immediate_to_vec();
+        // Pending means the owned executor has no runnable effects/tasks or
+        // dirty scopes. Drain scheduled work without advancing real time.
+        while dom.wait_for_work().now_or_never().is_some() {
+            dom.render_immediate_to_vec();
+        }
+    }
+
+    fn home_mode_publication_probe() -> Element {
+        let controller = use_context::<Arc<UiController>>();
+        let started = use_signal(|| false);
+        let neighborhood = use_signal(NeighborhoodRuntimeView::default);
+        let chat = use_signal(ChatRuntimeView::default);
+        let contacts = use_signal(ContactsRuntimeView::default);
+        let settings = use_signal(SettingsRuntimeView::default);
+        let notifications = use_signal(NotificationsRuntimeView::default);
+        use_runtime_bridge_subscriptions(
+            controller.clone(),
+            started,
+            neighborhood,
+            chat,
+            contacts,
+            settings,
+            notifications,
+        );
+        controller.set_rerender_callback(schedule_update());
+        super::super::state::ShellRuntimeSnapshots::from_signals(
+            neighborhood,
+            chat,
+            contacts,
+            settings,
+            notifications,
+        )
+        .publish_semantic_snapshot(&controller, &controller.ui_model().expect("model"));
+        rsx! { div {} }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test(start_paused = true)]
+    async fn mode_only_home_signal_pushes_semantic_snapshot_without_display_change() {
+        use crate::MemoryClipboard;
+        use async_lock::Mutex;
+        use aura_app::core::{AppConfig, AppCore};
+        use aura_app::ui::types::{HomeState, HomesState};
+        use aura_core::{ChannelId, ContextId};
+        let app = Arc::new(async_lock::RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap(),
+        ));
+        AppCore::init_signals_with_hooks(&app).await.unwrap();
+        let home_id = ChannelId::from_bytes([91; 32]);
+        let context_id = ContextId::new_from_entropy([92; 32]);
+        let mut home = HomeState::new(
+            home_id,
+            Some("Mode push".into()),
+            AuthorityId::new_from_entropy([93; 32]),
+            0,
+            context_id,
+        );
+        home.mode_flags = Some("m".into());
+        let mut wire = serde_json::to_value(HomesState::new()).unwrap();
+        wire["homes"]
+            .as_object_mut()
+            .unwrap()
+            .insert(home_id.to_string(), serde_json::to_value(home).unwrap());
+        let mut fixture: HomesState = serde_json::from_value(wire).unwrap();
+        fixture.select_home(Some(home_id));
+        aura_app::test_support::publish_homes_fixture(&app, fixture)
+            .await
+            .unwrap();
+        context_workflows::add_home_to_neighborhood(&app, &home_id.to_string())
+            .await
+            .unwrap();
+        context_workflows::move_position(&app, &home_id.to_string(), "full")
+            .await
+            .unwrap();
+        let controller = Arc::new(UiController::new(
+            app.clone(),
+            Arc::new(MemoryClipboard::default()),
+        ));
+        let snapshots = Arc::new(Mutex::new(Vec::<UiSnapshot>::new()));
+        controller.set_ui_snapshot_sink(Arc::new({
+            let snapshots = snapshots.clone();
+            move |snapshot| {
+                snapshots
+                    .try_lock()
+                    .expect("fixture sink is uncontended")
+                    .push(snapshot);
+            }
+        }));
+        let mut dom = dioxus::dioxus_core::VirtualDom::new(home_mode_publication_probe);
+        dom.provide_root_context(controller.clone());
+        dom.rebuild_in_place();
+        drain_virtual_dom(&mut dom);
+        assert_eq!(
+            app.read()
+                .await
+                .reactive()
+                .graph()
+                .subscriber_count(HOMES_SIGNAL.id())
+                .await,
+            1
+        );
+        let before_view = load_neighborhood_runtime_view(controller.clone()).await;
+        let before = snapshots
+            .try_lock()
+            .expect("fixture sink is uncontended")
+            .last()
+            .cloned()
+            .expect("initial pushed snapshot");
+        assert_eq!(before.home_modes[0].mode_flags.as_deref(), Some("m"));
+        assert!(before
+            .subscription_health
+            .iter()
+            .all(|health| matches!(health.state, SubscriptionHealthState::Healthy)));
+        snapshots
+            .try_lock()
+            .expect("fixture sink is uncontended")
+            .clear();
+        drain_virtual_dom(&mut dom);
+        assert!(
+            snapshots
+                .try_lock()
+                .expect("fixture sink is uncontended")
+                .is_empty(),
+            "baseline subscription work is quiescent"
+        );
+        aura_app::test_support::set_home_mode_fixture(&app, home_id, Some("mi".into()))
+            .await
+            .unwrap();
+        let after_view = load_neighborhood_runtime_view(controller.clone()).await;
+        assert_eq!(
+            before_view, after_view,
+            "mode-only update must leave display values equal"
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), dom.wait_for_work())
+            .await
+            .expect("mode-only HOMES change must schedule semantic publication");
+        drain_virtual_dom(&mut dom);
+        let after = snapshots
+            .try_lock()
+            .expect("fixture sink is uncontended")
+            .last()
+            .cloned()
+            .expect("HOMES update must push a snapshot");
+        assert_eq!(after.home_modes[0].channel_id, home_id.to_string());
+        assert_eq!(after.home_modes[0].context_id, context_id.to_string());
+        assert_eq!(after.home_modes[0].mode_flags.as_deref(), Some("mi"));
+        assert!(after.projection_source_revisions.homes > before.projection_source_revisions.homes);
     }
 
     #[test]

@@ -180,3 +180,13 @@ replace the previous observation of the same kind, including when counts fall.
 Equal channel names use canonical IDs to order the default selection, and
 message lookup retains the selected ID. Duplicate-name regression coverage
 checks both the browser view and shared observation builder.
+
+Controller snapshot publication derives `home_modes` through the app-owned `observed_home_modes` helper from the same `StateSnapshot` as `projection_source_revisions.homes`. Runtime view labels and frontend caches cannot reconstruct home modes or their context. Both model observation and published browser snapshots use this shared enrichment path.
+
+If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
+
+Completed owned runtime refreshes schedule semantic publication even when rendered view values compare equal: mode-only canonical changes must wake pushed snapshot observers. Display signals remain updated only when their values change, and the existing snapshot sink deduplicates identical observations.
+
+The subscription supervisor awaits the app-owned attached receiver before reading initial state or reporting Healthy. Native and browser observers share this ordering; owned cancellation still drops the receiver with the mounted subscription owner.
+
+Native integration tests may opt into app `test-support` fixture publication, which delegates existing observed-projection owners to publish a detached HomesState or mutate only the mode of an exact materialized home. The feature is absent from default/wasm production frontends and does not add a production mutation bypass.

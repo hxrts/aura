@@ -759,6 +759,14 @@ impl QuiescenceSnapshot {
     }
 }
 
+/// Canonical home mode observation, bound to its materialized channel and context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HomeModeSnapshot {
+    pub channel_id: String,
+    pub context_id: String,
+    pub mode_flags: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSnapshot {
     pub screen: ScreenId,
@@ -773,6 +781,7 @@ pub struct UiSnapshot {
     pub quiescence: QuiescenceSnapshot,
     pub selections: Vec<SelectionSnapshot>,
     pub lists: Vec<ListSnapshot>,
+    pub home_modes: Vec<HomeModeSnapshot>,
     pub messages: Vec<MessageSnapshot>,
     pub operations: Vec<OperationSnapshot>,
     pub toasts: Vec<ToastSnapshot>,
@@ -807,6 +816,7 @@ impl UiSnapshot {
             },
             selections: Vec::new(),
             lists: Vec::new(),
+            home_modes: Vec::new(),
             messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
@@ -818,6 +828,18 @@ impl UiSnapshot {
     }
 
     pub fn validate_invariants(&self) -> Result<(), String> {
+        let mut home_ids = HashSet::new();
+        for home in &self.home_modes {
+            if home.channel_id.is_empty()
+                || home.context_id.is_empty()
+                || !home_ids.insert(&home.channel_id)
+            {
+                return Err(format!(
+                    "invalid or duplicate home mode binding {}",
+                    home.channel_id
+                ));
+            }
+        }
         let mut subscription_signals = HashSet::new();
         for health in &self.subscription_health {
             if health.signal.is_empty() || !subscription_signals.insert(&health.signal) {

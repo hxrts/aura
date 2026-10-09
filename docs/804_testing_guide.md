@@ -2187,3 +2187,9 @@ actual future destruction. Keep the native error/destruction, explicit timer
 progress/rollback, and genuine listener-startup regressions in ordinary test
 coverage. A timeout poll must not spend a listener's entire startup window before
 that listener can acknowledge readiness.
+
+Both frontend observation surfaces use version 2 and require `UiSnapshot.home_modes`: a stable list of canonical channel ID, context ID and optional mode flags. The app-owned projection helper derives these observations solely from materialized `HomesState`; entries lacking a canonical context are omitted. Native and browser exports bind these values to `projection_source_revisions.homes` from the same app snapshot. Wait on pushed semantic snapshots for the expected binding and flags, then compare both frontends; DOM labels and rendered mode text are diagnostic only. Loading snapshots contain an explicit empty vector, and missing wire fields fail decoding. Mode changes still require the sanctioned command owner; these observed strings grant no authority.
+
+If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
+
+Completed owned runtime refreshes schedule semantic publication even when rendered view values compare equal: mode-only canonical changes must wake pushed snapshot observers. Display signals remain updated only when their values change, and the existing snapshot sink deduplicates identical observations.

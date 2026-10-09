@@ -71,6 +71,25 @@ The Task 4 transaction and mirror tests cover stale publication and delayed
 view-copy races; the Task 14 PR smoke must exercise this through both frontend
 observers after a forced stale projection and recovery.
 
+## Canonical home mode observations
+
+Observation surface version 2 requires `UiSnapshot.home_modes` on both
+frontends. The shared app projection helper exports each materialized home's
+channel, context, and mode flags from the same app snapshot as its homes source
+revision. Missing contexts are withheld; unavailable browser app reads publish
+loading/busy rather than authoritative absence. Shared parity comparison checks
+these bindings and mode flags independently of list order.
+
+Focused app, native terminal, and shared UI tests cover canonical projection,
+required wire fields, parity differences, matching homes provenance, and
+unavailable reads. The shared UI's real HOMES subscription-to-render-to-sink
+regression changes only mode flags while display values remain equal, verifies
+a newer homes revision in the pushed snapshot, and fails with the old
+render-equality gate. Subscription attachment is acknowledged before healthy
+publication; immediate-update and repeated-mount cancellation tests cover that
+ownership boundary. These are in-process observations: paired LAN mode-change
+publication and convergence through both frontends remain unproven.
+
 ## Canonical UX Scenario Set
 
 | Scenario | File | Primary Flow |
