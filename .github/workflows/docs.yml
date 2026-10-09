@@ -25,13 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-      - run: nix develop --command just ci-docs-links
+      - run: nix develop .#ci --command just ci-docs-links
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: nix develop --command just ci-docs-links
+          replay-command: nix develop .#ci --command just ci-docs-links
 
   crate-links:
     name: Crate Doc Links

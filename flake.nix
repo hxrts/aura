@@ -411,6 +411,9 @@
             # Browser/build tooling used by harness and web checks
             nodejs_20
 
+            # Documentation link checking without the verification toolchain
+            markdown-link-check
+
             # Conformance ITF generation
             quint
           ]
