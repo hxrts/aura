@@ -13,11 +13,69 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/env.sh"
 cd "$AURA_E2E_ROOT"
 D=$AURA_E2E_RUN_DIR
-mkdir -p "$D"
 FIFO=$D/repl.in OUT=$D/repl.out PIDF=$D/repl.pid SEQ=$D/repl.seq
+IDENTITY=$D/repl.identity.json
+physical_repo="$(pwd -P)"
 RETENTION_ROOT_FILE=$D/retention-root
 RETENTION_RUN_FILE=$D/retention-run-id
 RETENTION_TOOL=$AURA_E2E_ROOT/scripts/dev/retain-e2e-runs.sh
+
+# PID presence is insufficient authority to signal a process: the PID may
+# have been reused. Keep the launch birth and exact command/cwd evidence.
+process_birth() { LC_ALL=C ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+process_cwd() { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1; }
+verify_repl_identity() {
+  local pid=$1 birth expected_birth expected_exe expected_config cwd args
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -f "$IDENTITY" ]] || return 1
+  jq -e --argjson pid "$pid" --arg root "$physical_repo" \
+    '.pid==$pid and .checkout==$root' "$IDENTITY" >/dev/null || return 1
+  birth=$(process_birth "$pid") || return 1
+  expected_birth=$(jq -er '.birth' "$IDENTITY") || return 1
+  [[ -n "$birth" && "$birth" == "$expected_birth" ]] || return 1
+  cwd=$(process_cwd "$pid") || return 1
+  [[ "$cwd" == "$physical_repo" ]] || return 1
+  expected_exe=$(jq -er '.executable' "$IDENTITY") || return 1
+  expected_config=$(jq -er '.config' "$IDENTITY") || return 1
+  args=$(ps -p "$pid" -o args= 2>/dev/null) || return 1
+  # Bash scripts are permitted for isolated fixture/explicit operator binaries.
+  # Both shapes require the exact launched binary and config, never a basename.
+  [[ "$args" == "$expected_exe --config $expected_config "* || \
+     "$args" == *"bash $expected_exe --config $expected_config "* ]]
+}
+owned_harness_processes() {
+  local pid executable cwd open_path name process_list
+  command -v ps >/dev/null && command -v lsof >/dev/null || {
+    echo 'cannot inspect owned LAN processes; refusing lifecycle operation' >&2; return 1;
+  }
+  process_list=$(ps -axo pid=,comm=) || { echo 'cannot inspect LAN process list' >&2; return 1; }
+  while read -r pid executable; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    name=${executable##*/}
+    case "$name" in tool_repl|aura-harness|aura|"${AURA_E2E_TOOL_REPL##*/}") ;; *) continue ;; esac
+    cwd=$(process_cwd "$pid" || true)
+    case "$name" in
+      tool_repl|aura-harness|"${AURA_E2E_TOOL_REPL##*/}")
+        [[ -n "$cwd" ]] || { echo "cannot inspect harness candidate $pid" >&2; return 1; }
+        [[ "$cwd" == "$physical_repo" ]] && echo "$pid"
+        ;;
+      aura)
+        while IFS= read -r open_path; do
+          case "$open_path" in
+            "n$physical_repo/.tmp/harness/transient/"*|"n$D/"*) echo "$pid"; break ;;
+          esac
+        done < <(lsof -a -p "$pid" -Fn 2>/dev/null || true)
+        ;;
+    esac
+  done <<< "$process_list"
+  return 0
+}
+require_no_owned_harness() {
+  local active
+  active=$(owned_harness_processes) || return 1
+  [[ -z "$active" ]] || {
+    echo "owned LAN harness processes remain ($active); retaining state, inspect their exact ownership before recovery" >&2; return 1;
+  }
+}
 
 retention_root_for_config() {
   local artifact_dir runs_root
@@ -40,6 +98,12 @@ retention_root_for_config() {
 case "${1:-}" in
 start)
   [ -n "${2:-}" ] || { echo "usage: $0 start <config>" >&2; exit 2; }
+  # Never overwrite FIFO/evidence under an active or unidentified old owner.
+  if [[ -f "$PIDF" || -f "$IDENTITY" ]]; then
+    echo 'existing LAN driver identity; stop/inspect it before starting a new run' >&2; exit 1;
+  fi
+  require_no_owned_harness
+  mkdir -p "$D"
   # Configs name this host's LAN address as __HOST_ADDR__; render a copy.
   if grep -q __HOST_ADDR__ "$2"; then
     [ -n "$AURA_E2E_HOST_ADDR" ] || { echo "set AURA_E2E_HOST_ADDR to this host's LAN address" >&2; exit 2; }
@@ -74,13 +138,24 @@ start)
   lan_host=$(grep -o 'bind_address = "[^"]*"' "$2" | cut -d'"' -f2 | cut -d: -f1 | grep -v "^127\." | head -1 || true)
   [ -n "$lan_host" ] && export AURA_HARNESS_WEB_RELAY_HOST="$lan_host"
   # Hold the FIFO open so the REPL never sees EOF.
-  nohup bash -c "exec 3<>'$FIFO'; exec nice -n 5 '$AURA_E2E_TOOL_REPL' --config '$2' --idle-timeout-ms 0 <&3" \
+  nohup bash -c 'exec 3<>"$1"; exec nice -n 5 "$2" --config "$3" --idle-timeout-ms 0 <&3' \
+    lan-tool-repl "$FIFO" "$AURA_E2E_TOOL_REPL" "$2" \
     >"$OUT" 2>"$D/repl.err" </dev/null &
-  echo $! > "$PIDF"; echo "started pid $(cat "$PIDF")"
+  repl_pid=$!
+  birth=$(process_birth "$repl_pid")
+  [[ -n "$birth" ]] || { echo 'LAN process exited before launch identity was captured' >&2; exit 1; }
+  jq -cn --argjson pid "$repl_pid" --arg birth "$birth" --arg checkout "$physical_repo" \
+    --arg executable "$AURA_E2E_TOOL_REPL" --arg config "$2" \
+    '{pid:$pid,birth:$birth,checkout:$checkout,executable:$executable,config:$config}' > "$IDENTITY"
+  printf '%s\n' "$repl_pid" > "$PIDF"
+  echo "started pid $repl_pid"
   ;;
 req)
   [[ -f "$PIDF" ]] && kill -0 "$(cat "$PIDF")" 2>/dev/null || {
     echo 'LAN REPL is not running; request rejected' >&2; exit 1;
+  }
+  verify_repl_identity "$(cat "$PIDF")" || {
+    echo 'LAN REPL ownership does not match launch identity; request rejected' >&2; exit 1;
   }
   n=$(( $(cat "$SEQ") + 1 )); echo $n > "$SEQ"
   body="${2#\{}"
@@ -109,12 +184,16 @@ req)
   echo "TIMEOUT id=$n" >&2; exit 1
   ;;
 stop)
-  # Only stop the REPL this driver started (and its children).
-  if [ -f "$PIDF" ]; then
-    repl_pid="$(cat "$PIDF")"
-    pkill -TERM -P "$repl_pid" 2>/dev/null || true
-    kill "$repl_pid" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if [[ -f "$PIDF" ]]; then
+    repl_pid=$(cat "$PIDF")
+    verify_repl_identity "$repl_pid" || {
+      echo 'LAN PID ownership is missing/stale/mismatched; retaining state without signalling' >&2; exit 1;
+    }
+    # ctrlc's termination feature routes TERM through the REPL's existing
+    # stop_all owner. Never signal arbitrary children or a process group.
+    verify_repl_identity "$repl_pid" || exit 1
+    kill -TERM "$repl_pid"
+    for _ in {1..20}; do
       kill -0 "$repl_pid" 2>/dev/null || break
       sleep 0.1
     done
@@ -122,12 +201,17 @@ stop)
       echo "LAN REPL $repl_pid did not stop; retaining active run state" >&2
       exit 1
     fi
+  elif [[ -f "$IDENTITY" ]]; then
+    echo 'LAN launch identity exists without PID state; retaining evidence for inspection' >&2; exit 1
   fi
-  rm -f "$PIDF"; echo stopped
+  require_no_owned_harness
+  rm -f "$PIDF" "$IDENTITY"
+  echo stopped
   ;;
 finish)
   [[ "${2:-}" == success || "${2:-}" == failed ]] || { echo 'usage: drv.sh finish success|failed' >&2; exit 2; }
-  [[ ! -f "$PIDF" ]] || { echo 'stop the LAN driver before recording an outcome' >&2; exit 1; }
+  require_no_owned_harness
+  [[ ! -f "$PIDF" && ! -f "$IDENTITY" ]] || { echo 'stop the LAN driver before recording an outcome' >&2; exit 1; }
   [[ -f "$RETENTION_ROOT_FILE" && -f "$RETENTION_RUN_FILE" ]] || {
     echo 'this LAN run has no retention metadata; inspect it manually' >&2; exit 1;
   }

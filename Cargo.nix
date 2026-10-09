@@ -1900,6 +1900,7 @@ with optional architecture-specific hardware acceleration
           {
             name = "ctrlc";
             packageId = "ctrlc";
+            features = [ "termination" ];
           }
           {
             name = "hex";
@@ -6040,6 +6041,7 @@ with no_std support and support for mobile targets including Android and iOS
         ];
         features = {
         };
+        resolvedDefaultFeatures = [ "termination" ];
       };
       "curve25519-dalek" = rec {
         crateName = "curve25519-dalek";

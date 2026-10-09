@@ -36,6 +36,12 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Invariants
 
+- The LAN driver signals only a REPL whose retained birth, executable, config
+  and checkout identity match the live process. Missing or mismatched identity
+  and surviving checkout-owned harness IPC fail closed without discarding run
+  evidence. TERM enters the REPL's existing owned shutdown; arbitrary child
+  process signalling is forbidden.
+
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;
   raw authority IDs, demo autofill and discovery metadata cannot replace the

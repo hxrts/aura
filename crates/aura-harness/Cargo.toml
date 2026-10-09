@@ -49,7 +49,7 @@ vt100 = "0.15"
 regex = "1.11"
 nix = "0.26"
 which = "6"
-ctrlc = "3.4"
+ctrlc = { version = "3.4", features = ["termination"] }
 tempfile = { workspace = true }
 patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9", optional = true }
 

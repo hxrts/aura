@@ -127,6 +127,14 @@ configured run outputs. Native RPC clients obtain the exact owned profile
 directory from `instance_metadata` and connect to its recorded running-node
 socket; they must not open another runtime over a profile held by the TUI.
 
+LAN driver PID files retain the launched process's birth, executable, config,
+and checkout identity. Missing or mismatched identity, or surviving
+checkout-owned REPL/native harness IPC, blocks start, stop, and finish without
+signalling an unverified process or discarding active evidence. TERM reaches
+the REPL's existing owned shutdown through `ctrlc`'s termination feature.
+Unresolved shutdown retains driver state after the unchanged two-second
+infrastructure budget; that budget is not a business-flow readiness wait.
+
 Native TUI harness IPC is part of that shared compatibility surface now. In
 explicit harness mode the command socket and semantic snapshot mirrors are
 scoped under `AURA_HARNESS_INSTANCE_TRANSIENT_ROOT`, and command submission
