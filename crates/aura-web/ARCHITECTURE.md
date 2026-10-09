@@ -44,6 +44,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   setup verifier pin or infer that the new device accepted enrollment.
 
 - Browser-only APIs stay in this crate.
+- Shared runtime-event count observations use fixed-width integers. Enrollment
+  code lengths are checked at browser publication rather than exporting a
+  pointer-sized count.
 - Enrollment submission reads the exact retained operation instance through
   `UiOperationHandle::instance_id()` and consumes operation kinds through the
   app facade. Browser compilation enforces the private-field boundary; it

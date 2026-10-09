@@ -79,7 +79,7 @@ pub struct SearchQuery {
     /// Required capabilities for accessing results
     pub required_capabilities: Vec<StorageCapability>,
     /// Maximum number of results
-    pub limit: Option<usize>,
+    pub limit: Option<u32>,
     /// Query metadata
     pub metadata: BTreeMap<String, String>,
 }
@@ -103,7 +103,7 @@ impl SearchQuery {
     }
 
     /// Set result limit
-    pub fn with_limit(mut self, limit: usize) -> Self {
+    pub fn with_limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
     }
@@ -115,7 +115,7 @@ impl SearchQuery {
     }
 
     /// Get effective limit (default if not set)
-    pub fn effective_limit(&self) -> usize {
+    pub fn effective_limit(&self) -> u32 {
         self.limit.unwrap_or(100)
     }
 }

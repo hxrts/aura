@@ -35,7 +35,7 @@ fn history() -> impl Parser<Request> {
     let limit = short('l')
         .long("limit")
         .help("Only the last LIMIT messages")
-        .argument::<usize>("LIMIT")
+        .argument::<u32>("LIMIT")
         .optional();
     let sender = sender();
     let channel = channel();
@@ -125,7 +125,7 @@ fn search() -> impl Parser<Request> {
     let limit = short('l')
         .long("limit")
         .help("Maximum number of results (default: 20)")
-        .argument::<usize>("LIMIT")
+        .argument::<u32>("LIMIT")
         .fallback(20);
     let query = positional::<String>("QUERY").help("Text to find");
     construct!(Request::ChatSearch {

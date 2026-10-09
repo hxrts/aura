@@ -139,7 +139,7 @@
                   },
                   "limit": {
                     "default": null,
-                    "format": "uint",
+                    "format": "uint32",
                     "minimum": 0,
                     "type": [
                       "integer",
@@ -345,7 +345,7 @@
                   },
                   "limit": {
                     "default": 20,
-                    "format": "uint",
+                    "format": "uint32",
                     "minimum": 0,
                     "type": "integer"
                   },
@@ -2260,12 +2260,12 @@
             "type": "string"
           },
           "contacts": {
-            "format": "uint",
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },
           "devices": {
-            "format": "uint",
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },
@@ -2703,12 +2703,12 @@
       "OtaReleaseView": {
         "properties": {
           "artifacts": {
-            "format": "uint",
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },
           "certificates": {
-            "format": "uint",
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },
@@ -2746,7 +2746,7 @@
       "OtaUpgradeView": {
         "properties": {
           "approvals": {
-            "format": "uint",
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },
@@ -3451,7 +3451,7 @@
               "data": {
                 "properties": {
                   "connected": {
-                    "format": "uint",
+                    "format": "uint64",
                     "minimum": 0,
                     "type": "integer"
                   }
@@ -3620,7 +3620,7 @@
       "SettingsView": {
         "properties": {
           "contacts": {
-            "format": "uint",
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },

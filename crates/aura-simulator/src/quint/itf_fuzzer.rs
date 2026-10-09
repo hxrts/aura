@@ -39,7 +39,7 @@ pub struct ITFTrace {
     pub states: Vec<ITFState>,
     /// Optional loop index for infinite traces
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub loop_index: Option<usize>,
+    pub loop_index: Option<u64>,
 }
 
 /// ITF trace metadata

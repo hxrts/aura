@@ -40,8 +40,8 @@ pub struct AccountView {
     pub nickname: String,
     pub threshold_k: u8,
     pub threshold_n: u8,
-    pub devices: usize,
-    pub contacts: usize,
+    pub devices: u64,
+    pub contacts: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -66,7 +66,7 @@ pub struct SettingsView {
     pub threshold_n: u8,
     pub mfa_policy: String,
     pub devices: Vec<String>,
-    pub contacts: usize,
+    pub contacts: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -93,8 +93,8 @@ pub struct OtaReleaseView {
     pub series_id: String,
     pub version: String,
     pub declared_by: Vec<String>,
-    pub artifacts: usize,
-    pub certificates: usize,
+    pub artifacts: u64,
+    pub certificates: u64,
     /// Recommended to this account.
     pub recommended: bool,
 }
@@ -106,7 +106,7 @@ pub struct OtaUpgradeView {
     pub from_release_id: Option<String>,
     /// `staged`, `cutover_approved`, `cutover_completed` or `rolled_back`.
     pub stage: String,
-    pub approvals: usize,
+    pub approvals: u64,
     pub rollbacks: Vec<String>,
 }
 
@@ -250,7 +250,7 @@ pub enum Response {
         detail: Option<String>,
     },
     Peers {
-        connected: usize,
+        connected: u64,
     },
     AmpChannel(AmpChannelView),
     AmpBumpProposed {
@@ -271,4 +271,22 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         operation: Option<OperationView>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Response;
+
+    #[test]
+    fn response_counts_preserve_the_full_published_wire_range() {
+        let response = Response::Peers {
+            connected: u64::MAX,
+        };
+        let encoded = serde_json::to_value(&response).unwrap();
+        assert_eq!(encoded["data"]["connected"].as_u64(), Some(u64::MAX));
+        assert_eq!(
+            serde_json::from_value::<Response>(encoded).unwrap(),
+            response
+        );
+    }
 }

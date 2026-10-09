@@ -187,6 +187,19 @@ custody independently.
 
 ### Architecture lint input discovery
 
+The harness move boundary checks parsed Rust paths and macro token trees.
+Its positive lexical test exclusions use the same shared predicate as the
+wire-width lane. Production following a test item, mixed test/production cfg,
+qualified constructor paths and macro payloads remain checked; strings and
+comments cannot become ownership escapes or exemptions.
+
+The style lane checks `usize` wire fields in parsed structs and enum
+variants, including nested collection and optional types. It respects each
+serde direction's skipped fields and variants, excludes PhantomData's erased
+type arguments, and shares the ownership visitors' positive test-cfg predicate.
+An unguarded module named `tests` or a mixed test/production cfg does not exempt
+its wire declarations.
+
 Every explicit scan input must exist. In a Git checkout, architecture lints
 inspect tracked and new untracked Rust sources, excluding ignored artifacts
 from directory scans. An explicitly requested Rust file is scanned even when

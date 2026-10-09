@@ -216,6 +216,13 @@ Waits must bind to declared readiness, event, or quiescence conditions. They may
 
 When a runtime bridge surface exposes typed lifecycle such as `DiscoveryTriggerOutcome`, `CeremonyProcessingOutcome`, or an explicit mutation outcome, tests should assert those variants directly. Do not treat a unit success result as sufficient proof of progress. Executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers. Do not keep a second harness-local convergence graph.
 
+Keep production handle construction and accepted receipt issuance in the sanctioned
+owners checked by `just ci-harness-move-ownership-boundary`. Test-only receipt
+fixtures may use positive lexical `cfg(test)` scopes. The checker inspects actual
+Rust paths and macro tokens: mixed test/production predicates and production
+following a test item remain checked, while comments and diagnostic strings do
+not constitute ownership operations.
+
 Projection-based semantic waits may resume across bounded browser or runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation. Runtime-event, toast, and exact operation-state waits still fail closed across restarts. Semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or a frontend-local submitting phase.
 
 Shared semantic harness core should decode typed `ToolPayload` and bridge structs directly. Keep raw `serde_json::Value` plumbing at outer CLI and browser adapters only. Raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only.
@@ -715,6 +722,12 @@ assert!(matches!(response, Response::Channels(_)));
   through `aura serve`. It relies on the test keyring above; set
   `AURA_TEST_KEYRING_DIR` per test so the test and binary share one store.
 - The published protocol schema is checked by `just ci-rpc-schema`.
+- Check RPC count serialization at its `u64` boundary and request limits at
+  their `u32` boundary. The architecture style lane also checks enum fields
+  and nested containers in scenarios, runtime-event observations and
+  conformance artifacts; skipped internal fields and erased phantom types
+  are not wire integers. Native/browser runtime-event counts share one fixed
+  width, with checked producer conversions.
 
 ### Quint Trace Usage
 

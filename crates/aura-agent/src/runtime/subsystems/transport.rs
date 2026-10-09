@@ -25,7 +25,7 @@ use std::sync::{
     Arc,
 };
 
-pub(crate) const LOCAL_TRANSPORT_INBOX_CAPACITY: usize = 256;
+pub(crate) const LOCAL_TRANSPORT_INBOX_CAPACITY: u16 = 256;
 /// Bound on peers tracked for reachability; the stalest is evicted first.
 const MAX_TRACKED_REACHABLE_PEERS: usize = 256;
 
@@ -203,7 +203,7 @@ impl TransportSubsystem {
         }
 
         let mut inbox = self.shared.inbox.write();
-        if inbox.len() >= LOCAL_TRANSPORT_INBOX_CAPACITY {
+        if inbox.len() >= usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
             return QueueEnvelopeOutcome::DroppedOverflow;
         }
         inbox.push(envelope);
@@ -306,19 +306,25 @@ mod bounded_queue_tests {
     fn local_transport_inbox_drops_when_capacity_is_exhausted() {
         let subsystem = TransportSubsystem::new();
 
-        for index in 0..LOCAL_TRANSPORT_INBOX_CAPACITY {
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
             assert_eq!(
                 subsystem.queue_envelope(envelope(index as u8)),
                 QueueEnvelopeOutcome::Queued
             );
         }
 
-        assert_eq!(subsystem.inbox_len(), LOCAL_TRANSPORT_INBOX_CAPACITY);
+        assert_eq!(
+            subsystem.inbox_len(),
+            usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+        );
         assert_eq!(
             subsystem.queue_envelope(envelope(255)),
             QueueEnvelopeOutcome::DroppedOverflow
         );
-        assert_eq!(subsystem.inbox_len(), LOCAL_TRANSPORT_INBOX_CAPACITY);
+        assert_eq!(
+            subsystem.inbox_len(),
+            usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+        );
     }
 }
 

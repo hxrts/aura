@@ -748,7 +748,7 @@ impl AuraEffectSystem {
                             crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow => {
                                 return Err(configured_network_ingress_error(
                                     TransportError::IngressCapacityExceeded {
-                                        capacity: crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY,
+                                        capacity: u64::from(crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY),
                                     },
                                 ));
                             }
@@ -853,7 +853,7 @@ impl AuraEffectSystem {
                 match self.receive_configured_envelope().await {
                     Ok(envelope) => {
                         if matches!(self.queue_runtime_envelope(envelope), crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow) {
-                            return Err(aura_core::AuraError::Network { message: "owned signing ingress capacity exceeded".into(), source: Some(std::sync::Arc::new(TransportError::IngressCapacityExceeded { capacity: crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY })) });
+                            return Err(aura_core::AuraError::Network { message: "owned signing ingress capacity exceeded".into(), source: Some(std::sync::Arc::new(TransportError::IngressCapacityExceeded { capacity: u64::from(crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY) })) });
                         }
                     },
                     Err(TransportError::NoMessage) => window.retry_delay(self, 25).await.map_err(aura_core::AuraError::from)?,

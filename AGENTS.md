@@ -142,6 +142,11 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Test-scope enforcement**: classify Rust test exclusions by parsed lexical
   scope and positive cfg predicates. Mixed test/production predicates and
   production declarations following test items retain production enforcement.
+- **Harness move ownership syntax**: operation-handle constructors, accepted
+  receipts, submission recording and instance assignment stay in their
+  sanctioned owners. The gate checks actual qualified Rust paths and macro
+  tokens; comments, strings and test-like module names grant no exemption.
+  Only lexical scopes with positive test predicates are test fixtures.
 - **Architecture syntax lint gate**: run `just lint-arch-syntax` when changing
   effect placement, runtime-coupling, raw impure/time/random usage,
   concurrency escape hatches, crypto-boundary syntax, or syntax-owned

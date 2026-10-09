@@ -411,6 +411,13 @@ pub fn use_devices_subscription(
                 last_seen: d.last_seen,
             })
             .collect();
+        let device_count = match u64::try_from(list.len()) {
+            Ok(count) => count,
+            Err(error) => {
+                tracing::error!(%error, "device observation count exceeds its wire range");
+                return;
+            }
+        };
         let current_devices = list
             .iter()
             .map(|device| (device.id.clone(), device.name.clone()))
@@ -427,7 +434,7 @@ pub fn use_devices_subscription(
                             |(device_id, device_name)| RuntimeFact::DeviceEnrollmentAccepted {
                                 device_id: Some(device_id.clone()),
                                 device_name: Some(device_name.clone()),
-                                device_count: Some(list.len()),
+                                device_count: Some(device_count),
                             },
                         )
                         .collect::<Vec<_>>()

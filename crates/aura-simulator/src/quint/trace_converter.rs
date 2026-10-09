@@ -225,7 +225,7 @@ pub struct ItfTrace {
     /// Trace states
     pub states: Vec<ItfState>,
     /// Loop index for cyclic traces
-    pub loop_index: Option<usize>,
+    pub loop_index: Option<u64>,
 }
 
 /// ITF trace converter for Quint integration

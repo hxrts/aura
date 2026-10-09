@@ -75,7 +75,7 @@ pub struct AuraVmDeterminismProfileV1 {
     pub scheduler_envelope_class: String,
     /// Declared upper bound for threaded wave width, when applicable.
     #[serde(default)]
-    pub declared_wave_width_bound: Option<usize>,
+    pub declared_wave_width_bound: Option<u64>,
     /// Telltale determinism mode identifier.
     pub determinism_mode: String,
     /// Telltale effect determinism tier identifier.
@@ -99,7 +99,7 @@ pub struct AuraConformanceRunMetadataV1 {
     pub commit: Option<String>,
     /// Optional async host transcript entry count.
     #[serde(default)]
-    pub async_host_transcript_entries: Option<usize>,
+    pub async_host_transcript_entries: Option<u64>,
     /// Optional async host transcript digest.
     #[serde(default)]
     pub async_host_transcript_digest_hex: Option<String>,
@@ -339,6 +339,23 @@ fn stable_hash_hex_from_serializable<T: Serialize>(value: &T) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_metadata_counts_survive_canonical_encoding(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let metadata = AuraConformanceRunMetadataV1 {
+            async_host_transcript_entries: Some(u64::MAX),
+            vm_determinism_profile: Some(AuraVmDeterminismProfileV1 {
+                declared_wave_width_bound: Some(u64::MAX),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let bytes = crate::util::serialization::to_vec(&metadata)?;
+        let decoded: AuraConformanceRunMetadataV1 = crate::util::serialization::from_slice(&bytes)?;
+        assert_eq!(decoded, metadata);
+        Ok(())
+    }
 
     #[test]
     fn artifact_validation_requires_all_surfaces() {
