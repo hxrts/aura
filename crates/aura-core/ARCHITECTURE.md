@@ -311,8 +311,11 @@ deadline wake, cancellation drop and unchanged sticky original interval.
 
 The physical deadline effect accepts a typed existing endpoint and cannot confer
 domain completion. `acknowledge_with_timeout_budget` bounds the original final
-observation lease, selected clock read and checkpoint against that endpoint;
-publication is synchronous under the guard after success. Endpoint priority and
+observation lease, selected clock reads before and after the checkpoint, and
+checkpoint against that endpoint. The final read rejects expiry or rollback
+caused within the checkpoint's completion poll; publication is synchronous under
+the guard after success. This local validity check grants no durable domain ACK
+and does not claim its final high-water observation was persisted. Endpoint priority and
 owned loser Drop prevent late checkpoint success and retained stalled reads.
 Relative-only providers fail explicitly. `TimeError::source` dereferences native
 provider causes rather than exposing an Arc container; serialization retains

@@ -2089,8 +2089,11 @@ nonignored harness discovery and successful execution for the core terminal
 acknowledgment tests, the real native provider, and `ManualPhysicalClock`.
 The same inventory runs in `ci-vm-session-lifecycle`. Required cases include a
 hung current read, observation-lock contention, delayed checkpoint with endpoint
-priority, native timer failure without invented expiry, unsupported providers,
-and publication under the original guard. Actual provider cases exercise fixed
+priority, expiry caused inside the checkpoint's completion poll, a hung or failed
+selected postcheckpoint read, postcheckpoint rollback, native timer failure
+without invented expiry, unsupported providers, and publication under the original
+guard. Postcheckpoint validation retains the selected provider and original
+endpoint; it is local validity evidence, not a durable domain acknowledgment. Actual provider cases exercise fixed
 endpoints after delayed registration, rollback, native failure custody and real
 native timer wake observations. A focused pass does not prove the broader
 runtime shutdown, command admission, browser execution or enrollment lifecycle.
