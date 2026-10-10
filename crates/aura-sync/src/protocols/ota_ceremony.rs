@@ -52,7 +52,6 @@ use uuid::Uuid;
 use super::ota::{UpgradeKind, UpgradeProposal as OTAProposal};
 
 mod facts;
-#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod theorem_pack_tests;

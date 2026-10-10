@@ -32,7 +32,6 @@ mod builder;
 mod health;
 mod required;
 pub use required::RequiredPeerSyncError;
-#[cfg(test)]
 mod tests;
 
 use parking_lot::RwLock;
