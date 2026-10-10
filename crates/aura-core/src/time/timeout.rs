@@ -1243,7 +1243,12 @@ where
     let ((), _lease) = bounded_timeout_observation(time, budget, || async {
         let now = current_physical_time(time).await?;
         budget.remaining_at(&now)?;
-        checkpoint().await
+        checkpoint().await?;
+        // A checkpoint may advance the selected clock in the same poll that
+        // returns Ready. Validate that completion under the original race.
+        let completed_at = current_physical_time(time).await?;
+        budget.remaining_at(&completed_at)?;
+        Ok(())
     })
     .await?;
     Ok(publish())
@@ -1376,6 +1381,7 @@ mod tests {
 
     struct TerminalObservationClock {
         read: Mutex<Option<futures::channel::oneshot::Receiver<PhysicalTime>>>,
+        post_read: Mutex<Option<futures::channel::oneshot::Receiver<PhysicalTime>>>,
         endpoint:
             Mutex<Option<futures::channel::oneshot::Receiver<Result<PhysicalTime, TimeError>>>>,
     }
@@ -1390,6 +1396,7 @@ mod tests {
             (
                 Self {
                     read: Mutex::new(Some(read)),
+                    post_read: Mutex::new(None),
                     endpoint: Mutex::new(Some(endpoint)),
                 },
                 read_release,
@@ -1404,7 +1411,8 @@ mod tests {
                 .read
                 .lock()
                 .take()
-                .expect("one required terminal clock read");
+                .or_else(|| self.post_read.lock().take())
+                .expect("explicit required terminal clock read");
             read.await.map_err(|source| TimeError::ProviderFailure {
                 operation: crate::effects::time::TimeProviderOperation::ReadPhysicalClock,
                 source: Some(Arc::new(source)),
@@ -1568,6 +1576,9 @@ mod tests {
     #[tokio::test]
     async fn required_terminal_ack_publishes_once_with_original_guard_after_checkpoint() {
         let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        post_release.send(physical_time(350)).unwrap();
         let budget = terminal_test_budget();
         read.send(physical_time(350))
             .expect("required current observation");
@@ -1670,6 +1681,136 @@ mod tests {
         ));
         assert!(!published.get());
         assert!(clock.0.sleep_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_rejects_checkpoint_expiry_in_its_completion_poll() {
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        post_release.send(physical_time(500)).unwrap();
+        let budget = terminal_test_budget();
+        read.send(physical_time(350)).unwrap();
+        let published = std::cell::Cell::new(false);
+        let result = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async move {
+                endpoint.send(Ok(physical_time(500))).unwrap();
+                Ok(())
+            },
+            || published.set(true),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(!published.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+    #[tokio::test]
+    async fn required_terminal_ack_bounds_hung_postcheckpoint_read() {
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        read.send(physical_time(350)).unwrap();
+        let budget = terminal_test_budget();
+        let checkpointed = std::cell::Cell::new(false);
+        let published = std::cell::Cell::new(false);
+        let mut acknowledgment = Box::pin(super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async {
+                checkpointed.set(true);
+                Ok(())
+            },
+            || published.set(true),
+        ));
+        assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
+        assert!(checkpointed.get());
+        endpoint.send(Ok(physical_time(500))).unwrap();
+        assert!(matches!(
+            acknowledgment.await,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(!published.get());
+        assert!(
+            post_release.is_canceled(),
+            "actual losing postread is dropped"
+        );
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_retains_postcheckpoint_provider_failure() {
+        use std::error::Error;
+        let (clock, read, _endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        drop(post_release);
+        read.send(physical_time(350)).unwrap();
+        let budget = terminal_test_budget();
+        let published = std::cell::Cell::new(false);
+        let error = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async { Ok(()) },
+            || published.set(true),
+        )
+        .await
+        .expect_err("failed selected postread cannot publish");
+        let native = error
+            .source()
+            .and_then(|source| source.source())
+            .and_then(|source| source.downcast_ref::<TimeError>())
+            .unwrap();
+        assert!(matches!(
+            native,
+            TimeError::ProviderFailure {
+                operation: crate::effects::time::TimeProviderOperation::ReadPhysicalClock,
+                ..
+            }
+        ));
+        assert!(native
+            .source()
+            .unwrap()
+            .is::<futures::channel::oneshot::Canceled>());
+        assert!(!published.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_rejects_postcheckpoint_rollback() {
+        let (clock, read, _endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        read.send(physical_time(350)).unwrap();
+        post_release.send(physical_time(349)).unwrap();
+        let budget = terminal_test_budget();
+        let published = std::cell::Cell::new(false);
+        let outcome = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async { Ok(()) },
+            || published.set(true),
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            Err(TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 350,
+                observed_at_ms: 349,
+            })
+        ));
+        assert!(!published.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
     }
 
     #[derive(Debug, Clone, Copy)]
