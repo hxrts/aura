@@ -128,8 +128,8 @@ pub(crate) use crypto::{
 };
 
 pub(in crate::runtime) use crypto::{
-    OwnedSecretBirthCapability, OwnedSecretNegativeCapability, OwnedSecretPositiveCapability,
-    OwnedSecretReadCapability,
+    OriginalEnrollmentAllocationAcknowledgment, OwnedSecretBirthCapability,
+    OwnedSecretNegativeCapability, OwnedSecretPositiveCapability, OwnedSecretReadCapability,
 };
 
 mod effect_api;

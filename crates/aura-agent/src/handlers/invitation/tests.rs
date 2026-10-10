@@ -4187,6 +4187,14 @@ pub(crate) fn actual_pinned_device_enrollment_fixture_with_clock(
     ))
 }
 
+pub(crate) fn actual_pinned_device_enrollment_fixture_with_clock_and_transport(
+    label: &str,
+    clock: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    transport: crate::SharedTransport,
+) -> impl std::future::Future<Output = ActualDeviceEnrollmentFixture> + '_ {
+    Box::pin(actual_pinned_device_enrollment_fixture_owned(label, Some(clock), Some(transport)))
+}
+
 async fn actual_pinned_device_enrollment_fixture_owned(
     label: &str,
     clock: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>>,
@@ -7268,15 +7276,14 @@ async fn actual_enrollment_notice_callers_fit_default_stack_budget() {
     );
     drop(issuer_future);
     let invitee_handler = handler_for(AuthorityContext::new(invitee.authority_id()));
-    let tasks = invitee
-        .runtime()
-        .tasks()
-        .group("notice-future-size-observer");
-    let invitee_future = invitee_handler.execute_device_enrollment_invitee(
-        invitee.runtime().effects(),
-        &invitation,
-        &tasks,
-    );
+    let root = invitee
+        .invitations()
+        .unwrap()
+        .take_original_enrollment_execution(&invitation.invitation_id)
+        .await
+        .unwrap();
+    let invitee_future =
+        invitee_handler.execute_device_enrollment_invitee(invitee.runtime().effects(), root);
     let invitee_bytes = std::mem::size_of_val(&invitee_future);
     assert!(
         invitee_bytes <= 16 * 1024,
@@ -7811,6 +7818,7 @@ async fn interrupted_signed_issuance_resumes_actual_original_registration_owner(
         assert_eq!(after.timeout_budget.started_at_ms(), before.0);
         assert_eq!(after.timeout_budget.deadline_at_ms(), before.1);
         let remaining = window
+            .child()
             .remaining_ms(effects.as_ref())
             .await
             .expect("required original owner clock");

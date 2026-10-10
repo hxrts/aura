@@ -143,7 +143,7 @@ impl InvitationHandler {
 
     #[aura_macros::capability_boundary(
         category = "capability_gated",
-        capability = "EnrollmentWindowCapability",
+        capability = "EnrollmentExecutionChild",
         family = "runtime_helper"
     )]
     pub(crate) async fn execute_device_enrollment_initiator_owned(
@@ -151,8 +151,8 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
-        budget: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
-    ) -> AgentResult<()> {
+        budget: crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> AgentResult<Option<super::IssuerEnrollmentTerminalReceipt>> {
         Box::pin(
             InvitationDeviceEnrollmentHandler::new(self).execute_device_enrollment_initiator_owned(
                 effects,
@@ -167,12 +167,13 @@ impl InvitationHandler {
     pub(crate) async fn execute_device_enrollment_invitee(
         &self,
         effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-        tasks: &crate::task_registry::TaskGroup,
+        root: crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            super::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        >,
     ) -> AgentResult<()> {
         Box::pin(
             InvitationDeviceEnrollmentHandler::new(self)
-                .execute_device_enrollment_invitee(effects, invitation, tasks),
+                .execute_device_enrollment_invitee(effects, root),
         )
         .await
     }

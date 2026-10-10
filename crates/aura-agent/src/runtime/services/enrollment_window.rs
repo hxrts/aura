@@ -27,6 +27,9 @@ mod signing_contract_guards {
         impl<T: ?Sized> AmbiguousIfClone<()> for T {}
         impl<T: Clone> AmbiguousIfClone<CloneImplemented> for T {}
         let _ = <HeldIssuerCompletionObserver as AmbiguousIfClone<_>>::marker;
+        let _ = <crate::handlers::invitation::IssuerEnrollmentTerminalReceipt as AmbiguousIfClone<_>>::marker;
+        let _ = <super::EnrollmentExecutionRoot<super::RegisteredEnrollmentWindowCapability> as AmbiguousIfClone<_>>::marker;
+        let _ = <super::AcknowledgedIssuerEnrollmentWindow as AmbiguousIfClone<_>>::marker;
 
         struct DeserializeImplemented;
         trait AmbiguousIfDeserialize<A> {
@@ -35,6 +38,9 @@ mod signing_contract_guards {
         impl<T: ?Sized> AmbiguousIfDeserialize<()> for T {}
         impl<T: serde::de::DeserializeOwned> AmbiguousIfDeserialize<DeserializeImplemented> for T {}
         let _ = <HeldIssuerCompletionObserver as AmbiguousIfDeserialize<_>>::marker;
+        let _ = <crate::handlers::invitation::IssuerEnrollmentTerminalReceipt as AmbiguousIfDeserialize<_>>::marker;
+        let _ = <super::EnrollmentExecutionRoot<super::RegisteredEnrollmentWindowCapability> as AmbiguousIfDeserialize<_>>::marker;
+        let _ = <super::AcknowledgedIssuerEnrollmentWindow as AmbiguousIfDeserialize<_>>::marker;
     }
 }
 
@@ -45,6 +51,61 @@ pub(crate) struct HeldIssuerCompletionObserver {
     original: super::ceremony_tracker::HeldIssuerClockObservationCapability,
 }
 impl HeldIssuerCompletionObserver {
+    pub(super) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        self.original.require_effects(effects)
+    }
+    #[cfg(test)]
+    pub(super) async fn finalize_original_issuer(
+        &self,
+        effects: &AuraEffectSystem,
+        retained: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        service: &crate::handlers::device_epoch_rotation::DeviceEpochRotationService,
+    ) -> crate::core::AgentResult<()> {
+        self.original.require_effects(effects)?;
+        retained.require_runtime_owner(effects)?;
+        aura_core::time::timeout::execute_with_timeout_budget(effects, &self.active, || async {
+            self.original.require_pending().await?;
+            service
+                .finalize_sole_device_enrollment(&retained.manifest().ceremony)
+                .await
+        })
+        .await
+        .map_err(|source| {
+            map_enrollment_run_error("finalize original issuer", &self.active, source)
+        })
+    }
+    #[cfg(test)]
+    pub(super) async fn observe_issuer_terminal_receipt(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        retained: Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+        runner: &super::ceremony_runner::CeremonyRunner,
+    ) -> crate::core::AgentResult<crate::handlers::invitation::IssuerEnrollmentTerminalReceipt>
+    {
+        self.original.require_effects(effects.as_ref())?;
+        retained.require_runtime_owner(effects.as_ref())?;
+        aura_core::time::timeout::execute_with_timeout_budget(
+            effects.as_ref(),
+            &self.active,
+            || async {
+                self.original.require_pending().await?;
+                crate::handlers::invitation::issue_original_terminal_receipt(
+                    effects.clone(),
+                    retained,
+                    runner,
+                )
+                .await
+            },
+        )
+        .await
+        .map_err(|source| {
+            map_enrollment_run_error(
+                "observe original issuer terminal signing",
+                &self.active,
+                source,
+            )
+        })
+    }
     pub(crate) async fn receive_issuer_result(
         &self,
         effects: &AuraEffectSystem,
@@ -56,28 +117,19 @@ impl HeldIssuerCompletionObserver {
         >,
     ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, AuraError> {
         self.original.require_effects(effects)?;
-        aura_core::time::timeout::execute_with_timeout_budget_and_checkpoint(
-            effects,
-            &self.active,
-            || async {
-                self.original
-                    .checkpoint()
-                    .await
-                    .map_err(TimeoutBudgetError::checkpoint_failure)
-            },
-            || async {
-                receiver
-                    .await
-                    .map_err(|source| AuraError::Internal {
-                        message: "original prepared issuer result channel stopped".into(),
-                        source: Some(Arc::new(source)),
-                    })?
-                    .map_err(|source| AuraError::Internal {
-                        message: "original prepared issuer rejected completion".into(),
-                        source: Some(Arc::new(source)),
-                    })
-            },
-        )
+        aura_core::time::timeout::execute_with_timeout_budget(effects, &self.active, || async {
+            self.original.require_pending().await?;
+            receiver
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "original prepared issuer result channel stopped".into(),
+                    source: Some(Arc::new(source)),
+                })?
+                .map_err(|source| AuraError::Internal {
+                    message: "original prepared issuer rejected completion".into(),
+                    source: Some(Arc::new(source)),
+                })
+        })
         .await
         .map_err(|source| AuraError::Internal {
             message: "original issuer completion observation failed".into(),
@@ -97,16 +149,18 @@ impl HeldIssuerCompletionObserver {
                 group: group.name().into(),
                 source: Box::new(TimeoutBudgetError::checkpoint_failure(source)),
             })?;
-        let outcome = aura_core::time::timeout::execute_with_timeout_budget_and_checkpoint(
+        let outcome = aura_core::time::timeout::execute_with_timeout_budget(
             effects,
             &self.active,
             || async {
-                self.original
-                    .checkpoint()
-                    .await
-                    .map_err(TimeoutBudgetError::checkpoint_failure)
+                self.original.require_pending().await.map_err(|source| {
+                    TaskSupervisionError::Budget {
+                        group: group.name().into(),
+                        source: Box::new(TimeoutBudgetError::checkpoint_failure(source)),
+                    }
+                })?;
+                group.wait_with_original_budget(effects, &self.active).await
             },
-            || group.wait_with_original_budget(effects, &self.active),
         )
         .await;
         match outcome {
@@ -385,15 +439,415 @@ impl CancelledEnrollmentNoticeWindowCapability {
 
 /// A child retains both the original persisted window and its admission lease.
 /// There is no raw-budget extraction or caller-supplied checkpoint constructor.
-#[derive(Clone)]
-pub(crate) struct EnrollmentWindowCapability {
+pub(crate) struct EnrollmentExecutionChild {
     active: TimeoutBudget,
     original: TimeoutBudget,
     checkpoint: Arc<WindowCheckpoint>,
     _lease: Arc<OwnedSemaphorePermit>,
 }
-/// Move-only acknowledgment of an actual persisted live invitee window.
-/// Frozen bytes do not share mutable clock state with subsequent observations.
+
+/// One fresh acknowledged allocation owns all attenuated execution and its
+/// dedicated child subtree. Serialized clock phases cannot construct this root.
+pub(crate) struct EnrollmentExecutionRoot<Origin> {
+    child: EnrollmentExecutionChild,
+    children: crate::task_registry::TaskGroup,
+    origin: Arc<Origin>,
+}
+
+impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_registered_enrollment_root",
+        receiver_type = EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>,
+        family = "runtime_helper"
+    )]
+    pub(crate) fn prepare_running_observation(
+        &self,
+        effects: &AuraEffectSystem,
+        generation: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
+    ) -> Result<super::ceremony_tracker::PreparedRunningIssuerObservation, AuraError> {
+        self.origin.prepare_running_observation(
+            self.running_observer(effects)?,
+            self.children().clone(),
+            generation,
+        )
+    }
+    fn running_observer(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<HeldIssuerCompletionObserver, AuraError> {
+        self.origin.require_effects(effects)?;
+        let original = self.origin.completion_observation();
+        if !self
+            .child
+            .active
+            .shares_observation_owner_with(original.budget())
+        {
+            return Err(DurableEnrollmentExecutionError::ForeignProvider.refusal());
+        }
+        Ok(HeldIssuerCompletionObserver {
+            active: self.child.active.clone(),
+            original,
+        })
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_enrollment_terminal_root",
+        receiver_type = EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn acknowledge_issuer_terminal(
+        self,
+        effects: &AuraEffectSystem,
+        terminal: crate::handlers::invitation::IssuerEnrollmentTerminalReceipt,
+    ) -> Result<AcknowledgedIssuerEnrollmentWindow, AuraError> {
+        self.child.require_execution_effects(effects)?;
+        terminal.require_runtime_owner(effects)?;
+        self.origin
+            .require_issued_notice_control(terminal.retained())?;
+        let sealed = self.children.seal_admission();
+        let result = aura_core::time::timeout::execute_with_timeout_budget(
+            effects,
+            &self.child.active,
+            || async {
+                let disposal = sealed.await_disposal().await;
+                disposal.require_original_group(&self.children)?;
+                if let Some(source) = disposal.failure() {
+                    return Err(AuraError::Internal {
+                        message: "original issuer child disposal failed".into(),
+                        source: Some(Arc::new(source.clone())),
+                    });
+                }
+                match disposal.execution_outcome() {
+                    crate::task_registry::TaskGroupExecutionOutcome::Completed => {}
+                    crate::task_registry::TaskGroupExecutionOutcome::NotExecuted => {
+                        return Err(DurableEnrollmentExecutionError::NoCompletedChild.refusal());
+                    }
+                    crate::task_registry::TaskGroupExecutionOutcome::Interrupted(source) => {
+                        return Err(AuraError::Internal {
+                            message: "original issuer child execution was interrupted".into(),
+                            source: Some(Arc::new(source.clone())),
+                        });
+                    }
+                }
+                Ok(())
+            },
+        )
+        .await;
+        match result {
+            Ok(()) => {}
+            Err(TimeoutRunError::Operation(source)) => return Err(source),
+            Err(TimeoutRunError::Timeout(source)) => return Err(AuraError::from(source)),
+        }
+        // Disposal runs before entering the ACK observation gate: descendants
+        // may still need the same original gate until their actual completion.
+        // Only the shared resource-ACK boundary may expose terminal authority.
+        aura_core::time::timeout::acknowledge_with_timeout_budget(
+            effects,
+            &self.child.active,
+            || async {
+                self.origin
+                    .acknowledge_terminal_checkpoint()
+                    .await
+                    .map_err(TimeoutBudgetError::checkpoint_failure)
+            },
+            || AcknowledgedIssuerEnrollmentWindow { terminal },
+        )
+        .await
+        .map_err(AuraError::from)
+    }
+
+    /// Transfer the same allocation from issuance into its registered protocol.
+    /// This changes only the permitted checkpoint accessor, never its provider,
+    /// absolute endpoint, lease, subtree or terminal authority.
+    pub(super) fn into_registered(mut self) -> Self {
+        self.child.checkpoint = Arc::new(WindowCheckpoint::Registered {
+            capability: Arc::clone(&self.origin),
+        });
+        self
+    }
+    /// Consume the actual fresh issuer Pending acknowledgment. The tracker
+    /// calls this only after the shared original-endpoint publication boundary.
+    pub(super) fn from_issuer_birth(
+        birth: super::ceremony_tracker::AcknowledgedIssuerEnrollmentBirth,
+        original_tasks: &crate::task_registry::TaskGroup,
+    ) -> Self {
+        let original = Arc::new(birth.into_original_window());
+        Self {
+            child: EnrollmentExecutionChild {
+                active: original.budget().clone(),
+                original: original.budget().clone(),
+                _lease: original.lease(),
+                checkpoint: Arc::new(WindowCheckpoint::HeldIssuer {
+                    capability: original.clone(),
+                }),
+            },
+            children: original_tasks.group("original-issuer-enrollment-children"),
+            origin: original,
+        }
+    }
+}
+
+/// Actual terminal storage acknowledgment retaining the original signed result.
+/// A Closed record read on restart cannot recreate this process-local authority.
+pub(crate) struct AcknowledgedIssuerEnrollmentWindow {
+    terminal: crate::handlers::invitation::IssuerEnrollmentTerminalReceipt,
+}
+
+impl AcknowledgedIssuerEnrollmentWindow {
+    pub(crate) fn positive(&self) -> bool {
+        self.terminal.positive()
+    }
+}
+
+impl<Origin> Drop for EnrollmentExecutionRoot<Origin> {
+    fn drop(&mut self) {
+        // Eviction, abandoned handoff and dropped terminal observations retain
+        // Pending/Closed refusal; cancellation grants no terminal ACK.
+        self.children.request_cancellation();
+    }
+}
+
+impl<Origin> EnrollmentExecutionRoot<Origin> {
+    pub(crate) fn child(&self) -> &EnrollmentExecutionChild {
+        &self.child
+    }
+
+    pub(crate) fn children(&self) -> &crate::task_registry::TaskGroup {
+        &self.children
+    }
+
+    pub(crate) fn origin(&self) -> &Origin {
+        &self.origin
+    }
+
+    /// Share admitted domain evidence without transferring execution-root or
+    /// terminal custody. Owned descendants remain in this root's task subtree.
+    pub(crate) fn origin_observation(&self) -> Arc<Origin> {
+        Arc::clone(&self.origin)
+    }
+
+    /// Give an owned descendant the same already-selected absolute endpoint.
+    /// This grants no terminal authority and performs no allocation or renewal.
+    pub(crate) fn owned_execution_child(&self) -> EnrollmentExecutionChild {
+        EnrollmentExecutionChild {
+            active: self.child.active.clone(),
+            original: self.child.original.clone(),
+            checkpoint: Arc::clone(&self.child.checkpoint),
+            _lease: Arc::clone(&self.child._lease),
+        }
+    }
+}
+
+impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
+    fn require_original_domain_invitation(
+        &self,
+        invitation: &aura_core::invitation::Invitation,
+    ) -> Result<(), AuraError> {
+        let encode = |value| {
+            aura_core::util::serialization::to_vec(value).map_err(|source| AuraError::Internal {
+                message: "encode original enrollment domain binding".into(),
+                source: Some(Arc::new(source)),
+            })
+        };
+        if encode(invitation)? != encode(self.origin().canonical_invitation())? {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        Ok(())
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_enrollment_terminal_root",
+        receiver_type = EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn acknowledge_confirmation(
+        self,
+        effects: &AuraEffectSystem,
+        proof: &crate::handlers::invitation::VerifiedEnrollmentConfirmation,
+    ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
+        self.require_original_domain_invitation(proof.canonical_invitation())?;
+        if proof.manifest_digest() != self.origin().manifest_digest() {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        self.close_acknowledged(effects, true).await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_enrollment_terminal_root",
+        receiver_type = EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn acknowledge_failure(
+        self,
+        effects: &AuraEffectSystem,
+        proof: &crate::handlers::invitation::VerifiedEnrollmentFailureCapability,
+    ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
+        self.require_original_domain_invitation(proof.canonical_invitation())?;
+        if proof.manifest_digest() != self.origin().manifest_digest() {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        self.close_acknowledged(effects, false).await
+    }
+
+    async fn close_acknowledged(
+        self,
+        effects: &AuraEffectSystem,
+        positive: bool,
+    ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
+        self.child.require_execution_effects(effects)?;
+        let sealed = self.children.seal_admission();
+        let result = aura_core::time::timeout::execute_with_timeout_budget(
+            effects,
+            &self.child.active,
+            || async {
+                let disposal = sealed.await_disposal().await;
+                disposal
+                    .require_original_group(&self.children)
+                    .map_err(|source| AuraError::Internal {
+                        message: "original enrollment child disposal belongs to another subtree"
+                            .into(),
+                        source: Some(Arc::new(source)),
+                    })?;
+                if let Some(source) = disposal.failure() {
+                    return Err(AuraError::Internal {
+                        message: "original enrollment child disposal failed".into(),
+                        source: Some(Arc::new(source.clone())),
+                    });
+                }
+                match disposal.execution_outcome() {
+                    crate::task_registry::TaskGroupExecutionOutcome::Interrupted(source) => {
+                        return Err(AuraError::Internal {
+                            message: "original enrollment child execution was interrupted".into(),
+                            source: Some(Arc::new(source.clone())),
+                        });
+                    }
+                    crate::task_registry::TaskGroupExecutionOutcome::NotExecuted => {
+                        if positive {
+                            return Err(DurableEnrollmentExecutionError::NoCompletedChild.refusal());
+                        }
+                    }
+                    crate::task_registry::TaskGroupExecutionOutcome::Completed => {}
+                }
+                let WindowCheckpoint::Admitted {
+                    binding, writes, ..
+                } = self.child.checkpoint.as_ref()
+                else {
+                    return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+                };
+                let _write = writes.lock().await;
+                self.child
+                    .require_pending_checkpoint(effects)
+                    .await
+                    .map_err(AuraError::from)?;
+                let retained = EnrollmentExecutionChild::read_bound_admitted_checkpoint(
+                    effects,
+                    binding,
+                    &self.child.original,
+                )
+                .await
+                .map_err(AuraError::from)?;
+                if retained.execution != DurableEnrollmentExecutionState::Pending {
+                    return Err(DurableEnrollmentExecutionError::AlreadyBorn.refusal());
+                }
+                let now = effects.physical_time().await.map_err(AuraError::from)?;
+                self.child
+                    .active
+                    .remaining_at(&now)
+                    .map_err(AuraError::from)?;
+                let record = StoredAdmittedWindow {
+                    binding: binding.clone(),
+                    budget: self.child.original.clone(),
+                    execution: DurableEnrollmentExecutionState::Closed,
+                };
+                let bytes = serde_json::to_vec(&record).map_err(|source| AuraError::Internal {
+                    message: "encode original enrollment terminal checkpoint".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+                let frozen: StoredAdmittedWindow =
+                    serde_json::from_slice(&bytes).map_err(|source| AuraError::Internal {
+                        message: "freeze original enrollment terminal checkpoint".into(),
+                        source: Some(Arc::new(source)),
+                    })?;
+                let key = admitted_location("admitted_enrollment_clock_checkpoint_v2", binding);
+                effects
+                    .secure_store(&key, &bytes, &[SecureStorageCapability::Write])
+                    .await?;
+                let stored = effects
+                    .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                    .await?;
+                if stored != bytes {
+                    return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+                }
+                let frozen_budget =
+                    serde_json::to_vec(&frozen.budget).map_err(|source| AuraError::Internal {
+                        message: "encode acknowledged original enrollment budget".into(),
+                        source: Some(Arc::new(source)),
+                    })?;
+                Ok(AcknowledgedEnrollmentWindow {
+                    binding: binding.clone(),
+                    frozen_budget,
+                    acknowledged_at_ms: now.ts_ms,
+                })
+            },
+        )
+        .await;
+        match result {
+            Ok(acknowledged) => Ok(acknowledged),
+            Err(TimeoutRunError::Operation(source)) => Err(source),
+            Err(TimeoutRunError::Timeout(source)) => Err(AuraError::from(source)),
+        }
+    }
+}
+
+/// Actual original provider acknowledgment of a newly published pending birth.
+/// It is neither reconstructible from retained bytes nor transferable to another
+/// physical provider. The invitation owner must retain its move-owned custody.
+pub(crate) struct AcknowledgedAdmittedEnrollmentBirth<'provider> {
+    effects: &'provider AuraEffectSystem,
+    binding: AdmittedWindowBinding,
+    budget: TimeoutBudget,
+}
+
+impl AcknowledgedAdmittedEnrollmentBirth<'_> {
+    /// Consume the actual fresh provider acknowledgment while attaching its
+    /// original runtime and independently admitted physical invitation owner.
+    pub(crate) fn into_root(
+        self,
+        effects: Arc<AuraEffectSystem>,
+        admitted: AdmittedEnrollmentManifest,
+        original_tasks: &crate::task_registry::TaskGroup,
+    ) -> Result<EnrollmentExecutionRoot<AdmittedEnrollmentManifest>, AuraError> {
+        if !std::ptr::eq(self.effects, effects.as_ref()) {
+            return Err(DurableEnrollmentExecutionError::ForeignProvider.refusal());
+        }
+        if self.binding != EnrollmentExecutionChild::admitted_binding(&admitted) {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        let lease = effects.acquire_admitted_enrollment_window_owner(&admitted)?;
+        lease.require_effects(effects.as_ref())?;
+        let lease = lease.into_permit();
+        Ok(EnrollmentExecutionRoot {
+            child: EnrollmentExecutionChild {
+                active: self.budget.clone(),
+                original: self.budget,
+                checkpoint: Arc::new(WindowCheckpoint::Admitted {
+                    effects,
+                    binding: self.binding,
+                    writes: Mutex::new(()),
+                }),
+                _lease: Arc::new(lease),
+            },
+            children: original_tasks.group("original-enrollment-children"),
+            origin: Arc::new(admitted),
+        })
+    }
+}
+/// Move-only acknowledgment of the original consuming terminal closure.
+/// Domain evidence and child disposal were checked before the Closed write;
+/// frozen bytes do not share mutable state with later observations.
 pub(crate) struct AcknowledgedEnrollmentWindow {
     binding: AdmittedWindowBinding,
     frozen_budget: Vec<u8>,
@@ -418,10 +872,6 @@ impl AcknowledgedEnrollmentWindow {
     pub(crate) fn acknowledged_at_ms(&self) -> u64 {
         self.acknowledged_at_ms
     }
-}
-struct FrozenAdmittedCheckpoint {
-    binding: AdmittedWindowBinding,
-    budget_bytes: Vec<u8>,
 }
 enum WindowCheckpoint {
     HeldIssuer {
@@ -454,22 +904,75 @@ struct AdmittedWindowBinding {
 struct StoredAdmittedWindow {
     binding: AdmittedWindowBinding,
     budget: TimeoutBudget,
+    execution: DurableEnrollmentExecutionState,
+}
+
+/// Persisted observation of original execution custody, never an owner token.
+/// Absence is a codec error; obsolete records cannot become fresh allocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum DurableEnrollmentExecutionState {
+    Allocated,
+    Pending,
+    Closed,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum DurableEnrollmentExecutionError {
+    #[error("retained enrollment receipt has no original closed checkpoint")]
+    MissingTerminalCheckpoint,
+    #[error("original enrollment subtree has no completed child execution")]
+    NoCompletedChild,
+    #[error("original enrollment execution belongs to another physical provider")]
+    ForeignProvider,
+    #[error("original enrollment birth belongs to another admitted invitation")]
+    ForeignAdmission,
+    #[error("original enrollment allocation already has a durable birth")]
+    AlreadyBorn,
+    #[error("original enrollment execution has an unacknowledged pending observation")]
+    Pending,
+    #[error("original enrollment execution custody was already closed")]
+    Closed,
+}
+
+impl DurableEnrollmentExecutionError {
+    fn refusal(self) -> AuraError {
+        AuraError::PermissionDenied {
+            message: "original enrollment execution custody refused".into(),
+            source: Some(Arc::new(self)),
+        }
+    }
+}
+
+impl DurableEnrollmentExecutionState {
+    pub(super) fn require_unstarted_recovery(self) -> Result<(), AuraError> {
+        let source = match self {
+            Self::Allocated => return Ok(()),
+            Self::Pending => DurableEnrollmentExecutionError::Pending,
+            Self::Closed => DurableEnrollmentExecutionError::Closed,
+        };
+        Err(AuraError::PermissionDenied {
+            message: "original enrollment execution cannot be reconstructed".into(),
+            source: Some(Arc::new(source)),
+        })
+    }
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredAdmittedAnchor {
     version: u16,
-    legacy_v1: bool,
     window: StoredAdmittedWindow,
 }
+// The locator belongs to the original allocation, independently of its codec
+// version. Keeping it stable ensures obsolete bytes are refused rather than
+// becoming an apparently absent allocation eligible for a second admission.
 fn admitted_location(namespace: &str, binding: &AdmittedWindowBinding) -> SecureStorageLocation {
     SecureStorageLocation::new(namespace, binding.ceremony.to_string())
 }
-impl EnrollmentWindowCapability {
+impl EnrollmentExecutionChild {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "original_held_issuer_window",
-        receiver_type = EnrollmentWindowCapability,
+        receiver_type = EnrollmentExecutionChild,
         family = "runtime_helper"
     )]
     pub(crate) async fn held_issuer_completion_observer(
@@ -505,9 +1008,7 @@ impl EnrollmentWindowCapability {
                 if std::ptr::eq(original.as_ref(), effects) {
                     Ok(())
                 } else {
-                    Err(AuraError::permission_denied(
-                        "admitted clock effect owner changed",
-                    ))
+                    Err(DurableEnrollmentExecutionError::ForeignProvider.refusal())
                 }
             }
         }
@@ -575,27 +1076,6 @@ impl EnrollmentWindowCapability {
         group.request_cancellation();
         self.wait_owned_group(effects, group).await
     }
-    /// Mint only from the actual allocation while its original decision remains held.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "EnrollmentGenerationReservation",
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn held_issuer(
-        effects: Arc<AuraEffectSystem>,
-        tracker: &super::ceremony_tracker::CeremonyTracker,
-        reservation: &crate::runtime::effects::EnrollmentGenerationReservation<'_>,
-    ) -> Result<Self, AuraError> {
-        let capability = Arc::new(tracker.held_issuer_window(&effects, reservation).await?);
-        capability.checkpoint().await?;
-        Ok(Self {
-            active: capability.budget().clone(),
-            original: capability.budget().clone(),
-            _lease: capability.lease(),
-            checkpoint: Arc::new(WindowCheckpoint::HeldIssuer { capability }),
-        })
-    }
-
     /// New sibling consent creates its local allocation once. No peer clock is used.
     /// Any previous allocation (including restart or consumed approval) refuses
     /// a second owner; only children of the retained original may continue.
@@ -633,16 +1113,14 @@ impl EnrollmentWindowCapability {
     fn validate_admitted_record(
         record: &StoredAdmittedWindow,
         binding: &AdmittedWindowBinding,
-        legacy: bool,
     ) -> Result<(), AuraError> {
         let full = binding
             .expires_at_ms
             .checked_sub(binding.admitted_at_ms)
             .ok_or_else(|| AuraError::invalid("invalid original admitted interval"))?;
-        let allowance = if legacy { full.min(240_000) } else { full };
         if record.binding != *binding
             || record.budget.started_at_ms() != binding.admitted_at_ms
-            || record.budget.timeout_ms() != allowance
+            || record.budget.timeout_ms() != full
         {
             return Err(AuraError::from(
                 TimeoutBudgetError::CheckpointDiscontinuity {
@@ -672,28 +1150,6 @@ impl EnrollmentWindowCapability {
         binding: &AdmittedWindowBinding,
     ) -> Result<StoredAdmittedWindow, AuraError> {
         let key = admitted_location("admitted_enrollment_clock_anchor_v2", binding);
-        if effects
-            .secure_exists(&admitted_location(
-                "admitted_enrollment_clock_ever_live_v2",
-                binding,
-            ))
-            .await?
-        {
-            // Every reader preserves the required v2 missing-record cause after
-            // live admission; no frozen receipt reader can select v1 instead.
-            effects
-                .secure_retrieve(&key, &[SecureStorageCapability::Read])
-                .await?;
-        }
-        if !effects.secure_exists(&key).await? {
-            let legacy = Self::decode_admitted_record(
-                effects,
-                &admitted_location("admitted_enrollment_clock_v1", binding),
-            )
-            .await?;
-            Self::validate_admitted_record(&legacy, binding, true)?;
-            return Ok(legacy);
-        }
         let bytes = effects
             .secure_retrieve(&key, &[SecureStorageCapability::Read])
             .await?;
@@ -705,20 +1161,18 @@ impl EnrollmentWindowCapability {
                 message: "decode protected admitted anchor".into(),
                 source: Some(Arc::new(source)),
             })?;
-        if anchor.version != 2 {
+        if anchor.version != 3 {
             return Err(AuraError::invalid("unsupported admitted anchor"));
         }
-        Self::validate_admitted_record(&anchor.window, binding, anchor.legacy_v1)?;
+        Self::validate_admitted_record(&anchor.window, binding)?;
         Ok(anchor.window)
     }
     async fn publish_admitted_anchor(
         effects: &AuraEffectSystem,
         record: &StoredAdmittedWindow,
-        legacy: bool,
     ) -> Result<(), AuraError> {
         let anchor = StoredAdmittedAnchor {
-            version: 2,
-            legacy_v1: legacy,
+            version: 3,
             window: serde_json::from_slice(
                 &serde_json::to_vec(record).map_err(TimeoutBudgetError::checkpoint_failure)?,
             )
@@ -729,7 +1183,7 @@ impl EnrollmentWindowCapability {
             return Err(AuraError::invalid("oversized admitted anchor publication"));
         }
         let key = admitted_location("admitted_enrollment_clock_anchor_v2", &record.binding);
-        effects
+        let publication = effects
             .secure_store_immutable(
                 &key,
                 &bytes,
@@ -739,6 +1193,12 @@ impl EnrollmentWindowCapability {
                 ],
             )
             .await?;
+        if publication != aura_core::effects::secure::ImmutableSecureStoreOutcome::Created {
+            return Err(AuraError::PermissionDenied {
+                message: "original admitted window birth was not freshly acknowledged".into(),
+                source: Some(Arc::new(DurableEnrollmentExecutionError::AlreadyBorn)),
+            });
+        }
         let retained = effects
             .secure_retrieve(&key, &[SecureStorageCapability::Read])
             .await?;
@@ -751,7 +1211,7 @@ impl EnrollmentWindowCapability {
         }
         let checkpoint =
             serde_json::to_vec(record).map_err(TimeoutBudgetError::checkpoint_failure)?;
-        effects
+        let checkpoint_publication = effects
             .secure_create_mutable(
                 &admitted_location("admitted_enrollment_clock_checkpoint_v2", &record.binding),
                 &checkpoint,
@@ -761,12 +1221,22 @@ impl EnrollmentWindowCapability {
                 ],
             )
             .await?;
+        if checkpoint_publication
+            != aura_core::effects::secure::ImmutableSecureStoreOutcome::Created
+        {
+            return Err(AuraError::PermissionDenied {
+                message: "original admitted checkpoint birth was not freshly acknowledged".into(),
+                source: Some(Arc::new(DurableEnrollmentExecutionError::AlreadyBorn)),
+            });
+        }
         let retained_checkpoint = Self::decode_admitted_record(
             effects,
             &admitted_location("admitted_enrollment_clock_checkpoint_v2", &record.binding),
         )
         .await?;
-        if retained_checkpoint.binding != record.binding {
+        if retained_checkpoint.binding != record.binding
+            || retained_checkpoint.execution != record.execution
+        {
             return Err(AuraError::from(
                 TimeoutBudgetError::CheckpointDiscontinuity {
                     detail: "initial admitted checkpoint has another owner".into(),
@@ -780,232 +1250,6 @@ impl EnrollmentWindowCapability {
         Ok(())
     }
 
-    async fn require_original_admission_publication(
-        effects: &AuraEffectSystem,
-        witness: &AdmittedEnrollmentManifest,
-        lease: &crate::runtime::effects::AdmittedEnrollmentWindowLeaseCapability<'_>,
-    ) -> Result<(), AuraError> {
-        lease.require_effects(effects)?;
-        let original =
-            crate::handlers::invitation::enrollment_manifest_admission::load_admitted_baseline(
-                effects,
-                effects.runtime_authority_id(),
-                witness.canonical_invitation(),
-            )
-            .await
-            .map_err(|source| AuraError::Internal {
-                message: "reverify protected initial admission publication".into(),
-                source: Some(Arc::new(source)),
-            })?;
-        if original.manifest_digest() != witness.manifest_digest()
-            || original.admitted_at_ms() != witness.admitted_at_ms()
-        {
-            return Err(AuraError::from(
-                TimeoutBudgetError::CheckpointDiscontinuity {
-                    detail: "initial publication belongs to another protected admission".into(),
-                },
-            ));
-        }
-        Ok(())
-    }
-    async fn require_live_admitted_publication(
-        effects: &AuraEffectSystem,
-        binding: &AdmittedWindowBinding,
-    ) -> Result<bool, AuraError> {
-        let live = admitted_location("admitted_enrollment_clock_ever_live_v2", binding);
-        if !effects.secure_exists(&live).await? {
-            return Ok(false);
-        }
-        let anchor_key = admitted_location("admitted_enrollment_clock_anchor_v2", binding);
-        let checkpoint_key = admitted_location("admitted_enrollment_clock_checkpoint_v2", binding);
-        // A prior live decision forbids repairing a lost immutable anchor.
-        effects
-            .secure_retrieve(&anchor_key, &[SecureStorageCapability::Read])
-            .await?;
-        let anchor = Self::read_admitted_anchor(effects, binding).await?;
-        let expected =
-            serde_json::to_vec(&anchor).map_err(TimeoutBudgetError::checkpoint_failure)?;
-        let retained = effects
-            .secure_retrieve(&live, &[SecureStorageCapability::Read])
-            .await?;
-        if retained.len() > 16_384 || retained != expected {
-            return Err(AuraError::from(
-                TimeoutBudgetError::CheckpointDiscontinuity {
-                    detail: "admitted ever-live evidence differs from original publication".into(),
-                },
-            ));
-        }
-        // Required read; absence after prior admission must never initialize.
-        let checkpoint = Self::decode_admitted_record(effects, &checkpoint_key).await?;
-        if checkpoint.binding != *binding {
-            return Err(AuraError::invalid("ever-live checkpoint binding differs"));
-        }
-        checkpoint
-            .budget
-            .validate_checkpoint_continuation_from(&anchor.budget)
-            .map_err(AuraError::from)?;
-        Ok(true)
-    }
-    /// Restore only the original protected publication while its actual execution
-    /// lease is held. Required reimport reads never call this completion owner.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "AdmittedEnrollmentWindowLeaseCapability",
-        family = "runtime_helper"
-    )]
-    async fn finish_original_initial_publication(
-        effects: &AuraEffectSystem,
-        witness: &AdmittedEnrollmentManifest,
-        lease: &crate::runtime::effects::AdmittedEnrollmentWindowLeaseCapability<'_>,
-    ) -> Result<(), AuraError> {
-        Self::require_original_admission_publication(effects, witness, lease).await?;
-        let binding = Self::admitted_binding(witness);
-        let live = admitted_location("admitted_enrollment_clock_ever_live_v2", &binding);
-        let anchor_key = admitted_location("admitted_enrollment_clock_anchor_v2", &binding);
-        let checkpoint_key = admitted_location("admitted_enrollment_clock_checkpoint_v2", &binding);
-        if Self::require_live_admitted_publication(effects, &binding).await? {
-            return Ok(());
-        }
-        let anchor = if effects.secure_exists(&anchor_key).await? {
-            Self::read_admitted_anchor(effects, &binding).await?
-        } else {
-            let legacy_key = admitted_location("admitted_enrollment_clock_v1", &binding);
-            if effects.secure_exists(&legacy_key).await? {
-                let legacy = Self::decode_admitted_record(effects, &legacy_key).await?;
-                Self::validate_admitted_record(&legacy, &binding, true)?;
-                Self::publish_admitted_anchor(effects, &legacy, true).await?;
-                legacy
-            } else {
-                // The witness was reverified from the actual immutable original
-                // admission record; its timestamp is never supplied by a caller.
-                let allowance = binding
-                    .expires_at_ms
-                    .checked_sub(binding.admitted_at_ms)
-                    .ok_or_else(|| AuraError::invalid("invalid original admission publication"))?;
-                let budget = TimeoutBudget::from_start_and_timeout(
-                    &PhysicalTime::exact(binding.admitted_at_ms),
-                    Duration::from_millis(allowance),
-                )?;
-                let original = StoredAdmittedWindow {
-                    binding: binding.clone(),
-                    budget,
-                };
-                Self::publish_admitted_anchor(effects, &original, false).await?;
-                original
-            }
-        };
-        if !effects.secure_exists(&checkpoint_key).await? {
-            let bytes =
-                serde_json::to_vec(&anchor).map_err(TimeoutBudgetError::checkpoint_failure)?;
-            effects
-                .secure_create_mutable(
-                    &checkpoint_key,
-                    &bytes,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await?;
-        }
-        let checkpoint = Self::decode_admitted_record(effects, &checkpoint_key).await?;
-        if checkpoint.binding != binding {
-            return Err(AuraError::invalid("initial checkpoint binding differs"));
-        }
-        checkpoint
-            .budget
-            .validate_checkpoint_continuation_from(&anchor.budget)
-            .map_err(AuraError::from)?;
-        // Record first admission before execution. Once this is ACKed, neither
-        // startup nor reimport can complete missing clock records as initial.
-        let bytes = serde_json::to_vec(&anchor).map_err(TimeoutBudgetError::checkpoint_failure)?;
-        effects
-            .secure_store_immutable(
-                &live,
-                &bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await?;
-        let retained = effects
-            .secure_retrieve(&live, &[SecureStorageCapability::Read])
-            .await?;
-        if retained != bytes {
-            return Err(AuraError::invalid("admitted first-live decision differs"));
-        }
-        Ok(())
-    }
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "registered_enrollment_window",
-        capability_type = RegisteredEnrollmentWindowCapability,
-        family = "runtime_helper"
-    )]
-    pub(super) async fn registered(
-        capability: RegisteredEnrollmentWindowCapability,
-    ) -> Result<Self, AuraError> {
-        let capability = Arc::new(capability);
-        capability.checkpoint().await?;
-        Ok(Self {
-            active: capability.budget().clone(),
-            original: capability.budget().clone(),
-            _lease: capability.lease(),
-            checkpoint: Arc::new(WindowCheckpoint::Registered { capability }),
-        })
-    }
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "admitted_enrollment_window",
-        capability_type = AdmittedEnrollmentManifest,
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn admitted(
-        effects: Arc<AuraEffectSystem>,
-        witness: &AdmittedEnrollmentManifest,
-    ) -> Result<Self, AuraError> {
-        let lease_owner = effects.acquire_admitted_enrollment_window_owner(witness)?;
-        Self::finish_original_initial_publication(&effects, witness, &lease_owner).await?;
-        let lease = lease_owner.into_permit();
-        let manifest = witness.manifest();
-        let binding = AdmittedWindowBinding {
-            ceremony: manifest.ceremony.clone(),
-            invitation: manifest.invitation.clone(),
-            manifest_digest: witness.manifest_digest(),
-            device: manifest.invitee_device,
-            expires_at_ms: manifest.expires_at_ms,
-            admitted_at_ms: witness.admitted_at_ms(),
-        };
-        let anchor = Self::read_admitted_anchor(&effects, &binding).await?;
-        let record = Self::decode_admitted_record(
-            &effects,
-            &admitted_location("admitted_enrollment_clock_checkpoint_v2", &binding),
-        )
-        .await?;
-        record
-            .budget
-            .validate_checkpoint_continuation_from(&anchor.budget)
-            .map_err(AuraError::from)?;
-        if record.binding != binding {
-            return Err(AuraError::invalid(
-                "admitted checkpoint belongs to another owner",
-            ));
-        }
-        let budget = record.budget;
-        let owner = Self {
-            active: budget.clone(),
-            original: budget,
-            checkpoint: Arc::new(WindowCheckpoint::Admitted {
-                effects,
-                binding,
-                writes: Mutex::new(()),
-            }),
-            _lease: Arc::new(lease),
-        };
-        owner.checkpoint().await.map_err(AuraError::from)?;
-        Ok(owner)
-    }
     /// Called only after a new explicit user-transfer admission is committed.
     /// Reimporting an existing admission never allocates a fresh clock owner.
     #[aura_macros::capability_boundary(
@@ -1014,10 +1258,10 @@ impl EnrollmentWindowCapability {
         capability_type = NewEnrollmentAdmissionCapability,
         family = "runtime_helper"
     )]
-    pub(crate) async fn retain_new_admitted_window(
-        effects: &AuraEffectSystem,
+    pub(crate) async fn retain_new_admitted_window<'provider>(
+        effects: &'provider AuraEffectSystem,
         admission: NewEnrollmentAdmissionCapability<'_>,
-    ) -> Result<(), AuraError> {
+    ) -> Result<AcknowledgedAdmittedEnrollmentBirth<'provider>, AuraError> {
         let witness = admission.witness();
         let manifest = witness.manifest();
         let binding = AdmittedWindowBinding {
@@ -1037,8 +1281,17 @@ impl EnrollmentWindowCapability {
             Duration::from_millis(allowance),
         )
         .map_err(AuraError::from)?;
-        let record = StoredAdmittedWindow { binding, budget };
-        Self::publish_admitted_anchor(effects, &record, false).await
+        let record = StoredAdmittedWindow {
+            binding,
+            budget,
+            execution: DurableEnrollmentExecutionState::Pending,
+        };
+        Self::publish_admitted_anchor(effects, &record).await?;
+        Ok(AcknowledgedAdmittedEnrollmentBirth {
+            effects,
+            binding: record.binding,
+            budget: record.budget,
+        })
     }
     pub(crate) async fn require_retained_admitted_window(
         effects: &AuraEffectSystem,
@@ -1046,91 +1299,23 @@ impl EnrollmentWindowCapability {
     ) -> Result<(), AuraError> {
         let binding = Self::admitted_binding(witness);
         let anchor = Self::read_admitted_anchor(effects, &binding).await?;
-        let anchor_key = admitted_location("admitted_enrollment_clock_anchor_v2", &binding);
-        if effects.secure_exists(&anchor_key).await? {
-            let checkpoint = Self::decode_admitted_record(
-                effects,
-                &admitted_location("admitted_enrollment_clock_checkpoint_v2", &binding),
-            )
-            .await?;
-            if checkpoint.binding != binding {
-                return Err(AuraError::invalid("retained checkpoint binding differs"));
-            }
-            checkpoint
-                .budget
-                .validate_checkpoint_continuation_from(&anchor.budget)
-                .map_err(AuraError::from)?;
+        let checkpoint = Self::decode_admitted_record(
+            effects,
+            &admitted_location("admitted_enrollment_clock_checkpoint_v2", &binding),
+        )
+        .await?;
+        if anchor.execution != DurableEnrollmentExecutionState::Pending
+            || checkpoint.execution != DurableEnrollmentExecutionState::Closed
+            || checkpoint.binding != binding
+        {
+            return Err(DurableEnrollmentExecutionError::MissingTerminalCheckpoint.refusal());
         }
+        checkpoint
+            .budget
+            .validate_checkpoint_continuation_from(&anchor.budget)
+            .map_err(AuraError::from)?;
         Ok(())
     }
-    pub(crate) async fn acknowledge_confirmation<E: PhysicalTimeEffects + ?Sized>(
-        &self,
-        effects: &E,
-    ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
-        if !matches!(self.checkpoint.as_ref(), WindowCheckpoint::Admitted { .. }) {
-            return Err(AuraError::invalid(
-                "confirmation acknowledgment requires the actual admitted invitee owner",
-            ));
-        }
-        let (now, _observation) = self.observe(effects).await.map_err(AuraError::from)?;
-        let remaining = self.active.remaining_at(&now);
-        if let Err(source) = remaining {
-            self.checkpoint().await.map_err(AuraError::from)?;
-            return Err(AuraError::from(source));
-        }
-        let acknowledged = self
-            .checkpoint_acknowledged(Some(&now))
-            .await
-            .map_err(AuraError::from)?
-            .ok_or_else(|| {
-                AuraError::invalid("confirmation requires an admitted checkpoint acknowledgment")
-            })?;
-
-        let frozen: TimeoutBudget =
-            serde_json::from_slice(&acknowledged.budget_bytes).map_err(|source| {
-                AuraError::Internal {
-                    message: "validate exact acknowledged enrollment snapshot".into(),
-                    source: Some(Arc::new(source)),
-                }
-            })?;
-        frozen
-            .validate_recorded_observation_at(&now)
-            .map_err(AuraError::from)?;
-        Ok(AcknowledgedEnrollmentWindow {
-            binding: acknowledged.binding,
-            frozen_budget: acknowledged.budget_bytes,
-            acknowledged_at_ms: now.ts_ms,
-        })
-    }
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "verified_enrollment_failure_ack",
-        capability_type = VerifiedEnrollmentFailureCapability,
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn acknowledge_failure<E: PhysicalTimeEffects + ?Sized>(
-        &self,
-        effects: &E,
-        failure: &crate::handlers::invitation::VerifiedEnrollmentFailureCapability,
-    ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
-        let WindowCheckpoint::Admitted { binding, .. } = self.checkpoint.as_ref() else {
-            return Err(AuraError::invalid(
-                "failure acknowledgment requires actual admitted invitee window",
-            ));
-        };
-        let manifest = failure.manifest();
-        if binding.manifest_digest != failure.manifest_digest()
-            || binding.ceremony != manifest.ceremony
-            || binding.invitation != manifest.invitation
-            || binding.device != manifest.invitee_device
-        {
-            return Err(AuraError::invalid(
-                "verified failure belongs to another admitted window",
-            ));
-        }
-        self.acknowledge_confirmation(effects).await
-    }
-
     /// Validate original clock evidence of a separately authenticated retained
     /// receipt. Later live expiry cannot rewrite immutable completed evidence.
     pub(crate) async fn verify_retained_confirmation_clock(
@@ -1247,96 +1432,23 @@ impl EnrollmentWindowCapability {
     }
 
     async fn checkpoint(&self) -> Result<(), TimeoutBudgetError> {
-        self.checkpoint_acknowledged(None).await.map(|_| ())
-    }
-    // Only this admitted owner can request confirmation acknowledgment. The
-    // observation comes from its required effect read, never a public timestamp.
-    async fn checkpoint_acknowledged(
-        &self,
-        confirmation_at: Option<&PhysicalTime>,
-    ) -> Result<Option<FrozenAdmittedCheckpoint>, TimeoutBudgetError> {
         match self.checkpoint.as_ref() {
-            WindowCheckpoint::HeldIssuer { capability } => {
-                if confirmation_at.is_some() {
-                    return Err(TimeoutBudgetError::CheckpointDiscontinuity {
-                        detail: "held issuer cannot acknowledge invitee confirmation".into(),
-                    });
-                }
-                capability
-                    .checkpoint()
-                    .await
-                    .map_err(TimeoutBudgetError::checkpoint_failure)?;
-                Ok(None)
-            }
+            WindowCheckpoint::HeldIssuer { capability }
+            | WindowCheckpoint::Registered { capability } => capability
+                .require_pending()
+                .await
+                .map_err(TimeoutBudgetError::checkpoint_failure),
             WindowCheckpoint::ApprovedSigning { capability } => {
-                if confirmation_at.is_some() {
-                    return Err(TimeoutBudgetError::CheckpointDiscontinuity {
-                        detail: "sibling signing cannot acknowledge invitee confirmation".into(),
-                    });
-                }
-                capability.checkpoint(&self.original).await?;
-                Ok(None)
+                capability.checkpoint(&self.original).await
             }
-            WindowCheckpoint::Registered { capability } => {
-                if confirmation_at.is_some() {
-                    return Err(TimeoutBudgetError::CheckpointDiscontinuity {
-                        detail: "issuer checkpoint cannot acknowledge invitee confirmation".into(),
-                    });
-                }
-                capability
-                    .checkpoint()
-                    .await
-                    .map_err(TimeoutBudgetError::checkpoint_failure)?;
-                Ok(None)
-            }
-            WindowCheckpoint::Admitted {
-                effects,
-                binding,
-                writes,
-            } => {
-                let _write = writes.lock().await;
-                Self::read_bound_admitted_checkpoint(effects, binding, &self.original).await?;
-                let record = StoredAdmittedWindow {
-                    binding: binding.clone(),
-                    budget: self.original.clone(),
-                };
-                // Freeze the original parent's snapshot once, before its write.
-                // A later clone observation cannot change these detached bytes.
-                let bytes =
-                    serde_json::to_vec(&record).map_err(TimeoutBudgetError::checkpoint_failure)?;
-                let frozen: StoredAdmittedWindow = serde_json::from_slice(&bytes)
-                    .map_err(TimeoutBudgetError::checkpoint_failure)?;
-                let confirmation_validation = confirmation_at.map(|now| {
-                    self.active
-                        .validate_recorded_observation_at(now)
-                        .and_then(|()| frozen.budget.validate_recorded_observation_at(now))
-                });
-                let budget_bytes = serde_json::to_vec(&frozen.budget)
-                    .map_err(TimeoutBudgetError::checkpoint_failure)?;
-                effects
-                    .secure_store(
-                        &SecureStorageLocation::new(
-                            "admitted_enrollment_clock_checkpoint_v2",
-                            binding.ceremony.to_string(),
-                        ),
-                        &bytes,
-                        &[SecureStorageCapability::Write],
-                    )
-                    .await
-                    .map_err(TimeoutBudgetError::checkpoint_failure)?;
-                if let Some(validation) = confirmation_validation {
-                    validation?;
-                }
-                Ok(Some(FrozenAdmittedCheckpoint {
-                    binding: frozen.binding,
-                    budget_bytes,
-                }))
-            }
+            // Admitted birth is already durably Pending. Only the consuming
+            // root may write terminal closure; children grant no write ACK.
+            WindowCheckpoint::Admitted { .. } => Ok(()),
         }
     }
-    async fn observe<E: PhysicalTimeEffects + ?Sized>(
+    async fn observe(
         &self,
-        effects: &E,
+        effects: &AuraEffectSystem,
     ) -> Result<
         (
             PhysicalTime,
@@ -1344,12 +1456,85 @@ impl EnrollmentWindowCapability {
         ),
         TimeoutBudgetError,
     > {
+        self.require_execution_effects(effects)
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
         let lease = self.original.acquire_observation().await;
         let now = effects
             .physical_time()
             .await
             .map_err(TimeoutBudgetError::time_source_failure)?;
         Ok((now, lease))
+    }
+
+    async fn observe_pending_birth(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<PhysicalTime, TimeoutBudgetError> {
+        self.require_execution_effects(effects)
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        let result = aura_core::time::timeout::execute_with_timeout_budget(
+            effects,
+            &self.active,
+            || async {
+                self.require_pending_checkpoint(effects).await?;
+                let now = effects
+                    .physical_time()
+                    .await
+                    .map_err(TimeoutBudgetError::time_source_failure)?;
+                self.active.remaining_at(&now)?;
+                Ok(now)
+            },
+        )
+        .await;
+        match result {
+            Ok(now) => Ok(now),
+            Err(TimeoutRunError::Operation(source) | TimeoutRunError::Timeout(source)) => {
+                Err(source)
+            }
+        }
+    }
+
+    fn has_pending_birth(&self) -> bool {
+        matches!(
+            self.checkpoint.as_ref(),
+            WindowCheckpoint::Admitted { .. }
+                | WindowCheckpoint::HeldIssuer { .. }
+                | WindowCheckpoint::Registered { .. }
+        )
+    }
+
+    async fn require_pending_checkpoint(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), TimeoutBudgetError> {
+        if let WindowCheckpoint::HeldIssuer { capability }
+        | WindowCheckpoint::Registered { capability } = self.checkpoint.as_ref()
+        {
+            return capability
+                .require_pending()
+                .await
+                .map_err(TimeoutBudgetError::checkpoint_failure);
+        }
+        let WindowCheckpoint::Admitted { binding, .. } = self.checkpoint.as_ref() else {
+            return Err(TimeoutBudgetError::checkpoint_failure(
+                DurableEnrollmentExecutionError::ForeignAdmission.refusal(),
+            ));
+        };
+        let anchor = Self::read_admitted_anchor(effects, binding)
+            .await
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        let checkpoint =
+            Self::read_bound_admitted_checkpoint(effects, binding, &self.original).await?;
+        if anchor.execution != DurableEnrollmentExecutionState::Pending
+            || checkpoint.execution != DurableEnrollmentExecutionState::Pending
+            || anchor.budget.started_at_ms() != self.original.started_at_ms()
+            || anchor.budget.deadline_at_ms() != self.original.deadline_at_ms()
+        {
+            return Err(TimeoutBudgetError::checkpoint_failure(
+                DurableEnrollmentExecutionError::AlreadyBorn.refusal(),
+            ));
+        }
+        Ok(())
     }
     #[aura_macros::capability_boundary(
         category = "capability_gated",
@@ -1415,21 +1600,35 @@ impl EnrollmentWindowCapability {
         }
     }
 
-    pub(crate) async fn remaining_ms<E: PhysicalTimeEffects + ?Sized>(
+    pub(crate) async fn remaining_ms(
         &self,
-        effects: &E,
+        effects: &AuraEffectSystem,
     ) -> Result<u64, TimeoutBudgetError> {
+        if self.has_pending_birth() {
+            let now = self.observe_pending_birth(effects).await?;
+            return u64::try_from(self.active.remaining_at(&now)?.as_millis())
+                .map_err(|source| TimeoutBudgetError::invalid_policy(source.to_string()));
+        }
         let (now, _observation) = self.observe(effects).await?;
         let remaining = self.active.remaining_at(&now);
         self.checkpoint().await?;
         u64::try_from(remaining?.as_millis())
             .map_err(|error| TimeoutBudgetError::invalid_policy(error.to_string()))
     }
-    pub(crate) async fn child<E: PhysicalTimeEffects + ?Sized>(
+    pub(crate) async fn child(
         &self,
-        effects: &E,
+        effects: &AuraEffectSystem,
         requested: Duration,
     ) -> Result<Self, TimeoutBudgetError> {
+        if self.has_pending_birth() {
+            let now = self.observe_pending_birth(effects).await?;
+            return Ok(Self {
+                active: self.active.child_budget(&now, requested)?,
+                original: self.original.clone(),
+                checkpoint: Arc::clone(&self.checkpoint),
+                _lease: Arc::clone(&self._lease),
+            });
+        }
         let (now, _observation) = self.observe(effects).await?;
         let active = self.active.child_budget(&now, requested);
         self.checkpoint().await?;
@@ -1445,19 +1644,20 @@ impl EnrollmentWindowCapability {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "issued_notice_validity_window",
-        capability_type = EnrollmentWindowCapability,
+        capability_type = EnrollmentExecutionChild,
         family = "runtime_helper"
     )]
     pub(crate) async fn issued_notice_validity_child(
         &self,
         effects: &AuraEffectSystem,
         issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-    ) -> Result<EnrollmentWindowCapability, AuraError> {
+    ) -> Result<EnrollmentExecutionChild, AuraError> {
         self.require_issued_notice_owner(issued)?;
-        let (now, _observation) = self.observe(effects).await.map_err(AuraError::from)?;
-        let active = self.active.remaining_at(&now);
-        self.checkpoint().await.map_err(AuraError::from)?;
-        active.map_err(AuraError::from)?;
+        let now = self
+            .observe_pending_birth(effects)
+            .await
+            .map_err(AuraError::from)?;
+        self.active.remaining_at(&now).map_err(AuraError::from)?;
         let remaining = signed_notice_validity_remaining(&now, issued.manifest().expires_at_ms)?;
         let active = self
             .active
@@ -1471,12 +1671,28 @@ impl EnrollmentWindowCapability {
         })
     }
 
-    pub(crate) async fn retry_delay<E: PhysicalTimeEffects + ?Sized>(
+    pub(crate) async fn retry_delay(
         &self,
-        effects: &E,
+        effects: &AuraEffectSystem,
         delay_ms: u64,
     ) -> Result<(), TimeoutBudgetError> {
         let remaining = self.remaining_ms(effects).await?;
+        if self.has_pending_birth() {
+            let result = self
+                .execute(effects, || async {
+                    effects
+                        .sleep_ms(delay_ms.min(remaining))
+                        .await
+                        .map_err(TimeoutBudgetError::time_source_failure)
+                })
+                .await;
+            return match result {
+                Ok(()) => self.remaining_ms(effects).await.map(|_| ()),
+                Err(TimeoutRunError::Operation(source) | TimeoutRunError::Timeout(source)) => {
+                    Err(source)
+                }
+            };
+        }
         effects
             .sleep_ms(delay_ms.min(remaining))
             .await
@@ -1484,16 +1700,38 @@ impl EnrollmentWindowCapability {
         self.remaining_ms(effects).await?;
         Ok(())
     }
-    pub(crate) async fn execute<ETime, F, Fut, T, E>(
+    pub(crate) async fn execute<F, Fut, T, E>(
         &self,
-        time: &ETime,
+        time: &AuraEffectSystem,
         operation: F,
     ) -> Result<T, TimeoutRunError<E>>
     where
-        ETime: PhysicalTimeEffects + Sync,
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
+        self.require_execution_effects(time).map_err(|source| {
+            TimeoutRunError::Timeout(TimeoutBudgetError::checkpoint_failure(source))
+        })?;
+        if self.has_pending_birth() {
+            // Fresh admitted or issuer birth is already durably Pending. Any crash or
+            // dropped negative observation therefore refuses reconstruction;
+            // execution needs no unbounded write after the original endpoint.
+            let result = aura_core::time::timeout::execute_with_timeout_budget(
+                time,
+                &self.active,
+                || async {
+                    self.require_pending_checkpoint(time).await?;
+                    Ok(operation().await)
+                },
+            )
+            .await;
+            return match result {
+                Ok(result) => result.map_err(TimeoutRunError::Operation),
+                Err(TimeoutRunError::Operation(source) | TimeoutRunError::Timeout(source)) => {
+                    Err(TimeoutRunError::Timeout(source))
+                }
+            };
+        }
         aura_core::time::timeout::execute_with_timeout_budget_and_checkpoint(
             time,
             &self.active,
@@ -1568,6 +1806,32 @@ fn signed_notice_validity_remaining(
 mod notice_validity_tests {
     use super::*;
     #[test]
+    fn original_execution_custody_cannot_be_cloned_or_decoded() {
+        trait AmbiguousIfClone<A> {
+            fn absent() {}
+        }
+        struct Cloned;
+        impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+        impl<T: Clone> AmbiguousIfClone<Cloned> for T {}
+        trait AmbiguousIfDeserialize<A> {
+            fn absent() {}
+        }
+        struct Decoded;
+        impl<T: ?Sized> AmbiguousIfDeserialize<()> for T {}
+        impl<T: serde::Deserialize<'static>> AmbiguousIfDeserialize<Decoded> for T {}
+        let _ =
+            <EnrollmentExecutionRoot<AdmittedEnrollmentManifest> as AmbiguousIfClone<_>>::absent;
+        let _ = <EnrollmentExecutionChild as AmbiguousIfClone<_>>::absent;
+        let _ = <AcknowledgedAdmittedEnrollmentBirth<'static> as AmbiguousIfClone<_>>::absent;
+        let _ = <AcknowledgedEnrollmentWindow as AmbiguousIfClone<_>>::absent;
+        let _ = <EnrollmentExecutionRoot<AdmittedEnrollmentManifest> as AmbiguousIfDeserialize<
+            _,
+        >>::absent;
+        let _ = <EnrollmentExecutionChild as AmbiguousIfDeserialize<_>>::absent;
+        let _ = <AcknowledgedAdmittedEnrollmentBirth<'static> as AmbiguousIfDeserialize<_>>::absent;
+        let _ = <AcknowledgedEnrollmentWindow as AmbiguousIfDeserialize<_>>::absent;
+    }
+    #[test]
     fn signed_validity_child_keeps_exact_endpoint_and_original_owner() {
         let observed = PhysicalTime::exact(100);
         let original =
@@ -1635,6 +1899,74 @@ mod admitted_clock_split_tests {
     use super::*;
 
     #[cfg(unix)]
+    #[tokio::test]
+    async fn obsolete_anchor_at_original_locator_cannot_allocate_a_replacement_window() {
+        Box::pin(async {
+            let (_issuer, invitee, invitation, _start, _acceptance, _response) =
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "obsolete-original-admitted-anchor",
+                )
+                .await;
+            let effects = invitee.runtime().effects();
+            let witness =
+                crate::handlers::invitation::enrollment_manifest_admission::load_admitted_baseline(
+                    effects.as_ref(),
+                    invitee.authority_id(),
+                    &invitation,
+                )
+                .await
+                .unwrap();
+            let binding = EnrollmentExecutionChild::admitted_binding(&witness);
+            let key = admitted_location("admitted_enrollment_clock_anchor_v2", &binding);
+            let original = effects
+                .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                .await
+                .unwrap();
+            let checkpoint_key =
+                admitted_location("admitted_enrollment_clock_checkpoint_v2", &binding);
+            let checkpoint = effects
+                .secure_retrieve(&checkpoint_key, &[SecureStorageCapability::Read])
+                .await
+                .unwrap();
+            let mut obsolete: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            obsolete["version"] = serde_json::json!(2);
+            let obsolete = serde_json::to_vec(&obsolete).unwrap();
+            assert!(effects
+                .fault_remove_secure_record_for_test(&key)
+                .await
+                .unwrap());
+            effects
+                .secure_store_immutable(&key, &obsolete, &[SecureStorageCapability::Write])
+                .await
+                .unwrap();
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            assert!(root.child().remaining_ms(effects.as_ref()).await.is_err());
+            assert_eq!(
+                effects
+                    .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                obsolete,
+                "refusal preserves the original allocation rather than replacing its bytes"
+            );
+            assert_eq!(
+                effects
+                    .secure_retrieve(&checkpoint_key, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                checkpoint,
+                "refusal cannot rewrite the retained observation history"
+            );
+        })
+        .await;
+    }
+
+    #[cfg(unix)]
     async fn assert_live_anchor_loss_rejects_legacy(
         effects: &AuraEffectSystem,
         witness: &AdmittedEnrollmentManifest,
@@ -1658,6 +1990,7 @@ mod admitted_clock_split_tests {
         let protected: StoredAdmittedAnchor = serde_json::from_slice(anchor).unwrap();
         let legacy = StoredAdmittedWindow {
             binding: binding.clone(),
+            execution: DurableEnrollmentExecutionState::Allocated,
             budget: TimeoutBudget::from_start_and_timeout(
                 &PhysicalTime::exact(binding.admitted_at_ms),
                 Duration::from_millis(
@@ -1684,20 +2017,19 @@ mod admitted_clock_split_tests {
             .await
             .unwrap());
         assert!(
-            EnrollmentWindowCapability::read_admitted_anchor(effects, binding)
+            EnrollmentExecutionChild::read_admitted_anchor(effects, binding)
                 .await
                 .is_err()
         );
         assert!(
-            EnrollmentWindowCapability::require_retained_admitted_window(effects, witness)
+            EnrollmentExecutionChild::require_retained_admitted_window(effects, witness)
                 .await
                 .is_err()
         );
         assert!(!effects.secure_exists(&anchor_key).await.unwrap());
     }
     #[tokio::test]
-    async fn actual_admitted_checkpoint_updates_without_mutating_anchor_and_never_repairs_live_loss(
-    ) {
+    async fn actual_admitted_pending_birth_never_repairs_lost_execution_records() {
         Box::pin(async {
             let (_issuer, invitee, invitation, _start, _acceptance, _response) =
                 crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
@@ -1713,7 +2045,7 @@ mod admitted_clock_split_tests {
                 )
                 .await
                 .unwrap();
-            let binding = EnrollmentWindowCapability::admitted_binding(&witness);
+            let binding = EnrollmentExecutionChild::admitted_binding(&witness);
             let anchor_key = admitted_location("admitted_enrollment_clock_anchor_v2", &binding);
             let checkpoint_key =
                 admitted_location("admitted_enrollment_clock_checkpoint_v2", &binding);
@@ -1721,25 +2053,36 @@ mod admitted_clock_split_tests {
                 .secure_retrieve(&anchor_key, &[SecureStorageCapability::Read])
                 .await
                 .unwrap();
-            // Interrupted INITIAL publication is repairable only inside the
-            // original reverified owner's actual exclusive execution lease.
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let original_deadline = root.child().original.deadline_at_ms();
+            root.child().remaining_ms(effects.as_ref()).await.unwrap();
+            root.child().remaining_ms(effects.as_ref()).await.unwrap();
+            assert_eq!(root.child().original.deadline_at_ms(), original_deadline);
+            let retained_checkpoint = effects
+                .secure_retrieve(&checkpoint_key, &[SecureStorageCapability::Read])
+                .await
+                .unwrap();
+            let retained: StoredAdmittedWindow =
+                serde_json::from_slice(&retained_checkpoint).unwrap();
+            assert_eq!(retained.execution, DurableEnrollmentExecutionState::Pending);
+            // Even the original held root refuses missing durable birth bytes.
+            // No observed admission or retained phase can repair or recreate it.
             effects
                 .secure_delete(&checkpoint_key, &[SecureStorageCapability::Delete])
                 .await
                 .unwrap();
-            assert!(
-                EnrollmentWindowCapability::require_retained_admitted_window(
-                    effects.as_ref(),
-                    &witness
-                )
-                .await
-                .is_err()
-            );
-            let window = EnrollmentWindowCapability::admitted(effects.clone(), &witness)
-                .await
-                .unwrap();
-            window.checkpoint().await.unwrap();
-            window.checkpoint().await.unwrap();
+            assert!(EnrollmentExecutionChild::require_retained_admitted_window(
+                effects.as_ref(),
+                &witness
+            )
+            .await
+            .is_err());
+            assert!(root.child().remaining_ms(effects.as_ref()).await.is_err());
             assert_eq!(
                 effects
                     .secure_retrieve(&anchor_key, &[SecureStorageCapability::Read])
@@ -1747,27 +2090,13 @@ mod admitted_clock_split_tests {
                     .unwrap(),
                 anchor
             );
-            #[cfg(unix)]
-            let retained_checkpoint = effects
-                .secure_retrieve(&checkpoint_key, &[SecureStorageCapability::Read])
+            drop(root);
+            assert!(invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
                 .await
-                .unwrap();
-            let original_deadline = window.original.deadline_at_ms();
-            drop(window);
-            let restored = EnrollmentWindowCapability::admitted(effects.clone(), &witness)
-                .await
-                .unwrap();
-            assert_eq!(restored.original.deadline_at_ms(), original_deadline);
-            drop(restored);
-            effects
-                .secure_delete(&checkpoint_key, &[SecureStorageCapability::Delete])
-                .await
-                .unwrap();
-            assert!(
-                EnrollmentWindowCapability::admitted(effects.clone(), &witness)
-                    .await
-                    .is_err()
-            );
+                .is_err());
             assert!(!effects.secure_exists(&checkpoint_key).await.unwrap());
             assert_eq!(
                 effects
@@ -1790,7 +2119,7 @@ mod admitted_clock_split_tests {
     }
 
     #[test]
-    fn original_legacy_interval_is_attenuated_without_clamping_fresh_signed_window() {
+    fn original_signed_interval_rejects_clamped_reconstruction() {
         let binding = AdmittedWindowBinding {
             ceremony: aura_core::CeremonyId::new("pure-clock-interval"),
             invitation: aura_core::InvitationId::new("pure-clock-invitation"),
@@ -1801,27 +2130,23 @@ mod admitted_clock_split_tests {
         };
         let fresh = StoredAdmittedWindow {
             binding: binding.clone(),
+            execution: DurableEnrollmentExecutionState::Allocated,
             budget: TimeoutBudget::from_start_and_timeout(
                 &PhysicalTime::exact(100),
                 Duration::from_millis(900_000),
             )
             .unwrap(),
         };
-        let legacy = StoredAdmittedWindow {
+        let clamped = StoredAdmittedWindow {
             binding: binding.clone(),
+            execution: DurableEnrollmentExecutionState::Allocated,
             budget: TimeoutBudget::from_start_and_timeout(
                 &PhysicalTime::exact(100),
                 Duration::from_millis(240_000),
             )
             .unwrap(),
         };
-        EnrollmentWindowCapability::validate_admitted_record(&fresh, &binding, false).unwrap();
-        EnrollmentWindowCapability::validate_admitted_record(&legacy, &binding, true).unwrap();
-        assert!(
-            EnrollmentWindowCapability::validate_admitted_record(&fresh, &binding, true).is_err()
-        );
-        assert!(
-            EnrollmentWindowCapability::validate_admitted_record(&legacy, &binding, false).is_err()
-        );
+        EnrollmentExecutionChild::validate_admitted_record(&fresh, &binding).unwrap();
+        assert!(EnrollmentExecutionChild::validate_admitted_record(&clamped, &binding).is_err());
     }
 }

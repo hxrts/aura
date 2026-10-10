@@ -93,6 +93,7 @@ impl TransportStatsCounters {
 /// - Transport statistics
 struct TransportSubsystemShared {
     inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    inbox_notify: Arc<tokio::sync::Notify>,
     shared_transport: Option<SharedTransport>,
     stats: Arc<TransportStatsCounters>,
     /// Last time each peer authority was verified reachable (ms).
@@ -117,6 +118,7 @@ impl TransportSubsystem {
             handler: aura_effects::transport::RealTransportHandler::default(),
             shared: Arc::new(TransportSubsystemShared {
                 inbox: Arc::new(RwLock::new(Vec::new())),
+                inbox_notify: Arc::new(tokio::sync::Notify::new()),
                 shared_transport: None,
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
@@ -135,6 +137,7 @@ impl TransportSubsystem {
             handler: aura_effects::transport::RealTransportHandler::default(),
             shared: Arc::new(TransportSubsystemShared {
                 inbox: shared.inbox_for(authority),
+                inbox_notify: shared.inbox_notify(authority),
                 shared_transport: Some(shared),
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
@@ -155,6 +158,7 @@ impl TransportSubsystem {
             handler,
             shared: Arc::new(TransportSubsystemShared {
                 inbox,
+                inbox_notify: Arc::new(tokio::sync::Notify::new()),
                 shared_transport,
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
@@ -177,6 +181,14 @@ impl TransportSubsystem {
     /// Get shared inbox reference
     pub fn inbox(&self) -> Arc<RwLock<Vec<TransportEnvelope>>> {
         Arc::clone(&self.shared.inbox)
+    }
+
+    /// Observe arrivals in the original canonical inbox, without consuming frames.
+    pub(crate) fn inbox_notify(&self, authority: AuthorityId) -> Arc<tokio::sync::Notify> {
+        match self.shared.shared_transport.as_ref() {
+            Some(shared) => shared.inbox_notify(authority),
+            None => Arc::clone(&self.shared.inbox_notify),
+        }
     }
 
     /// Get shared stats reference
@@ -207,6 +219,8 @@ impl TransportSubsystem {
             return QueueEnvelopeOutcome::DroppedOverflow;
         }
         inbox.push(envelope);
+        drop(inbox);
+        self.shared.inbox_notify.notify_waiters();
         QueueEnvelopeOutcome::Queued
     }
 
@@ -299,6 +313,32 @@ mod bounded_queue_tests {
             payload: vec![index],
             metadata: HashMap::new(),
             receipt: None,
+        }
+    }
+
+    #[test]
+    fn original_inbox_arrival_between_check_and_await_is_not_lost() {
+        for subsystem in [
+            TransportSubsystem::new(),
+            TransportSubsystem::with_shared_transport(
+                SharedTransport::new(),
+                AuthorityId::new_from_entropy([1; 32]),
+            ),
+        ] {
+            let notify = subsystem.inbox_notify(AuthorityId::new_from_entropy([1; 32]));
+            let arrival = notify.notified();
+            futures::pin_mut!(arrival);
+            arrival.as_mut().enable();
+            assert_eq!(subsystem.inbox_len(), 0);
+            assert_eq!(
+                subsystem.queue_envelope(envelope(7)),
+                QueueEnvelopeOutcome::Queued
+            );
+            assert!(
+                futures::FutureExt::now_or_never(arrival).is_some(),
+                "original registered arrival cannot be lost before await"
+            );
+            assert_eq!(subsystem.inbox_len(), 1, "readiness never consumes a frame");
         }
     }
 

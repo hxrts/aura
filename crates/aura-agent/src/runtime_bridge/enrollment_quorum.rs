@@ -48,7 +48,7 @@ impl OriginalIssuerPreparation {
         manifest: &EnrollmentTrustManifest,
         public_transport: &aura_invitation::shareable::PublicEnrollmentTransportSigningIntent,
         setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
-        window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
     ) -> Result<RuntimeApprovedEnrollmentSigningIntent, AuraError> {
         use base64::Engine;
         let intent = aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent::new(
@@ -71,11 +71,11 @@ impl OriginalIssuerPreparation {
                 )
             })?,
         };
+        let observer = window
+            .held_issuer_completion_observer(effects.as_ref())
+            .await?;
         window
             .execute(effects.as_ref(), || async {
-                let observer = window
-                    .held_issuer_completion_observer(effects.as_ref())
-                    .await?;
                 self.ready
                     .send(OriginalPreparedIssuerReady {
                         observed,

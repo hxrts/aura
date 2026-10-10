@@ -453,8 +453,8 @@ LifecycleSuite {
         source: "crates/aura-agent/src/runtime/services/ceremony_tracker.rs",
         functions: &[
             "registered_window_rejects_replaced_allocation_before_checkpoint",
-            "registered_window_postoperation_checkpoint_failure_prevents_success_publication",
-            "registered_window_checkpoint_failure_blocks_operation_and_retains_storage_source",
+            "registered_window_operation_result_does_not_replace_original_terminal_acknowledgment",
+            "registered_window_pending_read_failure_blocks_operation_and_retains_storage_source",
         ],
         harness_prefix: "runtime::services::ceremony_tracker::tests::",
         filter: "runtime::services::ceremony_tracker::tests::registered_window_",

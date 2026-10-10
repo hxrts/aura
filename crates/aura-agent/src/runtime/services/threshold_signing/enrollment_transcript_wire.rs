@@ -4,7 +4,7 @@ use super::{
     enrollment_transcript_signing::EnrollmentTranscriptParticipantIngress,
     ValidatedLocalEnrollmentSigningMaterial,
 };
-use crate::runtime::services::enrollment_window::EnrollmentWindowCapability;
+use crate::runtime::services::enrollment_window::EnrollmentExecutionChild;
 use crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent;
 use aura_core::effects::crypto::SigningMode;
 use aura_core::effects::CryptoExtendedEffects;
@@ -144,7 +144,7 @@ impl ValidatedLocalEnrollmentSigningMaterial<'_, '_, '_, '_> {
     pub(super) async fn dispatch_original_participant(
         &self,
         approval: &RuntimeApprovedEnrollmentSigningIntent,
-        window: &EnrollmentWindowCapability,
+        window: &EnrollmentExecutionChild,
         ingress: &EnrollmentTranscriptParticipantIngress,
     ) -> Result<(), AuraError> {
         if self.device == approval.manifest().initiator_device {

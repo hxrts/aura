@@ -16,6 +16,7 @@ use aura_invitation::protocol::{
 };
 use aura_signature::SecurityTranscript;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 pub(super) const MAX_CONTROL_FRAME_BYTES: usize = 1_048_576;
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +30,10 @@ pub(crate) enum EnrollmentVmAdmissionError {
     #[error("enrollment confirmation issuer or target lacks current committed membership")]
     CurrentMembership,
 
+    #[error("enrollment VM completed without its original signed terminal receipt")]
+    MissingTerminalReceipt,
+    #[error("original issuer terminal observer was lost")]
+    TerminalObserverLost,
     #[error("enrollment activation failed: {0:?}")]
     TerminalFailed(aura_app::runtime_bridge::CeremonyFailureReason),
     #[error("enrollment control stage failed")]
@@ -39,7 +44,7 @@ pub(super) fn terminal_failure(
 ) -> AgentError {
     failure(EnrollmentVmAdmissionError::TerminalFailed(reason))
 }
-fn failure(error: EnrollmentVmAdmissionError) -> AgentError {
+pub(super) fn failure(error: EnrollmentVmAdmissionError) -> AgentError {
     aura_core::AuraError::crypto_with_source(
         "enrollment VM admission failed",
         std::sync::Arc::new(error),
@@ -1339,6 +1344,75 @@ pub(super) async fn sign_committed_confirmation(
     )
     .await
 }
+/// Native terminal signing custody. Wire frames and stored terminal states
+/// cannot reconstruct this receipt; VM completion alone does not create it.
+pub(crate) struct IssuerEnrollmentTerminalReceipt {
+    runtime_owner: Arc<AuraEffectSystem>,
+    retained: Arc<RetainedEnrollmentVmControl>,
+    frame: EnrollmentControlFrame,
+}
+
+impl IssuerEnrollmentTerminalReceipt {
+    pub(crate) fn require_runtime_owner(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), aura_core::AuraError> {
+        if !std::ptr::eq(self.runtime_owner.as_ref(), effects) {
+            return Err(aura_core::AuraError::PermissionDenied {
+                message: "issuer terminal receipt belongs to another physical provider".into(),
+                source: Some(Arc::new(
+                    super::enrollment_trust::EnrollmentVerifierError::RuntimeOwner,
+                )),
+            });
+        }
+        self.retained.require_runtime_owner(effects)
+    }
+
+    pub(crate) fn retained(&self) -> &RetainedEnrollmentVmControl {
+        &self.retained
+    }
+
+    pub(crate) fn positive(&self) -> bool {
+        matches!(self.frame.decision, EnrollmentControlDecision::Committed(_))
+    }
+
+    pub(super) fn frame(&self) -> &EnrollmentControlFrame {
+        &self.frame
+    }
+}
+
+pub(super) async fn sign_terminal_receipt(
+    effects: Arc<AuraEffectSystem>,
+    retained: Arc<RetainedEnrollmentVmControl>,
+    original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
+) -> AgentResult<IssuerEnrollmentTerminalReceipt> {
+    original
+        .execute(effects.as_ref(), || {
+            issue_original_terminal_receipt(effects.clone(), retained, runner)
+        })
+        .await
+        .map_err(|source| original.map_run_error("original issuer terminal signing", source))
+}
+
+/// The retained native control supplies signing authority. Callers bound this
+/// same operation with their original execution or observation owner.
+pub(crate) async fn issue_original_terminal_receipt(
+    effects: Arc<AuraEffectSystem>,
+    retained: Arc<RetainedEnrollmentVmControl>,
+    runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
+) -> AgentResult<IssuerEnrollmentTerminalReceipt> {
+    // Only the existing native generation/tree guarded signer can issue this
+    // receipt. There is deliberately no constructor from an observed frame.
+    retained.require_runtime_owner(effects.as_ref())?;
+    let frame = sign_terminal_confirmation(effects.as_ref(), &retained, runner).await?;
+    Ok(IssuerEnrollmentTerminalReceipt {
+        runtime_owner: effects,
+        retained,
+        frame,
+    })
+}
+
 pub(super) async fn sign_terminal_confirmation(
     effects: &AuraEffectSystem,
     retained: &RetainedEnrollmentVmControl,
@@ -1827,12 +1901,124 @@ mod committed_receipt_tests {
     use super::*;
     use aura_core::effects::{StorageCoreEffects, ThresholdSigningEffects};
     #[test]
+    fn original_signing_receive_waits_for_its_session_and_original_expiry() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+            let transport = crate::SharedTransport::new();
+            let (_issuer, invitee, invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock_and_transport(
+                    "original-signing-receive-readiness", Arc::new(clock.clone()), transport.clone(),
+                ),
+            ).await;
+            let effects = invitee.runtime().effects();
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let session = [41; 32];
+            let other_session = [42; 32];
+            let candidate = |session: [u8; 32], device: aura_core::DeviceId| {
+                let mut metadata = std::collections::HashMap::new();
+                metadata.insert(
+                    "content-type".into(),
+                    "application/aura-approved-enrollment-round-v1".into(),
+                );
+                metadata.insert("aura-enrollment-round-session".into(), hex::encode(session));
+                metadata.insert("aura-destination-device-id".into(), device.to_string());
+                aura_core::effects::TransportEnvelope {
+                    source: invitation.sender_id,
+                    destination: invitee.authority_id(),
+                    context: invitation.context_id,
+                    payload: vec![0xff],
+                    metadata,
+                    receipt: None,
+                }
+            };
+            let wrong_device = aura_core::DeviceId::new_from_entropy([43; 32]);
+            transport.route_envelope(candidate(other_session, effects.device_id()));
+            transport.route_envelope(candidate(session, wrong_device));
+            let receive = effects.receive_owned_enrollment_round(root.child(), session);
+            futures::pin_mut!(receive);
+            assert!(
+                futures::poll!(receive.as_mut()).is_pending(),
+                "foreign session and physical device cannot satisfy the original waiter"
+            );
+            assert_eq!(clock.now_ms(), 5_000);
+            transport.route_envelope(candidate(session, effects.device_id()));
+            let error = receive.await.expect_err(
+                "an arrival is still independently decoded, never authenticated by readiness",
+            );
+            let source = std::error::Error::source(&error).expect("native sealed receive source");
+            assert!(
+                matches!(
+                    source.downcast_ref::<aura_core::TimeoutRunError<aura_core::AuraError>>(),
+                    Some(aura_core::TimeoutRunError::Operation(aura_core::AuraError::Serialization { source: Some(native), .. }))
+                        if native.is::<aura_core::util::serialization::SerializationError>()
+                ),
+                "matching invalid bytes reach the actual decoder rather than a timeout"
+            );
+            assert_eq!(
+                clock.now_ms(),
+                5_000,
+                "actual matching arrival wakes without physical time advancement"
+            );
+            let mut cancelled =
+                Box::pin(effects.receive_owned_enrollment_round(root.child(), session));
+            assert!(futures::poll!(cancelled.as_mut()).is_pending());
+            drop(cancelled);
+            let mut replacement =
+                Box::pin(effects.receive_owned_enrollment_round(root.child(), session));
+            assert!(futures::poll!(replacement.as_mut()).is_pending());
+            transport.route_envelope(candidate(session, effects.device_id()));
+            let error = replacement
+                .await
+                .expect_err("same original child can receive after losing waiter disposal");
+            let source =
+                std::error::Error::source(&error).expect("actual replacement receive source");
+            assert!(
+                matches!(source.downcast_ref::<aura_core::TimeoutRunError<aura_core::AuraError>>(), Some(aura_core::TimeoutRunError::Operation(aura_core::AuraError::Serialization { source: Some(native), .. })) if native.is::<aura_core::util::serialization::SerializationError>())
+            );
+            let receive = effects.receive_owned_enrollment_round(root.child(), session);
+            futures::pin_mut!(receive);
+            assert!(futures::poll!(receive.as_mut()).is_pending());
+            clock.set_time(root.origin().manifest().expires_at_ms);
+            let error = receive
+                .await
+                .expect_err("the original endpoint still bounds an empty event wait");
+            let source = std::error::Error::source(&error).expect("native original timeout source");
+            assert!(matches!(
+                source.downcast_ref::<aura_core::TimeoutRunError<aura_core::AuraError>>(),
+                Some(aura_core::TimeoutRunError::Timeout(
+                    aura_core::TimeoutBudgetError::DeadlineExceeded { .. }
+                ))
+            ));
+            let preserved = transport.inbox_for(invitee.authority_id());
+            let preserved = preserved.read();
+            let original_frames: Vec<_> = preserved
+                .iter()
+                .filter_map(|envelope| {
+                    let session = envelope.metadata.get("aura-enrollment-round-session")?;
+                    let device = envelope.metadata.get("aura-destination-device-id")?;
+                    Some((session.clone(), device.clone()))
+                })
+                .collect();
+            assert_eq!(original_frames, vec![
+                (hex::encode(other_session), effects.device_id().to_string()),
+                (hex::encode(session), wrong_device.to_string()),
+            ], "drop and original expiry preserve foreign session and wrong-device frames in their original order");
+        });
+    }
+    #[test]
     fn real_committed_confirmation_is_durable_and_reverified_before_activation_capability() {
         crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
             let original_transport = crate::SharedTransport::new();
+            let original_clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
             let (issuer, invitee, invitation, start, _accept, verified) = Box::pin(
-                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_transport(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock_and_transport(
                     "confirmed-import-receipt",
+                    Arc::new(original_clock.clone()),
                     original_transport.clone(),
                 ),
             )
@@ -1840,16 +2026,44 @@ mod committed_receipt_tests {
             let issuer_effects = issuer.runtime().effects();
             let invitee_effects = invitee.runtime().effects();
             let original_invitee_config = invitee_effects.config().clone();
-            let retained = RetainedEnrollmentVmControl::load(issuer_effects.clone(), &invitation)
+            let retained = Arc::new(
+                RetainedEnrollmentVmControl::load(issuer_effects.clone(), &invitation)
+                    .await
+                    .unwrap(),
+            );
+            let issuer_observation = issuer
+                .runtime()
+                .ceremony_tracker()
+                .original_running_issuer_observation(&retained)
+                .expect("actual original registered issuer task observation");
+            let original_root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
                 .await
                 .unwrap();
-            let admitted = super::super::enrollment_manifest_admission::load_admitted_baseline(
-                invitee_effects.as_ref(),
-                invitation.receiver_id,
-                &invitation,
-            )
-            .await
-            .unwrap();
+            let manager = crate::runtime::services::InvitationManager::with_capacity(1);
+            manager
+                .cache_admitted_enrollment(original_root)
+                .await
+                .unwrap();
+            manager
+                .update_invitation(&invitation.invitation_id, |observed| {
+                    observed.status = super::super::InvitationStatus::Accepted;
+                    observed.receiver_nickname = Some("local confirmed device".into());
+                })
+                .await
+                .unwrap();
+            let original_root = manager
+                .take_admitted_enrollment(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let admitted = original_root.origin_observation();
+            assert_eq!(admitted.canonical_invitation().status, invitation.status);
+            assert_eq!(
+                admitted.canonical_invitation().receiver_nickname,
+                invitation.receiver_nickname,
+            );
             crate::runtime::services::enrollment_import::install_admitted_generation(
                 invitee_effects.as_ref(),
                 &admitted,
@@ -1877,12 +2091,26 @@ mod committed_receipt_tests {
                 .record_verified_enrollment_response(verified)
                 .await
                 .unwrap();
-            let frame = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                sign_committed_confirmation(issuer_effects.as_ref(), &retained, runner),
-            )
-            .await
-            .expect("actual finalizer publishes authoritative terminal outcome");
+            let finalizer = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+                issuer.authority_id(),
+                issuer_effects.clone(),
+                issuer.runtime().ceremony_tracker().clone(),
+                runner.clone(),
+                issuer.runtime().threshold_signing(),
+                issuer.runtime().reconfiguration().clone(),
+            );
+            issuer_observation
+                .finalize_original_issuer(issuer_effects.as_ref(), &retained, &finalizer)
+                .await
+                .expect("actual original issuer finalization before terminal signing");
+            // This fixture deliberately exercises native terminal signing and
+            // independent invitee verification. Its original running observer
+            // bounds the same retained-control signer used by production; it
+            // never reconstructs an execution window or issues a root ACK.
+            let frame = issuer_observation
+                .observe_terminal_receipt(issuer_effects.clone(), retained.clone(), runner)
+                .await
+                .map(|receipt| receipt.frame().clone());
             let frame = match frame {
                 Ok(frame) => frame,
                 Err(error) => {
@@ -1900,10 +2128,36 @@ mod committed_receipt_tests {
                 }
             };
             let request = expected_request(&admitted);
-            let verified = frame
-                .verify_confirmation(invitee_effects.as_ref(), &admitted, &request)
+            let (domain_sender, domain_receiver) = tokio::sync::oneshot::channel();
+            let child_effects = invitee_effects.clone();
+            let child_admission = admitted.clone();
+            let child_frame = frame.clone();
+            let child_request = request.clone();
+            let _verification_task = original_root.children().spawn_try_named(
+                "verify-original-enrollment-confirmation",
+                async move {
+                    let verified = child_frame
+                        .verify_confirmation(
+                            child_effects.as_ref(),
+                            &child_admission,
+                            &child_request,
+                        )
+                        .await
+                        .map_err(|source| aura_core::AuraError::Internal {
+                            message: "actual original confirmation verification".into(),
+                            source: Some(Arc::new(source)),
+                        })?;
+                    domain_sender
+                        .send(verified)
+                        .expect("original domain proof receiver");
+                    Ok(())
+                },
+            );
+            let verified = original_root
+                .child()
+                .execute(invitee_effects.as_ref(), || async { domain_receiver.await })
                 .await
-                .unwrap();
+                .expect("original bounded confirmation verification");
             // The genuine original signer roster stays one while AddLeaf creates
             // two authenticated root children before the original-key epoch fence.
             let history = verified.committed_transition().ops();
@@ -1966,15 +2220,8 @@ mod committed_receipt_tests {
                 aura_core::tree::NodeIndex(0)
             )
             .is_err());
-            let window =
-                crate::runtime::services::enrollment_window::EnrollmentWindowCapability::admitted(
-                    invitee_effects.clone(),
-                    &admitted,
-                )
-                .await
-                .unwrap();
-            let acknowledged = window
-                .acknowledge_confirmation(invitee_effects.as_ref())
+            let acknowledged = original_root
+                .acknowledge_confirmation(invitee_effects.as_ref(), &verified)
                 .await
                 .unwrap();
             let durable =
@@ -2664,7 +2911,6 @@ mod committed_receipt_tests {
             drop(archive_reloaded);
             drop(archive);
             drop(durable);
-            drop(window);
             drop(admitted);
             drop(invitee_effects);
             drop(invitee);
@@ -2682,6 +2928,7 @@ mod committed_receipt_tests {
                     .with_authority(first_manifest.subject)
                     .with_config(original_invitee_config)
                     .with_shared_transport(original_transport.clone())
+                    .with_physical_time_provider(Arc::new(original_clock.clone()))
                     .build(&adopted_context)
                     .await
                     .expect(
@@ -2760,6 +3007,7 @@ mod committed_receipt_tests {
                         .with_authority(third_authority)
                         .with_config(third_config)
                         .with_shared_transport(original_transport.clone())
+                        .with_physical_time_provider(Arc::new(original_clock.clone()))
                         .build(&third_context)
                         .await
                         .unwrap();

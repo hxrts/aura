@@ -87,6 +87,215 @@ module time_system {
   type Option[a] = Some(a) | None
   type AuthorityId = str
 
+  // Durable physical-window refinement. These records model state only;
+  // serialized fields do not mint the runtime's move-owned root capability.
+  type WindowPhase = WindowAllocated | WindowPending | WindowClosed
+  type RootCustody = RootUnissued | RootHeld | RootFinishing | RootGone
+  type AllocationCustody = AllocationUnissued | AllocationAcknowledged | AllocationConsumed | AllocationGone
+  type AllocationWrite = AllocationCreated | AllocationAlreadyPresent
+  type IssuerRegistration = RegistrationAbsent | RegistrationLive | RegistrationGone
+  type DurableWindow = {
+    phase: WindowPhase,
+    root: RootCustody,
+    allocation: AllocationCustody,
+    registration: IssuerRegistration,
+    admittedTasks: int,
+    originalDeadline: int,
+    observedAt: int,
+    domainAcknowledged: bool,
+    disposalAcknowledged: bool,
+    terminalAcknowledged: bool,
+    published: bool
+  }
+
+  pure def originalWindow(deadline: int): DurableWindow = {
+    phase: WindowAllocated,
+    root: RootUnissued,
+    allocation: AllocationUnissued,
+    registration: RegistrationAbsent,
+    admittedTasks: 0,
+    originalDeadline: deadline,
+    observedAt: 0,
+    domainAcknowledged: false,
+    disposalAcknowledged: false,
+    terminalAcknowledged: false,
+    published: false
+  }
+
+  // Both original physical records must be freshly created and read back.
+  // Existing bytes cannot supply the nonserialized allocation acknowledgment.
+  pure def acknowledgeFreshAllocation(window: DurableWindow,
+      immutableWrite: AllocationWrite, mutableWrite: AllocationWrite,
+      originalReadback: bool): DurableWindow =
+    if (window.allocation == AllocationUnissued and
+        immutableWrite == AllocationCreated and mutableWrite == AllocationCreated and
+        originalReadback)
+      window.with("allocation", AllocationAcknowledged)
+    else window
+
+  // Allocation is not usable. Pending is committed at original durable birth,
+  // before an acknowledgment can transfer a fresh nonserialized root.
+  pure def birthCommitted(window: DurableWindow): DurableWindow =
+    if (window.phase == WindowAllocated and window.root == RootUnissued and
+        window.allocation == AllocationAcknowledged)
+      window.with("phase", WindowPending)
+    else window
+
+  // Called only with the original in-process provider acknowledgment. Recovery
+  // of Pending bytes alone cannot manufacture this transition or fresh root.
+  pure def pendingAcknowledged(window: DurableWindow): DurableWindow =
+    if (window.phase == WindowPending and window.root == RootUnissued and
+        window.allocation == AllocationAcknowledged)
+      window.with("root", RootHeld).with("allocation", AllocationConsumed)
+    else window
+
+  pure def acknowledgedOriginalWindow(deadline: int): DurableWindow =
+    pendingAcknowledged(birthCommitted(acknowledgeFreshAllocation(
+      originalWindow(deadline), AllocationCreated, AllocationCreated, true)))
+
+  // Closing consumes positive execution authority before awaiting its write.
+  // A committed close with a lost ACK cannot establish semantic success.
+  pure def closeCommitted(window: DurableWindow): DurableWindow =
+    if (window.phase == WindowPending and window.root == RootHeld)
+      window.with("phase", WindowClosed).with("root", RootFinishing)
+    else window
+
+  pure def crashWindow(window: DurableWindow): DurableWindow =
+    window.with("root", RootGone).with("allocation", AllocationGone)
+      .with("registration", RegistrationGone)
+
+  pure def mayObserveWindow(window: DurableWindow): bool =
+    window.phase == WindowPending and window.root == RootHeld
+
+  // An accepted actual spawn retains observation in the existing root entry.
+  // Repeated admission only observes that registration; it never spawns again.
+  pure def registerIssuer(window: DurableWindow): DurableWindow =
+    if (mayObserveWindow(window) and window.registration == RegistrationAbsent)
+      window.with("registration", RegistrationLive)
+        .with("admittedTasks", window.admittedTasks + 1)
+    else window
+
+  pure def observeRunningIssuer(window: DurableWindow): bool =
+    mayObserveWindow(window) and window.registration == RegistrationLive
+
+  pure def disposeIssuer(window: DurableWindow): DurableWindow =
+    window.with("registration", RegistrationGone)
+
+  run duplicateIssuerRequiresActualLiveRegistrationTest = {
+    val original = acknowledgedOriginalWindow(100)
+    val running = registerIssuer(original)
+    val duplicate = registerIssuer(running)
+    assert(not(observeRunningIssuer(original)) and
+      observeRunningIssuer(running) and duplicate.admittedTasks == 1 and
+      duplicate.originalDeadline == original.originalDeadline and
+      not(observeRunningIssuer(disposeIssuer(running))) and
+      not(observeRunningIssuer(crashWindow(running))) and
+      registerIssuer(disposeIssuer(running)).admittedTasks == 1)
+  }
+
+  // An attenuated child updates only the original observation history. It
+  // cannot acknowledge the root's terminal write or change its durable phase.
+  pure def childCheckpoint(window: DurableWindow, observedAt: int): DurableWindow =
+    if (mayObserveWindow(window))
+      if (observedAt < window.observedAt) crashWindow(window)
+      else window.with("observedAt", observedAt)
+    else window
+
+  pure def mayAcknowledgePositiveWindow(window: DurableWindow): bool =
+    window.phase == WindowClosed and window.root == RootFinishing and
+      window.domainAcknowledged and window.disposalAcknowledged and
+      window.observedAt < window.originalDeadline
+
+  pure def acknowledgePositiveWindow(window: DurableWindow): DurableWindow =
+    if (mayAcknowledgePositiveWindow(window))
+      window.with("root", RootGone)
+        .with("terminalAcknowledged", true).with("published", true)
+    else window
+
+  pure def InvariantPendingCrashCannotResume(window: DurableWindow): bool =
+    not(mayObserveWindow(crashWindow(window)))
+
+  pure def InvariantCommittedBytesDoNotPublish(window: DurableWindow): bool =
+    closeCommitted(window).published == window.published
+
+  pure def InvariantLostTerminalAckCannotPublish(window: DurableWindow): bool =
+    acknowledgePositiveWindow(crashWindow(closeCommitted(window))).published ==
+      window.published
+
+  pure def InvariantOriginalDeadlinePreserved(window: DurableWindow): bool =
+    acknowledgePositiveWindow(crashWindow(closeCommitted(pendingAcknowledged(window))))
+      .originalDeadline == window.originalDeadline
+
+  run pendingCrashRefusesExecutionTest = {
+    val pending = acknowledgedOriginalWindow(100)
+    assert(mayObserveWindow(pending) and
+      InvariantPendingCrashCannotResume(pending) and
+      not(mayObserveWindow(pendingAcknowledged(crashWindow(pending)))))
+  }
+
+  run committedCloseLostAcknowledgmentTest = {
+    val pending = acknowledgedOriginalWindow(100)
+      .with("domainAcknowledged", true).with("disposalAcknowledged", true)
+      .with("observedAt", 99)
+    val closed = closeCommitted(pending)
+    assert(not(closed.published) and
+      InvariantLostTerminalAckCannotPublish(pending) and
+      not(acknowledgePositiveWindow(crashWindow(closed)).published))
+  }
+
+  run positiveCloseRequiresOriginalUnexpiredRootTest = {
+    val pending = acknowledgedOriginalWindow(100)
+    val closed = closeCommitted(pending)
+    val proved = closed.with("domainAcknowledged", true)
+      .with("disposalAcknowledged", true).with("observedAt", 99)
+    val acknowledged = acknowledgePositiveWindow(proved)
+    assert(not(acknowledgePositiveWindow(closed).published) and
+      not(acknowledgePositiveWindow(proved.with("observedAt", 100)).published) and
+      acknowledged.published and acknowledged.terminalAcknowledged and
+      not(mayAcknowledgePositiveWindow(acknowledged)) and
+      InvariantOriginalDeadlinePreserved(pending))
+  }
+
+  run nestedChildCannotClearPendingRootTest = {
+    val pending = acknowledgedOriginalWindow(100)
+    val outer = childCheckpoint(pending, 20)
+    val inner = childCheckpoint(outer, 30)
+    val rollback = childCheckpoint(inner, 29)
+    assert(inner.phase == WindowPending and inner.root == RootHeld and
+      inner.originalDeadline == 100 and not(inner.terminalAcknowledged) and
+      not(inner.published) and not(mayObserveWindow(rollback)) and
+      not(acknowledgePositiveWindow(closeCommitted(rollback)).published))
+  }
+
+  run interruptedBirthCannotMintAnExecutionRootTest = {
+    val draft = acknowledgeFreshAllocation(originalWindow(100),
+      AllocationCreated, AllocationCreated, true)
+    val committedWithoutAck = birthCommitted(draft)
+    val recovered = crashWindow(committedWithoutAck)
+    assert(not(mayObserveWindow(draft)) and
+      not(mayObserveWindow(committedWithoutAck)) and
+      not(mayObserveWindow(pendingAcknowledged(recovered))) and
+      not(acknowledgePositiveWindow(closeCommitted(recovered)).published) and
+      mayObserveWindow(pendingAcknowledged(committedWithoutAck)))
+  }
+
+  run existingPhysicalAllocationCannotMintBirthTest = {
+    val draft = originalWindow(100)
+    val existingImmutable = acknowledgeFreshAllocation(draft,
+      AllocationAlreadyPresent, AllocationCreated, true)
+    val existingMutable = acknowledgeFreshAllocation(draft,
+      AllocationCreated, AllocationAlreadyPresent, true)
+    val wrongReadback = acknowledgeFreshAllocation(draft,
+      AllocationCreated, AllocationCreated, false)
+    val fresh = acknowledgeFreshAllocation(draft,
+      AllocationCreated, AllocationCreated, true)
+    assert(not(mayObserveWindow(pendingAcknowledged(birthCommitted(existingImmutable)))) and
+      not(mayObserveWindow(pendingAcknowledged(birthCommitted(existingMutable)))) and
+      not(mayObserveWindow(pendingAcknowledged(birthCommitted(wrongReadback)))) and
+      not(mayObserveWindow(pendingAcknowledged(birthCommitted(crashWindow(fresh))))) and
+      mayObserveWindow(pendingAcknowledged(birthCommitted(fresh))))
+  }
+
   // ==================== HELPER FUNCTIONS ====================
 
   // Extract domain from timestamp.

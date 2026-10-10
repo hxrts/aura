@@ -84,6 +84,10 @@ impl TransportEffects for LoggingTransportWrapper {
         result
     }
 
+    async fn wait_receive_ready(&self) -> Result<(), TransportError> {
+        self.inner.wait_receive_ready().await
+    }
+
     async fn receive_envelope_from(
         &self,
         source: AuthorityId,

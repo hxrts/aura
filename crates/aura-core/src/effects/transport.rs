@@ -61,6 +61,9 @@ pub struct TransportEnvelope {
 /// Transport operation errors
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum TransportError {
+    /// The selected stateless provider cannot acknowledge receive readiness.
+    #[error("Selected transport does not support receive readiness")]
+    ReceiveReadinessUnsupported,
     /// Required runtime ingress exceeded its bounded retained queue.
     #[error("Transport ingress capacity exceeded ({capacity} envelopes)")]
     IngressCapacityExceeded {
@@ -156,6 +159,16 @@ pub trait TransportEffects: Send + Sync {
     /// the encrypted payload and any attached receipts. Higher-level protocols handle
     /// decryption and receipt validation.
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError>;
+
+    /// Await an arrival without consuming it or substituting another provider.
+    ///
+    /// Implementations register their event before checking their own queue, so
+    /// an arrival between the check and await cannot be lost. Readiness is an
+    /// observation; callers still receive and validate the envelope and bound
+    /// this wait with their original operation deadline. Stateless providers
+    /// return `ReceiveReadinessUnsupported` instead of polling or fabricating
+    /// progress.
+    async fn wait_receive_ready(&self) -> Result<(), TransportError>;
 
     /// Receive envelope from a specific authority within a context
     ///

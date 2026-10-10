@@ -309,3 +309,15 @@ Sync status and delivery tracking provide user visibility into Category A operat
 ### Generation interval arithmetic
 
 Receipt-generation allowance coordinates and physical-time coordinates are distinct domains. Receipt windows contain no physical timestamps and do not renew according to elapsed time. Their checked half-open intervals require a representable exclusive endpoint: base `u64::MAX` with extent one is invalid, and endpoint overflow is rejected rather than wrapped or truncated. Exhaustion requires an explicit domain outcome; it does not authorize implicit renewal. Empty generation allowances admit no receipts. Current/previous epoch acceptance, authenticated checkpoint admission, nonce replay protection and authorized checked epoch progression remain flow-domain contracts. Serialized arithmetic intervals do not provide admission authority. Fixed physical execution windows retain their original deadline and do not acquire generation rollover semantics.
+
+### Receive readiness
+
+Transport receive readiness is a local observation of the original provider or
+canonical runtime inbox. It consumes no envelope and supplies no authentication,
+protocol completion or durable acknowledgment. Each provider registers its
+arrival event before checking its own queue; a stateless provider explicitly
+refuses unsupported readiness. A required receive retains its original provider
+inventory and fixed operation endpoint, including readiness and provider errors.
+An unrelated session's retained frame cannot authorize another session or cause
+that session to spin. Arrival notifications replace timed polling; they do not
+advance physical time or allocate a new execution window.

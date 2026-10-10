@@ -4435,7 +4435,7 @@ pub(super) struct ApprovedLocalEnrollmentTranscript<'tree, 'custody, 'owner, 'ru
     domains: [ApprovedEnrollmentTranscriptDomain; 3],
     local_share: &'tree [u8],
     /// Original sealed participant-local window; no peer clock is accepted.
-    original_window: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+    original_window: &'tree crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
 }
 
 struct ApprovedEnrollmentTranscriptDomain {
@@ -4446,9 +4446,9 @@ struct ApprovedEnrollmentTranscriptDomain {
 
 /// Minted only from the independently retained native policy and explicit
 /// canonical three-domain approval. It contains public material exclusively.
-pub(super) struct ApprovedEnrollmentTranscriptRound {
+pub(super) struct ApprovedEnrollmentTranscriptRound<'window> {
     effects: Arc<AuraEffectSystem>,
-    original_window: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+    original_window: &'window crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
     message: Vec<u8>,
     public_package: Vec<u8>,
     verifying_key: aura_core::TrustedPublicKey,
@@ -4461,11 +4461,11 @@ pub(super) struct ApprovedEnrollmentTranscriptRound {
 impl<'tree, 'custody, 'owner, 'runtime>
     ValidatedLocalEnrollmentSigningMaterial<'tree, 'custody, 'owner, 'runtime>
 {
-    fn approved_rounds(
+    fn approved_rounds<'window>(
         &self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
-        original_window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
-    ) -> Result<[ApprovedEnrollmentTranscriptRound; 3], AuraError> {
+        original_window: &'window crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<[ApprovedEnrollmentTranscriptRound<'window>; 3], AuraError> {
         use aura_signature::SecurityTranscript;
         self.custody
             .require_manifest(self.effects.as_ref(), approval.manifest())?;
@@ -4533,7 +4533,7 @@ impl<'tree, 'custody, 'owner, 'runtime>
         ];
         Ok(messages.map(|message| ApprovedEnrollmentTranscriptRound {
             effects: self.effects.clone(),
-            original_window: original_window.clone(),
+            original_window,
             message,
             public_package: self.public_package.clone(),
             verifying_key: aura_core::TrustedPublicKey::active(
@@ -4550,7 +4550,7 @@ impl<'tree, 'custody, 'owner, 'runtime>
     fn prepare_manifest_participant<'grant>(
         &'grant self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
-        original_window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        original_window: &'grant crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
     ) -> Result<
         (
             enrollment_transcript_signing::EnrollmentTranscriptParticipantIngress,
@@ -4683,7 +4683,7 @@ impl<'tree, 'custody, 'owner, 'runtime>
                 },
             ],
             local_share: self.local_share.as_slice(),
-            original_window: original_window.clone(),
+            original_window,
         };
         Ok(enrollment_transcript_signing::admitted_participant(grant))
     }
@@ -4829,14 +4829,14 @@ impl ThresholdSigningService {
 
     #[aura_macros::capability_boundary(
         category = "capability_gated",
-        capability = "EnrollmentWindowCapability",
+        capability = "EnrollmentExecutionChild",
         family = "runtime_helper"
     )]
     pub(crate) async fn sign_original_approved_enrollment_domains(
         &self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
         custody: &crate::runtime::effects::EnrollmentTranscriptTreeOwner<'_, '_, '_>,
-        window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
     ) -> Result<[Vec<u8>; 3], AuraError> {
         window
             .execute(self.effects.as_ref(), || async {
@@ -4897,7 +4897,7 @@ pub(super) struct StartedEnrollmentManifestParticipant {
     task: aura_core::OwnedTaskHandle<u64>,
     group: crate::task_registry::TaskGroup,
     effects: Arc<AuraEffectSystem>,
-    original_window: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+    original_window: Arc<crate::runtime::services::enrollment_window::EnrollmentExecutionChild>,
 }
 
 impl StartedEnrollmentManifestParticipant {
@@ -4952,10 +4952,10 @@ impl ThresholdSigningService {
         let effects = self.effects.clone();
         // Clock admission precedes native custody acquisition. It cannot mint
         // signing authority and cannot accept a reconstructed caller budget.
-        let original = crate::runtime::services::enrollment_window::EnrollmentWindowCapability::approved_signing(
+        let original = Arc::new(crate::runtime::services::enrollment_window::EnrollmentExecutionChild::approved_signing(
             self.effects.clone(), &approval,
-        ).await?;
-        let readiness_window = original.clone();
+        ).await?);
+        let readiness_window = Arc::clone(&original);
         let (ready_sender, ready_receiver) = tokio::sync::oneshot::channel();
         let participant_task = async move {
             let mut ready_sender = Some(ready_sender);

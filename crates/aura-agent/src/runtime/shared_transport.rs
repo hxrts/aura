@@ -255,7 +255,6 @@ impl Default for SharedTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::PhysicalTimeEffects;
     use aura_core::types::identifiers::ContextId;
     use std::collections::HashMap;
 
@@ -323,23 +322,17 @@ mod tests {
         let b = AuthorityId::new_from_entropy([4u8; 32]);
         let notify = shared.inbox_notify(a);
         let notified = notify.notified();
-        let time = aura_effects::time::PhysicalTimeHandler::new();
-        let started_at = time
-            .physical_time()
-            .await
-            .expect("physical time should be available");
-        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
-            &started_at,
-            std::time::Duration::from_millis(40),
-        )
-        .expect("timeout budget should fit");
-
+        let second = notify.notified();
+        futures::pin_mut!(notified, second);
+        assert!(futures::poll!(notified.as_mut()).is_pending());
+        assert!(futures::poll!(second.as_mut()).is_pending());
         shared.route_envelope(envelope_for(a, b));
-        aura_core::execute_with_timeout_budget(&time, &budget, || async {
-            notified.await;
-            Ok::<(), ()>(())
-        })
-        .await
-        .expect("shared transport should notify promptly");
+        notified.await;
+        second.await;
+        assert_eq!(
+            shared.inbox_for(a).read().len(),
+            1,
+            "both observers wake without consuming or duplicating delivery"
+        );
     }
 }

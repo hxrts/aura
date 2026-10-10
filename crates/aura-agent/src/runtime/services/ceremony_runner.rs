@@ -108,11 +108,12 @@ impl CeremonyRunner {
     )]
     pub(crate) async fn start_owned_device_enrollment(
         &self,
-        generation: &crate::runtime::effects::EnrollmentGenerationReservation<'_>,
+        generation: &mut crate::runtime::effects::EnrollmentGenerationReservation<'_>,
         request: CeremonyInitRequest,
+        original_tasks: &crate::task_registry::TaskGroup,
     ) -> Result<(), AuraError> {
         self.tracker
-            .register_owned_device_enrollment(generation, request)
+            .register_owned_device_enrollment(generation, request, original_tasks)
             .await
     }
 
@@ -147,12 +148,16 @@ impl CeremonyRunner {
     pub(crate) async fn registered_enrollment_generation_window(
         &self,
         generation: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
-    ) -> Result<super::enrollment_window::EnrollmentWindowCapability, AuraError> {
-        let capability = self
-            .tracker
+    ) -> Result<
+        super::enrollment_window::EnrollmentExecutionRoot<
+            super::ceremony_tracker::RegisteredEnrollmentWindowCapability,
+        >,
+        AuraError,
+    > {
+        self.tracker
             .acquire_registered_enrollment_generation_window(generation)
-            .await?;
-        super::enrollment_window::EnrollmentWindowCapability::registered(capability).await
+            .await
+            .map(super::enrollment_window::EnrollmentExecutionRoot::into_registered)
     }
 
     #[aura_macros::capability_boundary(

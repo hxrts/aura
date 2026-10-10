@@ -21,6 +21,41 @@ use std::sync::Arc;
 #[error("custom fixture provider unavailable")]
 pub struct CustomProviderOutage;
 
+#[cfg(test)]
+mod transport_readiness_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn delayed_arrival_wakes_the_original_provider_without_consuming() {
+        let provider = CustomProviderProbe::default();
+        let ready = provider.wait_receive_ready();
+        futures::pin_mut!(ready);
+        assert!(futures::poll!(ready.as_mut()).is_pending());
+        let envelope = TransportEnvelope {
+            source: AuthorityId::new_from_entropy([1; 32]),
+            destination: AuthorityId::new_from_entropy([2; 32]),
+            context: ContextId::new_from_entropy([3; 32]),
+            payload: vec![4],
+            metadata: HashMap::new(),
+            receipt: None,
+        };
+        provider.push_inbound(envelope.clone()).await;
+        ready.await.expect("actual original provider arrival");
+        assert_eq!(
+            provider.receive_envelope().await.unwrap().payload,
+            envelope.payload
+        );
+        let ready = provider.wait_receive_ready();
+        futures::pin_mut!(ready);
+        assert!(futures::poll!(ready.as_mut()).is_pending());
+        provider.set_fault(true);
+        assert!(
+            matches!(ready.await, Err(TransportError::ProtocolError { .. })),
+            "original readiness provider failure remains typed"
+        );
+    }
+}
+
 /// Shared configured-provider sentinel; mocks and mutable fault controls stay in L8.
 #[derive(Default)]
 pub struct CustomProviderProbe {
@@ -31,12 +66,14 @@ pub struct CustomProviderProbe {
     sends: AtomicUsize,
     ready: AtomicBool,
     inbound: async_lock::Mutex<VecDeque<TransportEnvelope>>,
+    inbound_notify: tokio::sync::Notify,
     receives: AtomicUsize,
 }
 impl CustomProviderProbe {
     /// Change actual provider availability after runtime construction.
     pub fn set_fault(&self, fault: bool) {
         self.fault.store(fault, Ordering::SeqCst);
+        self.inbound_notify.notify_waiters();
     }
     /// Expose a real configured channel for stable dispatch selection.
     pub fn set_ready(&self, ready: bool) {
@@ -57,6 +94,7 @@ impl CustomProviderProbe {
     /// Enqueue a physical provider frame; runtime ownership is exercised by actual receive APIs.
     pub async fn push_inbound(&self, envelope: TransportEnvelope) {
         self.inbound.lock().await.push_back(envelope);
+        self.inbound_notify.notify_waiters();
     }
     /// Count actual physical receive attempts independently of retained runtime reads.
     pub fn receives(&self) -> usize {
@@ -164,6 +202,22 @@ impl StorageExtendedEffects for CustomProviderProbe {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TransportEffects for CustomProviderProbe {
+    async fn wait_receive_ready(&self) -> Result<(), TransportError> {
+        loop {
+            let arrival = self.inbound_notify.notified();
+            tokio::pin!(arrival);
+            arrival.as_mut().enable();
+            if self.fault.load(Ordering::SeqCst) {
+                return Err(TransportError::ProtocolError {
+                    details: "configured fixture ingress fault".into(),
+                });
+            }
+            if !self.inbound.lock().await.is_empty() {
+                return Ok(());
+            }
+            arrival.await;
+        }
+    }
     async fn send_envelope(&self, envelope: TransportEnvelope) -> Result<(), TransportError> {
         self.sends.fetch_add(1, Ordering::SeqCst);
         if self.fault.load(Ordering::SeqCst) {

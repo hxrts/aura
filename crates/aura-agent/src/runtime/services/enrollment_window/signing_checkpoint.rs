@@ -27,6 +27,7 @@ struct SigningClockRecord {
     version: u16,
     binding: SigningBinding,
     budget: TimeoutBudget,
+    execution: DurableEnrollmentExecutionState,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,9 +125,10 @@ impl ApprovedSigningCheckpoint {
         let budget = TimeoutBudget::from_start_and_timeout(&now, ORIGINAL_SIGNING_POLICY)
             .map_err(AuraError::from)?;
         let anchor = serde_json::to_vec(&SigningClockRecord {
-            version: 1,
+            version: 2,
             binding: binding.clone(),
             budget: budget.clone(),
+            execution: DurableEnrollmentExecutionState::Allocated,
         })
         .map_err(|source| AuraError::Serialization {
             message: "encode original local signing clock".into(),
@@ -200,9 +202,10 @@ impl ApprovedSigningCheckpoint {
                 message: "decode original signing checkpoint".into(),
                 source: Some(Arc::new(source)),
             })?;
-        if record.version != 1 || &record.binding != binding {
+        if record.version != 2 || &record.binding != binding {
             return Err(rejected(SigningWindowError::Binding));
         }
+        record.execution.require_unstarted_recovery()?;
         original
             .validate_checkpoint_continuation_from(&record.budget)
             .map_err(AuraError::from)
@@ -261,9 +264,10 @@ impl ApprovedSigningCheckpoint {
         Self::validate_record(&self.binding, &retained, original)
             .map_err(TimeoutBudgetError::checkpoint_failure)?;
         let bytes = serde_json::to_vec(&SigningClockRecord {
-            version: 1,
+            version: 2,
             binding: self.binding.clone(),
             budget: original.clone(),
+            execution: DurableEnrollmentExecutionState::Allocated,
         })
         .map_err(TimeoutBudgetError::checkpoint_failure)?;
         self.effects
@@ -295,9 +299,10 @@ mod tests {
     }
     fn record(binding: SigningBinding, budget: &TimeoutBudget) -> Vec<u8> {
         serde_json::to_vec(&SigningClockRecord {
-            version: 1,
+            version: 2,
             binding,
             budget: budget.clone(),
+            execution: DurableEnrollmentExecutionState::Allocated,
         })
         .expect("encode actual original checkpoint")
     }

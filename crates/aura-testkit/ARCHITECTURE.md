@@ -199,3 +199,7 @@ source-bearing clock fault to a waiting original timer. Mock entity IDs and app
 message IDs use separate sequence owners. Required listener startup uses actual
 supervised acknowledgment under the frozen original window; polling its timeout
 cannot advance shared time or consume another task's startup budget.
+
+The configured transport probe owns an arrival event alongside its original
+queue. Delayed enqueue and provider faults wake the same registered observer;
+readiness consumes no frame and requires no physical-clock advancement.

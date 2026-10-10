@@ -8936,9 +8936,8 @@ mod ownership_ratchet_tests {
             "impl Runtime {{\n#[aura_macros::capability_boundary(category = \"capability_gated\")]\npub async fn current_time_ms() {{}}\n{missing} }}"
         );
         assert!(!boundary_annotation_attached_in_source(&sibling, free, required).unwrap());
-        let string_marker = format!(
-            "const NOTE: &str = \"#[aura_macros::capability_boundary]\";\n{missing}"
-        );
+        let string_marker =
+            format!("const NOTE: &str = \"#[aura_macros::capability_boundary]\";\n{missing}");
         assert!(!boundary_annotation_attached_in_source(&string_marker, free, required).unwrap());
         assert!(boundary_annotation_attached_in_source(
             "#[aura_macros::actor_owned(owner = \"sync\")] struct SyncService {}",

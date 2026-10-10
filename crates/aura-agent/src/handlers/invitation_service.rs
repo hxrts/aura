@@ -731,14 +731,20 @@ impl InvitationServiceApi {
 
     #[aura_macros::capability_boundary(
         category = "capability_gated",
-        capability = "EnrollmentWindowCapability",
+        capability = "EnrollmentExecutionRoot",
+        capability_type = crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<crate::runtime::services::ceremony_tracker::RegisteredEnrollmentWindowCapability,>,
         family = "runtime_helper"
     )]
     fn spawn_device_enrollment_initiator(
         &self,
-        invitation: &Invitation,
-        budget: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        registered: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
+        original: crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            crate::runtime::services::ceremony_tracker::RegisteredEnrollmentWindowCapability,
+        >,
     ) -> AgentResult<()> {
+        registered.require_effects(self.effects.as_ref())?;
+        let running = original.prepare_running_observation(self.effects.as_ref(), registered)?;
+        let invitation = registered.canonical_invitation();
         if invitation.receiver_id == invitation.sender_id {
             return Err(AgentError::internal(
                 "device enrollment requires a distinct invitee",
@@ -765,15 +771,83 @@ impl InvitationServiceApi {
         let sender_id = invitation.sender_id;
         let receiver_id = invitation.receiver_id;
         let fut = Box::pin(async move {
-            if let Err(error) = handler
-                .execute_device_enrollment_initiator_owned(
-                    effects,
-                    &invitation,
-                    ceremony_runner.clone(),
-                    budget,
-                )
+            let child = original.owned_execution_child();
+            let (terminal_sender, terminal_receiver) = tokio::sync::oneshot::channel();
+            let child_effects = effects.clone();
+            let child_runner = ceremony_runner.clone();
+            let execution = async move {
+                let result = handler
+                    .execute_device_enrollment_initiator_owned(
+                        child_effects,
+                        &invitation,
+                        child_runner,
+                        child,
+                    )
+                    .await;
+                match result {
+                    Ok(terminal) => {
+                        terminal_sender.send(Ok(terminal)).map_err(|_| {
+                            aura_core::AuraError::PermissionDenied {
+                                message: "original issuer terminal observer was lost".into(),
+                                source: Some(Arc::new(super::invitation::EnrollmentVmAdmissionError::TerminalObserverLost)),
+                            }
+                        })?;
+                        Ok(())
+                    }
+                    Err(source) => {
+                        let failure = aura_core::AuraError::Internal {
+                            message: "original issuer enrollment child failed".into(),
+                            source: Some(Arc::new(source)),
+                        };
+                        let _ = terminal_sender.send(Err(AgentError::from(failure.clone())));
+                        Err(failure)
+                    }
+                }
+            };
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    let _child_handle = original.children().spawn_local_try_named("original_issuer_protocol", execution);
+                } else {
+                    let _child_handle = original.children().spawn_try_named("original_issuer_protocol", execution);
+                }
+            }
+            let result = original
+                .child()
+                .execute(effects.as_ref(), || async {
+                    terminal_receiver.await.map_err(|source| {
+                        AgentError::from(aura_core::AuraError::Internal {
+                            message: "observe original signed issuer terminal result".into(),
+                            source: Some(Arc::new(source)),
+                        })
+                    })?
+                })
                 .await
-            {
+                .map_err(|source| {
+                    original
+                        .child()
+                        .map_run_error("original issuer terminal result", source)
+                });
+            let result = match result {
+                Ok(Some(terminal)) => original
+                    .acknowledge_issuer_terminal(effects.as_ref(), terminal)
+                    .await
+                    .map(|acknowledged| {
+                        // Keep domain disposition distinct from resource disposal.
+                        let _positive = acknowledged.positive();
+                    })
+                    .map_err(AgentError::from),
+                // The cancellation notice has its existing distinct settlement
+                // owner. It cannot turn an abandoned positive root into an ACK.
+                Ok(None) => {
+                    drop(original);
+                    Ok(())
+                }
+                Err(source) => {
+                    drop(original);
+                    Err(source)
+                }
+            };
+            if let Err(error) = result {
                 tracing::error!(
                     invitation_id = %invitation_id,
                     sender_id = %sender_id,
@@ -793,11 +867,12 @@ impl InvitationServiceApi {
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = tasks.spawn_local_try_named("device_enrollment_initiator", fut);
+                let registration = tasks.spawn_local_try_named_observed("device_enrollment_initiator", fut)?;
             } else {
-                let _task_handle = tasks.spawn_try_named("device_enrollment_initiator", fut);
+                let registration = tasks.spawn_try_named_observed("device_enrollment_initiator", fut)?;
             }
         }
+        running.publish(registration)?;
         if let Some(source) = tasks.terminal_failure() {
             return Err(AgentError::from(aura_core::AuraError::Internal {
                 message: "admit registered enrollment initiator task".into(),
@@ -1622,7 +1697,7 @@ impl InvitationServiceApi {
             Err(source) if crate::runtime::services::ceremony_tracker::registered_enrollment_window_already_owned(&source) => return Ok(DeviceEnrollmentInitiatorStart::AlreadyRunning),
             Err(source) => return Err(AgentError::from(source)),
         };
-        self.spawn_device_enrollment_initiator(registered.canonical_invitation(), budget)?;
+        self.spawn_device_enrollment_initiator(registered, budget)?;
         Ok(DeviceEnrollmentInitiatorStart::Started)
         }).await
     }
@@ -1723,8 +1798,52 @@ impl InvitationServiceApi {
         Box::pin(self.accept_owned(invitation_id)).await
     }
 
+    /// Consume the canonical retained enrollment root exactly once.
+    pub(crate) async fn take_original_enrollment_execution(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<
+        crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            super::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        >,
+        aura_core::AuraError,
+    > {
+        self.handler
+            .take_original_enrollment_execution(invitation)
+            .await
+    }
+
     /// Keep the shared caller future bounded while retaining lexical ownership.
     async fn accept_owned(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+        // Observation selects the operation kind; only consuming its retained
+        // original root can authorize the enrollment mutation that follows.
+        let observed = self
+            .handler
+            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
+            .await;
+        let enrollment_root = if observed.as_ref().is_some_and(|invitation| {
+            matches!(
+                invitation.invitation_type,
+                InvitationType::DeviceEnrollment { .. }
+            )
+        }) {
+            Some(
+                self.take_original_enrollment_execution(invitation_id)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        if let Some(root) = enrollment_root {
+            let result = self
+                .handler
+                .accept_original_enrollment_invitation(self.effects.as_ref(), &root)
+                .await?;
+            self.handler
+                .execute_device_enrollment_invitee(self.effects.clone(), root)
+                .await?;
+            return Ok(result);
+        }
         let result = self
             .handler
             .accept_invitation(self.effects.clone(), invitation_id)
@@ -1737,21 +1856,6 @@ impl InvitationServiceApi {
         {
             if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
                 self.spawn_channel_acceptance_notification(invitation.invitation_id.clone());
-            }
-            if matches!(
-                invitation.invitation_type,
-                InvitationType::DeviceEnrollment { .. }
-            ) {
-                // The signed acceptance choreography is the authoritative step:
-                // enrollment must not report success if the initiator never
-                // received and verified it.
-                self.handler
-                    .execute_device_enrollment_invitee(
-                        self.effects.clone(),
-                        &invitation,
-                        &self.tasks.group("invitation_service.enrollment_receiver"),
-                    )
-                    .await?;
             }
             if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
                 if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
@@ -2337,6 +2441,56 @@ impl InvitationServiceApi {
     /// Returns an error if the code is invalid
     pub fn import_code(code: &str) -> Result<ShareableInvitation, ShareableInvitationError> {
         ShareableInvitation::from_code(code)
+    }
+
+    /// Retain the original explicit enrollment admission and its acknowledged
+    /// execution birth in the same bounded invitation owner used by acceptance.
+    pub(crate) async fn import_enrollment_and_cache(
+        &self,
+        code: &str,
+        pin: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
+    ) -> Result<Invitation, aura_invitation::enrollment_manifest::EnrollmentManifestError> {
+        use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+        let boundary =
+            |source: aura_core::AuraError| EnrollmentManifestError::Runtime(Box::new(source));
+        let _operation = self
+            .effects
+            .admit_public_operation()
+            .map_err(|source| EnrollmentManifestError::Runtime(Box::new(source)))?;
+        if let Some(invitation) = self
+            .handler
+            .observe_original_enrollment_transfer(self.effects.as_ref(), code, pin)
+            .await
+            .map_err(boundary)?
+        {
+            return Ok(invitation);
+        }
+        let root = super::invitation::enrollment_manifest_admission::admit_user_transfer(
+            &self.effects,
+            self.effects.runtime_authority_id(),
+            code,
+            pin,
+            &self.tasks.group("invitation_service.enrollment_import"),
+        )
+        .await?;
+        let imported = root
+            .child()
+            .execute(self.effects.as_ref(), || {
+                self.handler
+                    .import_invitation_code(self.effects.as_ref(), code)
+            })
+            .await
+            .map_err(|source| {
+                EnrollmentManifestError::Runtime(Box::new(
+                    root.child()
+                        .map_run_error("original enrollment invitation import", source),
+                ))
+            })?;
+        self.handler
+            .retain_original_enrollment_execution(root)
+            .await
+            .map_err(boundary)?;
+        Ok(imported)
     }
 
     /// Import an out-of-band invite code into the local invitation cache.
@@ -3140,8 +3294,7 @@ mod required_enrollment_task_tests {
             )
             .expect("distinct simulation effects"),
         );
-        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
-        let tracker = CeremonyTracker::new_with_storage(time, effects.clone());
+        let tracker = CeremonyTracker::new_with_storage(effects.clone());
         let runner = CeremonyRunner::new(tracker.clone());
         let missing = CeremonyId::new("required-window-unregistered".to_owned());
         let rejection = match effects

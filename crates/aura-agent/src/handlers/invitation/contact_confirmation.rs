@@ -651,7 +651,7 @@ async fn publish_verified_contact_response(
         .update_invitation(&verified.response.invitation_id, |invitation| {
             invitation.status = status.clone();
         })
-        .await;
+        .await?;
     Ok(Some(verified.response.decision))
 }
 

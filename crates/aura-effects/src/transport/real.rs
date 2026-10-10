@@ -74,6 +74,10 @@ impl TransportEffects for RealTransportHandler {
         Err(TransportError::NoMessage)
     }
 
+    async fn wait_receive_ready(&self) -> Result<(), TransportError> {
+        Err(TransportError::ReceiveReadinessUnsupported)
+    }
+
     async fn receive_envelope_from(
         &self,
         source: AuthorityId,
