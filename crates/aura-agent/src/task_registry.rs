@@ -399,12 +399,124 @@ struct TaskGroupShared {
     diagnostics: Option<Arc<RuntimeDiagnosticSink>>,
     tasks: Mutex<BTreeMap<u64, TaskMetadata>>,
     first_failure: Mutex<Option<TaskSupervisionError>>,
+    execution_outcome: Mutex<TaskGroupExecutionOutcome>,
     notify: Arc<Notify>,
 }
 
 #[derive(Clone)]
 pub struct TaskGroup {
     shared: Arc<TaskGroupShared>,
+}
+
+/// Observation issued only by an accepted spawn in this exact registry tree.
+/// It grants neither execution nor terminal acknowledgment authority.
+pub(crate) struct RegisteredRuntimeTaskObservation {
+    group: TaskGroup,
+    original: OwnedTaskHandle<u64>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("the original supervised task registration is no longer running")]
+pub(crate) struct OriginalTaskRegistrationNotLive;
+
+impl RegisteredRuntimeTaskObservation {
+    pub(crate) fn require_original_tree(
+        &self,
+        original: &TaskGroup,
+    ) -> Result<(), aura_core::AuraError> {
+        if Arc::ptr_eq(&self.group.shared.tree, &original.shared.tree) {
+            Ok(())
+        } else {
+            Err(aura_core::AuraError::PermissionDenied {
+                message: "runtime task observation belongs to a foreign supervision tree".into(),
+                source: Some(Arc::new(OriginalTaskRegistrationNotLive)),
+            })
+        }
+    }
+    pub(crate) fn require_running(&self) -> Result<(), aura_core::AuraError> {
+        let _tree = self.group.shared.tree.state.lock();
+        let tasks = self.group.shared.tasks.lock();
+        let running = tasks.get(self.original.handle_id()).is_some_and(|task| {
+            !task.abort.is_aborted()
+                && !self.group.shared.closing.load(Ordering::Acquire)
+                && !self.group.cancellation_token().is_cancelled()
+        });
+        if running {
+            Ok(())
+        } else {
+            Err(aura_core::AuraError::PermissionDenied {
+                message: "original runtime task observation is not live".into(),
+                source: Some(Arc::new(OriginalTaskRegistrationNotLive)),
+            })
+        }
+    }
+}
+
+/// Original subtree custody after admission is irreversibly sealed.
+/// Kept by the runtime owner while a bounded disposal observation is pending.
+/// This is an observation handle, not one-use protocol completion authority.
+/// Repeated observations cannot authorize a durable root checkpoint by themselves.
+pub(crate) struct SealedTaskGroup {
+    group: TaskGroup,
+}
+
+/// Actual disposal of a sealed original subtree, including its native outcome.
+/// Disposal alone does not imply that execution or required cleanup succeeded.
+pub(crate) struct TaskGroupDisposalAcknowledgment {
+    group: TaskGroup,
+    failure: Option<TaskSupervisionError>,
+    execution_outcome: TaskGroupExecutionOutcome,
+}
+
+/// Execution outcome retained by the original supervision tree after disposal.
+#[derive(Clone)]
+pub(crate) enum TaskGroupExecutionOutcome {
+    NotExecuted,
+    Completed,
+    Interrupted(TaskSupervisionError),
+}
+
+impl SealedTaskGroup {
+    /// Borrowing retains the seal in the original owner if this future is dropped.
+    /// The caller must bound observation with its original selected provider.
+    pub(crate) async fn await_disposal(&self) -> TaskGroupDisposalAcknowledgment {
+        loop {
+            let changed = self.group.shared.notify.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.group.active_tasks().is_empty() {
+                return TaskGroupDisposalAcknowledgment {
+                    group: self.group.clone(),
+                    failure: self.group.terminal_failure(),
+                    execution_outcome: self.group.shared.execution_outcome.lock().clone(),
+                };
+            }
+            changed.await;
+        }
+    }
+}
+
+impl TaskGroupDisposalAcknowledgment {
+    pub(crate) fn require_original_group(
+        &self,
+        original: &TaskGroup,
+    ) -> Result<(), aura_core::AuraError> {
+        if Arc::ptr_eq(&self.group.shared, &original.shared) {
+            Ok(())
+        } else {
+            Err(aura_core::AuraError::permission_denied(
+                "disposal acknowledgment belongs to another task subtree",
+            ))
+        }
+    }
+
+    pub(crate) fn failure(&self) -> Option<&TaskSupervisionError> {
+        self.failure.as_ref()
+    }
+
+    pub(crate) fn execution_outcome(&self) -> &TaskGroupExecutionOutcome {
+        &self.execution_outcome
+    }
 }
 
 #[derive(Clone)]
@@ -680,6 +792,51 @@ impl Drop for TaskSupervisorOwner {
 }
 
 impl TaskGroup {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn spawn_try_named_observed<F>(
+        &self,
+        name: impl Into<String>,
+        operation: F,
+    ) -> Result<RegisteredRuntimeTaskObservation, aura_core::AuraError>
+    where
+        F: Future<Output = Result<(), aura_core::AuraError>> + Send + 'static,
+    {
+        let original = self
+            .spawn_checked_fallible_boxed(name.into(), Box::pin(operation), None)
+            .map_err(|(_, source)| aura_core::AuraError::Internal {
+                message: "original supervised task admission failed".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let observed = RegisteredRuntimeTaskObservation {
+            group: self.clone(),
+            original,
+        };
+        observed.require_running()?;
+        Ok(observed)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn spawn_local_try_named_observed<F>(
+        &self,
+        name: impl Into<String>,
+        operation: F,
+    ) -> Result<RegisteredRuntimeTaskObservation, aura_core::AuraError>
+    where
+        F: Future<Output = Result<(), aura_core::AuraError>> + 'static,
+    {
+        let original = self
+            .spawn_checked_fallible_boxed_local(name.into(), Box::pin(operation), None)
+            .map_err(|(_, source)| aura_core::AuraError::Internal {
+                message: "original local supervised task admission failed".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let observed = RegisteredRuntimeTaskObservation {
+            group: self.clone(),
+            original,
+        };
+        observed.require_running()?;
+        Ok(observed)
+    }
     fn root(name: impl Into<String>, diagnostics: Option<Arc<RuntimeDiagnosticSink>>) -> Self {
         let tree = Arc::new(TaskTreeShared {
             state: Mutex::new(TaskTreeState {
@@ -699,6 +856,7 @@ impl TaskGroup {
                 diagnostics,
                 tasks: Mutex::new(BTreeMap::new()),
                 first_failure: Mutex::new(None),
+                execution_outcome: Mutex::new(TaskGroupExecutionOutcome::NotExecuted),
                 notify: Arc::new(Notify::new()),
                 tree: tree.clone(),
                 group_id: 1,
@@ -786,6 +944,10 @@ impl TaskGroup {
                 diagnostics: self.shared.diagnostics.clone(),
                 tasks: Mutex::new(BTreeMap::new()),
                 first_failure: Mutex::new(rejection.clone()),
+                execution_outcome: Mutex::new(rejection.clone().map_or(
+                    TaskGroupExecutionOutcome::NotExecuted,
+                    TaskGroupExecutionOutcome::Interrupted,
+                )),
                 notify: Arc::new(Notify::new()),
                 tree: self.shared.tree.clone(),
                 group_id,
@@ -804,6 +966,18 @@ impl TaskGroup {
         child
     }
 
+    /// Seal admission on this exact registered subtree without cancelling work.
+    /// The tree lock linearizes this transition against concurrent admission.
+    pub(crate) fn seal_admission(&self) -> SealedTaskGroup {
+        let mut tree = self.shared.tree.state.lock();
+        for group in self.subtree_groups_locked(&mut tree) {
+            group.closing.store(true, Ordering::Release);
+        }
+        SealedTaskGroup {
+            group: self.clone(),
+        }
+    }
+
     fn subtree_groups_locked(&self, tree: &mut TaskTreeState) -> Vec<Arc<TaskGroupShared>> {
         tree.groups.retain(|_, group| group.strong_count() != 0);
         let mut groups: Vec<_> = tree
@@ -819,6 +993,7 @@ impl TaskGroup {
     }
 
     fn propagate_failure(&self, failure: TaskSupervisionError) {
+        self.retain_execution_outcome(TaskGroupExecutionOutcome::Interrupted(failure.clone()));
         if matches!(
             failure,
             TaskSupervisionError::TaskFailed { .. } | TaskSupervisionError::Panicked { .. }
@@ -835,6 +1010,18 @@ impl TaskGroup {
                 .lock()
                 .get_or_insert_with(|| failure.clone());
             group.notify.notify_waiters();
+            current = group.parent.clone();
+        }
+    }
+
+    fn retain_execution_outcome(&self, outcome: TaskGroupExecutionOutcome) {
+        let mut current = Some(self.shared.clone());
+        while let Some(group) = current {
+            let mut retained = group.execution_outcome.lock();
+            if !matches!(*retained, TaskGroupExecutionOutcome::Interrupted(_)) {
+                *retained = outcome.clone();
+            }
+            drop(retained);
             current = group.parent.clone();
         }
     }
@@ -1357,7 +1544,19 @@ impl TaskGroup {
                 group: self.shared.name.clone(),
                 task: task_name.to_owned(),
             }),
-            TaskOutcome::Completed | TaskOutcome::Cancelled => None,
+            TaskOutcome::Completed => {
+                self.retain_execution_outcome(TaskGroupExecutionOutcome::Completed);
+                None
+            }
+            TaskOutcome::Cancelled => {
+                self.retain_execution_outcome(TaskGroupExecutionOutcome::Interrupted(
+                    TaskSupervisionError::Cancelled {
+                        group: self.shared.name.clone(),
+                        task: task_name.to_owned(),
+                    },
+                ));
+                None
+            }
         };
         if let Some(error) = failure {
             self.propagate_failure(error);
@@ -3020,5 +3219,226 @@ mod shutdown_scope_tests {
         assert!(narrow.owns_group(&child.group("worker")));
         assert!(!narrow.owns_group(&sibling));
         assert!(!narrow.owns_group(&foreign));
+    }
+}
+
+#[cfg(test)]
+mod sealed_group_disposal_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn sealed_disposal_handles_cannot_be_cloned_or_deserialized() {
+        trait AmbiguousIfClone<M> {
+            fn absent() {}
+        }
+        impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+        struct Cloned;
+        impl<T: Clone> AmbiguousIfClone<Cloned> for T {}
+        trait AmbiguousIfDeserialize<M> {
+            fn absent() {}
+        }
+        impl<T: ?Sized> AmbiguousIfDeserialize<()> for T {}
+        struct Decoded;
+        impl<T: serde::Deserialize<'static>> AmbiguousIfDeserialize<Decoded> for T {}
+        let _ = <SealedTaskGroup as AmbiguousIfClone<_>>::absent;
+        let _ = <TaskGroupDisposalAcknowledgment as AmbiguousIfClone<_>>::absent;
+        let _ = <SealedTaskGroup as AmbiguousIfDeserialize<_>>::absent;
+        let _ = <TaskGroupDisposalAcknowledgment as AmbiguousIfDeserialize<_>>::absent;
+    }
+
+    #[tokio::test]
+    async fn completed_disposal_is_repeatable_observation_of_the_same_subtree() {
+        let supervisor = TaskSupervisor::new();
+        let original = supervisor.group("completed-original");
+        let (domain_tx, domain) = tokio::sync::oneshot::channel();
+        let _handle = original.spawn_try_named("actual-domain-operation", async move {
+            domain_tx
+                .send(())
+                .expect("independent domain acknowledgment");
+            Ok(())
+        });
+        // Domain acknowledgment is produced by the actual operation, separately
+        // from the supervisor's resource-disposal observation.
+        domain.await.expect("actual domain operation acknowledged");
+        let seal = original.seal_admission();
+        let first = seal.await_disposal().await;
+        let second = original.seal_admission().await_disposal().await;
+        for observed in [first, second] {
+            observed
+                .require_original_group(&original)
+                .expect("both observations retain the same original subtree");
+            assert!(observed.failure().is_none());
+            assert!(matches!(
+                observed.execution_outcome(),
+                TaskGroupExecutionOutcome::Completed
+            ));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn running_observation_requires_the_original_live_registration() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("original-observed-registration");
+        let (ready_tx, ready) = tokio::sync::oneshot::channel();
+        let (finish_tx, finish) = tokio::sync::oneshot::channel();
+        let original = group
+            .spawn_try_named_observed("actual-child", async move {
+                ready_tx.send(()).expect("original readiness observer");
+                finish.await.expect("original completion owner");
+                Ok(())
+            })
+            .expect("actual accepted spawn");
+        ready.await.expect("original task was polled");
+        original
+            .require_original_tree(&group)
+            .expect("same original tree");
+        let foreign_supervisor = TaskSupervisor::new();
+        let foreign = foreign_supervisor.group("original-observed-registration");
+        assert!(
+            original.require_original_tree(&foreign).is_err(),
+            "matching group names cannot replace original supervisor custody"
+        );
+        original
+            .require_running()
+            .expect("same actual live registration");
+        finish_tx.send(()).expect("release actual task");
+        group.seal_admission().await_disposal().await;
+        let error = original
+            .require_running()
+            .expect_err("completion invalidates observation");
+        assert!(std::error::Error::source(&error)
+            .unwrap()
+            .is::<OriginalTaskRegistrationNotLive>());
+
+        let cancelled = supervisor.group("cancelled-observed-registration");
+        let original = cancelled
+            .spawn_try_named_observed("actual-child", async {
+                futures::future::pending::<Result<(), aura_core::AuraError>>().await
+            })
+            .expect("actual accepted pending spawn");
+        cancelled.request_cancellation();
+        assert!(
+            original.require_running().is_err(),
+            "cancellation immediately invalidates observation"
+        );
+        cancelled.seal_admission().await_disposal().await;
+        let rejected = cancelled.spawn_try_named_observed("rejected-child", async { Ok(()) });
+        assert!(
+            rejected.is_err(),
+            "failed admission cannot issue an observation"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_or_unexecuted_child_disposal_is_not_positive_execution() {
+        let supervisor = TaskSupervisor::new();
+        let empty = supervisor.group("unexecuted");
+        let empty_seal = empty.seal_admission();
+        let empty_ack = empty_seal.await_disposal().await;
+        assert!(matches!(
+            empty_ack.execution_outcome(),
+            TaskGroupExecutionOutcome::NotExecuted
+        ));
+        let original = supervisor.group("cancelled-original");
+        let child = original.group("cancelled-child");
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let _handle = child.spawn_try_named("actual-cancelled-child", async move {
+            started_tx.send(()).expect("actual child readiness");
+            futures::future::pending::<Result<(), aura_core::AuraError>>().await
+        });
+        started.await.expect("actual registered child polled");
+        let seal = original.seal_admission();
+        original.request_cancellation();
+        let acknowledged = seal.await_disposal().await;
+        assert!(acknowledged.failure().is_none());
+        assert!(matches!(
+            acknowledged.execution_outcome(),
+            TaskGroupExecutionOutcome::Interrupted(TaskSupervisionError::Cancelled { .. })
+        ));
+        acknowledged
+            .require_original_group(&original)
+            .expect("resource disposal retains exact original scope");
+    }
+
+    #[tokio::test]
+    async fn sealed_disposal_wait_retains_original_scope_and_actual_descendant_failure() {
+        let supervisor = TaskSupervisor::new();
+        let original = supervisor.group("sealed-original");
+        let child = original.group("child");
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (release_tx, release) = tokio::sync::oneshot::channel();
+        let source = aura_core::AuraError::Storage {
+            message: "original descendant storage failure".into(),
+            source: Some(Arc::new(aura_core::effects::StorageError::WriteFailed(
+                "selected original provider".into(),
+            ))),
+        };
+        let _handle = child.spawn_try_named("actual-child", async move {
+            started_tx
+                .send(())
+                .expect("original owner observes readiness");
+            release.await.expect("original owner releases execution");
+            Err(source)
+        });
+        started.await.expect("actual task is running");
+        let sealed = original.seal_admission();
+        assert!(sealed.await_disposal().now_or_never().is_none());
+        // Dropping the observation above leaves the original seal and actual
+        // registration intact; it cannot certify callback destruction.
+        assert!(!original.active_tasks().is_empty());
+        release_tx.send(()).expect("release registered child");
+        let acknowledged = sealed.await_disposal().await;
+        acknowledged
+            .require_original_group(&original)
+            .expect("actual original subtree");
+        assert!(matches!(
+            acknowledged.failure(),
+            Some(TaskSupervisionError::TaskFailed { source, .. })
+                if std::error::Error::source(source)
+                    .is_some_and(|source| source.is::<aura_core::effects::StorageError>())
+        ));
+        assert!(original.active_tasks().is_empty());
+        let foreign = TaskSupervisor::new().group("sealed-original");
+        assert!(acknowledged.require_original_group(&foreign).is_err());
+        assert!(acknowledged.require_original_group(&child).is_err());
+    }
+
+    #[tokio::test]
+    async fn original_seal_rejects_admission_from_retained_and_new_descendants() {
+        let supervisor = TaskSupervisor::new();
+        let original = supervisor.group("sealed-admission");
+        let retained = original.group("retained-child");
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (attempt_tx, attempt) = tokio::sync::oneshot::channel();
+        let late = retained.clone();
+        let polled = Arc::new(AtomicUsize::new(0));
+        let actual_polled = polled.clone();
+        let _handle = retained.spawn_try_named("admission-contender", async move {
+            started_tx.send(()).expect("registered contender readiness");
+            attempt.await.expect("owner seals before admission attempt");
+            let _rejected = late.spawn_named("after-seal", async move {
+                actual_polled.fetch_add(1, Ordering::SeqCst);
+            });
+            Ok(())
+        });
+        started.await.expect("actual admission contender");
+        let sealed = original.seal_admission();
+        let after_seal = original.group("new-child");
+        let new_polled = polled.clone();
+        let _rejected = after_seal.spawn_named("new-descendant", async move {
+            new_polled.fetch_add(1, Ordering::SeqCst);
+        });
+        attempt_tx.send(()).expect("release actual contender");
+        let acknowledged = sealed.await_disposal().await;
+        assert_eq!(polled.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            acknowledged.failure(),
+            Some(TaskSupervisionError::AdmissionClosed { .. })
+        ));
+        acknowledged
+            .require_original_group(&original)
+            .expect("failed admission does not forge another scope");
     }
 }

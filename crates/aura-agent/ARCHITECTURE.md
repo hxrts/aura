@@ -972,6 +972,8 @@ Only verified recovery reaches the private storage helper without the live reser
 
 ### Initial persistent enrollment allocation
 
+Persistent tracker construction accepts only the original `Arc<AuraEffectSystem>`; that exact owner supplies both physical time and storage. Independent clock injection belongs to standalone nonpersistent trackers. Persistent simulations install virtual time in the effect system itself, so allocation, deadline observation, and durable acknowledgment cannot select different providers.
+
 Generic `CeremonyRunner::start` and tracker registration cannot allocate persistent device enrollment from plain request facts. The owned enrollment entry accepts the actual held `EnrollmentGenerationReservation`, and immutable allocation publication independently checks that owner before writing. Another effect instance, physical roster/policy, ceremony, epoch, prestate, or terminal state cannot reuse the reservation. Missing ownership returns structural `RequiredOwner` before durable or tracker mutation.
 
 Guardian ceremonies retain their generic registration contract. Nonpersistent tracker models may register enrollment facts for pure state-machine testing; they do not authorize runtime signing activation. Recovery does not re-enter generic registration: it reconstructs original verified durable evidence and preserves original start, deadline and observation history. Declaration attributes point to the typed owner delegates and validation methods, with actual raw-registration refusal tests providing the integration guard.
@@ -1320,16 +1322,20 @@ EnrollmentFinalVerifierInventoryCapability borrows the actual held EnrollmentGen
 
 The original registered execution window is admitted before any initiator task
 is spawned. Its actual semaphore lease and persisted clock owner move into the
-initiator. A second facade sharing the same runtime observes structural
-`AlreadyRunning` and does not spawn another initiator, sole finalizer, or peer
+initiator. Only an accepted actual registry spawn can retain a running
+observation in that same canonical entry. A second facade must match the full
+original invitation and provider and check that exact registration is still
+live before observing `AlreadyRunning`; a busy lease or absent root cannot
+establish it. It does not spawn another initiator, sole finalizer, or peer
 rotation owner. Closed lease, original checkpoint, and clock faults retain their
 sources and remain failures. Task admission faults retain supervisor evidence;
 an already-owned window never authorizes ceremony failure or retirement.
 
 The runtime identity and immutable original registration remain prerequisites.
 The lease bounds concurrent execution; it does not prove remote acceptance,
-new quorum agreement, or completed profile activation. Recovered runtimes must
-reauthorize the exact original window before claiming a new execution lease.
+new quorum agreement, or completed profile activation. Completion, cancellation,
+abort, and failed admission invalidate the running observation. Recovered
+Pending or Closed records cannot reconstruct its root or live registration.
 
 ### Original enrollment history identity
 
@@ -1444,26 +1450,66 @@ cryptographic erasure or generation-specific wrapping-key lifetime.
 
 ### Admitted clock anchor and checkpoint boundary
 
-`EnrollmentWindowCapability::admitted` retains the actual
-`AdmittedEnrollmentWindowLeaseCapability` through original publication recovery.
-The lease checks physical effect-owner identity. Recovery rereads and revalidates
-the original protected admission before completing missing initial bytes. Ordinary
-required/reimport readers never invoke this completion producer.
+Fresh explicit admission publishes a Pending birth before it can transfer an
+`EnrollmentExecutionRoot<AdmittedEnrollmentManifest>`. Its private constructor
+consumes the actual original provider acknowledgment, checks the exact physical
+provider and admitted binding, and retains the original
+`AdmittedEnrollmentWindowLeaseCapability`. No retained-record decoder or missing
+initial-publication repair can construct another execution root.
 
 `admitted_enrollment_clock_anchor_v2` retains the immutable original binding and
 interval; `admitted_enrollment_clock_checkpoint_v2` is the independently mutable
-highwater record. `admitted_enrollment_clock_ever_live_v2` acknowledges the first
-execution admission before checkpoint-backed execution. After that decision, loss
-of either required clock record cannot cause initialization. Legacy v1 migration
-under the same held owner retains its original capped interval and bytes.
+highwater and phase record. The original locators remain stable across a breaking
+codec change so obsolete bytes cannot appear to be an absent allocation. Obsolete
+records are refused without migration. Pending and Closed records cannot restore
+execution authority, including after a committed write whose acknowledgment was
+lost. Missing required records cannot cause initialization.
 
-The actual public enrollment fixture exercises checkpoint updates against the
-protected anchor, interrupted initial publication, restoration without deadline
-renewal and missing checkpoint after live admission. The interval regression
-distinguishes original legacy attenuation from the fresh signed interval. Actual
-same-profile AgentBuilder reconstruction and legacy-layout provider-fault cases
-remain required broader integration validation; these checks alone do not prove
-full restart closure.
+The existing bounded invitation manager retains the move-owned root alongside
+its canonical invitation. Repeat transfer borrows that original root and checks
+exact code, independent manifest selection, provider and original endpoint; an
+observed cache refresh cannot replace its immutable admission fields. Acceptance
+takes the root once. Its canonical context selects the required guard snapshot,
+without default-context, clock or flow-budget fallback.
+
+The ceremony tracker likewise separates its private canonical entry from the
+cloneable `TrackedCeremony` observation. Its execution slot holds a move-owned
+root; snapshot restoration fills only observed state. A registered checkpoint
+retains the selected provider but references the exact original tracker weakly,
+avoiding an ownership cycle through the entry. Losing that actor produces a
+concrete original-owner-loss refusal; retained provider or snapshot bytes cannot
+reconstruct the actor or acknowledge execution.
+
+Fresh issuer rotation additionally retains a private move-owned physical
+allocation acknowledgment. Both immutable allocation and mutable profile writes
+must report Created and match their original readbacks. AlreadyPresent and
+recovered records never produce that acknowledgment. The original reservation
+transfers it once into Pending publication; the shared original-deadline
+publication boundary returns the actual acknowledgment only after selected
+provider validation. Issuance takes the resulting tracker root, borrows its
+children for signing, and returns the same root for registered protocol handoff.
+Neither clock recovery nor successful task observation substitutes for it.
+
+Issuer terminal signing retains a noncloneable, nonserializable receipt from
+the existing generation/tree guarded control signer. It carries the exact
+physical runtime, independently retained issued control, and original signed
+terminal frame. The original allocation compares the retained setup binding,
+invitation, subject, epoch and device before binding the complete canonical
+invitation immutably. Wire decoding and a VM's unit completion cannot issue
+this receipt. The protocol child carries it through actual VM teardown; the
+root first seals and observes its original registered child subtree's disposal,
+then the shared `acknowledge_with_timeout_budget` boundary publishes its ACK
+only after the scoped Pending-to-Closed write and exact readback. Child drain
+does not hold the ACK observation gate. Lost ACK, cancelled execution, provider
+failure, or a dropped root cannot recover positive execution from phase bytes.
+
+Owned descendants receive attenuated `EnrollmentExecutionChild` values with the
+same original endpoint. Only consuming the root with the original verified domain
+terminal and sealed child-subtree disposal can acknowledge Closed. Disposal alone
+is repeatable observation and grants no terminal authority. Positive settlement
+requires completed child execution and independent domain evidence. Actual
+restart, lost acknowledgment, cancellation, provider fault and metadata mutation
+fixtures must validate these boundaries before the work is considered complete.
 
 ### Protected enrollment response policy
 
@@ -1928,3 +1974,10 @@ cross-authority transport. AMP, journal, and membership readiness remain with
 their shared owners. Required initiation and snapshot validity use fallible
 selected physical milliseconds; native guard, service, and clock causes survive
 the runtime bridge with their peer/context binding.
+
+Approved enrollment signing receive registers canonical inbox readiness before
+checking its exact session. Local ingress and shared transport signal the same
+original inbox; configured providers retain their required readiness contract.
+Unrelated frames remain queued without waking a polling loop. The sealed
+original enrollment child bounds the complete wait and preserves native errors;
+no arrival advances time or reconstructs a window (docs/111).

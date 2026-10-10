@@ -174,8 +174,11 @@ mod enrollment_vm_admission;
 pub(super) use enrollment_vm_admission::retain_quorum_initial_request;
 mod required_channel_read;
 pub(crate) use enrollment_trust::VerifiedEnrollmentResponse;
+#[cfg(test)]
+pub(crate) use enrollment_vm_admission::issue_original_terminal_receipt;
 pub(crate) use enrollment_vm_admission::{
-    EnrollmentVmAdmissionError, VerifiedEnrollmentFailureCapability,
+    EnrollmentVmAdmissionError, IssuerEnrollmentTerminalReceipt, VerifiedEnrollmentConfirmation,
+    VerifiedEnrollmentFailureCapability,
 };
 mod exchange;
 mod execution;
@@ -1516,6 +1519,23 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
+        let canonical = self
+            .get_invitation_with_storage(effects.as_ref(), invitation_id)
+            .await
+            .ok_or_else(|| {
+                aura_core::AuraError::permission_denied(
+                    "ordinary invitation acceptance requires canonical invitation metadata",
+                )
+            })?;
+        if matches!(
+            canonical.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            return Err(aura_core::AuraError::permission_denied(
+                "enrollment acceptance requires the retained original execution root",
+            )
+            .into());
+        }
         let operation_budget = invitation_timeout_budget(
             effects.as_ref(),
             "accept_invitation",
@@ -1535,22 +1555,6 @@ impl InvitationHandler {
                     CachedInvitationActionValidation::Accept { now_ms },
                 )
                 .await?;
-                if let Some(invitation) = self
-                    .get_invitation_with_storage(effects.as_ref(), invitation_id)
-                    .await
-                {
-                    if matches!(
-                        invitation.invitation_type,
-                        InvitationType::DeviceEnrollment { .. }
-                    ) {
-                        enrollment_manifest_admission::load_admitted_baseline(
-                            effects.as_ref(),
-                            invitation.receiver_id,
-                            &invitation,
-                        )
-                        .await?;
-                    }
-                }
                 Ok(now_ms)
             },
         )
@@ -1562,20 +1566,7 @@ impl InvitationHandler {
             &operation_budget,
             "accept_invitation_prepare",
             INVITATION_ACCEPT_PREPARE_STAGE_TIMEOUT_MS,
-            async {
-                // Stamp before snapshotting so the snapshot is never held
-                // across an await in the accept state machine.
-                let causal = crate::handlers::shared::stamp_invitation_outcome_causal(
-                    effects.as_ref(),
-                    self.context.authority.authority_id(),
-                    invitation_id,
-                )
-                .await?;
-                let snapshot = self.build_snapshot(effects.as_ref()).await;
-                Ok(self
-                    .service
-                    .prepare_accept_invitation(&snapshot, invitation_id, causal))
-            },
+            self.prepare_accept_invitation_outcome(effects.as_ref(), invitation_id),
         )
         .await?;
 
@@ -1640,7 +1631,7 @@ impl InvitationHandler {
             .update_invitation(invitation_id, |inv| {
                 inv.status = InvitationStatus::Accepted;
             })
-            .await;
+            .await?;
 
         let choreography_invitation = self
             .load_invitation_for_choreography(effects.as_ref(), invitation_id)
@@ -1682,6 +1673,104 @@ impl InvitationHandler {
         ))
     }
 
+    async fn prepare_accept_invitation_outcome(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<aura_invitation::guards::GuardOutcome> {
+        let snapshot = self.build_snapshot(effects).await;
+        self.prepare_accept_invitation_from_snapshot(effects, invitation_id, &snapshot)
+            .await
+    }
+
+    async fn prepare_accept_invitation_from_snapshot(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+        snapshot: &GuardSnapshot,
+    ) -> AgentResult<aura_invitation::guards::GuardOutcome> {
+        let causal = crate::handlers::shared::stamp_invitation_outcome_causal(
+            effects,
+            self.context.authority.authority_id(),
+            invitation_id,
+        )
+        .await?;
+        Ok(self
+            .service
+            .prepare_accept_invitation(snapshot, invitation_id, causal))
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_enrollment_execution_root",
+        capability_type = crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<enrollment_manifest_admission::AdmittedEnrollmentManifest,>,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn accept_original_enrollment_invitation(
+        &self,
+        effects: &AuraEffectSystem,
+        root: &crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        >,
+    ) -> AgentResult<InvitationResult> {
+        let invitation = root.origin().canonical_invitation();
+        let result = root
+            .child()
+            .execute(effects, || async {
+                if invitation.receiver_id != effects.runtime_authority_id() {
+                    return Err(aura_core::AuraError::permission_denied(
+                        "original enrollment invitation has another local receiver",
+                    )
+                    .into());
+                }
+                let snapshot = self
+                    .build_required_snapshot_for_context(effects, invitation.context_id)
+                    .await?;
+                let now_ms = snapshot.now_ms;
+                if invitation.is_expired(now_ms) {
+                    return Err(aura_core::AuraError::permission_denied(
+                        "original enrollment invitation expired",
+                    )
+                    .into());
+                }
+                let outcome = self
+                    .prepare_accept_invitation_from_snapshot(
+                        effects,
+                        &invitation.invitation_id,
+                        &snapshot,
+                    )
+                    .await?;
+                execute_guard_outcome_for_accept(outcome, &self.context.authority, effects).await?;
+                crate::runtime::services::enrollment_import::install_admitted_generation(
+                    effects,
+                    root.origin(),
+                )
+                .await
+                .map_err(AgentError::from)?;
+                self.update_imported_invitation_status_if_present(
+                    effects,
+                    &invitation.invitation_id,
+                    InvitationStatus::Accepted,
+                    now_ms,
+                )
+                .await?;
+                self.invitation_cache
+                    .update_invitation(&invitation.invitation_id, |cached| {
+                        cached.status = InvitationStatus::Accepted;
+                    })
+                    .await?;
+                Ok(InvitationResult::new(
+                    invitation.invitation_id.clone(),
+                    InvitationStatus::Accepted,
+                ))
+            })
+            .await;
+        result.map_err(|source| {
+            root.child()
+                .map_run_error("original enrollment acceptance", source)
+        })
+    }
+
     async fn materialize_accept_invitation_state(
         &self,
         effects: Arc<AuraEffectSystem>,
@@ -1695,8 +1784,6 @@ impl InvitationHandler {
         )
         .await?;
         self.materialize_channel_acceptance_if_needed(effects.as_ref(), invitation_id)
-            .await?;
-        self.materialize_device_enrollment_acceptance_if_needed(effects.as_ref(), invitation_id)
             .await
     }
 
@@ -1894,34 +1981,6 @@ impl InvitationHandler {
         Ok(creation)
     }
 
-    async fn materialize_device_enrollment_acceptance_if_needed(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> AgentResult<()> {
-        let Some(canonical) = self
-            .get_invitation_with_storage(effects, invitation_id)
-            .await
-        else {
-            return Ok(());
-        };
-        if !matches!(
-            canonical.invitation_type,
-            InvitationType::DeviceEnrollment { .. }
-        ) {
-            return Ok(());
-        }
-        let admitted = enrollment_manifest_admission::load_admitted_baseline(
-            effects,
-            canonical.receiver_id,
-            &canonical,
-        )
-        .await?;
-        crate::runtime::services::enrollment_import::install_admitted_generation(effects, &admitted)
-            .await
-            .map_err(AgentError::from)
-    }
-
     async fn execute_accept_invitation_follow_up(
         &self,
         effects: Arc<AuraEffectSystem>,
@@ -2084,6 +2143,40 @@ impl InvitationHandler {
     ) -> AgentResult<()> {
         InvitationChannelHandler::new(self)
             .materialize_channel_bootstrap_acceptance(effects, invite, bootstrap_id)
+            .await
+    }
+
+    pub(crate) async fn observe_original_enrollment_transfer(
+        &self,
+        effects: &AuraEffectSystem,
+        code: &str,
+        pin: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
+    ) -> Result<Option<Invitation>, aura_core::AuraError> {
+        self.invitation_cache
+            .observe_admitted_enrollment(effects, code, pin)
+            .await
+    }
+
+    pub(crate) async fn retain_original_enrollment_execution(
+        &self,
+        root: crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        >,
+    ) -> Result<(), aura_core::AuraError> {
+        self.invitation_cache.cache_admitted_enrollment(root).await
+    }
+
+    pub(crate) async fn take_original_enrollment_execution(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<
+        crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        >,
+        aura_core::AuraError,
+    > {
+        self.invitation_cache
+            .take_admitted_enrollment(invitation)
             .await
     }
 
@@ -2473,23 +2566,23 @@ impl InvitationHandler {
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
-        tasks: &crate::task_registry::TaskGroup,
+        _tasks: &crate::task_registry::TaskGroup,
     ) -> AgentResult<InvitationResult> {
-        let admitted = enrollment_manifest_admission::load_admitted_enrollment_for_id(
-            effects.as_ref(),
-            self.context.authority.authority_id(),
-            invitation_id,
-        )
-        .await
-        .map_err(AgentError::EnrollmentManifest)?;
-        let enrollment_response = admitted.is_some();
-        if let Some(admitted) = admitted {
+        let observed = self
+            .get_invitation_with_storage(effects.as_ref(), invitation_id)
+            .await;
+        let enrollment_response = observed.as_ref().is_some_and(|invitation| {
+            matches!(
+                invitation.invitation_type,
+                InvitationType::DeviceEnrollment { .. }
+            )
+        });
+        if enrollment_response {
+            let root = self
+                .take_original_enrollment_execution(invitation_id)
+                .await?;
             device_enrollment::InvitationDeviceEnrollmentHandler::new(self)
-                .execute_device_enrollment_invitee_decline(
-                    effects.clone(),
-                    Arc::new(admitted),
-                    tasks,
-                )
+                .execute_device_enrollment_invitee_decline(effects.clone(), root)
                 .await?;
         }
         self.validate_cached_invitation_for_action(
@@ -2535,7 +2628,7 @@ impl InvitationHandler {
             .update_invitation(invitation_id, |inv| {
                 inv.status = InvitationStatus::Declined;
             })
-            .await;
+            .await?;
 
         if !enrollment_response {
             if let Some(invitation) = self

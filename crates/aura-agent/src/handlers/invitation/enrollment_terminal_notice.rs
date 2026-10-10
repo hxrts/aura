@@ -7,7 +7,7 @@ use super::enrollment_vm_admission::{
 };
 use super::*;
 use crate::runtime::services::ceremony_runner::CeremonyRunner;
-use crate::runtime::services::enrollment_window::EnrollmentWindowCapability;
+use crate::runtime::services::enrollment_window::EnrollmentExecutionChild;
 use crate::runtime::session_ingress::OwnedVmSession;
 use aura_invitation::protocol::DeviceEnrollmentTerminalNotice;
 use std::collections::BTreeMap;
@@ -50,7 +50,7 @@ fn discard_unverified_notice(error: &AgentError) -> bool {
 /// Each variant retains its protocol-specific owner; recovery has no active
 /// request/response admission authority.
 enum IssuedNoticeWindowCapability<'a> {
-    Active(&'a EnrollmentWindowCapability),
+    Active(&'a EnrollmentExecutionChild),
     Cancelled(
         &'a crate::runtime::services::enrollment_window::CancelledEnrollmentNoticeWindowCapability,
     ),
@@ -97,10 +97,7 @@ enum NoticeIngressCapability<'a> {
         &'a RetainedEnrollmentVmControl,
         IssuedNoticeWindowCapability<'a>,
     ),
-    Admitted(
-        &'a AdmittedEnrollmentManifest,
-        &'a EnrollmentWindowCapability,
-    ),
+    Admitted(&'a AdmittedEnrollmentManifest, &'a EnrollmentExecutionChild),
 }
 #[aura_macros::capability_boundary(
     category = "capability_gated",
@@ -171,7 +168,7 @@ pub(super) async fn sign_cancelled_notice(
     issued: &RetainedEnrollmentVmControl,
     runner: &CeremonyRunner,
     cancelled: &crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
-    window: &EnrollmentWindowCapability,
+    window: &EnrollmentExecutionChild,
 ) -> AgentResult<SignedCancelledNotice> {
     let bytes = sign_cancelled_notice_bytes(
         effects,
@@ -194,7 +191,7 @@ pub(super) async fn send_cancelled_notice(
     effects: Arc<AuraEffectSystem>,
     issued: &RetainedEnrollmentVmControl,
     notice: &SignedCancelledNotice,
-    window: &EnrollmentWindowCapability,
+    window: &EnrollmentExecutionChild,
     slot: &mut Option<OwnedVmSession>,
 ) -> AgentResult<()> {
     let validity = window
@@ -521,13 +518,13 @@ async fn send_recovered_cancelled_notice(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "admitted_original_window_terminal_notice",
-    capability_type = EnrollmentWindowCapability,
+    capability_type = EnrollmentExecutionChild,
     family = "runtime_helper"
 )]
 pub(super) async fn receive_cancelled_notice(
     effects: Arc<AuraEffectSystem>,
     admitted: &AdmittedEnrollmentManifest,
-    window: &EnrollmentWindowCapability,
+    window: &EnrollmentExecutionChild,
     slot: &mut Option<OwnedVmSession>,
 ) -> AgentResult<VerifiedEnrollmentFailureCapability> {
     window

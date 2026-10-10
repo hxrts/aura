@@ -205,3 +205,7 @@ MockRuntimeBridge registers absolute physical endpoints against its existing con
 The mock retains one `ManualPhysicalClock` for reads, explicit advances, setters,
 and absolute waits. Its runtime provider accessor returns that same original
 clock, sharing state and native failure semantics with workflow timeout owners.
+
+The configured transport probe owns an arrival event alongside its original
+queue. Delayed enqueue and provider faults wake the same registered observer;
+readiness consumes no frame and requires no physical-clock advancement.

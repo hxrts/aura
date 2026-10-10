@@ -121,7 +121,7 @@ impl AgentRuntimeBridge {
 
         #[cfg(test)]
         eprintln!("enrollment initiation stage: prepare pinned generation");
-        let (pending_epoch, key_packages, _public_key, generation_reservation) = effects
+        let (pending_epoch, key_packages, _public_key, mut generation_reservation) = effects
             .prepare_pinned_enrollment_rotation(&setup, &reserved, &ceremony_id, plan)
             .await
             .map_err(|e| IssueError::at(Stage::Rotation, e))?;
@@ -249,7 +249,7 @@ impl AgentRuntimeBridge {
         eprintln!("enrollment initiation stage: register held generation");
         runner
             .start_owned_device_enrollment(
-                &generation_reservation,
+                &mut generation_reservation,
                 CeremonyInitRequest {
                     ceremony_id: ceremony_id.clone(),
                     kind: aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
@@ -262,17 +262,23 @@ impl AgentRuntimeBridge {
                     enrollment_nickname_suggestion: nickname_for_tracker,
                     prestate_hash,
                 },
+                &self
+                    .agent
+                    .runtime()
+                    .tasks()
+                    .group("original-enrollment-issuance"),
             )
             .await
             .map_err(|e| IssueError::at(Stage::CeremonyRegistration, e))?;
 
-        let original_window = if preparation.is_some() {
-            Some(crate::runtime::services::enrollment_window::EnrollmentWindowCapability::held_issuer(
-                effects.clone(), &issuance_tracker, &generation_reservation,
-            ).await.map_err(|source| IssueError::at(Stage::CeremonyRegistration, source))?)
-        } else {
-            None
-        };
+        let original_window = issuance_tracker
+            .held_issuer_window(&effects, &generation_reservation)
+            .await
+            .map_err(|source| IssueError::at(Stage::CeremonyRegistration, source))?;
+
+        let (enrollment_code, manifest_transfer, registered_generation) = original_window
+            .child()
+            .execute(effects.as_ref(), || async {
 
         #[cfg(test)]
         eprintln!("enrollment initiation stage: export original baseline");
@@ -400,7 +406,7 @@ impl AgentRuntimeBridge {
                     },
                 )
                 .map_err(|source| IssueError::at(Stage::InvitationExport, source))?;
-            let window = original_window.as_ref().ok_or(IssueError::InvalidPolicy)?;
+            let window = original_window.child();
             let approval = preparation
                 .require_original_user_approval(
                     effects.clone(),
@@ -516,10 +522,6 @@ impl AgentRuntimeBridge {
                     .await
                     .map_err(|source| IssueError::at(Stage::InvitationExport, source))?
             };
-        // Release the exact prepared execution lease only after both original
-        // domains and required actor acknowledgment have completed.
-        drop(original_window);
-
         let registration = self
             .agent
             .runtime()
@@ -539,6 +541,20 @@ impl AgentRuntimeBridge {
             .complete_registration()
             .await
             .map_err(|e| IssueError::at(Stage::CeremonyRegistration, e))?;
+
+        Ok::<_, IssueError>((enrollment_code, manifest_transfer, registered_generation))
+            })
+            .await
+            .map_err(|source| match source {
+                aura_core::time::timeout::TimeoutRunError::Operation(source) => source,
+                aura_core::time::timeout::TimeoutRunError::Timeout(source) =>
+                    IssueError::at(Stage::CeremonyRegistration, aura_core::AuraError::from(source)),
+            })?;
+        // Preserve the same original execution authority only after all required
+        // issuance and registration writes finish under its selected window.
+        issuance_tracker
+            .retain_original_issuer_execution(original_window)
+            .map_err(|source| IssueError::at(Stage::CeremonyRegistration, source))?;
 
         let admission = invitation_service
             .start_registered_device_enrollment(&registered_generation)

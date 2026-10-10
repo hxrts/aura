@@ -373,11 +373,105 @@ pub(crate) struct EnrollmentGenerationReservation<'a> {
     owner: StoredEnrollmentGenerationProfile,
     _tree: aura_protocol::handlers::tree::TreeDecisionLease<'a>,
     _owner: crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'a>,
+    original_birth: Option<OriginalEnrollmentAllocationAcknowledgment>,
+}
+
+/// Actual fresh physical allocation acknowledgment. Protected bytes cannot
+/// decode this owner, and recovery never manufactures a replacement.
+pub(in crate::runtime) struct OriginalEnrollmentAllocationAcknowledgment {
+    runtime_identity: std::sync::Arc<()>,
+    original: StoredEnrollmentGenerationProfile,
+}
+
+impl OriginalEnrollmentAllocationAcknowledgment {
+    pub(in crate::runtime) fn require_registered_generation(
+        &self,
+        effects: &AuraEffectSystem,
+        generation: &RegisteredEnrollmentGenerationCapability<'_>,
+    ) -> Result<(), AuraError> {
+        generation.require_effects(effects)?;
+        let invitation = generation.canonical_invitation();
+        let aura_invitation::InvitationType::DeviceEnrollment {
+            subject_authority,
+            ceremony_id,
+            pending_epoch,
+            setup_binding,
+            initiator_device_id,
+            device_id,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::InvitationKind,
+            ));
+        };
+        if !Arc::ptr_eq(
+            &self.runtime_identity,
+            &effects.crypto.lifetime_owner_identity(),
+        ) || self.original.authority != invitation.sender_id
+            || self.original.authority != *subject_authority
+            || self.original.ceremony != *ceremony_id
+            || self.original.invitation != invitation.invitation_id
+            || self.original.pending_epoch != *pending_epoch
+            || self.original.setup_digest != setup_binding.digest
+            || *initiator_device_id != effects.device_id()
+            || !self
+                .original
+                .participants
+                .contains(&ParticipantIdentity::device(*device_id))
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
+    pub(in crate::runtime) fn require_issued_control(
+        &self,
+        effects: &AuraEffectSystem,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        issued.require_runtime_owner(effects)?;
+        let manifest = issued.manifest();
+        if !std::sync::Arc::ptr_eq(
+            &self.runtime_identity,
+            &effects.crypto.lifetime_owner_identity(),
+        ) || self.original.authority != manifest.subject
+            || self.original.ceremony != manifest.ceremony
+            || self.original.invitation != manifest.invitation
+            || self.original.pending_epoch != manifest.pending_epoch
+            || self.original.setup_digest != manifest.setup.digest
+            || manifest.initiator_device != effects.device_id()
+            || !self
+                .original
+                .participants
+                .contains(&ParticipantIdentity::device(manifest.invitee_device))
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct RotatedKeyMaterial {
+    epoch: u64,
+    packages: Vec<Vec<u8>>,
+    public: Vec<u8>,
+}
+
+enum RotatedOwnedProfile {
+    Ordinary(RotatedKeyMaterial),
+    Enrollment {
+        material: RotatedKeyMaterial,
+        original_birth: Box<OriginalEnrollmentAllocationAcknowledgment>,
+    },
 }
 
 /// Response quorum is distinct from the threshold policy of the new signing key.
 /// Its original protected allocation commitment authorizes tracker comparisons.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EnrollmentResponsePolicy {
     required: u16,
@@ -428,7 +522,7 @@ impl EnrollmentResponsePolicy {
         self.total
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredEnrollmentGenerationProfile {
     registered: bool,
@@ -566,6 +660,10 @@ pub(crate) enum HeldEnrollmentRegistrationError {
     BaselineBinding,
     #[error("registration differs from held enrollment generation bindings")]
     Binding,
+    #[error("the immutable original enrollment allocation was already published")]
+    AllocationAlreadyPublished,
+    #[error("enrollment execution requires the actual fresh physical allocation acknowledgment")]
+    MissingOriginalBirth,
 }
 pub(crate) fn held_registration_error(reason: HeldEnrollmentRegistrationError) -> AuraError {
     AuraError::Invalid {
@@ -574,6 +672,32 @@ pub(crate) fn held_registration_error(reason: HeldEnrollmentRegistrationError) -
     }
 }
 impl<'runtime> EnrollmentGenerationReservation<'runtime> {
+    pub(in crate::runtime) fn require_original_birth(&self) -> Result<(), AuraError> {
+        let birth = self.original_birth.as_ref().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::MissingOriginalBirth)
+        })?;
+        self.require_effects(self.effects)?;
+        if !std::sync::Arc::ptr_eq(
+            &birth.runtime_identity,
+            &self.effects.crypto.lifetime_owner_identity(),
+        ) || birth.original != self.owner
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in crate::runtime) fn take_original_birth(
+        &mut self,
+    ) -> Result<OriginalEnrollmentAllocationAcknowledgment, AuraError> {
+        self.require_original_birth()?;
+        self.original_birth.take().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::MissingOriginalBirth)
+        })
+    }
+
     pub(crate) fn response_policy(&self) -> Result<EnrollmentResponsePolicy, AuraError> {
         self.owner.response_policy()
     }
@@ -1569,6 +1693,7 @@ impl AuraEffectSystem {
                 owner,
                 _tree: tree,
                 _owner: decision,
+                original_birth: None,
             },
             original,
         ))
@@ -2686,7 +2811,7 @@ impl AuraEffectSystem {
             &AuthenticatedEnrollmentRotationPlan<'_>,
         )>,
         generation: &EnrollmentGenerationCustodyCapability<'_>,
-    ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
+    ) -> Result<RotatedOwnedProfile, AuraError> {
         tracing::info!(
             ?authority,
             new_threshold,
@@ -2728,9 +2853,11 @@ impl AuraEffectSystem {
             .await?;
         let profile = super::enrollment_generation_profile_location(authority, new_epoch);
         if self.secure_exists(&profile).await? {
-            return Err(AuraError::invalid("an enrollment owns this pending generation; recovery is required before replacement"));
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::AllocationAlreadyPublished,
+            ));
         }
-        if let Some((owner, _)) = enrollment {
+        let original_birth = if let Some((owner, _)) = enrollment {
             // Reserve activation ownership before any pending package becomes visible.
             let mut record = owner.clone();
             record.pending_epoch = new_epoch;
@@ -2747,15 +2874,21 @@ impl AuraEffectSystem {
                     HeldEnrollmentRegistrationError::Binding,
                 ));
             }
-            self.secure_store_immutable(
-                &original_location,
-                &bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await?;
+            let immutable = self
+                .secure_store_immutable(
+                    &original_location,
+                    &bytes,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await?;
+            if immutable != aura_core::effects::secure::ImmutableSecureStoreOutcome::Created {
+                return Err(held_registration_error(
+                    HeldEnrollmentRegistrationError::AllocationAlreadyPublished,
+                ));
+            }
             let original = self
                 .secure_retrieve(&original_location, &[SecureStorageCapability::Read])
                 .await?;
@@ -2779,7 +2912,21 @@ impl AuraEffectSystem {
                     "an enrollment already owns this pending generation",
                 ));
             }
-        }
+            let mutable = self
+                .secure_retrieve(&profile, &[SecureStorageCapability::Read])
+                .await?;
+            if mutable != bytes {
+                return Err(held_registration_error(
+                    HeldEnrollmentRegistrationError::Binding,
+                ));
+            }
+            Some(OriginalEnrollmentAllocationAcknowledgment {
+                runtime_identity: self.crypto.lifetime_owner_identity(),
+                original: record,
+            })
+        } else {
+            None
+        };
 
         tracing::debug!(
             ?authority,
@@ -2858,7 +3005,18 @@ impl AuraEffectSystem {
         .await?;
 
         let (key_packages, public_key_package) = key_result.into_parts();
-        Ok((new_epoch, key_packages, public_key_package))
+        let material = RotatedKeyMaterial {
+            epoch: new_epoch,
+            packages: key_packages,
+            public: public_key_package,
+        };
+        Ok(match original_birth {
+            Some(original_birth) => RotatedOwnedProfile::Enrollment {
+                material,
+                original_birth: Box::new(original_birth),
+            },
+            None => RotatedOwnedProfile::Ordinary(material),
+        })
     }
 
     /// Mint the only live roster/prestate authority under generation then tree custody.
@@ -3098,7 +3256,7 @@ impl AuraEffectSystem {
             threshold,
             participants: participants.to_vec(),
         };
-        let (epoch, packages, public) = self
+        let rotated = self
             .rotate_keys_for_owned_profile(
                 &self.authority_id,
                 threshold,
@@ -3108,6 +3266,20 @@ impl AuraEffectSystem {
                 plan.generation.generation(),
             )
             .await?;
+        let RotatedOwnedProfile::Enrollment {
+            material:
+                RotatedKeyMaterial {
+                    epoch,
+                    packages,
+                    public,
+                },
+            original_birth,
+        } = rotated
+        else {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::MissingOriginalBirth,
+            ));
+        };
         if plan.state.epoch.value().checked_add(1) != Some(epoch) {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::Binding,
@@ -3123,6 +3295,7 @@ impl AuraEffectSystem {
                 owner: profile_owner,
                 _owner: plan.generation,
                 _tree: plan.tree,
+                original_birth: Some(*original_birth),
             },
         ))
     }
@@ -4629,8 +4802,17 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         participants: &[aura_core::threshold::ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
         let owner = self.acquire_enrollment_generation_custody().await;
-        self.rotate_keys_for_owned_profile(authority, threshold, total, participants, None, &owner)
-            .await
+        match self
+            .rotate_keys_for_owned_profile(authority, threshold, total, participants, None, &owner)
+            .await?
+        {
+            RotatedOwnedProfile::Ordinary(material) => {
+                Ok((material.epoch, material.packages, material.public))
+            }
+            RotatedOwnedProfile::Enrollment { .. } => Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            )),
+        }
     }
 
     async fn commit_key_rotation(
@@ -6104,9 +6286,11 @@ mod registered_generation_actual_owner_tests {
 
     #[tokio::test]
     async fn equal_ids_cannot_handoff_registration_to_another_runtime() {
+        let original_clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
         let (issuer, _invitee, _invitation, start, _acceptance, _verified) =
-            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock(
                 "registration-actual-owner",
+                original_clock,
             )
             .await;
         let effects = issuer.runtime().effects();
@@ -6130,7 +6314,6 @@ mod registered_generation_actual_owner_tests {
             .expect("original physical effect owner");
         let detached =
             crate::runtime::services::ceremony_tracker::CeremonyTracker::new_with_storage(
-                effects.clone(),
                 effects.clone(),
             );
         let detached_runner =

@@ -34,6 +34,7 @@ struct AdmissionRecord {
 /// grants no membership, global transport identity or historical signing key.
 pub(crate) struct AdmittedEnrollmentManifest {
     canonical_invitation: Invitation,
+    original_code: String,
     baseline: VerifiedEnrollmentBaseline,
     local_setup: aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
     admitted_at_ms: u64,
@@ -49,6 +50,13 @@ impl NewEnrollmentAdmissionCapability<'_> {
     }
 }
 impl AdmittedEnrollmentManifest {
+    pub(crate) fn matches_original_transfer(
+        &self,
+        code: &str,
+        pin: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
+    ) -> bool {
+        self.original_code == code && self.manifest_digest() == pin.digest()
+    }
     pub(crate) fn admitted_at_ms(&self) -> u64 {
         self.admitted_at_ms
     }
@@ -83,15 +91,44 @@ fn boundary(error: impl std::error::Error + Send + Sync + 'static) -> Enrollment
     EnrollmentManifestError::Runtime(Box::new(error))
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum EnrollmentAdmissionBirthError {
+    #[error("original enrollment admission was already published")]
+    AlreadyPublished,
+    #[error("original enrollment admission publication lost fresh ownership")]
+    LostFreshPublication,
+}
+
+fn birth_refused(source: EnrollmentAdmissionBirthError) -> EnrollmentManifestError {
+    boundary(aura_core::AuraError::PermissionDenied {
+        message: "original enrollment admission birth refused".into(),
+        source: Some(std::sync::Arc::new(source)),
+    })
+}
+
 /// Admit only the opaque explicit app transfer selection. Discovery and raw
 /// cached invitations cannot call this API with a manufactured pin.
 pub(crate) async fn admit_user_transfer(
-    effects: &AuraEffectSystem,
+    effects: &std::sync::Arc<AuraEffectSystem>,
     provisional: AuthorityId,
     code: &str,
     pin: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
-) -> Result<AdmittedEnrollmentManifest, EnrollmentManifestError> {
+    original_tasks: &crate::task_registry::TaskGroup,
+) -> Result<
+    crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+        AdmittedEnrollmentManifest,
+    >,
+    EnrollmentManifestError,
+> {
     let _admission_owner = effects.lock_enrollment_manifest_admission().await;
+    let key = location(provisional, &pin.manifest().invitation);
+    // A retained record is negative restart evidence, never a source of another
+    // original execution owner. Refuse before observing a new physical clock.
+    if effects.secure_exists(&key).await.map_err(boundary)? {
+        return Err(birth_refused(
+            EnrollmentAdmissionBirthError::AlreadyPublished,
+        ));
+    }
     let now = effects.physical_time().await?.ts_ms;
     let record = AdmissionRecord {
         version: 1,
@@ -108,7 +145,6 @@ pub(crate) async fn admit_user_transfer(
     if encoded.len() > MAX_RECORD_BYTES {
         return Err(EnrollmentManifestError::Shape);
     }
-    let key = location(provisional, &record.invitation);
     let caps = [
         SecureStorageCapability::Read,
         SecureStorageCapability::Write,
@@ -121,43 +157,22 @@ pub(crate) async fn admit_user_transfer(
         outcome,
         aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists
     ) {
-        let old = effects
-            .secure_retrieve(&key, &caps)
-            .await
-            .map_err(boundary)?;
-        if old.len() > MAX_RECORD_BYTES {
-            return Err(EnrollmentManifestError::Shape);
-        }
-        let previous: AdmissionRecord =
-            aura_core::util::serialization::from_slice(&old).map_err(boundary)?;
-        // Preserve original owned admission time on an idempotent transfer.
-        if previous.provisional != record.provisional
-            || previous.device != record.device
-            || previous.invitation != record.invitation
-            || previous.code != record.code
-            || previous.manifest_code != record.manifest_code
-            || previous.selected_verifier != record.selected_verifier
-        {
-            #[cfg(test)]
-            eprintln!("enrollment admission Pin branch at {}:{}", file!(), line!());
-            return Err(EnrollmentManifestError::Pin);
-        }
-        let admitted = validate(effects, &previous, now).await?;
-        crate::runtime::services::enrollment_window::EnrollmentWindowCapability::require_retained_admitted_window(effects, &admitted).await.map_err(boundary)?;
-        retain_import_generation_owner(effects, &admitted).await?;
-        return Ok(admitted);
+        return Err(birth_refused(
+            EnrollmentAdmissionBirthError::LostFreshPublication,
+        ));
     }
-    crate::runtime::services::enrollment_window::EnrollmentWindowCapability::retain_new_admitted_window(
+    let birth = crate::runtime::services::enrollment_window::EnrollmentExecutionChild::retain_new_admitted_window(
         effects,
         NewEnrollmentAdmissionCapability { witness: &admitted },
     )
     .await
     .map_err(boundary)?;
-    // Created means the provider durably published complete encrypted bytes
-    // without replacement. AlreadyExists above requires the original pinned
-    // record's exact binding and cryptographic revalidation, never existence.
+    // Only this fresh publication ACK carries execution custody; restart and
+    // duplicate imports cannot reconstruct it from matching encrypted bytes.
     retain_import_generation_owner(effects, &admitted).await?;
-    Ok(admitted)
+    birth
+        .into_root(effects.clone(), admitted, original_tasks)
+        .map_err(boundary)
 }
 
 pub(crate) async fn load_admitted_baseline(
@@ -326,6 +341,7 @@ async fn validate(
     .map_err(boundary)?;
     Ok(AdmittedEnrollmentManifest {
         canonical_invitation: imported.invitation().clone(),
+        original_code: record.code.clone(),
         baseline,
         local_setup: setup,
         admitted_at_ms: record.admitted_at_ms,
@@ -539,38 +555,11 @@ pub(crate) async fn load_failed_enrollment_for_ceremony(
         acknowledged_at_ms: record.acknowledged_at_ms,
         frozen_budget: record.frozen_budget,
     };
-    crate::runtime::services::enrollment_window::EnrollmentWindowCapability::verify_retained_failure_clock(effects, &retained).await.map_err(boundary)?;
+    crate::runtime::services::enrollment_window::EnrollmentExecutionChild::verify_retained_failure_clock(effects, &retained).await.map_err(boundary)?;
     let evidence = super::enrollment_vm_admission::verify_retained_failure(effects, retained)
         .await
         .map_err(boundary)?;
     Ok(Some(DurableFailedEnrollmentCapability { evidence }))
-}
-
-/// A raw invitation selects the independently retained admission. Absence alone
-/// may select a different invitation family; failed reads never become absence.
-pub(crate) async fn load_admitted_enrollment_for_id(
-    effects: &AuraEffectSystem,
-    provisional: AuthorityId,
-    id: &InvitationId,
-) -> Result<Option<AdmittedEnrollmentManifest>, EnrollmentManifestError> {
-    let key = location(provisional, id);
-    if !effects.secure_exists(&key).await.map_err(boundary)? {
-        return Ok(None);
-    }
-    let bytes = effects
-        .secure_retrieve(&key, &[SecureStorageCapability::Read])
-        .await
-        .map_err(boundary)?;
-    if bytes.len() > MAX_RECORD_BYTES {
-        return Err(EnrollmentManifestError::Shape);
-    }
-    let record: AdmissionRecord =
-        aura_core::util::serialization::from_slice(&bytes).map_err(boundary)?;
-    if record.provisional != provisional || record.invitation != *id {
-        return Err(EnrollmentManifestError::Pin);
-    }
-    let now = effects.physical_time().await?.ts_ms;
-    validate(effects, &record, now).await.map(Some)
 }
 
 /// Authenticated local secure receipt input; fields cannot be supplied by peer
@@ -781,7 +770,7 @@ pub(crate) async fn load_confirmed_enrollment(
         acknowledged_at_ms: record.acknowledged_at_ms,
         frozen_budget: record.frozen_budget,
     };
-    crate::runtime::services::enrollment_window::EnrollmentWindowCapability::verify_retained_confirmation_clock(effects,&retained)
+    crate::runtime::services::enrollment_window::EnrollmentExecutionChild::verify_retained_confirmation_clock(effects,&retained)
         .await.map_err(boundary)?;
     let evidence = super::enrollment_vm_admission::verify_retained_confirmation(effects, retained)
         .await
@@ -1007,18 +996,13 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let duplicate = admit_user_transfer(
-                effects.as_ref(),
-                invitee.authority_id(),
-                &start.enrollment_code,
-                &pin,
-            )
-            .await
-            .unwrap();
-            assert_eq!(
-                duplicate.canonical_invitation().invitation_id,
-                invitation.invitation_id
-            );
+            let duplicate = invitee
+                .invitations()
+                .unwrap()
+                .import_enrollment_and_cache(&start.enrollment_code, &pin)
+                .await
+                .unwrap();
+            assert_eq!(duplicate.invitation_id, invitation.invitation_id);
             assert_eq!(
                 effects.secure_retrieve(&key, &read).await.unwrap(),
                 original,
@@ -1032,10 +1016,14 @@ mod tests {
                 .unwrap();
             assert!(matches!(
                 admit_user_transfer(
-                    effects.as_ref(),
+                    &effects,
                     invitee.authority_id(),
                     &start.enrollment_code,
-                    &pin
+                    &pin,
+                    &invitee
+                        .runtime()
+                        .tasks()
+                        .group("duplicate-admission-refusal"),
                 )
                 .await,
                 Err(EnrollmentManifestError::Runtime(_))

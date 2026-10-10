@@ -608,6 +608,10 @@ Enrollment acceptance binds the original setup and the independently admitted si
 
 Enrollment execution retains the original allocated local deadline and acknowledged clock history across retries and restart. A child allowance cannot replace its parent's durable window. Required clock observations and sticky failures are durably acknowledged before protocol progression or terminal result publication. Missing retained observation state is a required recovery failure. A reimport preserves its original admitted window. Historical completed evidence retains its immutable acknowledged window and cannot grant fresh protocol or signing authority.
 
+The original durable allocation birth records pending execution in the same bound clock record before handing out a usable root. Only the actual in-process birth acknowledgment transfers that nonserialized root custody. Initial provider time may establish the allocation deadline; no required observation of an existing window or potentially state-changing operation may precede the pending acknowledgment. Restart with pending state refuses positive execution; a previously usable budget cannot be restored across an unacknowledged observation. An uncertain, failed, or stalled allocation publication grants no usable root or semantic success. Nested children retain the same pending root and may persist its observation high-water mark, but cannot clear it.
+
+Only the original move-owned root may settle pending execution. Positive settlement requires independent domain completion and actual disposal of its own sealed child subtree, followed by the original durable acknowledgment. The currently executing root task is outside that subtree. Task-group disposal is a repeatable observation, not root completion authority: cancelled, never-executed, failed, or incompletely cleaned-up children cannot establish positive completion. Dropping a bounded disposal observation retains the seal and pending root custody. Failure or endpoint exhaustion preserves refusal without allocating a new positive window or awaiting an unbounded post-expiry checkpoint.
+
 Owned ceremony maintenance terminates with a typed failure when required clock, storage, or timer effects fail. Health projections may describe that outcome, while the runtime retains its original error source.
 
 ### Native identity query failures
@@ -901,6 +905,15 @@ owned by the target session. VM disposal is local cleanup and does not establish
 remote delivery, a signed terminal decision or protocol completion.
 
 ### Final active enrollment inventory custody
+
+An enrollment duplicate-start observation requires both the original canonical
+invitation binding and the still-live task registration admitted from its
+original execution root. A missing root, busy lease, recovered phase record,
+cancelled task, or rejected spawn cannot establish that execution is running.
+Repeated observation neither creates another task nor renews the original
+provider or deadline. Running observations confer no execution or terminal
+acknowledgment authority and become unusable when their registration ceases to
+be live.
 
 The issuer captures final active verification material while the original generation, tracker decision and tree reservation remains held. The exporter requires that sealed capture and compares the exact manifest binding before signing; caller-supplied manifest tuples do not authorize export. Receiver admission requires the signed final inventory and authenticates its roster against baseline membership. Existing-peer recording retains its original registered issuance capability rather than reloading weaker identifiers. Exact nonroot package persistence remains required before nonroot enrollment can be admitted; an absent provider fails closed and cannot be replaced by the root package.
 

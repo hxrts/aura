@@ -2418,6 +2418,43 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
     struct WindowVisitor {
         file: PathBuf,
         violations: Vec<String>,
+        canonical_child_import: bool,
+    }
+    fn canonical_child_path(path: &syn::Path) -> bool {
+        path.segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect::<Vec<_>>()
+            == [
+                "crate",
+                "runtime",
+                "services",
+                "enrollment_window",
+                "EnrollmentExecutionChild",
+            ]
+    }
+    fn canonical_child_import(tree: &syn::UseTree, prefix: &mut Vec<String>) -> bool {
+        match tree {
+            syn::UseTree::Path(path) => {
+                prefix.push(path.ident.to_string());
+                let found = canonical_child_import(&path.tree, prefix);
+                prefix.pop();
+                found
+            }
+            syn::UseTree::Name(name) => {
+                prefix.iter().map(String::as_str).eq([
+                    "crate",
+                    "runtime",
+                    "services",
+                    "enrollment_window",
+                ]) && name.ident == "EnrollmentExecutionChild"
+            }
+            syn::UseTree::Group(group) => group
+                .items
+                .iter()
+                .any(|tree| canonical_child_import(tree, prefix)),
+            syn::UseTree::Rename(_) | syn::UseTree::Glob(_) => false,
+        }
     }
     impl WindowVisitor {
         fn check_attempt_signature(&mut self, signature: &syn::Signature) {
@@ -2432,7 +2469,10 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
                 matches!(input, FnArg::Typed(input) if matches!(&*input.ty,
                     Type::Reference(reference) if matches!(&*reference.elem,
                         Type::Path(path) if path.path.segments.last().is_some_and(|last|
-                            last.ident == "EnrollmentWindowCapability"))))
+                            canonical_child_path(&path.path)
+                                || (path.path.segments.len() == 1
+                                    && last.ident == "EnrollmentExecutionChild"
+                                    && self.canonical_child_import)))))
             });
             if !has_window {
                 self.violations.push(format!(
@@ -2444,6 +2484,36 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
         }
     }
     impl<'ast> Visit<'ast> for WindowVisitor {
+        fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
+            if !has_cfg_test_attr(&node.attrs) && node.ident == "EnrollmentExecutionChild" {
+                self.violations.push(format!(
+                    "{}:{} enrollment child cannot be a local alias",
+                    self.file.display(),
+                    node.span().start().line
+                ));
+            }
+            visit::visit_item_type(self, node);
+        }
+        fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+            if !has_cfg_test_attr(&node.attrs) && node.ident == "EnrollmentExecutionChild" {
+                self.violations.push(format!(
+                    "{}:{} enrollment child must originate in the runtime window owner",
+                    self.file.display(),
+                    node.span().start().line
+                ));
+            }
+            visit::visit_item_struct(self, node);
+        }
+        fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+            if !has_cfg_test_attr(&node.attrs) && node.ident == "EnrollmentExecutionChild" {
+                self.violations.push(format!(
+                    "{}:{} enrollment child must originate in the runtime window owner",
+                    self.file.display(),
+                    node.span().start().line
+                ));
+            }
+            visit::visit_item_enum(self, node);
+        }
         fn visit_item_fn(&mut self, node: &'ast ItemFn) {
             if !has_cfg_test_attr(&node.attrs) && !has_test_attr(&node.attrs) {
                 self.check_attempt_signature(&node.sig);
@@ -2547,6 +2617,11 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
     let mut visitor = WindowVisitor {
         file: file.to_path_buf(),
         violations: Vec::new(),
+        canonical_child_import: syntax.items.iter().any(|item| {
+            matches!(item, syn::Item::Use(item)
+                if !has_cfg_test_attr(&item.attrs)
+                    && canonical_child_import(&item.tree, &mut Vec::new()))
+        }),
     };
     visitor.visit_file(syntax);
     visitor.violations
@@ -3735,6 +3810,12 @@ mod tests {
             "impl Handler { async fn run_device_enrollment_invitee_attempt(&self, renamed: &TimeoutBudget) {} }",
             "async fn run_device_enrollment_invitee_attempt(renamed: &TimeoutBudget) {}",
             "async fn run_device_enrollment_invitee_attempt() {}",
+            "async fn run_device_enrollment_invitee_attempt(window: &EnrollmentWindowCapability) {}",
+            "async fn run_device_enrollment_invitee_attempt(window: &EnrollmentExecutionChild) {}",
+            "use foreign::EnrollmentExecutionChild; async fn run_device_enrollment_invitee_attempt(window: &EnrollmentExecutionChild) {}",
+            "async fn run_device_enrollment_invitee_attempt(window: &foreign::EnrollmentExecutionChild) {}",
+            "use crate::runtime::services::enrollment_window::EnrollmentExecutionChild; type EnrollmentExecutionChild = TimeoutBudget; async fn run_device_enrollment_invitee_attempt(window: &EnrollmentExecutionChild) {}",
+            "use crate::runtime::services::enrollment_window::EnrollmentExecutionChild; struct EnrollmentExecutionChild; async fn run_device_enrollment_invitee_attempt(window: &EnrollmentExecutionChild) {}",
         ] {
             let parsed = parse_file(source).expect("valid adversarial Rust fixture");
             assert!(!super::scan_enrollment_durable_window_boundary(path, &parsed).is_empty());
@@ -3746,8 +3827,9 @@ mod tests {
         )
         .is_empty());
         for source in [
-            "impl Handler { async fn run_device_enrollment_invitee_attempt(&self, window: &EnrollmentWindowCapability) {} }",
-            "async fn run_device_enrollment_invitee_attempt(window: &EnrollmentWindowCapability) {}",
+            "use crate::runtime::services::enrollment_window::EnrollmentExecutionChild; impl Handler { async fn run_device_enrollment_invitee_attempt(&self, window: &EnrollmentExecutionChild) {} }",
+            "use crate::runtime::services::enrollment_window::EnrollmentExecutionChild; async fn run_device_enrollment_invitee_attempt(window: &EnrollmentExecutionChild) {}",
+            "async fn run_device_enrollment_invitee_attempt(window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild) {}",
         ] {
             assert!(super::scan_enrollment_durable_window_boundary(
                 path, &parse_file(source).expect("valid sealed attempt fixture")

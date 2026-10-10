@@ -370,7 +370,7 @@ pub(super) fn admitted_participant<'tree, 'custody: 'tree, 'owner: 'custody, 'ru
 
 /// Public-only coordinator inputs. The constructor must be restricted to the
 /// original local approved intent owner and retain its actual public policy.
-impl ApprovedEnrollmentTranscriptRound {
+impl ApprovedEnrollmentTranscriptRound<'_> {
     pub(super) async fn sign<T: aura_signature::SecurityTranscript>(
         self,
         transcript: &T,

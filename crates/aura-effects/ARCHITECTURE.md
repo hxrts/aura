@@ -356,3 +356,7 @@ service or detached task. Native required endpoint tests join the lifecycle gate
 Original lifetime inventory admission and bounded listing use the shared
 `MAX_PROFILE_ALLOCATION_COUNT` count bound, preserving the existing 4096 limit.
 The bound cannot substitute for provider-authenticated inventory custody.
+
+The stateless real transport handler explicitly returns typed unsupported
+receive readiness; event-backed runtime ingress owns actual inbox notifications.
+It never substitutes polling or a different provider (docs/111).

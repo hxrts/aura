@@ -338,3 +338,8 @@ subsequent selected-provider validation. The helper returns the caller's actual
 acknowledgment only while that window remains valid; it constructs no domain or
 durability proof. Publication failures retain their concrete operation error,
 and cancellation drops the losing work and any unexposed acknowledgment.
+
+`TransportEffects::wait_receive_ready` is required for every provider. Its
+register-before-own-queue-check contract prevents lost arrivals and preserves
+selected-provider custody. `ReceiveReadinessUnsupported` is an explicit refusal,
+not a default adapter. See docs/111 "Receive readiness".

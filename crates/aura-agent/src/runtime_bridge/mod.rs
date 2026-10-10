@@ -3701,16 +3701,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
         code: &str,
         pin: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
     ) -> Result<InvitationInfo, aura_invitation::enrollment_manifest::EnrollmentManifestError> {
-        crate::handlers::invitation::enrollment_manifest_admission::admit_user_transfer(
-            self.agent.runtime().effects().as_ref(),
-            self.agent.authority_id(),
-            code,
-            &pin,
-        )
-        .await?;
-        self.import_invitation(code).await.map_err(|e| {
-            aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(Box::new(e))
-        })
+        let service = self.agent.invitations().map_err(|source| {
+            aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(Box::new(source))
+        })?;
+        let invitation = service.import_enrollment_and_cache(code, &pin).await?;
+        Ok(convert_invitation_to_bridge_info(&invitation))
     }
 
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {

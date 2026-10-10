@@ -782,7 +782,7 @@ impl AuraEffectSystem {
         &self,
         custody: &super::EnrollmentTranscriptTreeOwner<'_, '_, '_>,
         manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
-        window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
         destination_device: aura_core::DeviceId,
         packet: &aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket,
     ) -> Result<(), aura_core::AuraError> {
@@ -832,7 +832,7 @@ impl AuraEffectSystem {
     /// verifier and admitted local owner must verify the returned packet.
     pub(crate) async fn receive_owned_enrollment_round(
         &self,
-        window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
         session: [u8; 32],
     ) -> Result<
         aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket,
@@ -841,6 +841,10 @@ impl AuraEffectSystem {
         window.execute(self, || async {
             let session_locator = hex::encode(session);
             loop {
+                let notify = self.transport.inbox_notify(self.authority_id);
+                let arrival = notify.notified();
+                tokio::pin!(arrival);
+                arrival.as_mut().enable();
                 match self.take_inbound_envelope(|envelope|
                     envelope.metadata.get("content-type").is_some_and(|kind| kind == "application/aura-approved-enrollment-round-v1")
                     && envelope.metadata.get("aura-enrollment-round-session") == Some(&session_locator)
@@ -855,7 +859,7 @@ impl AuraEffectSystem {
                             return Err(aura_core::AuraError::Network { message: "owned signing ingress capacity exceeded".into(), source: Some(std::sync::Arc::new(TransportError::IngressCapacityExceeded { capacity: u64::from(crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY) })) });
                         }
                     },
-                    Err(TransportError::NoMessage) => window.retry_delay(self, 25).await.map_err(aura_core::AuraError::from)?,
+                    Err(TransportError::NoMessage) => self.wait_for_transport_arrival(arrival).await.map_err(aura_core::AuraError::from)?,
                     Err(source) => return Err(aura_core::AuraError::Network { message: "original configured signing ingress failure".into(), source: Some(std::sync::Arc::new(source)) }),
                 }
             }

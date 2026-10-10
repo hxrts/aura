@@ -178,6 +178,23 @@ impl TransportEffects for AuraEffectSystem {
         Ok(envelope)
     }
 
+    async fn wait_receive_ready(&self) -> Result<(), TransportError> {
+        let notify = self.transport.inbox_notify(self.authority_id);
+        let arrival = notify.notified();
+        tokio::pin!(arrival);
+        arrival.as_mut().enable();
+        if self
+            .transport
+            .inbox()
+            .read()
+            .iter()
+            .any(|envelope| self.addressed_here(envelope))
+        {
+            return Ok(());
+        }
+        self.wait_for_transport_arrival(arrival).await
+    }
+
     async fn receive_envelope_from(
         &self,
         source: AuthorityId,
@@ -897,6 +914,31 @@ fn normalize_ws_url(addr: &str) -> String {
 }
 
 impl AuraEffectSystem {
+    /// Wait on the original canonical inbox and configured provider inventory.
+    /// The caller arms `arrival` before inspecting its relevant queue predicate.
+    pub(super) async fn wait_for_transport_arrival(
+        &self,
+        arrival: impl std::future::Future<Output = ()>,
+    ) -> Result<(), TransportError> {
+        let configured = async {
+            if self.custom_transports.is_empty() {
+                return std::future::pending::<Result<(), TransportError>>().await;
+            }
+            let waits: Vec<_> = self
+                .custom_transports
+                .iter()
+                .map(|provider| provider.wait_receive_ready())
+                .collect();
+            let (result, _, remaining) = futures::future::select_all(waits).await;
+            drop(remaining);
+            result
+        };
+        futures::pin_mut!(arrival, configured);
+        match futures::future::select(arrival, configured).await {
+            futures::future::Either::Left(((), _)) => Ok(()),
+            futures::future::Either::Right((result, _)) => result,
+        }
+    }
     /// Extract only physical configured ingress. Consumer APIs check their retained
     /// matching inbox first; session-specific pumps cannot take/requeue an unrelated
     /// retained frame repeatedly and starve the next physical frame.
@@ -1670,5 +1712,84 @@ mod tests {
             error,
             TransportError::ReceiptValidationFailed { .. }
         ));
+    }
+}
+
+#[cfg(test)]
+mod original_readiness_tests {
+    use super::*;
+    use aura_testkit::stateful_effects::custom_provider::CustomProviderProbe;
+    use std::sync::Arc;
+
+    fn configured(
+        label: &'static str,
+        providers: Vec<Arc<dyn TransportEffects>>,
+    ) -> AuraEffectSystem {
+        let resources = Arc::new(CustomProviderProbe::default());
+        AuraEffectSystem::custom_for_authority(
+            crate::core::AgentConfig::default(),
+            AuthorityId::new_from_entropy(aura_core::hash::hash(label.as_bytes())),
+            aura_core::effects::ExecutionMode::Testing,
+            crate::runtime::effects::SelectedCustomProviders {
+                crypto: Arc::new(aura_effects::crypto::RealCryptoHandler::new()),
+                storage: resources.clone(),
+                random: resources.clone(),
+                console: resources,
+                transports: providers,
+            },
+            None,
+            None,
+        )
+        .expect("actual selected transport inventory")
+    }
+
+    #[tokio::test]
+    async fn configured_arrival_and_fault_wake_original_runtime_readiness() {
+        let provider = Arc::new(CustomProviderProbe::default());
+        let effects = configured("configured-arrival-and-fault", vec![provider.clone()]);
+        let ready = effects.wait_receive_ready();
+        futures::pin_mut!(ready);
+        assert!(futures::poll!(ready.as_mut()).is_pending());
+        let envelope = TransportEnvelope {
+            source: AuthorityId::new_from_entropy([91; 32]),
+            destination: effects.authority_id,
+            context: ContextId::new_from_entropy([92; 32]),
+            payload: vec![93],
+            metadata: std::collections::HashMap::new(),
+            receipt: None,
+        };
+        provider.push_inbound(envelope).await;
+        ready.await.expect("same provider delayed arrival");
+        assert_eq!(
+            provider.receives(),
+            0,
+            "readiness consumes no provider frame"
+        );
+        assert_eq!(effects.receive_envelope().await.unwrap().payload, vec![93]);
+        let ready = effects.wait_receive_ready();
+        futures::pin_mut!(ready);
+        assert!(futures::poll!(ready.as_mut()).is_pending());
+        provider.set_fault(true);
+        assert!(
+            matches!(ready.await, Err(TransportError::ProtocolError { .. })),
+            "native selected-provider failure survives readiness"
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_configured_readiness_refuses_instead_of_replacing_provider() {
+        let provider = Arc::new(CustomProviderProbe::default());
+        let effects = configured(
+            "unsupported-configured-readiness",
+            vec![
+                provider.clone(),
+                Arc::new(aura_effects::transport::RealTransportHandler::default()),
+            ],
+        );
+        assert!(matches!(
+            effects.wait_receive_ready().await,
+            Err(TransportError::ReceiveReadinessUnsupported)
+        ));
+        assert_eq!(provider.receives(), 0);
     }
 }

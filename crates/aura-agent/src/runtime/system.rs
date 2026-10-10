@@ -789,10 +789,7 @@ impl RuntimeSystem {
         let device_id = config.device_id;
         let activity_gate = effect_system.public_operation_activity();
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let time_effects: Arc<dyn PhysicalTimeEffects> =
-            Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker =
-            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new_with_storage(effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -868,10 +865,7 @@ impl RuntimeSystem {
         let device_id = config.device_id;
         let activity_gate = effect_system.public_operation_activity();
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let time_effects: Arc<dyn PhysicalTimeEffects> =
-            Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker =
-            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new_with_storage(effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -947,10 +941,7 @@ impl RuntimeSystem {
         let device_id = config.device_id;
         let activity_gate = effect_system.public_operation_activity();
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let time_effects: Arc<dyn PhysicalTimeEffects> =
-            Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker =
-            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new_with_storage(effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -1035,10 +1026,7 @@ impl RuntimeSystem {
         let device_id = config.device_id;
         let activity_gate = effect_system.public_operation_activity();
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let time_effects: Arc<dyn PhysicalTimeEffects> =
-            Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker =
-            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new_with_storage(effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());

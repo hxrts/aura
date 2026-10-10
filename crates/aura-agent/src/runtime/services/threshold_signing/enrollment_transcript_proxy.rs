@@ -9,7 +9,7 @@ use super::{
     },
     ValidatedLocalEnrollmentSigningMaterial,
 };
-use crate::runtime::services::enrollment_window::EnrollmentWindowCapability;
+use crate::runtime::services::enrollment_window::EnrollmentExecutionChild;
 use crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent;
 use aura_core::{AuraError, DeviceId};
 use aura_protocol::transcript_round_packet::{
@@ -58,7 +58,7 @@ impl<'tree, 'custody, 'owner, 'runtime>
     pub(super) fn original_remote_proxy<'borrow>(
         &'borrow self,
         approval: &'borrow RuntimeApprovedEnrollmentSigningIntent,
-        window: &'borrow EnrollmentWindowCapability,
+        window: &'borrow EnrollmentExecutionChild,
         peer: DeviceId,
     ) -> Result<
         (
