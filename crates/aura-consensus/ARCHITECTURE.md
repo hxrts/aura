@@ -176,3 +176,34 @@ cargo test -p aura-consensus
 - [Consensus](../../docs/108_consensus.md)
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [System Internals Guide](../../docs/807_system_internals_guide.md)
+
+### Allocation-free consensus decisions and bounded proofs
+
+`core/decision.rs` owns the shared pure share-admission, phase-transition,
+invariant, membership and threshold-counting algorithms. Production
+`ConsensusState`/transition wrappers feed borrowed identity iterators into this
+kernel, retain full share payloads and materialize commits through the existing
+signature producer. Verification uses fixed storage with the same algorithms;
+it does not replace production decisions with a parallel bounded model.
+
+Maximal-count selection retains the first proposal occurrence on ties. This
+chooses one admissible threshold winner under the threshold-checking contract
+in `docs/108_consensus.md`; Quint `consensus/core.qnt` permits an explicit
+threshold-qualified fallback winner. No time value orders this selection.
+Reference checks compare unique winners exactly and tied winners by qualification
+and maximal count. The wrapper refinement compares its selected winner exactly.
+
+The fourteen named property harnesses retain 2–4 witnesses, up to three existing
+proposals and three equality-distinct result representatives. The additional
+`production_wrappers_refine_bounded_decisions` harness executes the real public
+wrappers, including storage allocation, rejection formatting and actual commit
+signature production, and checks original payload, identifier and prestate
+custody. Kernel-only proof success cannot waive this refinement or the complete
+`just ci-kani` gate. See `docs/806_verification_guide.md` for execution and mutation
+sensitivity requirements.
+
+Task76 validation also includes an exhaustive independent native storage/reference
+fixture over the bounded proof domain and independent identity/prestate variants.
+The real wrapper harness retains independently symbolic bounded bindings; fourteen
+kernel successes do not waive that fifteenth allocation-backed proof. Canonical
+Kani budget ownership and forwarding/mutation fixtures are documented in docs806.

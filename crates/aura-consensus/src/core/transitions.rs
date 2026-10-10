@@ -75,7 +75,11 @@ fn assert_transition_invariants(state: &ConsensusState, label: &'static str) {
     );
 }
 
-fn abstract_commit_signature(cid: ConsensusId, result_id: Hash32, prestate_hash: Hash32) -> String {
+pub(super) fn abstract_commit_signature(
+    cid: ConsensusId,
+    result_id: Hash32,
+    prestate_hash: Hash32,
+) -> String {
     let mut bytes = Vec::with_capacity(96);
     bytes.extend_from_slice(&cid.0 .0);
     bytes.extend_from_slice(&result_id.0);
@@ -142,58 +146,41 @@ pub fn start_consensus(
 /// - Detects equivocation if witness votes for different result
 /// - Commits if threshold is reached
 pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> TransitionResult {
-    // Quint: isWitness = inst.witnesses.contains(witness)
-    if !state.witnesses.contains(&proposal.witness) {
-        return not_enabled(format!("witness {} not in witness set", proposal.witness));
-    }
-
-    // Quint: notVoted = not(hasProposal(inst.proposals, witness))
-    if state.has_proposal(&proposal.witness) {
-        return not_enabled(format!("witness {} already voted", proposal.witness));
-    }
-
-    // Quint: isActive = inst.phase == FastPathActive or inst.phase == FallbackActive
-    if !state.is_active() {
-        return not_enabled(format!("consensus not active: {:?}", state.phase));
-    }
-
-    // Quint: not(inst.equivocators.contains(witness))
-    if state.equivocators.contains(&proposal.witness) {
-        return not_enabled(format!("witness {} is known equivocator", proposal.witness));
-    }
-
-    let mut new_state = state.clone();
-
-    // Quint: isEquivocating = detectEquivocation(inst.proposals, witness, rid)
-    let is_equivocating = state
-        .proposals
-        .iter()
-        .any(|p| p.witness == proposal.witness && p.result_id != proposal.result_id);
-
-    if is_equivocating {
-        // Quint: newEquivocators = inst.equivocators.union(Set(witness))
-        new_state.equivocators.insert(proposal.witness);
-        // Don't add proposal from equivocator
-    } else {
-        // Quint: newProposals = inst.proposals.union(Set(proposal))
-        new_state.proposals.push(proposal);
-    }
-
-    // Quint: matchingCount = countMatchingProposals(newProposals, rid, inst.prestateHash)
-    // Quint: reachedThreshold = matchingCount >= inst.threshold
-    if new_state.threshold_met() {
-        // Quint: newPhase = ConsensusCommitted
-        new_state.phase = ConsensusPhase::Committed;
-
-        // Create commit fact
-        if let Some(rid) = new_state.majority_result() {
-            new_state.commit_fact = Some(PureCommitFact {
-                cid: new_state.cid,
-                result_id: rid,
-                signature: abstract_commit_signature(new_state.cid, rid, new_state.prestate_hash),
-                prestate_hash: new_state.prestate_hash,
-            });
+    use super::decision::ShareRejection;
+    let update = match super::decision::apply_share(
+        state.phase,
+        state.threshold.as_usize(),
+        state.proposals.iter().map(|p| (p.witness, p.result_id)),
+        state.witnesses.contains(&proposal.witness),
+        state.equivocators.contains(&proposal.witness),
+        (proposal.witness, proposal.result_id),
+    ) {
+        Ok(update) => update,
+        Err(rejection) => {
+            return not_enabled(match rejection {
+                ShareRejection::NonWitness => {
+                    format!("witness {} not in witness set", proposal.witness)
+                }
+                ShareRejection::AlreadyVoted => {
+                    format!("witness {} already voted", proposal.witness)
+                }
+                ShareRejection::Inactive => format!("consensus not active: {:?}", state.phase),
+                ShareRejection::Equivocator => {
+                    format!("witness {} is known equivocator", proposal.witness)
+                }
+            })
         }
+    };
+    let mut new_state = state.clone();
+    new_state.proposals.push(proposal);
+    new_state.phase = update.phase;
+    if let Some(rid) = update.commit_result {
+        new_state.commit_fact = Some(PureCommitFact {
+            cid: new_state.cid,
+            result_id: rid,
+            signature: abstract_commit_signature(new_state.cid, rid, new_state.prestate_hash),
+            prestate_hash: new_state.prestate_hash,
+        });
     }
 
     // Quint: InvariantEquivocatorsExcluded, InvariantCommitRequiresThreshold
@@ -214,12 +201,11 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 /// - Activates fallback timer
 pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
     // Quint: isFastPath = inst.phase == FastPathActive
-    if state.phase != ConsensusPhase::FastPathActive {
+    let Some(phase) = super::decision::trigger_fallback(state.phase) else {
         return not_enabled(format!("not in fast path: {:?}", state.phase));
-    }
-
+    };
     let mut new_state = state.clone();
-    new_state.phase = ConsensusPhase::FallbackActive;
+    new_state.phase = phase;
     new_state.fallback_timer_active = true;
 
     // Quint: WellFormedState invariant after triggerFallback
@@ -333,18 +319,15 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> Tr
 /// Effects:
 /// - Moves to ConsensusFailed phase
 pub fn fail_consensus(state: &ConsensusState) -> TransitionResult {
-    // Quint: notCommitted = inst.phase != ConsensusCommitted
-    if state.phase == ConsensusPhase::Committed {
-        return not_enabled("already committed");
-    }
-
-    // Quint: notFailed = inst.phase != ConsensusFailed
-    if state.phase == ConsensusPhase::Failed {
-        return not_enabled("already failed");
-    }
-
+    let Some(phase) = super::decision::fail_consensus(state.phase) else {
+        return not_enabled(if state.phase == ConsensusPhase::Committed {
+            "already committed"
+        } else {
+            "already failed"
+        });
+    };
     let mut new_state = state.clone();
-    new_state.phase = ConsensusPhase::Failed;
+    new_state.phase = phase;
 
     // Quint: WellFormedState invariant after failConsensus
     assert_transition_invariants(&new_state, "fail_consensus");
