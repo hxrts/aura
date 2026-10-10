@@ -1019,7 +1019,136 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    execute_with_timeout_budget_and_checkpoint(time, budget, || async { Ok(()) }, operation).await
+    observe_with_timeout_budget(time, budget)
+        .await
+        .map_err(TimeoutRunError::Timeout)?;
+    let operation = Box::pin(operation());
+    let deadline =
+        Box::pin(time.wait_until_physical_deadline(WindowPosition::new(budget.deadline_at_ms())));
+    match futures::future::select(deadline, operation).await {
+        Either::Left((witness, operation)) => {
+            drop(operation);
+            expire_witnessed_deadline(
+                budget,
+                witness.map_err(|error| TimeoutRunError::Timeout(time_error(error)))?,
+            )
+            .map_err(TimeoutRunError::Timeout)
+        }
+        Either::Right((result, deadline)) => {
+            drop(deadline);
+            observe_with_timeout_budget(time, budget)
+                .await
+                .map_err(TimeoutRunError::Timeout)?;
+            result.map_err(TimeoutRunError::Operation)
+        }
+    }
+}
+
+/// Observe an existing local window through its original provider and endpoint.
+/// This validates clock progress; it supplies no domain or durable acknowledgment.
+/// The boxed boundary keeps nested workflows' future types and Send proofs bounded.
+pub fn observe_with_timeout_budget<'a, TTime>(
+    time: &'a TTime,
+    budget: &'a TimeoutBudget,
+) -> futures::future::BoxFuture<'a, TimeoutBudgetResult<PhysicalTime>>
+where
+    TTime: PhysicalTimeEffects + Sync + 'a,
+{
+    Box::pin(async move {
+        let (now, _lease) = bounded_timeout_observation(time, budget, || async {
+            let now = current_physical_time(time).await?;
+            budget.remaining_at(&now)?;
+            Ok(now)
+        })
+        .await?;
+        Ok(now)
+    })
+}
+
+async fn bounded_timeout_observation<TTime, F, Fut, T>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    observe: F,
+) -> TimeoutBudgetResult<(T, TimeoutObservationLease)>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = TimeoutBudgetResult<T>>,
+{
+    match bounded_timeout_observation_result::<_, _, _, _, std::convert::Infallible>(
+        time,
+        budget,
+        || async { observe().await.map_err(TimeoutRunError::Timeout) },
+    )
+    .await
+    {
+        Ok(value) => Ok(value),
+        Err(TimeoutRunError::Timeout(error)) => Err(error),
+        Err(TimeoutRunError::Operation(never)) => match never {},
+    }
+}
+
+/// Acknowledge an initial publication before observing its original clock window.
+/// The caller supplies the actual publication acknowledgment; this helper creates
+/// no domain proof. Gate acquisition, publication, and the subsequent clock
+/// validation share the original absolute deadline and selected provider.
+pub async fn acknowledge_initial_publication_with_timeout_budget<TTime, F, Fut, T, E>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    acknowledge: F,
+) -> Result<T, TimeoutRunError<E>>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let (acknowledgment, _lease) = bounded_timeout_observation_result(time, budget, || async {
+        let acknowledgment = acknowledge().await.map_err(TimeoutRunError::Operation)?;
+        let now = current_physical_time(time)
+            .await
+            .map_err(TimeoutRunError::Timeout)?;
+        budget
+            .remaining_at(&now)
+            .map_err(TimeoutRunError::Timeout)?;
+        Ok(acknowledgment)
+    })
+    .await?;
+    Ok(acknowledgment)
+}
+
+async fn bounded_timeout_observation_result<TTime, F, Fut, T, E>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    observe: F,
+) -> Result<(T, TimeoutObservationLease), TimeoutRunError<E>>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, TimeoutRunError<E>>>,
+{
+    let observation = Box::pin(async {
+        let lease = budget.acquire_observation().await;
+        let value = observe().await?;
+        Ok((value, lease))
+    });
+    let deadline =
+        Box::pin(time.wait_until_physical_deadline(WindowPosition::new(budget.deadline_at_ms())));
+    match futures::future::select(deadline, observation).await {
+        Either::Left((witness, observation)) => {
+            drop(observation);
+            expire_witnessed_deadline(
+                budget,
+                witness
+                    .map_err(time_error)
+                    .map_err(TimeoutRunError::Timeout)?,
+            )
+            .map_err(TimeoutRunError::Timeout)
+        }
+        Either::Right((result, deadline)) => {
+            drop(deadline);
+            result
+        }
+    }
 }
 
 /// Execute under a deadline whose owner acknowledges every observation before
@@ -1111,28 +1240,13 @@ where
     CFut: Future<Output = TimeoutBudgetResult<()>>,
     P: FnOnce() -> T,
 {
-    let observation = Box::pin(async {
-        let guard = budget.acquire_observation().await;
+    let ((), _lease) = bounded_timeout_observation(time, budget, || async {
         let now = current_physical_time(time).await?;
         budget.remaining_at(&now)?;
-        checkpoint().await?;
-        Ok::<_, TimeoutBudgetError>(guard)
-    });
-    let deadline =
-        Box::pin(time.wait_until_physical_deadline(WindowPosition::new(budget.deadline_at_ms())));
-    // Poll the deadline first: a late checkpoint cannot beat an already ready
-    // endpoint when both futures are runnable on the same poll.
-    match futures::future::select(deadline, observation).await {
-        Either::Left((observed, observation)) => {
-            drop(observation);
-            expire_witnessed_deadline(budget, observed.map_err(time_error)?)
-        }
-        Either::Right((result, deadline)) => {
-            drop(deadline);
-            let _guard = result?;
-            Ok(publish())
-        }
-    }
+        checkpoint().await
+    })
+    .await?;
+    Ok(publish())
 }
 
 fn expire_witnessed_deadline<T>(
@@ -1239,10 +1353,11 @@ fn time_error(error: TimeError) -> TimeoutBudgetError {
 #[allow(clippy::disallowed_types, clippy::expect_used, clippy::redundant_clone)]
 mod tests {
     use super::{
-        execute_with_retry_budget, execute_with_timeout_budget,
-        execute_with_timeout_budget_and_checkpoint, AttemptBudget, ExponentialBackoffPolicy,
-        RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionClass,
-        TimeoutExecutionProfile, TimeoutRunError, TimeoutTimeSemantics,
+        acknowledge_initial_publication_with_timeout_budget, execute_with_retry_budget,
+        execute_with_timeout_budget, execute_with_timeout_budget_and_checkpoint, AttemptBudget,
+        ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError, TimeoutBudget,
+        TimeoutBudgetError, TimeoutExecutionClass, TimeoutExecutionProfile, TimeoutRunError,
+        TimeoutTimeSemantics,
     };
     use crate::types::window::WindowPosition;
     use crate::{
@@ -1250,6 +1365,7 @@ mod tests {
         time::{PhysicalTime, TimeDomain},
         AuraError, ProtocolErrorCode,
     };
+    use futures::FutureExt;
     use parking_lot::Mutex;
     use std::time::Duration;
     use std::{collections::VecDeque, sync::Arc};
@@ -1521,7 +1637,20 @@ mod tests {
     #[tokio::test]
     async fn required_terminal_ack_rejects_unsupported_provider_before_publication() {
         use std::error::Error;
-        let clock = ScriptedTimeEffects::new([physical_time(350)], SleepBehavior::Immediate);
+        struct RelativeOnlyClock(ScriptedTimeEffects);
+        #[async_trait::async_trait]
+        impl PhysicalTimeEffects for RelativeOnlyClock {
+            async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+                self.0.physical_time().await
+            }
+            async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+                self.0.sleep_ms(ms).await
+            }
+        }
+        let clock = RelativeOnlyClock(ScriptedTimeEffects::new(
+            [physical_time(350)],
+            SleepBehavior::Immediate,
+        ));
         let budget = terminal_test_budget();
         let published = std::cell::Cell::new(false);
         let failure = super::acknowledge_with_timeout_budget(
@@ -1540,7 +1669,7 @@ mod tests {
             Some(TimeError::AbsoluteDeadlineUnsupported)
         ));
         assert!(!published.get());
-        assert!(clock.sleep_calls().is_empty());
+        assert!(clock.0.sleep_calls().is_empty());
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -1549,11 +1678,18 @@ mod tests {
         YieldOnce,
     }
 
+    type ScriptedPhysicalRead =
+        futures::future::BoxFuture<'static, Result<PhysicalTime, TimeError>>;
+
     #[derive(Clone)]
     pub(super) struct ScriptedTimeEffects {
         times: Arc<Mutex<VecDeque<PhysicalTime>>>,
         sleeps: Arc<Mutex<Vec<u64>>>,
         sleep_behavior: SleepBehavior,
+        read_answers: Arc<Mutex<VecDeque<ScriptedPhysicalRead>>>,
+        deadline: futures::future::Shared<
+            futures::future::BoxFuture<'static, Result<PhysicalTime, Arc<TimeError>>>,
+        >,
     }
 
     impl ScriptedTimeEffects {
@@ -1565,7 +1701,36 @@ mod tests {
                 times: Arc::new(Mutex::new(times.into_iter().collect())),
                 sleeps: Arc::new(Mutex::new(Vec::new())),
                 sleep_behavior,
+                read_answers: Arc::new(Mutex::new(VecDeque::new())),
+                deadline: futures::future::pending().boxed().shared(),
             }
+        }
+
+        pub(super) fn with_controlled_deadline(
+            mut self,
+        ) -> (
+            Self,
+            futures::channel::oneshot::Sender<Result<PhysicalTime, TimeError>>,
+        ) {
+            let (release, receive) =
+                futures::channel::oneshot::channel::<Result<PhysicalTime, TimeError>>();
+            self.deadline = async move {
+                receive
+                    .await
+                    .expect("actual selected provider endpoint is explicitly released")
+                    .map_err(Arc::new)
+            }
+            .boxed()
+            .shared();
+            (self, release)
+        }
+
+        fn with_clock_reads(
+            self,
+            answers: Vec<futures::future::BoxFuture<'static, Result<PhysicalTime, TimeError>>>,
+        ) -> Self {
+            self.read_answers.lock().extend(answers);
+            self
         }
 
         pub(super) fn sleep_calls(&self) -> Vec<u64> {
@@ -1576,10 +1741,27 @@ mod tests {
     #[async_trait::async_trait]
     impl PhysicalTimeEffects for ScriptedTimeEffects {
         async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            let answer = { self.read_answers.lock().pop_front() };
+            if let Some(answer) = answer {
+                return answer.await;
+            }
             self.times
                 .lock()
                 .pop_front()
                 .ok_or(TimeError::ServiceUnavailable)
+        }
+
+        async fn wait_until_physical_deadline(
+            &self,
+            _deadline: WindowPosition<crate::types::window::PhysicalMillis>,
+        ) -> Result<PhysicalTime, TimeError> {
+            self.deadline
+                .clone()
+                .await
+                .map_err(|source| TimeError::ProviderFailure {
+                    operation: crate::effects::time::TimeProviderOperation::WaitTimer,
+                    source: Some(source),
+                })
         }
 
         async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
@@ -1587,11 +1769,210 @@ mod tests {
             match self.sleep_behavior {
                 SleepBehavior::Immediate => Ok(()),
                 SleepBehavior::YieldOnce => {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    let mut yielded = false;
+                    futures::future::poll_fn(|cx| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            cx.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
                     Ok(())
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn initial_publication_ack_precedes_clock_observation_and_retains_result() {
+        let time = ScriptedTimeEffects::new([physical_time(499)], SleepBehavior::Immediate);
+        let budget = terminal_test_budget();
+        let result =
+            acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+                assert_eq!(time.times.lock().len(), 1, "no prepublication clock read");
+                Ok::<_, AuraError>(Box::new(17))
+            })
+            .await
+            .expect("actual acknowledgment within original window");
+        assert_eq!(*result, 17);
+        assert!(time.times.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn initial_publication_bounds_write_readback_and_post_ack_clock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for stage in 0..3 {
+            let dropped = Arc::new(AtomicBool::new(false));
+            let read_dropped = Arc::new(AtomicBool::new(false));
+            let read_cancelled = read_dropped.clone();
+            let time = ScriptedTimeEffects::new([], SleepBehavior::Immediate);
+            let time = if stage == 2 {
+                time.with_clock_reads(vec![async move {
+                    let _read = CancelledQueryObservation {
+                        cancelled: read_cancelled,
+                    };
+                    futures::future::pending().await
+                }
+                .boxed()])
+            } else {
+                time
+            };
+            let (time, endpoint) = time.with_controlled_deadline();
+            let budget = terminal_test_budget();
+            let publication =
+                acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+                    let ack = CancelledQueryObservation {
+                        cancelled: dropped.clone(),
+                    };
+                    if stage == 0 {
+                        futures::future::pending::<()>().await;
+                    }
+                    // A completed write is insufficient without the actual readback.
+                    if stage == 1 {
+                        futures::future::pending::<()>().await;
+                    }
+                    Ok::<_, AuraError>(ack)
+                });
+            futures::pin_mut!(publication);
+            assert!(futures::poll!(publication.as_mut()).is_pending());
+            endpoint
+                .send(Ok(physical_time(500)))
+                .expect("original endpoint");
+            assert!(matches!(
+                publication.await,
+                Err(TimeoutRunError::Timeout(
+                    TimeoutBudgetError::DeadlineExceeded {
+                        deadline_at_ms: 500,
+                        observed_at_ms: 500
+                    }
+                ))
+            ));
+            assert!(
+                dropped.load(Ordering::SeqCst),
+                "losing work and actual ACK dropped"
+            );
+            assert_eq!(read_dropped.load(Ordering::SeqCst), stage == 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_publication_deadline_wins_same_turn_and_bounds_gate() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for hold_gate in [false, true] {
+            let (time, endpoint) =
+                ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_controlled_deadline();
+            let budget = terminal_test_budget();
+            let lease = if hold_gate {
+                Some(budget.acquire_observation().await)
+            } else {
+                None
+            };
+            let calls = AtomicUsize::new(0);
+            endpoint
+                .send(Ok(physical_time(500)))
+                .expect("original endpoint ready");
+            let result =
+                acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, AuraError>(())
+                })
+                .await;
+            assert!(matches!(
+                result,
+                Err(TimeoutRunError::Timeout(
+                    TimeoutBudgetError::DeadlineExceeded {
+                        deadline_at_ms: 500,
+                        observed_at_ms: 500
+                    }
+                ))
+            ));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            drop(lease);
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_publication_preserves_native_failure_without_clock_read() {
+        let time = ScriptedTimeEffects::new([physical_time(499)], SleepBehavior::Immediate);
+        let budget = terminal_test_budget();
+        let result =
+            acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+                Err::<(), _>(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "publication denied",
+                ))
+            })
+            .await;
+        match result {
+            Err(TimeoutRunError::Operation(error)) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+            _ => panic!("actual publication failure must survive"),
+        }
+        assert_eq!(time.times.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn initial_publication_preserves_clock_failure_and_refuses_expired_ack() {
+        use std::error::Error;
+        let budget = terminal_test_budget();
+        let time =
+            ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_clock_reads(vec![async {
+                Err(TimeError::ProviderFailure {
+                    operation: crate::effects::time::TimeProviderOperation::ReadPhysicalClock,
+                    source: Some(Arc::new(NativeTerminalTimerFailure)),
+                })
+            }
+            .boxed()]);
+        let error = acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+            Ok::<_, AuraError>(())
+        })
+        .await
+        .expect_err("actual selected clock failure");
+        assert!(matches!(
+            &error,
+            TimeoutRunError::Timeout(TimeoutBudgetError::TimeSourceUnavailable {
+                source: Some(_),
+                ..
+            })
+        ));
+        assert!(error
+            .source()
+            .and_then(|cause| cause.source())
+            .and_then(|cause| cause.source())
+            .and_then(|cause| cause.source())
+            .is_some_and(|cause| cause.is::<NativeTerminalTimerFailure>()));
+        let budget = terminal_test_budget();
+        let time = ScriptedTimeEffects::new([physical_time(500)], SleepBehavior::Immediate);
+        assert!(matches!(
+            acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+                Ok::<_, AuraError>(())
+            })
+            .await,
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    observed_at_ms: 500
+                }
+            ))
+        ));
+        let budget = terminal_test_budget();
+        let time = ScriptedTimeEffects::new([physical_time(99)], SleepBehavior::Immediate);
+        assert!(matches!(
+            acknowledge_initial_publication_with_timeout_budget(&time, &budget, || async {
+                Ok::<_, AuraError>(())
+            })
+            .await,
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::ClockRollback {
+                    previous_observed_at_ms: 100,
+                    observed_at_ms: 99
+                }
+            ))
+        ));
     }
 
     struct CancelledQueryObservation {
@@ -1606,7 +1987,7 @@ mod tests {
     struct TimeoutWhileQueryOwnsObservation {
         reads: std::sync::atomic::AtomicUsize,
         query: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
-        sleep: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
+        deadline: futures::future::Shared<futures::future::BoxFuture<'static, ()>>,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
     }
     #[async_trait::async_trait]
@@ -1626,18 +2007,134 @@ mod tests {
                 _ => Ok(physical_time(500)),
             }
         }
-        async fn sleep_ms(&self, duration: u64) -> Result<(), TimeError> {
-            assert_eq!(duration, 400, "original deadline delay is unchanged");
-            let wait = {
-                self.sleep
-                    .lock()
-                    .take()
-                    .expect("one original deadline watcher")
-            };
-            wait.await
-                .expect("fixture releases actual original deadline sleep");
-            Ok(())
+        async fn sleep_ms(&self, _: u64) -> Result<(), TimeError> {
+            panic!("plain timeout must retain its fixed endpoint");
         }
+        async fn wait_until_physical_deadline(
+            &self,
+            deadline: WindowPosition<crate::types::window::PhysicalMillis>,
+        ) -> Result<PhysicalTime, TimeError> {
+            assert_eq!(deadline.value(), 500);
+            self.deadline.clone().await;
+            Ok(physical_time(500))
+        }
+    }
+
+    #[tokio::test]
+    async fn required_plain_timeout_bounds_hung_initial_clock_read() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let dropped = Arc::new(AtomicBool::new(false));
+        let read_dropped = dropped.clone();
+        let (time, endpoint) = ScriptedTimeEffects::new([], SleepBehavior::Immediate)
+            .with_clock_reads(vec![async move {
+                let _lease = CancelledQueryObservation {
+                    cancelled: read_dropped,
+                };
+                futures::future::pending().await
+            }
+            .boxed()])
+            .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let polls = AtomicUsize::new(0);
+        let execution = execute_with_timeout_budget(&time, &budget, || async {
+            polls.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, AuraError>(())
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        assert!(matches!(
+            execution.await,
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    observed_at_ms: 500
+                }
+            ))
+        ));
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+        assert!(dropped.load(Ordering::SeqCst));
+        let _released = budget.acquire_observation().await;
+    }
+
+    #[tokio::test]
+    async fn required_plain_timeout_bounds_hung_success_clock_read() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let dropped = Arc::new(AtomicBool::new(false));
+        let read_dropped = dropped.clone();
+        let (time, endpoint) = ScriptedTimeEffects::new([], SleepBehavior::Immediate)
+            .with_clock_reads(vec![
+                futures::future::ready(Ok(physical_time(100))).boxed(),
+                async move {
+                    let _lease = CancelledQueryObservation {
+                        cancelled: read_dropped,
+                    };
+                    futures::future::pending().await
+                }
+                .boxed(),
+            ])
+            .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let polls = AtomicUsize::new(0);
+        let execution = execute_with_timeout_budget(&time, &budget, || async {
+            polls.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, AuraError>(())
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        assert!(matches!(
+            execution.await,
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    observed_at_ms: 500
+                }
+            ))
+        ));
+        assert!(dropped.load(Ordering::SeqCst));
+        let _released = budget.acquire_observation().await;
+    }
+
+    #[tokio::test]
+    async fn required_plain_timeout_bounds_observation_gate_before_clock_or_operation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (time, endpoint) =
+            ScriptedTimeEffects::new([physical_time(100)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let held = budget.acquire_observation().await;
+        let polls = AtomicUsize::new(0);
+        let execution = execute_with_timeout_budget(&time, &budget, || async {
+            polls.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, AuraError>(())
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        assert!(matches!(
+            execution.await,
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    observed_at_ms: 500
+                }
+            ))
+        ));
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            time.times.lock().len(),
+            1,
+            "gate wait cannot start clock read"
+        );
+        drop(held);
     }
 
     #[tokio::test]
@@ -1649,7 +2146,11 @@ mod tests {
         let time = TimeoutWhileQueryOwnsObservation {
             reads: AtomicUsize::new(0),
             query: Mutex::new(Some(query)),
-            sleep: Mutex::new(Some(sleep)),
+            deadline: async move {
+                sleep.await.expect("actual fixed endpoint release");
+            }
+            .boxed()
+            .shared(),
             cancelled: cancelled.clone(),
         };
         let original =
@@ -1680,7 +2181,7 @@ mod tests {
             cancelled.load(Ordering::SeqCst),
             "actual query future was dropped before timeout observation"
         );
-        assert_eq!(time.reads.load(Ordering::SeqCst), 3);
+        assert_eq!(time.reads.load(Ordering::SeqCst), 2);
         assert!(
             matches!(
                 original.remaining_at(&physical_time(500)),
@@ -2100,19 +2601,24 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_wrapper_returns_typed_deadline_error() {
-        let effects = ScriptedTimeEffects::new(
+        let (effects, endpoint) = ScriptedTimeEffects::new(
             [physical_time(1_000), physical_time(6_200)],
             SleepBehavior::Immediate,
-        );
+        )
+        .with_controlled_deadline();
         let budget =
             TimeoutBudget::from_start_and_timeout(&physical_time(1_000), Duration::from_secs(5))
                 .expect("budget");
 
-        let error = execute_with_timeout_budget(&effects, &budget, || async {
+        let execution = execute_with_timeout_budget(&effects, &budget, || async {
             futures::future::pending::<Result<(), &'static str>>().await
-        })
-        .await
-        .expect_err("timed out");
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(6200)))
+            .expect("actual deadline observation");
+        let error = execution.await.expect_err("timed out");
 
         assert!(matches!(
             error,
@@ -2121,7 +2627,7 @@ mod tests {
                 observed_at_ms: 6_200,
             })
         ));
-        assert_eq!(effects.sleep_calls(), vec![5_000]);
+        assert!(effects.sleep_calls().is_empty());
     }
 
     #[tokio::test]
@@ -2132,16 +2638,21 @@ mod tests {
         let child = parent
             .child_budget(&physical_time(2_500), Duration::from_secs(10))
             .expect("child");
-        let effects = ScriptedTimeEffects::new(
+        let (effects, endpoint) = ScriptedTimeEffects::new(
             [physical_time(2_500), physical_time(6_100)],
             SleepBehavior::Immediate,
-        );
+        )
+        .with_controlled_deadline();
 
-        let error = execute_with_timeout_budget(&effects, &child, || async {
+        let execution = execute_with_timeout_budget(&effects, &child, || async {
             futures::future::pending::<Result<(), &'static str>>().await
-        })
-        .await
-        .expect_err("timed out");
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(6100)))
+            .expect("actual deadline observation");
+        let error = execution.await.expect_err("timed out");
 
         assert!(matches!(
             error,
@@ -2150,7 +2661,7 @@ mod tests {
                 observed_at_ms: 6_100,
             })
         ));
-        assert_eq!(effects.sleep_calls(), vec![3_500]);
+        assert!(effects.sleep_calls().is_empty());
     }
 
     #[tokio::test]
@@ -2322,17 +2833,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_post_sleep_clock_read_cannot_fabricate_deadline_evidence() {
+    async fn failed_absolute_wait_cannot_fabricate_deadline_evidence() {
         use std::error::Error;
-        let effects = ScriptedTimeEffects::new([physical_time(100)], SleepBehavior::Immediate);
+        let (effects, endpoint) =
+            ScriptedTimeEffects::new([physical_time(100)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
         let budget =
             TimeoutBudget::from_start_and_timeout(&physical_time(100), Duration::from_millis(50))
                 .unwrap();
-        let error = execute_with_timeout_budget(&effects, &budget, || async {
+        let execution = execute_with_timeout_budget(&effects, &budget, || async {
             futures::future::pending::<Result<(), std::io::Error>>().await
-        })
-        .await
-        .unwrap_err();
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        endpoint
+            .send(Err(TimeError::ServiceUnavailable))
+            .expect("actual timer failure");
+        let error = execution.await.unwrap_err();
         assert!(matches!(
             &error,
             TimeoutRunError::Timeout(TimeoutBudgetError::TimeSourceUnavailable { .. })
@@ -2548,18 +3065,38 @@ mod rollback_owner_tests {
     #[tokio::test]
     async fn success_and_timer_branches_both_detect_rollback_above_original_start() {
         for timer_wins in [false, true] {
-            let time = ScriptedTimeEffects::new(
+            let (time, endpoint) = ScriptedTimeEffects::new(
                 [physical_time(150), physical_time(140)],
                 SleepBehavior::Immediate,
-            );
-            let result = execute_with_timeout_budget(&time, &budget(), || async move {
+            )
+            .with_controlled_deadline();
+            let original = budget();
+            let execution = execute_with_timeout_budget(&time, &original, || async move {
                 if timer_wins {
                     futures::future::pending::<()>().await;
                 }
                 Ok::<_, std::io::Error>("operation completed")
-            })
-            .await
-            .expect_err("clock rollback must prevent successful terminal and fake timeout");
+            });
+            futures::pin_mut!(execution);
+            if timer_wins {
+                assert!(futures::poll!(execution.as_mut()).is_pending());
+                endpoint
+                    .send(Err(TimeError::PhysicalClockRollback {
+                        previous_ms: 150,
+                        observed_ms: 140,
+                    }))
+                    .expect("actual provider rollback");
+            }
+            let result = execution
+                .await
+                .expect_err("clock rollback prevents success or fake expiry");
+            if timer_wins {
+                assert!(matches!(
+                    result,
+                    TimeoutRunError::Timeout(TimeoutBudgetError::TimeSourceUnavailable { .. })
+                ));
+                continue;
+            }
             match result {
                 TimeoutRunError::Timeout(error) => assert_rollback(error),
                 TimeoutRunError::Operation(error) => {
