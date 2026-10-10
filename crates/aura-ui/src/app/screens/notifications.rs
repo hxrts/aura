@@ -30,7 +30,8 @@ pub(super) fn NotificationsScreen(
                 } else {
                     ScrollArea {
                         class: Some("flex-1 lg:min-h-0 pr-1".to_string()),
-                        ScrollAreaViewport {
+                        crate::rendered_control::RenderedScrollViewport {
+                            list_id: ListId::Notifications,
                             class: Some("aura-list space-y-2".to_string()),
                             for (idx, entry) in runtime.items.iter().enumerate() {
                                 button {

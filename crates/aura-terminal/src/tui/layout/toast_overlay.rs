@@ -54,7 +54,7 @@ pub fn ToastOverlay<'a>(props: &ToastOverlayProps<'a>) -> impl Into<AnyElement<'
     let dismiss_hint = if props.dismissable { "[Esc]" } else { "" };
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             width: dim::TOTAL_WIDTH,
             height: dim::FOOTER_HEIGHT,
             flex_direction: FlexDirection::Column,

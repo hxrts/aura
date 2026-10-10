@@ -3098,7 +3098,14 @@ with optional architecture-specific hardware acceleration
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "Document" "Element" "HtmlElement" "HtmlTextAreaElement" "Navigator" "Clipboard" "Storage" "Location" "console" "AbortController" "AbortSignal" "RequestInit" "Response" ];
+            features = [ "Window" "Event" "EventTarget" "ResizeObserver" "Document" "Element" "Node" "DomRect" "CssStyleDeclaration" "HtmlElement" "HtmlTextAreaElement" "Navigator" "Clipboard" "Storage" "Location" "console" "AbortController" "AbortSignal" "RequestInit" "Response" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "wasm-bindgen-test";
+            packageId = "wasm-bindgen-test";
+            target = { target, features }: ("wasm32" == target."arch" or null);
           }
         ];
         features = {
@@ -8592,7 +8599,7 @@ full support for heapless no_std targets
         version = "0.7.4";
         edition = "2021";
         description = "Web-sys renderer for Dioxus: Build fullstack web, desktop, and mobile apps with a single codebase.";
-        sha256 = "1q5m82lhpcbansmaw3cnkj65jfcaaczfrs1101236lxwcgw2xjga";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./vendor/dioxus-web-0.7.4; };
         libName = "dioxus_web";
         authors = [
           "Jonathan Kelley"
@@ -31887,7 +31894,7 @@ dependency.
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AesGcmParams" "AnimationEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "Crypto" "CryptoKey" "CssRule" "CssRuleList" "CssStyleDeclaration" "CssStyleRule" "CssStyleSheet" "CustomEvent" "DataTransfer" "DataTransferItem" "DataTransferItemList" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringList" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtendableEvent" "FetchEvent" "File" "FileList" "FileReader" "FocusEvent" "FormData" "Headers" "History" "HtmlCanvasElement" "HtmlElement" "HtmlFormElement" "HtmlHeadElement" "HtmlInputElement" "HtmlSelectElement" "HtmlStyleElement" "HtmlTextAreaElement" "IdbCursor" "IdbCursorDirection" "IdbCursorWithValue" "IdbDatabase" "IdbFactory" "IdbKeyRange" "IdbObjectStore" "IdbObjectStoreParameters" "IdbOpenDbRequest" "IdbRequest" "IdbRequestReadyState" "IdbTransaction" "IdbTransactionMode" "IdbVersionChangeEvent" "InputEvent" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "Performance" "PointerEvent" "ProgressEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserverEntry" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "ScrollBehavior" "ScrollIntoViewOptions" "ScrollLogicalPosition" "ScrollRestoration" "ScrollToOptions" "ServiceWorkerGlobalScope" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StreamPipeOptions" "StyleSheet" "SubtleCrypto" "SvgElement" "Text" "Touch" "TouchEvent" "TouchList" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "WebSocket" "WheelEvent" "Window" "WorkerGlobalScope" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AesGcmParams" "AnimationEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "Crypto" "CryptoKey" "CssRule" "CssRuleList" "CssStyleDeclaration" "CssStyleRule" "CssStyleSheet" "CustomEvent" "DataTransfer" "DataTransferItem" "DataTransferItemList" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringList" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtendableEvent" "FetchEvent" "File" "FileList" "FileReader" "FocusEvent" "FormData" "Headers" "History" "HtmlCanvasElement" "HtmlElement" "HtmlFormElement" "HtmlHeadElement" "HtmlInputElement" "HtmlSelectElement" "HtmlStyleElement" "HtmlTextAreaElement" "IdbCursor" "IdbCursorDirection" "IdbCursorWithValue" "IdbDatabase" "IdbFactory" "IdbKeyRange" "IdbObjectStore" "IdbObjectStoreParameters" "IdbOpenDbRequest" "IdbRequest" "IdbRequestReadyState" "IdbTransaction" "IdbTransactionMode" "IdbVersionChangeEvent" "InputEvent" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "Performance" "PointerEvent" "ProgressEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverEntry" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "ScrollBehavior" "ScrollIntoViewOptions" "ScrollLogicalPosition" "ScrollRestoration" "ScrollToOptions" "ServiceWorkerGlobalScope" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StreamPipeOptions" "StyleSheet" "SubtleCrypto" "SvgElement" "Text" "Touch" "TouchEvent" "TouchList" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "WebSocket" "WheelEvent" "Window" "WorkerGlobalScope" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";

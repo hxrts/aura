@@ -4,11 +4,11 @@ use crate::semantic_lifecycle::{
     UiLocalOperationOwner, UiOperationTransferScope, UiWorkflowHandoffOwner,
 };
 use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
-use aura_app::ui::workflows::messaging::handoff::{RetryChatMessageRequest, SendChatTarget};
-use aura_app::ui_contract::{
+use aura_app::ui::contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
+use aura_app::ui::workflows::messaging::handoff::{RetryChatMessageRequest, SendChatTarget};
 
 fn command_failure(detail: impl Into<String>) -> SemanticOperationError {
     SemanticOperationError::new(
@@ -97,7 +97,8 @@ pub(super) fn ChatScreen(
                     extra_class: Some("gap-2".to_string()),
                     ScrollArea {
                         class: Some("flex-1 lg:min-h-0 pr-1".to_string()),
-                        ScrollAreaViewport {
+                        crate::rendered_control::RenderedScrollViewport {
+                            list_id: ListId::Channels,
                             class: Some("flex flex-col gap-2".to_string()),
                             for channel in &runtime_channels {
                                 UiListButton {
@@ -122,12 +123,7 @@ pub(super) fn ChatScreen(
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 if can_close_channel {
                                     UiButton {
-                                        id: Some(
-                                            ControlId::ChatEditChannelButton
-                                                .web_dom_id()
-                                                .required_dom_id("ControlId::ChatEditChannelButton must define a web DOM id")
-                                                .to_string(),
-                                        ),
+                                        control_id: Some(ControlId::ChatEditChannelButton),
                                         label: "Edit".to_string(),
                                         variant: ButtonVariant::Primary,
                                         onclick: {
@@ -138,12 +134,7 @@ pub(super) fn ChatScreen(
                                         }
                                     }
                                     UiButton {
-                                        id: Some(
-                                            ControlId::ChatCloseChannelButton
-                                                .web_dom_id()
-                                                .required_dom_id("ControlId::ChatCloseChannelButton must define a web DOM id")
-                                                .to_string(),
-                                        ),
+                                        control_id: Some(ControlId::ChatCloseChannelButton),
                                         label: "Close Channel".to_string(),
                                         variant: ButtonVariant::Secondary,
                                         onclick: {
@@ -187,12 +178,7 @@ pub(super) fn ChatScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::ChatNewGroupButton
-                                        .web_dom_id()
-                                        .required_dom_id("ControlId::ChatNewGroupButton must define a web DOM id")
-                                        .to_string(),
-                                ),
+                                    control_id: Some(ControlId::ChatNewGroupButton),
                                 label: "New Group".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: move |_| {
@@ -245,10 +231,8 @@ pub(super) fn ChatScreen(
                                             render_tick.set(render_tick() + 1);
                                         }
                                     },
-                                    textarea {
-                                        id: FieldId::ChatInput
-                                            .web_dom_id()
-                                            .required_dom_id("FieldId::ChatInput must define a web DOM id"),
+                                    crate::rendered_control::RenderedTextarea {
+                                        control_id: ControlId::Field(FieldId::ChatInput),
                                         class: "h-full w-full resize-none overflow-hidden border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground",
                                         value: "{composer_value}",
                                         readonly: !is_input_mode,
@@ -257,16 +241,16 @@ pub(super) fn ChatScreen(
                                         } else {
                                             "Click here or press 𝒊 to start typing"
                                         },
-                                        onfocus: move |_| {
+                                        onfocus: move |_: FocusEvent| {
                                             if !is_input_mode {
                                                 composer_field_focus_controller.send_action_keys("i");
                                                 render_tick.set(render_tick() + 1);
                                             }
                                         },
-                                        oninput: move |event| {
+                                        oninput: move |event: FormEvent| {
                                             composer_input_controller.set_input_buffer(event.value());
                                         },
-                                        onkeydown: move |event| {
+                                        onkeydown: move |event: KeyboardEvent| {
                                             event.stop_propagation();
                                             if matches!(event.data().key(), Key::Enter)
                                                 && !event.data().modifiers().contains(Modifiers::SHIFT)
@@ -294,12 +278,7 @@ pub(super) fn ChatScreen(
                                     class: "flex h-full min-w-[4.5rem] flex-col items-end justify-end gap-1",
                                     if let Some(retryable_message) = retryable_message {
                                         UiButton {
-                                            id: Some(
-                                                ControlId::ChatRetryMessageButton
-                                                    .web_dom_id()
-                                                    .required_dom_id("ControlId::ChatRetryMessageButton must define a web DOM id")
-                                                    .to_string()
-                                            ),
+                                            control_id: Some(ControlId::ChatRetryMessageButton),
                                             label: "Retry".to_string(),
                                             variant: ButtonVariant::Primary,
                                             onclick: {
@@ -357,12 +336,7 @@ pub(super) fn ChatScreen(
                                         }
                                     }
                                     UiButton {
-                                        id: Some(
-                                            ControlId::ChatSendMessageButton
-                                                .web_dom_id()
-                                                .required_dom_id("ControlId::ChatSendMessageButton must define a web DOM id")
-                                                .to_string()
-                                        ),
+                                        control_id: Some(ControlId::ChatSendMessageButton),
                                         label: "Send".to_string(),
                                         variant: if is_input_mode { ButtonVariant::Primary } else { ButtonVariant::Secondary },
                                         onclick: move |_| {

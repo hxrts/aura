@@ -567,6 +567,7 @@ pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElemen
 fn add_device_modal_body(modal: &AddDeviceModalViewProps) -> AnyElement<'static> {
     let name_props =
         crate::tui::components::LabeledInputProps::new("Device name", "e.g. Mobile, Laptop")
+            .with_field(aura_app::ui::contract::FieldId::DeviceName)
             .with_value(modal.name.clone())
             .with_focused(!modal.invitee_focused);
     let invitee_props = crate::tui::components::LabeledInputProps::new(
@@ -858,6 +859,8 @@ pub fn render_authority_picker_modal(settings: &SettingsViewProps) -> Option<Any
                 id: id.clone(), label: label.clone(),
             }).collect::<Vec<_>>(),
             selected_index: modal.selected_index,
+            list_id: Some(aura_app::ui::contract::ListId::Authorities),
+            modal_id: Some(aura_app::ui::contract::ModalId::SwitchAuthority),
         )
     }.into_any())
 }

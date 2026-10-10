@@ -128,6 +128,7 @@ impl HarnessCoordinator {
         let mut instance_transient_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
         let pty_cols = config.run.pty_cols;
+        let transient_run_token = crate::provisioning::run_token();
         for instance in &config.instances {
             let id = instance.id.clone();
             let mut instance = instance.clone();
@@ -150,9 +151,15 @@ impl HarnessCoordinator {
                     (key == "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT")
                         .then(|| absolutize_path(PathBuf::from(value)))
                 })
+                .map(Ok)
                 .unwrap_or_else(|| {
-                    fallback_instance_transient_dir(&config.run.name, &id, &instance_data_dir)
-                });
+                    crate::provisioning::transient_root(
+                        &config.run.name,
+                        &id,
+                        transient_run_token.as_deref(),
+                        &instance_data_dir,
+                    )
+                })?;
             if !instance.env.iter().any(|entry| {
                 entry
                     .split_once('=')
@@ -482,6 +489,7 @@ impl HarnessCoordinator {
                 .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
             clear_directory_contents(data_dir)?;
             if let Some(transient_dir) = self.instance_transient_dirs.get(instance_id) {
+                crate::provisioning::prepare_owned_transient_reset(transient_dir)?;
                 clear_directory_contents(transient_dir)?;
             }
             self.events.push(
@@ -1511,7 +1519,7 @@ fn choose_available_port(relay_host: Option<&str>, start: u16, attempts: u16) ->
     };
     for offset in 0..attempts {
         let port = start.saturating_add(offset);
-        if port_free("127.0.0.1", port) && relay_host.map_or(true, |host| port_free(host, port)) {
+        if port_free("127.0.0.1", port) && relay_host.is_none_or(|host| port_free(host, port)) {
             return Ok(port);
         }
     }
@@ -1710,18 +1718,6 @@ fn instance_claim_key(
     data_dir.hash(&mut hasher);
     transient_dir.hash(&mut hasher);
     format!("{instance_id}-{:016x}", hasher.finish())
-}
-
-fn fallback_instance_transient_dir(run_name: &str, instance_id: &str, data_dir: &Path) -> PathBuf {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    run_name.hash(&mut hasher);
-    instance_id.hash(&mut hasher);
-    data_dir.hash(&mut hasher);
-    workspace_root()
-        .join(".tmp")
-        .join("harness")
-        .join("transient")
-        .join(format!("{:016x}", hasher.finish()))
 }
 
 fn clear_directory_contents(dir: &Path) -> Result<()> {

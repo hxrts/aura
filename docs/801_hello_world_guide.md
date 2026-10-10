@@ -20,6 +20,18 @@ plugin installed in Cargo home before searching PATH. This requires no global
 toolchain changes. `just ci-build-cache-policy` tests the dispatch, argument
 boundaries, and forwarded exit status.
 
+The repository supports the pinned Rust 1.93 toolchain. Workspace packages
+declare 1.93 as their supported compiler floor, including published packages;
+the earlier 1.75 metadata did not establish a tested minimum for the current
+resolved dependency graph. Lower package-specific minimum supported Rust
+versions require a separate dependency audit and actual checks with that
+compiler. Dependency metadata alone does not establish lower-toolchain support.
+The separate host-tool workspaces (`toolkit/test-support` and `toolkit/xtask`)
+declare this floor explicitly; they do not inherit the runtime workspace's
+metadata. Dylint libraries use the separately pinned nightly compiler because
+they integrate with compiler-private APIs. Vendored upstream package metadata
+remains upstream-owned.
+
 Build the project:
 
 ```bash

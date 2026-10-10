@@ -27,16 +27,6 @@ pub struct TuiSemanticInputs<'a> {
     pub bootstrap_candidates: &'a [String],
 }
 
-pub(super) fn map_screen(screen: Screen) -> ScreenId {
-    match screen {
-        Screen::Neighborhood => ScreenId::Neighborhood,
-        Screen::Chat => ScreenId::Chat,
-        Screen::Contacts => ScreenId::Contacts,
-        Screen::Notifications => ScreenId::Notifications,
-        Screen::Settings => ScreenId::Settings,
-    }
-}
-
 fn screen_from_id(screen: ScreenId) -> Option<Screen> {
     match screen {
         ScreenId::Onboarding => None,
@@ -50,23 +40,23 @@ fn screen_from_id(screen: ScreenId) -> Option<Screen> {
 
 fn settings_section_from_item_id(item_id: &str) -> Option<SettingsSection> {
     match classify_settings_section_item_id(item_id) {
-        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
-            aura_app::ui_contract::SharedSettingsSectionId::Profile,
+        Some(aura_app::ui::contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui::contract::SharedSettingsSectionId::Profile,
         )) => Some(SettingsSection::Profile),
-        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
-            aura_app::ui_contract::SharedSettingsSectionId::GuardianThreshold,
+        Some(aura_app::ui::contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui::contract::SharedSettingsSectionId::GuardianThreshold,
         )) => Some(SettingsSection::Threshold),
-        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
-            aura_app::ui_contract::SharedSettingsSectionId::RequestRecovery,
+        Some(aura_app::ui::contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui::contract::SharedSettingsSectionId::RequestRecovery,
         )) => Some(SettingsSection::Recovery),
-        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
-            aura_app::ui_contract::SharedSettingsSectionId::Devices,
+        Some(aura_app::ui::contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui::contract::SharedSettingsSectionId::Devices,
         )) => Some(SettingsSection::Devices),
-        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
-            aura_app::ui_contract::SharedSettingsSectionId::Authority,
+        Some(aura_app::ui::contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui::contract::SharedSettingsSectionId::Authority,
         )) => Some(SettingsSection::Authority),
-        Some(aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
-            aura_app::ui_contract::FrontendSpecificSettingsSectionId::Observability,
+        Some(aura_app::ui::contract::SettingsSectionSurfaceId::FrontendSpecific(
+            aura_app::ui::contract::FrontendSpecificSettingsSectionId::Observability,
         )) => Some(SettingsSection::Observability),
         _ => None,
     }

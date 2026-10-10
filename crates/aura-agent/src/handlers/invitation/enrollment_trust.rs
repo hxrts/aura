@@ -473,7 +473,7 @@ impl RetainedEnrollmentVerifier {
             || initiator_device != effects.device_id()
             || record.setup.public_key_package.is_empty()
             || record.setup.public_key_package.len() > aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::MAX_PUBLIC_KEY_PACKAGE_BYTES
-            || record.setup.expires_at_ms.checked_sub(record.setup.issued_at_ms).map_or(true, |lifetime| lifetime == 0 || lifetime > aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::MAX_VALIDITY_MS)
+            || record.setup.expires_at_ms.checked_sub(record.setup.issued_at_ms).is_none_or(|lifetime| lifetime == 0 || lifetime > aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::MAX_VALIDITY_MS)
             || record.setup.issued_at_ms >= record.setup.expires_at_ms
             || match record.setup.signing_mode {
                 SigningMode::SingleSigner => record.setup.threshold != 1 || record.setup.participants != 1,

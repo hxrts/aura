@@ -39,7 +39,11 @@ cleanup_run_scope() {
     fi
   }
 
-  kill_process_tree "$harness_pid"
+  if [[ -n "$harness_pid" ]]; then
+    # The retained scope owns and reaps its harness child before exiting.
+    kill -TERM "$harness_pid" 2>/dev/null || true
+    wait "$harness_pid" 2>/dev/null || true
+  fi
 
   if keep_tmp_enabled; then
     [[ -n "$run_root" ]] && echo "[harness-matrix] retained run_root=$run_root" >&2
@@ -179,7 +183,7 @@ ensure_built_artifact() {
   echo "[harness-matrix] building package=$package bin=$bin_name" >&2
   (
     cd "$repo_root"
-    cargo build -q -p "$package" --bin "$bin_name"
+    scripts/dev/build-budget.sh --lane gates -- cargo build -q -p "$package" --bin "$bin_name"
   )
   [[ -x "$artifact_path" ]] || fail "missing built artifact: $artifact_path"
   printf '%s\n' "$artifact_path"
@@ -220,11 +224,8 @@ prepare_config_artifacts() {
 run_scenario() {
   local config="$1"
   local scenario_path="$2"
-  if [[ -n "${AURA_HARNESS_BIN:-}" ]]; then
-    "$AURA_HARNESS_BIN" run --config "$config" --scenario "$scenario_path"
-  else
-    cargo run -q -p aura-harness --bin aura-harness -- run --config "$config" --scenario "$scenario_path"
-  fi
+  [[ -n "${AURA_HARNESS_BIN:-}" ]] || fail "harness executable was not prepared"
+  exec "$AURA_HARNESS_BIN" run --config "$config" --scenario "$scenario_path"
 }
 
 clean_config_state() {
@@ -279,15 +280,24 @@ run_lane() {
       local run_token=""
       local run_root=""
       local transient_root=""
-      local transient_key=""
-      local harness_pid=""
+      local scope_pid=""
       local scenario_log=""
       run_token="$(run_token_for_scenario "$selected_lane" "$scenario_id")"
       run_root="$repo_root/.tmp/harness/matrix/$selected_lane/$scenario_id/$run_token"
-      transient_key="$(printf '%s' "$run_token" | cksum | awk '{print $1}')"
-      transient_root="$repo_root/.tmp/harness/transient/$transient_key"
+      # This run owns a private short parent; Rust admission validates its
+      # ownership and derives fixed scope children before binding IPC.
+      transient_root="$(mktemp -d /tmp/ah-matrix.XXXXXXXX)" || fail "cannot allocate private harness IPC root"
       scenario_log="$repo_root/artifacts/harness/matrix/scenarios/$selected_lane/$scenario_id/$run_token.log"
+      # The outer matrix process retains the original run child. External
+      # interruption drains that child tree before any selected root is removed.
+      trap 'cleanup_run_scope "$run_root" "$transient_root" "${scope_pid:-}"' EXIT
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
       (
+        harness_pid=""
+        trap 'if [[ -n "$harness_pid" ]]; then kill -TERM "$harness_pid" 2>/dev/null || true; wait "$harness_pid" 2>/dev/null || true; fi' EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
         cd "$repo_root"
         export AURA_HARNESS_RUN_TOKEN="$run_token"
         export AURA_HARNESS_RUN_ROOT="$run_root"
@@ -295,14 +305,17 @@ run_lane() {
         if [[ -n "${AURA_HARNESS_KEEP_TMP:-}" ]]; then
           echo "[harness-matrix] keep_tmp=$AURA_HARNESS_KEEP_TMP run_root=$AURA_HARNESS_RUN_ROOT transient_root=$AURA_HARNESS_TRANSIENT_ROOT" >&2
         fi
-        trap 'cleanup_run_scope "$AURA_HARNESS_RUN_ROOT" "$AURA_HARNESS_TRANSIENT_ROOT" "${harness_pid:-}"' EXIT INT TERM
         mkdir -p "$AURA_HARNESS_RUN_ROOT"
         mkdir -p "$AURA_HARNESS_TRANSIENT_ROOT"
         mkdir -p "$(dirname "$scenario_log")"
         run_scenario "$config" "$scenario_path" >"$scenario_log" 2>&1 &
         harness_pid=$!
         wait "$harness_pid"
-      )
+      ) &
+      scope_pid=$!
+      wait "$scope_pid"
+      cleanup_run_scope "$run_root" "$transient_root" "$scope_pid"
+      trap - EXIT INT TERM
     fi
   done < <(
     awk '

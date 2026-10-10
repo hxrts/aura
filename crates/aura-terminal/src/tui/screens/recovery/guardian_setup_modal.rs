@@ -105,9 +105,25 @@ pub struct GuardianCandidateProps {
 
 /// Guardian Setup Modal Component
 #[component]
-pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyElement<'static>> {
+pub fn GuardianSetupModal(
+    props: &GuardianSetupModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::GuardianSetup,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     if !props.visible {
-        return element! { View {} };
+        return AnyElement::from(crate::tui::rendered_controls::register_native_view(
+            element! { View {} },
+            vec![control_layout_0],
+        ));
     }
 
     let step = props.step.clone();
@@ -124,50 +140,53 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
     };
     let header_props = ModalHeaderProps::new(copy.title).with_step(step_num, 3);
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: Theme::BORDER_FOCUS,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header with step indicator
-            #(Some(modal_header(&header_props).into()))
-
-            // Error message if any
-            #(if !error.is_empty() {
-                Some(element! {
-                    View(width: 100pct, padding: Spacing::PANEL_PADDING, background_color: Theme::ERROR) {
-                        Text(content: error, color: Theme::TEXT)
-                    }
-                })
-            } else {
-                None
-            })
-
-            // Content based on step - fills available space
+    AnyElement::from(crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
+                flex_direction: FlexDirection::Column,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: Theme::BORDER_FOCUS,
                 overflow: Overflow::Hidden,
             ) {
-                #(match step {
-                    GuardianSetupStep::SelectContacts => render_select_contacts(props),
-                    GuardianSetupStep::ChooseThreshold => render_choose_threshold(props),
-                    GuardianSetupStep::CeremonyInProgress
-                    | GuardianSetupStep::Complete
-                    | GuardianSetupStep::Error => render_ceremony_progress(props),
-                })
-            }
+                // Header with step indicator
+                #(Some(modal_header(&header_props).into()))
 
-            // Footer with key hints
-            #(Some(modal_footer(&get_footer_hints(&step)).into()))
-        }
-    }
+                // Error message if any
+                #(if !error.is_empty() {
+                    Some(element! {
+                        View(width: 100pct, padding: Spacing::PANEL_PADDING, background_color: Theme::ERROR) {
+                            Text(content: error, color: Theme::TEXT)
+                        }
+                    })
+                } else {
+                    None
+                })
+
+                // Content based on step - fills available space
+                crate::tui::rendered_controls::ObservedClipView(
+                    width: 100pct,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
+                ) {
+                    #(match step {
+                        GuardianSetupStep::SelectContacts => render_select_contacts(props),
+                        GuardianSetupStep::ChooseThreshold => render_choose_threshold(props),
+                        GuardianSetupStep::CeremonyInProgress
+                        | GuardianSetupStep::Complete
+                        | GuardianSetupStep::Error => render_ceremony_progress(props),
+                    })
+                }
+
+                // Footer with key hints
+                #(Some(modal_footer(&get_footer_hints(&step)).into()))
+            }
+        },
+        vec![control_layout_0],
+    ))
 }
 
 fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static> {
@@ -283,7 +302,7 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
             }
 
             // Response list - compact
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 margin_top: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,

@@ -378,7 +378,11 @@ impl ConsensusSimulation {
 
                         let witnesses: Vec<_> = self.states.keys().cloned().collect();
                         for (i, to) in witnesses.iter().enumerate() {
-                            let msg = if i % 2 == 0 { &proposal } else { &alt_proposal };
+                            let msg = if i.is_multiple_of(2) {
+                                &proposal
+                            } else {
+                                &alt_proposal
+                            };
                             self.network.send(SimulatedMessage {
                                 from: witness.to_string(),
                                 to: to.clone(),

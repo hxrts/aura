@@ -181,14 +181,14 @@ impl DeviceLeafMetadata {
             result
                 .nickname_suggestion
                 .as_ref()
-                .map_or(true, |s| s.len() <= MAX_NICKNAME_SUGGESTION_BYTES),
+                .is_none_or(|s| s.len() <= MAX_NICKNAME_SUGGESTION_BYTES),
             "decoded nickname_suggestion exceeds limit"
         );
         debug_assert!(
             result
                 .platform
                 .as_ref()
-                .map_or(true, |s| s.len() <= MAX_PLATFORM_BYTES),
+                .is_none_or(|s| s.len() <= MAX_PLATFORM_BYTES),
             "decoded platform exceeds limit"
         );
 

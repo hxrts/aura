@@ -17,7 +17,22 @@ pub struct HomeCreateModalProps {
 
 /// Modal for creating a new home
 #[component]
-pub fn HomeCreateModal(props: &HomeCreateModalProps) -> impl Into<AnyElement<'static>> {
+pub fn HomeCreateModal(
+    props: &HomeCreateModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::CreateHome,
+            ),
+            // This component is included only by the modal renderer's actual
+            // selected child; observation still requires its completed layout.
+            rendered: true,
+        },
+    );
+
     let state = &props.state;
     let name = state.name.clone();
     let description = state.description.clone();
@@ -41,6 +56,7 @@ pub fn HomeCreateModal(props: &HomeCreateModalProps) -> impl Into<AnyElement<'st
     // Input field props
     let name_input =
         crate::tui::components::LabeledInputProps::new("Home Name:", "Enter home name...")
+            .with_field(aura_app::ui::contract::FieldId::HomeName)
             .with_value(name)
             .with_focused(active_field == 0);
     let description_input = crate::tui::components::LabeledInputProps::new(
@@ -66,40 +82,43 @@ pub fn HomeCreateModal(props: &HomeCreateModalProps) -> impl Into<AnyElement<'st
         crate::tui::components::ModalStatus::Idle
     };
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
-            #(Some(crate::tui::components::modal_header(&header_props).into()))
-
-            // Body
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: border_color,
                 overflow: Overflow::Hidden,
             ) {
-                // Input fields
-                View(flex_direction: FlexDirection::Column, gap: Spacing::SM) {
-                    #(Some(crate::tui::components::labeled_input(&name_input).into()))
-                    #(Some(crate::tui::components::labeled_input(&description_input).into()))
+                // Header
+                #(Some(crate::tui::components::modal_header(&header_props).into()))
+
+                // Body
+                crate::tui::rendered_controls::ObservedClipView(
+                    width: 100pct,
+                    padding: Spacing::MODAL_PADDING,
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
+                ) {
+                    // Input fields
+                    View(flex_direction: FlexDirection::Column, gap: Spacing::SM) {
+                        #(Some(crate::tui::components::labeled_input(&name_input).into()))
+                        #(Some(crate::tui::components::labeled_input(&description_input).into()))
+                    }
+
+                    // Status message (error/loading)
+                    #(Some(crate::tui::components::status_message(&status).into()))
                 }
 
-                // Status message (error/loading)
-                #(Some(crate::tui::components::status_message(&status).into()))
+                // Footer
+                #(Some(crate::tui::components::modal_footer(&footer_props).into()))
             }
-
-            // Footer
-            #(Some(crate::tui::components::modal_footer(&footer_props).into()))
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }

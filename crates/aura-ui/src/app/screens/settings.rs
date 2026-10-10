@@ -18,6 +18,7 @@ pub(super) fn SettingsScreen(
                 subtitle: Some("Manage your account".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 UiCardBody {
+                    control_id: Some(ControlId::List(ListId::SettingsSections)),
                     extra_class: Some("gap-2".to_string()),
                     for section in SettingsSection::ALL {
                         UiListButton {
@@ -61,14 +62,7 @@ pub(super) fn SettingsScreen(
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsEditNicknameButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::SettingsEditNicknameButton must define a web DOM id"
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsEditNicknameButton),
                                     label: "Edit Nickname".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -104,14 +98,7 @@ pub(super) fn SettingsScreen(
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsConfigureThresholdButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::SettingsConfigureThresholdButton must define a web DOM id"
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsConfigureThresholdButton),
                                     label: "Configure Threshold".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -142,14 +129,7 @@ pub(super) fn SettingsScreen(
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsRequestRecoveryButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::SettingsRequestRecoveryButton must define a web DOM id"
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsRequestRecoveryButton),
                                     label: "Request Recovery".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -168,7 +148,8 @@ pub(super) fn SettingsScreen(
                 if matches!(model.settings_section, SettingsSection::Devices) {
                     UiCardBody {
                         extra_class: Some("gap-2".to_string()),
-                        div {
+                        crate::rendered_control::RenderedRegion {
+                            control_id: ControlId::List(ListId::Devices),
                             class: "aura-list flex flex-col gap-2",
                             for device in &runtime.devices {
                                 UiListItem {
@@ -207,12 +188,7 @@ pub(super) fn SettingsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsAddDeviceButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::SettingsAddDeviceButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsAddDeviceButton),
                                     label: "Add Device".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -225,12 +201,7 @@ pub(super) fn SettingsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsImportDeviceCodeButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::SettingsImportDeviceCodeButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsImportDeviceCodeButton),
                                     label: "Import Code".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -243,12 +214,7 @@ pub(super) fn SettingsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsRemoveDeviceButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::SettingsRemoveDeviceButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsRemoveDeviceButton),
                                     label: "Remove Device".to_string(),
                                     variant: ButtonVariant::Secondary,
                                     onclick: {
@@ -374,14 +340,7 @@ pub(super) fn SettingsScreen(
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsSwitchAuthorityButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::SettingsSwitchAuthorityButton must define a web DOM id"
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsSwitchAuthorityButton),
                                     label: "Switch Authority".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -394,14 +353,7 @@ pub(super) fn SettingsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsConfigureMfaButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::SettingsConfigureMfaButton must define a web DOM id"
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsConfigureMfaButton),
                                     label: "Configure MFA".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -438,14 +390,7 @@ pub(super) fn SettingsScreen(
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
-                                    id: Some(
-                                        ControlId::SettingsToggleThemeButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::SettingsToggleThemeButton must define a web DOM id"
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::SettingsToggleThemeButton),
                                     label: match resolved_scheme {
                                         ColorScheme::Light => "Switch to Dark".to_string(),
                                         _ => "Switch to Light".to_string(),

@@ -393,7 +393,7 @@ impl BiometricEffects for MockBiometricHandler {
         let matching_templates: Vec<&BiometricTemplate> = templates
             .values()
             .filter(|t| {
-                t.biometric_type == biometric_type && template_id.map_or(true, |id| t.id == id)
+                t.biometric_type == biometric_type && template_id.is_none_or(|id| t.id == id)
             })
             .collect();
 

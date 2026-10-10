@@ -1,7 +1,7 @@
 use async_lock::Mutex;
 use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
+use aura_app::ui::contract::RuntimeFact;
 use aura_app::ui::contract::{ControlId, FieldId, ScreenId, UiReadiness};
-use aura_app::ui_contract::RuntimeFact;
 use aura_app::DUAL_FRONTEND_DEMO_WEB_TABLET_NAME;
 use aura_app::{BootstrapCandidateInfo, BootstrapCandidateOrigin};
 use aura_ui::{AuraUiRoot, RequiredDomId};
@@ -215,8 +215,10 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
 
     if account_ready {
         return rsx! {
-            AuraUiRoot {
+            super::rendered_controls::ObservedRendererFrame {
+                snapshot: controller.semantic_model_snapshot(),
                 controller: controller.clone(),
+                AuraUiRoot { controller: controller.clone() }
             }
         };
     }
@@ -504,12 +506,12 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
     }
 
     rsx! {
+        super::rendered_controls::ObservedRendererFrame {
+            snapshot: controller_snapshot.clone(),
+            controller: controller.clone(),
         main {
             class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
-            div {
-                id: ControlId::OnboardingRoot
-                    .required_dom_id("ControlId::OnboardingRoot"),
-                class: "w-full max-w-xl",
+            super::rendered_controls::RenderedOnboardingRoot {
                 div {
                     id: "aura-onboarding-card",
                     class: "w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
@@ -525,22 +527,21 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         label {
                             class: "block space-y-2",
                             span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Create a new account" }
-                            input {
-                                id: FieldId::AccountName
-                                    .required_dom_id("FieldId::AccountName"),
+                            aura_ui::rendered_control::RenderedInput {
+                                control_id: ControlId::Field(FieldId::AccountName),
                                 class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                                 placeholder: "Enter your nickname...",
                                 value: "{account_name()}",
                                 autofocus: true,
                                 disabled: creating_account(),
-                                oninput: move |event| {
+                                oninput: move |event: FormEvent| {
                                     let value = event.value();
                                     account_name.set(value.clone());
                                     account_error.set(None);
                                 },
                                 onkeydown: {
                                     let run = run_account_submit.clone();
-                                    move |event| {
+                                    move |event: KeyboardEvent| {
                                         if matches!(event.data().key(), Key::Enter)
                                             && !event.data().modifiers().contains(Modifiers::SHIFT)
                                         {
@@ -609,14 +610,13 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         label {
                             class: "block space-y-2",
                             span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join an existing account" }
-                            input {
-                                id: FieldId::DeviceImportCode
-                                    .required_dom_id("FieldId::DeviceImportCode"),
+                            aura_ui::rendered_control::RenderedInput {
+                                control_id: ControlId::Field(FieldId::DeviceImportCode),
                                 class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                                 placeholder: "Enter device enrollment code...",
                                 value: "{import_code()}",
                                 disabled: importing_code(),
-                                oninput: move |event| {
+                                oninput: move |event: FormEvent| {
                                     import_code.set(event.value());
                                     import_error.set(None);
                                 },
@@ -624,7 +624,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                     let import_code = import_code.clone();
                                     let importing_code = importing_code.clone();
                                     let run_import = run_import.clone();
-                                    move |event| {
+                                    move |event: KeyboardEvent| {
                                         if matches!(event.data().key(), Key::Enter)
                                             && !event.data().modifiers().contains(Modifiers::SHIFT)
                                         {
@@ -641,23 +641,23 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         label {
                             class:"block space-y-2",
                             span {"Signed enrollment manifest"}
-                            input {
-                                id:FieldId::DeviceImportManifest.required_dom_id("FieldId::DeviceImportManifest"),
+                            aura_ui::rendered_control::RenderedInput {
+                                control_id: ControlId::Field(FieldId::DeviceImportManifest),
                                 class:"w-full rounded-md border bg-background px-3 py-2 text-sm",
                                 value:"{import_manifest()}",placeholder:"Paste signed manifest code...",
                                 disabled:importing_code(),
-                                oninput:move |event|{import_manifest.set(event.value());import_error.set(None);},
+                                oninput:move |event: FormEvent|{import_manifest.set(event.value());import_error.set(None);},
                             }
                         }
                         label {
                             class:"block space-y-2",
                             span {"Initiator verifier (separate transfer)"}
-                            input {
-                                id:FieldId::DeviceImportInitiatorVerifier.required_dom_id("FieldId::DeviceImportInitiatorVerifier"),
+                            aura_ui::rendered_control::RenderedInput {
+                                control_id: ControlId::Field(FieldId::DeviceImportInitiatorVerifier),
                                 class:"w-full rounded-md border bg-background px-3 py-2 text-sm",
                                 value:"{import_initiator_verifier()}",placeholder:"Paste separately transferred verifier...",
                                 disabled:importing_code(),
-                                oninput:move |event|{import_initiator_verifier.set(event.value());import_error.set(None);},
+                                oninput:move |event: FormEvent|{import_initiator_verifier.set(event.value());import_error.set(None);},
                             }
                         }
                         if let Some(error) = import_error() {
@@ -680,6 +680,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     }
                 }
             }
+        }
         }
     }
 }

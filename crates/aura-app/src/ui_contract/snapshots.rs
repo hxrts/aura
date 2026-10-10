@@ -782,6 +782,9 @@ pub struct UiSnapshot {
     pub selections: Vec<SelectionSnapshot>,
     pub lists: Vec<ListSnapshot>,
     pub home_modes: Vec<HomeModeSnapshot>,
+    /// Actual renderer-committed observations; missing controls are unsupported.
+    pub rendered_controls: Vec<super::RenderedControlObservation>,
+    pub rendered_control_frame: super::RenderedControlFrame,
     pub messages: Vec<MessageSnapshot>,
     pub operations: Vec<OperationSnapshot>,
     pub toasts: Vec<ToastSnapshot>,
@@ -817,6 +820,8 @@ impl UiSnapshot {
             selections: Vec::new(),
             lists: Vec::new(),
             home_modes: Vec::new(),
+            rendered_controls: Vec::new(),
+            rendered_control_frame: super::RenderedControlFrame::Unavailable,
             messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
@@ -828,6 +833,34 @@ impl UiSnapshot {
     }
 
     pub fn validate_invariants(&self) -> Result<(), String> {
+        match &self.rendered_control_frame {
+            super::RenderedControlFrame::Unavailable => {
+                if self
+                    .rendered_controls
+                    .iter()
+                    .any(|control| control.state == super::ControlLayoutState::Visible)
+                {
+                    return Err("visible control lacks committed renderer frame".into());
+                }
+            }
+            super::RenderedControlFrame::Committed {
+                capture_revision,
+                layout_revision,
+                source,
+            } => {
+                if *capture_revision == 0
+                    || *layout_revision == 0
+                    || !source.matches(self)
+                    || self.rendered_controls.iter().any(|control| {
+                        control.capture_revision != *capture_revision || control.source != *source
+                    })
+                {
+                    return Err(
+                        "rendered control frame has invalid capture or source binding".into(),
+                    );
+                }
+            }
+        }
         let mut home_ids = HashSet::new();
         for home in &self.home_modes {
             if home.channel_id.is_empty()

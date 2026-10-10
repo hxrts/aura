@@ -36,7 +36,7 @@ pub fn SimpleModal<'a>(props: &SimpleModalProps<'a>) -> impl Into<AnyElement<'a>
     };
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,
@@ -68,7 +68,7 @@ pub fn SimpleModal<'a>(props: &SimpleModalProps<'a>) -> impl Into<AnyElement<'a>
             )
 
             // Content area
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
@@ -102,7 +102,7 @@ pub fn ConfirmationModal<'a>(props: &ConfirmModalProps<'a>) -> impl Into<AnyElem
     let secondary_text = props.secondary.unwrap_or("");
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
             flex_direction: FlexDirection::Column,

@@ -11,6 +11,8 @@ use crate::tui::theme::{focus_border_color, Spacing, Theme};
 /// Props for ListPanel
 #[derive(Default, Props)]
 pub struct ListPanelProps<'a> {
+    /// Canonical list identity supplied by the actual rendered owner.
+    pub list_id: Option<aura_app::ui::contract::ListId>,
     /// Panel title (displayed in header)
     pub title: String,
     /// Item count (displayed in parentheses after title)
@@ -57,7 +59,20 @@ pub struct ListPanelProps<'a> {
 /// }
 /// ```
 #[component]
-pub fn ListPanel<'a>(props: &mut ListPanelProps<'a>) -> impl Into<AnyElement<'a>> {
+pub fn ListPanel<'a>(
+    props: &mut ListPanelProps<'a>,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'a>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        props.list_id.map_or(
+            crate::tui::rendered_controls::DrawObservationRole::PassThrough,
+            |id| crate::tui::rendered_controls::DrawObservationRole::Control {
+                id: aura_app::ui::contract::ControlId::List(id),
+                rendered: true,
+            },
+        ),
+    );
     let title = format!("{} ({})", props.title, props.count);
     let empty_message = if props.empty_message.is_empty() {
         "No items".to_string()
@@ -65,38 +80,41 @@ pub fn ListPanel<'a>(props: &mut ListPanelProps<'a>) -> impl Into<AnyElement<'a>
         props.empty_message.clone()
     };
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0_f32,
-            flex_shrink: 1.0,
-            border_style: BorderStyle::Round,
-            border_color: focus_border_color(props.focused),
-            overflow: Overflow::Hidden,
-        ) {
-            // Title bar with count
-            View(padding_left: Spacing::PANEL_PADDING) {
-                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-            // Scrollable content area
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
-                padding: Spacing::PANEL_PADDING,
-                overflow: Overflow::Scroll,
+                border_style: BorderStyle::Round,
+                border_color: focus_border_color(props.focused),
+                overflow: Overflow::Hidden,
             ) {
-                #(&mut props.items)
-                #(if props.items.is_empty() {
-                    Some(element! {
-                        View {
-                            EmptyState(title: empty_message)
-                        }
+                // Title bar with count
+                View(padding_left: Spacing::PANEL_PADDING) {
+                    Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
+                }
+                // Scrollable content area
+                crate::tui::rendered_controls::ObservedClipView(
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    padding: Spacing::PANEL_PADDING,
+                    overflow: Overflow::Scroll,
+                ) {
+                    #(&mut props.items)
+                    #(if props.items.is_empty() {
+                        Some(element! {
+                            View {
+                                EmptyState(title: empty_message)
+                            }
+                        })
+                    } else {
+                        None
                     })
-                } else {
-                    None
-                })
+                }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }

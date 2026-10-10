@@ -39,11 +39,25 @@ pub struct InvitationImportModalProps {
 
 /// Modal for importing invite codes
 #[component]
-pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<AnyElement<'static>> {
+pub fn InvitationImportModal(
+    props: &InvitationImportModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::AcceptContactInvitation,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     if !props.visible {
-        return element! {
-            View {}
-        };
+        return AnyElement::from(crate::tui::rendered_controls::register_native_view(
+            element! { View {} },
+            vec![control_layout_0],
+        ));
     }
 
     let code = props.code.clone();
@@ -97,60 +111,63 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
         ModalStatus::Idle
     };
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
-            #(Some(modal_header(&header_props).into()))
-
-            // Body - fills available space
+    AnyElement::from(crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: border_color,
                 overflow: Overflow::Hidden,
             ) {
-                // Instructions
-                View(margin_bottom: Spacing::XS) {
-                    Text(
-                        content: "Paste the invite code you received:",
-                        color: Theme::TEXT,
-                    )
-                }
+                // Header
+                #(Some(modal_header(&header_props).into()))
 
-                // Code input box
-                View(
+                // Body - fills available space
+                crate::tui::rendered_controls::ObservedClipView(
                     width: 100pct,
+                    padding: Spacing::MODAL_PADDING,
                     flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: if props.focused { Theme::PRIMARY } else { Theme::BORDER },
-                    padding: Spacing::PANEL_PADDING,
-                    margin_bottom: Spacing::XS,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
                 ) {
-                    Text(
-                        content: code_display,
-                        color: code_color,
-                        wrap: TextWrap::Wrap,
-                    )
+                    // Instructions
+                    View(margin_bottom: Spacing::XS) {
+                        Text(
+                            content: "Paste the invite code you received:",
+                            color: Theme::TEXT,
+                        )
+                    }
+
+                    // Code input box
+                    View(
+                        width: 100pct,
+                        flex_direction: FlexDirection::Column,
+                        border_style: Borders::INPUT,
+                        border_color: if props.focused { Theme::PRIMARY } else { Theme::BORDER },
+                        padding: Spacing::PANEL_PADDING,
+                        margin_bottom: Spacing::XS,
+                    ) {
+                        Text(
+                            content: code_display,
+                            color: code_color,
+                            wrap: TextWrap::Wrap,
+                        )
+                    }
+
+                    // Status message (error/loading)
+                    #(Some(status_message(&status).into()))
                 }
 
-                // Status message (error/loading)
-                #(Some(status_message(&status).into()))
+                // Footer
+                #(Some(modal_footer(&footer_props).into()))
             }
-
-            // Footer
-            #(Some(modal_footer(&footer_props).into()))
-        }
-    }
+        },
+        vec![control_layout_0],
+    ))
 }
 
 /// State for invitation import modal

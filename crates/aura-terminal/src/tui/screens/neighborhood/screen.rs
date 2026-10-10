@@ -46,7 +46,15 @@ struct HomeMapProps {
 }
 
 #[component]
-fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
+fn HomeMap(props: &HomeMapProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(aura_app::ui::contract::ListId::Homes),
+            rendered: true,
+        },
+    );
+
     let homes = props.homes.clone();
     let selected = props.selected_index;
     let enter_depth = props.enter_depth;
@@ -65,79 +73,82 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
         .unwrap_or("--");
     let can_enter_line = format!("Entry access: {strongest_access_label}");
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0_f32,
-            border_style: BorderStyle::Round,
-            border_color: Theme::BORDER,
-            padding_left: 1,
-            padding_right: 1,
-            padding_bottom: 1,
-        ) {
-            View(flex_direction: FlexDirection::Row, gap: 1) {
-                Text(content: "Map", weight: Weight::Bold, color: Theme::PRIMARY)
-                Text(content: depth_icon, color: Theme::SECONDARY)
-                Text(content: depth_label, color: Theme::SECONDARY)
-            }
-            View(height: 1)
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0_f32,
-                gap: 1,
-                overflow: Overflow::Scroll,
+                border_style: BorderStyle::Round,
+                border_color: Theme::BORDER,
+                padding_left: 1,
+                padding_right: 1,
+                padding_bottom: 1,
             ) {
-                #(if homes.is_empty() {
-                    vec![
-                        element! {
-                            View(flex_direction: FlexDirection::Column, gap: 1) {
-                                Text(content: "No home yet", color: Theme::TEXT_MUTED)
-                                View(height: 1)
-                                Text(content: "To get started:", color: Theme::TEXT)
-                                View(flex_direction: FlexDirection::Column, padding_left: 1) {
-                                    Text(content: "• Create a new home", color: Theme::TEXT_MUTED)
-                                    Text(content: "• Accept an invitation to join", color: Theme::TEXT_MUTED)
-                                    Text(content: "  an existing home", color: Theme::TEXT_MUTED)
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Map", weight: Weight::Bold, color: Theme::PRIMARY)
+                    Text(content: depth_icon, color: Theme::SECONDARY)
+                    Text(content: depth_label, color: Theme::SECONDARY)
+                }
+                View(height: 1)
+                View(
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    gap: 1,
+                    overflow: Overflow::Scroll,
+                ) {
+                    #(if homes.is_empty() {
+                        vec![
+                            element! {
+                                View(flex_direction: FlexDirection::Column, gap: 1) {
+                                    Text(content: "No home yet", color: Theme::TEXT_MUTED)
+                                    View(height: 1)
+                                    Text(content: "To get started:", color: Theme::TEXT)
+                                    View(flex_direction: FlexDirection::Column, padding_left: 1) {
+                                        Text(content: "• Create a new home", color: Theme::TEXT_MUTED)
+                                        Text(content: "• Accept an invitation to join", color: Theme::TEXT_MUTED)
+                                        Text(content: "  an existing home", color: Theme::TEXT_MUTED)
+                                    }
+                                    View(height: 1)
+                                    Text(content: "[n] Create home", color: Theme::SECONDARY)
+                                    Text(content: "[i] Import invitation", color: Theme::SECONDARY)
                                 }
-                                View(height: 1)
-                                Text(content: "[n] Create home", color: Theme::SECONDARY)
-                                Text(content: "[i] Import invitation", color: Theme::SECONDARY)
                             }
-                        }
-                    ]
-                } else {
-                    homes.iter().enumerate().map(|(idx, home_entry)| {
-                        let is_selected = idx == selected;
-                        let border_color = if is_selected { Theme::PRIMARY } else { Theme::BORDER };
-                        let name = home_entry
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| "Unnamed Home".to_string());
-                        let home_badge = if home_entry.is_home { " ⌂" } else { "" };
-                        let members = format!("{}/{}", home_entry.member_count, home_entry.max_members);
-                        element! {
-                            View(
-                                key: home_entry.id.clone(),
-                                flex_direction: FlexDirection::Column,
-                                border_style: BorderStyle::Round,
-                                border_color: border_color,
-                                padding_left: 1,
-                                padding_right: 1,
-                            ) {
-                                View(flex_direction: FlexDirection::Row) {
-                                    Text(content: name, color: Theme::TEXT)
-                                    Text(content: home_badge, color: Theme::PRIMARY)
+                        ]
+                    } else {
+                        homes.iter().enumerate().map(|(idx, home_entry)| {
+                            let is_selected = idx == selected;
+                            let border_color = if is_selected { Theme::PRIMARY } else { Theme::BORDER };
+                            let name = home_entry
+                                .name
+                                .clone()
+                                .unwrap_or_else(|| "Unnamed Home".to_string());
+                            let home_badge = if home_entry.is_home { " ⌂" } else { "" };
+                            let members = format!("{}/{}", home_entry.member_count, home_entry.max_members);
+                            element! {
+                                View(
+                                    key: home_entry.id.clone(),
+                                    flex_direction: FlexDirection::Column,
+                                    border_style: BorderStyle::Round,
+                                    border_color: border_color,
+                                    padding_left: 1,
+                                    padding_right: 1,
+                                ) {
+                                    View(flex_direction: FlexDirection::Row) {
+                                        Text(content: name, color: Theme::TEXT)
+                                        Text(content: home_badge, color: Theme::PRIMARY)
+                                    }
+                                    Text(content: members, color: Theme::TEXT_MUTED)
                                 }
-                                Text(content: members, color: Theme::TEXT_MUTED)
                             }
-                        }
-                    }).collect()
-                })
+                        }).collect()
+                    })
+                }
+                View(height: 1)
+                Text(content: can_enter_line, color: Theme::TEXT_MUTED)
             }
-            View(height: 1)
-            Text(content: can_enter_line, color: Theme::TEXT_MUTED)
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 #[derive(Default, Props)]
@@ -224,56 +235,69 @@ struct MemberListProps {
 }
 
 #[component]
-fn MemberList(props: &MemberListProps) -> impl Into<AnyElement<'static>> {
+fn MemberList(props: &MemberListProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(
+                aura_app::ui::contract::ListId::NeighborhoodMembers,
+            ),
+            rendered: true,
+        },
+    );
+
     let members = props.members.clone();
     let selected = props.selected_index;
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0_f32,
-            border_style: BorderStyle::Round,
-            border_color: Theme::BORDER,
-            padding_left: 1,
-            padding_right: 1,
-        ) {
-            View(flex_direction: FlexDirection::Row, gap: 1) {
-                Text(content: "Members & Participants", weight: Weight::Bold, color: Theme::PRIMARY)
-                #(if props.moderator_actions_enabled {
-                    Some(element! { Text(content: "⚖︎ Moderator", color: Theme::WARNING) })
-                } else {
-                    None
-                })
-            }
-            View(flex_direction: FlexDirection::Column, gap: 0) {
-                #(if members.is_empty() {
-                    vec![element! {
-                        View { Text(content: "No members or participants", color: Theme::TEXT_MUTED) }
-                    }]
-                } else {
-                    members.iter().enumerate().map(|(idx, r)| {
-                        let is_selected = idx == selected;
-                        let id_hint = short_id(&r.id, 4);
-                        let name = format!("{} · #{}", r.name, id_hint);
-                        let moderator_badge = if r.is_moderator { " ⚖︎" } else { "" };
-                        let self_badge = if r.is_self { " (you)" } else { "" };
-                        element! {
-                            View(
-                                key: r.id.clone(),
-                                flex_direction: FlexDirection::Row,
-                                background_color: if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL },
-                                padding_left: 1,
-                            ) {
-                                Text(content: name, color: if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL })
-                                Text(content: moderator_badge, color: Theme::WARNING)
-                                Text(content: self_badge, color: if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_MUTED })
+    crate::tui::rendered_controls::register_native_view(
+        element! {
+            View(
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0_f32,
+                border_style: BorderStyle::Round,
+                border_color: Theme::BORDER,
+                padding_left: 1,
+                padding_right: 1,
+            ) {
+                View(flex_direction: FlexDirection::Row, gap: 1) {
+                    Text(content: "Members & Participants", weight: Weight::Bold, color: Theme::PRIMARY)
+                    #(if props.moderator_actions_enabled {
+                        Some(element! { Text(content: "⚖︎ Moderator", color: Theme::WARNING) })
+                    } else {
+                        None
+                    })
+                }
+                View(flex_direction: FlexDirection::Column, gap: 0) {
+                    #(if members.is_empty() {
+                        vec![element! {
+                            View { Text(content: "No members or participants", color: Theme::TEXT_MUTED) }
+                        }]
+                    } else {
+                        members.iter().enumerate().map(|(idx, r)| {
+                            let is_selected = idx == selected;
+                            let id_hint = short_id(&r.id, 4);
+                            let name = format!("{} · #{}", r.name, id_hint);
+                            let moderator_badge = if r.is_moderator { " ⚖︎" } else { "" };
+                            let self_badge = if r.is_self { " (you)" } else { "" };
+                            element! {
+                                View(
+                                    key: r.id.clone(),
+                                    flex_direction: FlexDirection::Row,
+                                    background_color: if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL },
+                                    padding_left: 1,
+                                ) {
+                                    Text(content: name, color: if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL })
+                                    Text(content: moderator_badge, color: Theme::WARNING)
+                                    Text(content: self_badge, color: if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_MUTED })
+                                }
                             }
-                        }
-                    }).collect()
-                })
+                        }).collect()
+                    })
+                }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 #[derive(Default, Props)]
@@ -394,6 +418,16 @@ pub fn NeighborhoodScreen(
     props: &NeighborhoodScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Screen(
+                aura_app::ui::contract::ScreenId::Neighborhood,
+            ),
+            rendered: true,
+        },
+    );
+
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
     let reactive_neighborhood_name = hooks.use_state(String::new);
@@ -597,86 +631,89 @@ pub fn NeighborhoodScreen(
         "Moderator: No".to_string()
     };
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            overflow: Overflow::Hidden,
-        ) {
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                flex_direction: FlexDirection::Row,
+                flex_direction: FlexDirection::Column,
+                width: dim::TOTAL_WIDTH,
                 height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
-                gap: dim::TWO_PANEL_GAP,
             ) {
-                View(width: dim::TWO_PANEL_LEFT_WIDTH, height: dim::MIDDLE_HEIGHT) {
-                    #(if is_detail {
-                        vec![element! {
-                            View(flex_direction: FlexDirection::Column, gap: 0) {
-                                HomeHeader(
-                                    home_name: current_home_name.clone(),
-                                    member_count: member_count,
-                                    storage_text: storage_text,
-                                    moderator_label: moderator_label,
-                                )
-                                #(if show_detail_lists {
-                                    vec![element! {
-                                        View(flex_direction: FlexDirection::Column, gap: 0) {
-                                            ChannelList(channels: display_channels, selected_index: props.view.selected_channel)
-                                            MemberList(
-                                                members: display_members,
-                                                selected_index: props.view.selected_member,
-                                                moderator_actions_enabled: display_moderator_actions_enabled,
-                                            )
-                                        }
-                                    }]
-                                } else {
-                                    vec![
-                                        element! {
-                                            View(
-                                                border_style: BorderStyle::Round,
-                                                border_color: Theme::BORDER,
-                                                padding_left: 1,
-                                                padding_right: 1,
-                                                padding_top: 1,
-                                                padding_bottom: 1,
-                                            ) {
-                                                Text(
-                                                    content: "Partial/Limited view: full channel and membership details are hidden",
-                                                    color: Theme::TEXT_MUTED,
+                crate::tui::rendered_controls::ObservedClipView(
+                    flex_direction: FlexDirection::Row,
+                    height: dim::MIDDLE_HEIGHT,
+                    overflow: Overflow::Hidden,
+                    gap: dim::TWO_PANEL_GAP,
+                ) {
+                    View(width: dim::TWO_PANEL_LEFT_WIDTH, height: dim::MIDDLE_HEIGHT) {
+                        #(if is_detail {
+                            vec![element! {
+                                View(flex_direction: FlexDirection::Column, gap: 0) {
+                                    HomeHeader(
+                                        home_name: current_home_name.clone(),
+                                        member_count: member_count,
+                                        storage_text: storage_text,
+                                        moderator_label: moderator_label,
+                                    )
+                                    #(if show_detail_lists {
+                                        vec![element! {
+                                            View(flex_direction: FlexDirection::Column, gap: 0) {
+                                                ChannelList(channels: display_channels, selected_index: props.view.selected_channel)
+                                                MemberList(
+                                                    members: display_members,
+                                                    selected_index: props.view.selected_member,
+                                                    moderator_actions_enabled: display_moderator_actions_enabled,
                                                 )
                                             }
-                                        }
-                                    ]
-                                })
-                            }
-                        }]
-                    } else {
-                        vec![element! {
-                            View(flex_grow: 1.0_f32) {
-                                HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
-                            }
-                        }]
-                    })
-                }
-                View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: dim::MIDDLE_HEIGHT) {
-                    SocialStatusPanel(
-                        neighborhood_name: neighborhood_name,
-                        selected_home_name: current_home_name,
-                        selected_home_id: selected_home_id,
-                        enter_depth: effective_depth,
-                        entered_home: is_entered,
-                        homes_count: homes_count,
-                        channel_count: channel_count,
-                        selected_channel_name: selected_channel_name,
-                        member_count: member_count,
-                        moderator_actions_enabled: display_moderator_actions_enabled,
-                    )
+                                        }]
+                                    } else {
+                                        vec![
+                                            element! {
+                                                View(
+                                                    border_style: BorderStyle::Round,
+                                                    border_color: Theme::BORDER,
+                                                    padding_left: 1,
+                                                    padding_right: 1,
+                                                    padding_top: 1,
+                                                    padding_bottom: 1,
+                                                ) {
+                                                    Text(
+                                                        content: "Partial/Limited view: full channel and membership details are hidden",
+                                                        color: Theme::TEXT_MUTED,
+                                                    )
+                                                }
+                                            }
+                                        ]
+                                    })
+                                }
+                            }]
+                        } else {
+                            vec![element! {
+                                View(flex_grow: 1.0_f32) {
+                                    HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
+                                }
+                            }]
+                        })
+                    }
+                    View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: dim::MIDDLE_HEIGHT) {
+                        SocialStatusPanel(
+                            neighborhood_name: neighborhood_name,
+                            selected_home_name: current_home_name,
+                            selected_home_id: selected_home_id,
+                            enter_depth: effective_depth,
+                            entered_home: is_entered,
+                            homes_count: homes_count,
+                            channel_count: channel_count,
+                            selected_channel_name: selected_channel_name,
+                            member_count: member_count,
+                            moderator_actions_enabled: display_moderator_actions_enabled,
+                        )
+                    }
                 }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 #[cfg(test)]

@@ -24,6 +24,17 @@ pub enum CreateInvitationField {
     Ttl,
 }
 
+impl From<CreateInvitationField> for aura_app::ui::contract::FieldId {
+    fn from(field: CreateInvitationField) -> Self {
+        match field {
+            CreateInvitationField::Nickname => Self::Nickname,
+            CreateInvitationField::ReceiverNickname => Self::InvitationReceiverNickname,
+            CreateInvitationField::Message => Self::InvitationMessage,
+            CreateInvitationField::Ttl => Self::InvitationTtl,
+        }
+    }
+}
+
 /// State for create invitation modal
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.

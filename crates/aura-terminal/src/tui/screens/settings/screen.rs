@@ -91,6 +91,16 @@ pub fn SettingsScreen(
     props: &SettingsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Screen(
+                aura_app::ui::contract::ScreenId::Settings,
+            ),
+            rendered: true,
+        },
+    );
+
     // Get AppCoreContext for reactive signal subscription (required for domain data)
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
@@ -571,56 +581,44 @@ pub fn SettingsScreen(
     };
 
     // Layout: Full 25 rows for content (no input bar on this screen)
-    element! {
-        View(flex_direction: FlexDirection::Column, width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
-            // Main row layout - full 25 rows
-            View(flex_direction: FlexDirection::Row, height: dim::MIDDLE_HEIGHT, gap: dim::TWO_PANEL_GAP, overflow: Overflow::Hidden) {
-                // Left panel: Section list (fixed width from layout constants)
-                View(
-                    flex_direction: FlexDirection::Column,
-                    border_style: BorderStyle::Round,
-                    border_color: Theme::BORDER,
-                    padding_left: 1,
-                    padding_right: 1,
-                    padding_bottom: 1,
-                    width: dim::TWO_PANEL_LEFT_WIDTH,
-                ) {
-                    Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
-                    View(flex_direction: FlexDirection::Column, margin_top: 1) {
-                        SimpleSelectableItem(label: "Profile".to_string(), selected: current_section == SettingsSection::Profile)
-                        SimpleSelectableItem(label: "Guardian Threshold".to_string(), selected: current_section == SettingsSection::Threshold)
-                        SimpleSelectableItem(label: "Request Recovery".to_string(), selected: current_section == SettingsSection::Recovery)
-                        SimpleSelectableItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
-                        SimpleSelectableItem(label: "Authority".to_string(), selected: current_section == SettingsSection::Authority)
-                        SimpleSelectableItem(label: "Observability".to_string(), selected: current_section == SettingsSection::Observability)
+    crate::tui::rendered_controls::register_native_view(
+        element! {
+            View(flex_direction: FlexDirection::Column, width: dim::TOTAL_WIDTH, height: dim::MIDDLE_HEIGHT, overflow: Overflow::Hidden) {
+                // Main row layout - full 25 rows
+                crate::tui::rendered_controls::ObservedClipView(flex_direction: FlexDirection::Row, height: dim::MIDDLE_HEIGHT, gap: dim::TWO_PANEL_GAP, overflow: Overflow::Hidden) {
+                    // Left panel: Section list (fixed width from layout constants)
+                    View(
+                        flex_direction: FlexDirection::Column,
+                        border_style: BorderStyle::Round,
+                        border_color: Theme::BORDER,
+                        padding_left: 1,
+                        padding_right: 1,
+                        padding_bottom: 1,
+                        width: dim::TWO_PANEL_LEFT_WIDTH,
+                    ) {
+                        Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
+                        RenderedSettingsSections(current_section)
                     }
-                }
 
-                // Right panel: Detail view (fixed width from layout constants)
-                View(
-                    flex_direction: FlexDirection::Column,
-                    border_style: BorderStyle::Round,
-                    border_color: Theme::BORDER,
-                    padding_left: 1,
-                    padding_right: 1,
-                    padding_bottom: 1,
-                    width: dim::TWO_PANEL_RIGHT_WIDTH,
-                    overflow: Overflow::Hidden,
-                ) {
-                    Text(content: current_section.title(), weight: Weight::Bold, color: Theme::PRIMARY)
-                    View(flex_direction: FlexDirection::Column, margin_top: 1, overflow: Overflow::Scroll) {
-                        #(detail_lines.iter().map(|(text, color)| {
-                            let t = text.clone();
-                            let c = *color;
-                            element! {
-                                Text(content: t, color: c)
-                            }
-                        }))
+                    // Right panel: Detail view (fixed width from layout constants)
+                    crate::tui::rendered_controls::ObservedClipView(
+                        flex_direction: FlexDirection::Column,
+                        border_style: BorderStyle::Round,
+                        border_color: Theme::BORDER,
+                        padding_left: 1,
+                        padding_right: 1,
+                        padding_bottom: 1,
+                        width: dim::TWO_PANEL_RIGHT_WIDTH,
+                        overflow: Overflow::Hidden,
+                    ) {
+                        Text(content: current_section.title(), weight: Weight::Bold, color: Theme::PRIMARY)
+                        RenderedSettingsDetail(section: current_section, lines: detail_lines)
                     }
                 }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// Run the settings screen (requires AppCoreContext for domain data)
@@ -660,5 +658,118 @@ mod tests {
         assert!(!helper_region.contains("runtime.sleep_ms(1000).await"));
         assert!(!helper_region.contains("PhysicalTimeHandler::new().sleep_ms(1000).await"));
         assert!(!helper_region.contains("loop {"));
+    }
+}
+
+#[derive(Props)]
+struct RenderedSettingsSectionsProps {
+    current_section: SettingsSection,
+}
+impl Default for RenderedSettingsSectionsProps {
+    fn default() -> Self {
+        Self {
+            current_section: SettingsSection::Profile,
+        }
+    }
+}
+#[component]
+fn RenderedSettingsSections(
+    props: &RenderedSettingsSectionsProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(
+                aura_app::ui::contract::ListId::SettingsSections,
+            ),
+            rendered: true,
+        },
+    );
+    crate::tui::rendered_controls::register_native_view(
+        element! { View(flex_direction: FlexDirection::Column, margin_top: 1) {
+            SimpleSelectableItem(label: "Profile".to_string(), selected: props.current_section == SettingsSection::Profile)
+            SimpleSelectableItem(label: "Guardian Threshold".to_string(), selected: props.current_section == SettingsSection::Threshold)
+            SimpleSelectableItem(label: "Request Recovery".to_string(), selected: props.current_section == SettingsSection::Recovery)
+            SimpleSelectableItem(label: "Devices".to_string(), selected: props.current_section == SettingsSection::Devices)
+            SimpleSelectableItem(label: "Authority".to_string(), selected: props.current_section == SettingsSection::Authority)
+            SimpleSelectableItem(label: "Observability".to_string(), selected: props.current_section == SettingsSection::Observability)
+        } },
+        vec![control_layout_0],
+    )
+}
+
+#[derive(Props)]
+struct RenderedSettingsDetailProps {
+    section: SettingsSection,
+    lines: Vec<(String, Color)>,
+}
+impl Default for RenderedSettingsDetailProps {
+    fn default() -> Self {
+        Self {
+            section: SettingsSection::Profile,
+            lines: Vec::new(),
+        }
+    }
+}
+#[component]
+fn RenderedSettingsDetail(
+    props: &RenderedSettingsDetailProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    // The Devices branch actually paints each retained device row (or its empty
+    // state) in this list region. Authority detail only describes the current
+    // authority; its actual list belongs to the separate authority picker.
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        if props.section == SettingsSection::Devices {
+            crate::tui::rendered_controls::DrawObservationRole::Control {
+                id: aura_app::ui::contract::ControlId::List(
+                    aura_app::ui::contract::ListId::Devices,
+                ),
+                rendered: true,
+            }
+        } else {
+            crate::tui::rendered_controls::DrawObservationRole::PassThrough
+        },
+    );
+    crate::tui::rendered_controls::register_native_view(
+        element! { View(flex_direction: FlexDirection::Column, margin_top: 1, overflow: Overflow::Scroll) {
+            #(props.lines.iter().map(|(text, color)| {
+                let t = text.clone();
+                let c = *color;
+                element! {
+                    Text(content: t, color: c)
+                }
+            }))
+        } },
+        vec![control_layout_0],
+    )
+}
+
+#[cfg(test)]
+mod rendered_device_list_tests {
+    use super::*;
+    use aura_app::ui::contract::{ControlId, ControlLayoutState, ListId};
+    #[test]
+    fn devices_region_is_observed_from_actual_painted_list_not_device_text_elsewhere() {
+        let lines = vec![("Retained laptop".to_string(), Theme::TEXT)];
+        let (canvas, controls) = crate::tui::rendered_controls::rendered_tests::observe_test_layout(vec![
+            element! { RenderedSettingsDetail(section: SettingsSection::Devices, lines: lines.clone()) }.into_any()
+        ]);
+        assert!(canvas.contains("Retained laptop"));
+        assert!(controls.iter().any(
+            |control| control.control == ControlId::List(ListId::Devices)
+                && control.state == ControlLayoutState::Visible
+        ));
+        let (canvas, controls) =
+            crate::tui::rendered_controls::rendered_tests::observe_test_layout(vec![
+                element! { RenderedSettingsDetail(section: SettingsSection::Profile, lines) }
+                    .into_any(),
+            ]);
+        assert!(canvas.contains("Retained laptop"));
+        assert!(!controls
+            .iter()
+            .any(|control| control.control == ControlId::List(ListId::Devices)));
     }
 }

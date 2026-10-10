@@ -259,3 +259,18 @@ The configured native staging adapter delegates actual pending-bootstrap and enc
 Regression coverage must exercise actual storage production and observe the original operation after runtime attachment; manually seeded semantic facts do not establish producer ownership. The CreateAccount callback requires a workflow handoff owner, preventing submission with a local terminal owner.
 
 Authoritative harness snapshots export required `home_modes` through the shared app projection helper from `TuiSemanticInputs.app_snapshot.homes`, retaining the homes source revision from that same snapshot. This read-only channel/context/mode observation neither reconstructs entities nor authorizes commands; observation surface version 2 requires the field.
+
+Rendered-control observation follows actual iocraft canvas traversal. The root
+post-draw hook seals the captured semantic frame after child draws; actual root,
+ModalFrame and ModalContent clipping boundaries propagate clip custody to the
+AccountSetupModal control marker. The renderer evidence is observed state and
+never authorizes a workflow. Missing controls remain unsupported. Canvas tests
+cover the actual account component and clipping path. See docs/117 and docs/804.
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.

@@ -4,13 +4,13 @@
 
 use iocraft::prelude::*;
 
-use aura_app::ui::signals::{CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::ui::types::invitations::{InvitationDirection, InvitationType};
-use aura_app::ui::types::{truncate_id_for_display, EffectiveName};
-use aura_app::ui_contract::{
+use aura_app::ui::contract::{
     AmpTransitionPolicySnapshot, AmpTransitionState, InvitationFactKind, OperationState,
     RuntimeFact,
 };
+use aura_app::ui::signals::{CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::ui::types::invitations::{InvitationDirection, InvitationType};
+use aura_app::ui::types::{truncate_id_for_display, EffectiveName};
 
 use crate::tui::components::{DetailPanel, KeyValue, ListPanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -325,6 +325,16 @@ pub fn NotificationsScreen(
     props: &NotificationsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Screen(
+                aura_app::ui::contract::ScreenId::Notifications,
+            ),
+            rendered: true,
+        },
+    );
+
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
     let reactive_invites = hooks.use_state(Vec::new);
@@ -510,46 +520,50 @@ pub fn NotificationsScreen(
         Vec::new()
     };
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            overflow: Overflow::Hidden,
-        ) {
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                flex_direction: FlexDirection::Row,
+                flex_direction: FlexDirection::Column,
+                width: dim::TOTAL_WIDTH,
                 height: dim::MIDDLE_HEIGHT,
-                gap: dim::TWO_PANEL_GAP,
                 overflow: Overflow::Hidden,
             ) {
-                View(
-                    width: dim::TWO_PANEL_LEFT_WIDTH,
+                crate::tui::rendered_controls::ObservedClipView(
+                    flex_direction: FlexDirection::Row,
                     height: dim::MIDDLE_HEIGHT,
+                    gap: dim::TWO_PANEL_GAP,
+                    overflow: Overflow::Hidden,
                 ) {
-                    ListPanel(
-                        title: "Notifications".to_string(),
-                        count: notifications.len(),
-                        focused: false,
-                        items: list_items,
-                        empty_message: "No notifications".to_string(),
-                    )
-                }
+                    View(
+                        width: dim::TWO_PANEL_LEFT_WIDTH,
+                        height: dim::MIDDLE_HEIGHT,
+                    ) {
+                        ListPanel(
+                            list_id: Some(aura_app::ui::contract::ListId::Notifications),
+                            title: "Notifications".to_string(),
+                            count: notifications.len(),
+                            focused: false,
+                            items: list_items,
+                            empty_message: "No notifications".to_string(),
+                        )
+                    }
 
-                View(
-                    width: dim::TWO_PANEL_RIGHT_WIDTH,
-                    height: dim::MIDDLE_HEIGHT,
-                ) {
-                    DetailPanel(
-                        title: "Details".to_string(),
-                        focused: false,
-                        content: detail_content,
-                        empty_message: "Select a notification".to_string(),
-                    )
+                    View(
+                        width: dim::TWO_PANEL_RIGHT_WIDTH,
+                        height: dim::MIDDLE_HEIGHT,
+                    ) {
+                        DetailPanel(
+                            title: "Details".to_string(),
+                            focused: false,
+                            content: detail_content,
+                            empty_message: "Select a notification".to_string(),
+                        )
+                    }
                 }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// Run the notifications screen (requires AppCoreContext for domain data)

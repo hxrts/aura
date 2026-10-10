@@ -98,7 +98,7 @@ pub fn merged_vector<'a>(clocks: impl IntoIterator<Item = &'a CausalClock>) -> V
     let mut merged = VectorClock::new();
     for clock in clocks {
         for (device, counter) in &clock.vector {
-            if merged.get(device).map_or(true, |current| counter > current) {
+            if merged.get(device).is_none_or(|current| counter > current) {
                 merged.insert(*device, *counter);
             }
         }
@@ -116,7 +116,7 @@ pub fn for_each_permutation<T: Clone>(items: &[T], mut visit: impl FnMut(&[T])) 
     let mut i = 0;
     while i < n {
         if counters[i] < i {
-            if i % 2 == 0 {
+            if i.is_multiple_of(2) {
                 items.swap(0, i);
             } else {
                 items.swap(counters[i], i);

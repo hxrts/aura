@@ -392,3 +392,26 @@ See [Operation Categories](109_operation_categories.md) for the full consistency
 - [Runtime](104_runtime.md)
 - [AMP Protocol](112_amp.md) for message delivery acknowledgments
 - [Operation Categories](109_operation_categories.md) for status tracking patterns
+
+### Committed control visibility
+
+A rendered-control visibility observation refers to an actually committed typed
+control with nonempty rendered layout after clipping, with no hidden or disposed
+state. Eligibility, focus, screen identity, and component mounting alone do not
+establish visibility. The observation binds both its semantic source revisions
+and its renderer capture. Superseding renders and unmounts revoke the previous
+capture; a previous mount cannot publish into a later mount with the same
+semantic source. Browser observations use renderer-registered node references
+and a commit acknowledgment after the edit batch; native observations use the
+completed canvas traversal and actual clipping ancestors. Observations retain
+all matching control instances rather than collapsing duplicates into a boolean.
+Unsupported controls provide no positive visibility evidence. This observation
+proves the captured layout, not pixel occlusion or future layout stability.
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.

@@ -507,7 +507,7 @@ impl ServiceRegistryService {
                     .selection_state
                     .retain(|(candidate_scope, _), selection| {
                         *candidate_scope != scope
-                            || selection.epoch.map_or(true, |value| value == epoch)
+                            || selection.epoch.is_none_or(|value| value == epoch)
                     });
                 state
                     .hold_observations
@@ -553,7 +553,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| validity.admits(descriptor))
-            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
+            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
             .cloned()
             .collect::<Vec<_>>();
         descriptors.sort_by_key(|descriptor| {
@@ -578,9 +578,7 @@ impl ServiceRegistryService {
         let mut selection_state = state
             .selection_state
             .iter()
-            .filter(|((candidate_scope, _), _)| {
-                scope.map_or(true, |value| *candidate_scope == value)
-            })
+            .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         selection_state.sort_by_key(|entry| {
@@ -592,18 +590,14 @@ impl ServiceRegistryService {
         let mut hold_observations = state
             .hold_observations
             .iter()
-            .filter(|((candidate_scope, _), _)| {
-                scope.map_or(true, |value| *candidate_scope == value)
-            })
+            .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         hold_observations.sort_by_key(|entry| (entry.scope, entry.authority_id));
         let mut pending_routes = state
             .pending_routes
             .iter()
-            .filter(|((candidate_scope, _), _)| {
-                scope.map_or(true, |value| *candidate_scope == value)
-            })
+            .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         pending_routes.sort_by_key(|entry| (entry.scope, entry.authority_id));
@@ -628,7 +622,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| descriptor.authority_id != owner)
-            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
+            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
             .map(|descriptor| descriptor.authority_id)
             .collect::<Vec<_>>();
         peers.sort();
@@ -648,7 +642,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| descriptor.authority_id != owner)
-            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
+            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
             .filter_map(|descriptor| descriptor.device_id)
             .collect::<Vec<_>>();
         devices.sort();
@@ -668,7 +662,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| descriptor.authority_id == authority_id)
-            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
+            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
             .filter_map(|descriptor| descriptor.device_id)
             .collect::<Vec<_>>();
         devices.sort();

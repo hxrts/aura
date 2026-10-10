@@ -36,7 +36,7 @@ pub fn Scrollable(props: &ScrollableProps) -> impl Into<AnyElement<'static>> {
     let visible_items: Vec<String> = items.into_iter().skip(offset).take(end - offset).collect();
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0_f32,
             overflow: Overflow::Scroll,

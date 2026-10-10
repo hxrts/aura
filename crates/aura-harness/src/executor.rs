@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use aura_app::scenario_contract::ActionPrecondition;
 use aura_app::scenario_contract::{
     ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind, BarrierDeclaration,
@@ -1821,12 +1821,6 @@ fn semantic_expectation_wait_step(
             wait_step.screen_id = Some(*screen_id);
         }
         Expectation::ControlVisible(control_id) => {
-            if !matches!(
-                control_id,
-                ControlId::Screen(_) | ControlId::List(_) | ControlId::Modal(_)
-            ) {
-                bail!("step {} requires authoritative visible-control observation; focus does not prove visibility", step.id);
-            }
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.control_id = Some(*control_id);
         }
@@ -3158,12 +3152,23 @@ fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> boo
     }
 
     if let Some(control_id) = step.control_id {
-        let control_visible = match control_id {
-            ControlId::Screen(screen) => snapshot.screen == screen,
-            ControlId::List(list) => snapshot.lists.iter().any(|candidate| candidate.id == list),
-            ControlId::Modal(modal) => snapshot.open_modal == Some(modal),
-            _ => false,
+        let aura_app::ui_contract::RenderedControlFrame::Committed {
+            capture_revision,
+            source,
+            ..
+        } = &snapshot.rendered_control_frame
+        else {
+            return false;
         };
+        if !source.matches(snapshot) {
+            return false;
+        }
+        let control_visible = snapshot.rendered_controls.iter().any(|observation| {
+            observation.control == control_id
+                && observation.capture_revision == *capture_revision
+                && observation.source.matches(snapshot)
+                && observation.state == aura_app::ui_contract::ControlLayoutState::Visible
+        });
         if !control_visible {
             return false;
         }
@@ -3532,21 +3537,14 @@ fn extract_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
 }
 
 fn issue_stage<T>(step: &CompatibilityStep, result: Result<T>) -> Result<T> {
-    result.map_err(|error| {
-        anyhow::anyhow!(
-            "step {} issue stage failed for {}: {error:#}",
-            step.id,
-            step.action
-        )
-    })
+    result.with_context(|| format!("step {} issue stage failed for {}", step.id, step.action))
 }
 
 fn convergence_stage<T>(step: &CompatibilityStep, label: &str, result: Result<T>) -> Result<T> {
-    result.map_err(|error| {
-        anyhow::anyhow!(
-            "step {} convergence stage failed for {} ({label}): {error:#}",
-            step.id,
-            step.action
+    result.with_context(|| {
+        format!(
+            "step {} convergence stage failed for {} ({label})",
+            step.id, step.action
         )
     })
 }
@@ -4350,12 +4348,12 @@ mod exact_semantic_list_predicate_tests {
             timeout_ms: None,
             action: SemanticAction::Expect(expectation.clone()),
         };
-        assert!(
+        let lowered =
             semantic_expectation_wait_step(&step, &expectation, &ScenarioContext::default())
-                .is_err()
-        );
+                .expect("typed rendered-control expectation");
         let mut snapshot = snapshot();
         snapshot.focused_control = Some(control);
+        assert!(!semantic_wait_matches(&lowered, &snapshot));
         assert!(!semantic_wait_matches(
             &CompatibilityStep {
                 control_id: Some(control),
@@ -4363,5 +4361,111 @@ mod exact_semantic_list_predicate_tests {
             },
             &snapshot
         ));
+    }
+    #[test]
+    fn ordinary_control_requires_exact_committed_layout_receipt() {
+        use aura_app::ui_contract::{
+            ControlLayoutState, ControlRenderSource, RenderedControlFrame,
+            RenderedControlObservation,
+        };
+        let control = ControlId::Field(FieldId::ChatInput);
+        let step = lowered(Expectation::ControlVisible(control));
+        let mut snapshot = snapshot();
+        let source = ControlRenderSource::from_snapshot(&snapshot);
+        snapshot.rendered_control_frame = RenderedControlFrame::Committed {
+            capture_revision: 7,
+            layout_revision: 11,
+            source: source.clone(),
+        };
+        snapshot.rendered_controls.push(RenderedControlObservation {
+            control,
+            capture_revision: 7,
+            source,
+            state: ControlLayoutState::Visible,
+        });
+        assert!(semantic_wait_matches(&step, &snapshot));
+        snapshot.rendered_controls[0].capture_revision = 6;
+        assert!(!semantic_wait_matches(&step, &snapshot));
+        snapshot.rendered_controls[0].capture_revision = 7;
+        snapshot.rendered_controls[0].state = ControlLayoutState::Hidden;
+        assert!(!semantic_wait_matches(&step, &snapshot));
+        snapshot.rendered_controls[0].state = ControlLayoutState::Visible;
+        snapshot.rendered_control_frame = RenderedControlFrame::Unavailable;
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+    #[test]
+    fn ready_screen_metadata_without_committed_layout_is_not_visible() {
+        let control = ControlId::Screen(ScreenId::Neighborhood);
+        let step = lowered(Expectation::ControlVisible(control));
+        let mut snapshot = snapshot();
+        snapshot.readiness = aura_app::ui::contract::UiReadiness::Ready;
+        snapshot.focused_control = Some(control);
+        snapshot.rendered_control_frame = aura_app::ui::contract::RenderedControlFrame::Unavailable;
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn ready_screen_committed_empty_layout_is_not_visible() {
+        use aura_app::ui::contract::{ControlRenderSource, RenderedControlFrame};
+        let control = ControlId::Screen(ScreenId::Neighborhood);
+        let step = lowered(Expectation::ControlVisible(control));
+        let mut snapshot = snapshot();
+        snapshot.readiness = aura_app::ui::contract::UiReadiness::Ready;
+        snapshot.focused_control = Some(control);
+        snapshot.rendered_control_frame = RenderedControlFrame::Committed {
+            capture_revision: 7,
+            layout_revision: 11,
+            source: ControlRenderSource::from_snapshot(&snapshot),
+        };
+        assert!(snapshot.rendered_controls.is_empty());
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+}
+
+#[cfg(test)]
+mod stage_error_custody_tests {
+    use super::{convergence_stage, issue_stage, CompatibilityStep};
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct OriginalFailure(Arc<()>);
+
+    impl std::fmt::Display for OriginalFailure {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("original native failure")
+        }
+    }
+
+    impl std::error::Error for OriginalFailure {}
+
+    #[test]
+    fn stage_context_retains_original_concrete_failure_identity() {
+        let step = CompatibilityStep {
+            id: "original-submit".into(),
+            ..Default::default()
+        };
+        for convergence in [false, true] {
+            let identity = Arc::new(());
+            let original: anyhow::Result<()> = Err(OriginalFailure(identity.clone()).into());
+            let error = if convergence {
+                convergence_stage(&step, "original-observation", original)
+            } else {
+                issue_stage(&step, original)
+            }
+            .expect_err("stage must retain original failure");
+            let retained = error
+                .downcast_ref::<OriginalFailure>()
+                .expect("context must preserve concrete source");
+            assert!(Arc::ptr_eq(&identity, &retained.0));
+            let diagnostic = format!("{error:#}");
+            assert!(diagnostic.contains("original-submit"));
+            assert!(diagnostic.contains("original native failure"));
+            if convergence {
+                assert!(diagnostic.contains("convergence stage"));
+                assert!(diagnostic.contains("original-observation"));
+            } else {
+                assert!(diagnostic.contains("issue stage"));
+            }
+        }
     }
 }

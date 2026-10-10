@@ -363,6 +363,15 @@ impl RunConfig {
             if instance.id.trim().is_empty() {
                 bail!("instance id must be non-empty");
             }
+            let mut components = std::path::Path::new(&instance.id).components();
+            if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+                || components.next().is_some()
+            {
+                bail!(
+                    "instance id must be one normal path component: {}",
+                    instance.id
+                );
+            }
             if ActorId(instance.id.clone()).is_frontend_binding_label() {
                 bail!(
                     "instance id '{}' is a frontend binding label; run configs must bind frontend modes through instance.mode, not instance.id",
@@ -928,6 +937,24 @@ mod tests {
                 .map(|actor| actor.0.as_str()),
             Some("web")
         );
+    }
+
+    #[test]
+    fn absolute_and_parent_instance_ids_are_refused_before_path_materialization() {
+        let original: RunConfig =
+            toml::from_str(include_str!("../../../configs/harness/local-loopback.toml"))
+                .expect("actual local run config");
+        for id in ["/outside", "../outside", "nested/child", ".", ".."] {
+            let mut config = original.clone();
+            config.instances[0].id = id.to_string();
+            let error = config
+                .validate()
+                .expect_err("path-shaped instance id must be refused");
+            assert!(
+                error.to_string().contains("one normal path component"),
+                "actual config refusal: {error:#}"
+            );
+        }
     }
 
     #[test]

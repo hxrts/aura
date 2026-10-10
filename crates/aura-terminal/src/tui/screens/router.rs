@@ -20,6 +20,18 @@ pub enum Screen {
     Settings,
 }
 
+impl From<Screen> for aura_app::ui::contract::ScreenId {
+    fn from(screen: Screen) -> Self {
+        match screen {
+            Screen::Neighborhood => Self::Neighborhood,
+            Screen::Chat => Self::Chat,
+            Screen::Contacts => Self::Contacts,
+            Screen::Notifications => Self::Notifications,
+            Screen::Settings => Self::Settings,
+        }
+    }
+}
+
 impl Screen {
     /// Get the numeric key (1-6) for this screen
     #[must_use]

@@ -57,7 +57,7 @@ cfg_if! {
                 .set_max_level(max_level)
                 .set_report_logs_in_timings(false);
             tracing_wasm::set_as_global_default_with_config(tracing_config.build());
-            dioxus::launch(App);
+            shell::launch_observed(App);
         }
     } else {
         fn main() {

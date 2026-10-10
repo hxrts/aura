@@ -53,7 +53,7 @@ pub struct ModalFrameProps<'a> {
 #[component]
 pub fn ModalFrame<'a>(props: &mut ModalFrameProps<'a>) -> impl Into<AnyElement<'a>> {
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             position: Position::Absolute,
             top: dim::NAV_HEIGHT,
             left: 0u16,
@@ -78,6 +78,8 @@ pub fn ModalFrame<'a>(props: &mut ModalFrameProps<'a>) -> impl Into<AnyElement<'
 /// Use this as the root element for all modal body content.
 #[derive(Default, Props)]
 pub struct ModalContentProps<'a> {
+    /// Original registrations explicitly attached to this native root node.
+    pub(crate) control_layout: Vec<crate::tui::rendered_controls::ControlLayoutRegistration>,
     /// Child content
     pub children: Vec<AnyElement<'a>>,
     /// Flex direction for content layout
@@ -129,24 +131,27 @@ pub fn ModalContent<'a>(props: &mut ModalContentProps<'a>) -> impl Into<AnyEleme
         Overflow::Visible
     };
 
-    element! {
-        View(
-            // Size is always 100% - this is enforced, not configurable
-            width: 100pct,
-            height: 100pct,
-            // Layout props from user
-            flex_direction: props.flex_direction,
-            justify_content: justify,
-            align_items: align,
-            // Styling props from user
-            background_color: bg,
-            border_style: props.border_style,
-            border_color: border,
-            overflow: overflow,
-        ) {
-            #(&mut props.children)
-        }
-    }
+    crate::tui::rendered_controls::register_native_view(
+        element! {
+            View(
+                // Size is always 100% - this is enforced, not configurable
+                width: 100pct,
+                height: 100pct,
+                // Layout props from user
+                flex_direction: props.flex_direction,
+                justify_content: justify,
+                align_items: align,
+                // Styling props from user
+                background_color: bg,
+                border_style: props.border_style,
+                border_color: border,
+                overflow: overflow,
+            ) {
+                #(&mut props.children)
+            }
+        },
+        props.control_layout.clone(),
+    )
 }
 
 // =============================================================================

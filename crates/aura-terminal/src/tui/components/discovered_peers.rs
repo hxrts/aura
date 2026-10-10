@@ -177,7 +177,20 @@ pub struct DiscoveredPeersPanelProps {
 
 /// Panel showing discovered peers on the local network
 #[component]
-pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyElement<'static>> {
+pub fn DiscoveredPeersPanel(
+    props: &DiscoveredPeersPanelProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(
+                aura_app::ui::contract::ListId::BootstrapCandidates,
+            ),
+            rendered: true,
+        },
+    );
+
     let peers = props.peers.clone();
     let selected_index = props.selected_index;
     let focused = props.focused;
@@ -188,126 +201,129 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
         Theme::BORDER
     };
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            border_style: BorderStyle::Round,
-            border_color: border_color,
-        ) {
-            // Header
-            View(
-                padding_left: 2,
-                padding_right: 2,
-                padding_top: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "Nearby Peers", weight: Weight::Bold, color: Theme::TEXT)
-                    Text(
-                        content: format!("({})", peers.len()),
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-            }
-            View(padding_left: 2, padding_right: 2, padding_top: 1) {
-                Text(content: props.status_line.clone(), color: Theme::TEXT_MUTED)
-            }
-
-            // Peer list
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
                 flex_direction: FlexDirection::Column,
-                padding: 1,
-                overflow: Overflow::Scroll,
+                border_style: BorderStyle::Round,
+                border_color: border_color,
             ) {
-                #(if peers.is_empty() {
-                    vec![element! {
-                        View(padding: 1) {
-                            Text(
-                                content: "No peers discovered yet.",
-                                color: Theme::TEXT_MUTED,
-                            )
-                        }
-                    }]
-                } else {
-                    peers.iter().enumerate().map(|(idx, peer)| {
-                        let is_selected = idx == selected_index && focused;
-                        let pointer = if is_selected { "▸ " } else { "  " }.to_string();
-                        let text_color = if is_selected { Theme::PRIMARY } else { Theme::TEXT };
-                        let label = peer.display_label();
-                        let method = format!("[{}]", peer.discovery_method);
-                        let address = peer.address.clone();
-                        let age = peer.age_display();
-                        let key = peer.authority_id.clone();
-                        // Invitation status display
-                        let status_label = peer.invitation_status.label();
-                        let status_color = peer.invitation_status.color();
-                        let has_status = peer.invitation_status != PeerInvitationStatus::None;
+                // Header
+                View(
+                    padding_left: 2,
+                    padding_right: 2,
+                    padding_top: 1,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Bottom,
+                    border_color: Theme::BORDER,
+                ) {
+                    View(flex_direction: FlexDirection::Row, gap: 2) {
+                        Text(content: "Nearby Peers", weight: Weight::Bold, color: Theme::TEXT)
+                        Text(
+                            content: format!("({})", peers.len()),
+                            color: Theme::TEXT_MUTED,
+                        )
+                    }
+                }
+                View(padding_left: 2, padding_right: 2, padding_top: 1) {
+                    Text(content: props.status_line.clone(), color: Theme::TEXT_MUTED)
+                }
 
-                        element! {
-                            View(
-                                key: key,
-                                flex_direction: FlexDirection::Row,
-                                padding_left: 1,
-                                padding_right: 1,
-                                gap: 1,
-                            ) {
-                                Text(content: pointer, color: Theme::PRIMARY)
-                                Text(content: label, color: text_color)
-                                Text(content: method, color: Theme::SECONDARY)
-                                // Show invitation status badge if applicable
-                                #(if has_status {
+                // Peer list
+                View(
+                    flex_direction: FlexDirection::Column,
+                    padding: 1,
+                    overflow: Overflow::Scroll,
+                ) {
+                    #(if peers.is_empty() {
+                        vec![element! {
+                            View(padding: 1) {
+                                Text(
+                                    content: "No peers discovered yet.",
+                                    color: Theme::TEXT_MUTED,
+                                )
+                            }
+                        }]
+                    } else {
+                        peers.iter().enumerate().map(|(idx, peer)| {
+                            let is_selected = idx == selected_index && focused;
+                            let pointer = if is_selected { "▸ " } else { "  " }.to_string();
+                            let text_color = if is_selected { Theme::PRIMARY } else { Theme::TEXT };
+                            let label = peer.display_label();
+                            let method = format!("[{}]", peer.discovery_method);
+                            let address = peer.address.clone();
+                            let age = peer.age_display();
+                            let key = peer.authority_id.clone();
+                            // Invitation status display
+                            let status_label = peer.invitation_status.label();
+                            let status_color = peer.invitation_status.color();
+                            let has_status = peer.invitation_status != PeerInvitationStatus::None;
+
+                            element! {
+                                View(
+                                    key: key,
+                                    flex_direction: FlexDirection::Row,
+                                    padding_left: 1,
+                                    padding_right: 1,
+                                    gap: 1,
+                                ) {
+                                    Text(content: pointer, color: Theme::PRIMARY)
+                                    Text(content: label, color: text_color)
+                                    Text(content: method, color: Theme::SECONDARY)
+                                    // Show invitation status badge if applicable
+                                    #(if has_status {
+                                        Some(element! {
+                                            Text(
+                                                content: format!("[{}]", status_label),
+                                                color: status_color,
+                                            )
+                                        })
+                                    } else {
+                                        None
+                                    })
+                                    Text(content: address, color: Theme::TEXT_MUTED)
+                                    View(flex_grow: 1.0_f32) {}
+                                    Text(content: age, color: Theme::TEXT_MUTED)
+                                }
+                            }
+                        }).collect()
+                    })
+                }
+
+                // Footer with key hint (only when focused and peers exist)
+                #(if focused {
+                    let has_peers = !peers.is_empty();
+                    Some(element! {
+                        View(
+                            padding_left: 2,
+                            padding_right: 2,
+                            border_style: BorderStyle::Single,
+                            border_edges: Edges::Top,
+                            border_color: Theme::BORDER,
+                        ) {
+                            View(flex_direction: FlexDirection::Row, gap: 2) {
+                                #(if has_peers {
                                     Some(element! {
-                                        Text(
-                                            content: format!("[{}]", status_label),
-                                            color: status_color,
-                                        )
+                                        View(flex_direction: FlexDirection::Row, gap: 2) {
+                                            Text(content: "Enter", color: Theme::SECONDARY)
+                                            Text(content: "Invite", color: Theme::TEXT_MUTED)
+                                        }
                                     })
                                 } else {
                                     None
                                 })
-                                Text(content: address, color: Theme::TEXT_MUTED)
-                                View(flex_grow: 1.0_f32) {}
-                                Text(content: age, color: Theme::TEXT_MUTED)
+                                Text(content: "Auto", color: Theme::SECONDARY)
+                                Text(content: "Refresh", color: Theme::TEXT_MUTED)
                             }
                         }
-                    }).collect()
+                    })
+                } else {
+                    None
                 })
             }
-
-            // Footer with key hint (only when focused and peers exist)
-            #(if focused {
-                let has_peers = !peers.is_empty();
-                Some(element! {
-                    View(
-                        padding_left: 2,
-                        padding_right: 2,
-                        border_style: BorderStyle::Single,
-                        border_edges: Edges::Top,
-                        border_color: Theme::BORDER,
-                    ) {
-                        View(flex_direction: FlexDirection::Row, gap: 2) {
-                            #(if has_peers {
-                                Some(element! {
-                                    View(flex_direction: FlexDirection::Row, gap: 2) {
-                                        Text(content: "Enter", color: Theme::SECONDARY)
-                                        Text(content: "Invite", color: Theme::TEXT_MUTED)
-                                    }
-                                })
-                            } else {
-                                None
-                            })
-                            Text(content: "Auto", color: Theme::SECONDARY)
-                            Text(content: "Refresh", color: Theme::TEXT_MUTED)
-                        }
-                    }
-                })
-            } else {
-                None
-            })
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// State for discovered peers panel

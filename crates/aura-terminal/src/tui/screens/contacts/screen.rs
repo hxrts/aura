@@ -173,7 +173,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     );
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             background_color: bg,
             padding_left: 1,
             padding_right: 1,
@@ -194,56 +194,67 @@ pub struct ContactListProps {
 
 /// List of contacts
 #[component]
-pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
+pub fn ContactList(props: &ContactListProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(aura_app::ui::contract::ListId::Contacts),
+            rendered: true,
+        },
+    );
+
     let contacts = props.contacts.clone();
     let selected = props.selected_index;
     let border_color = focus_border_color(props.focused);
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0_f32,
-            flex_shrink: 1.0,
-            border_style: BorderStyle::Round,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
-        ) {
-            View(padding_left: Spacing::PANEL_PADDING) {
-                Text(
-                    content: format!("Contacts ({})", contacts.len()),
-                    weight: Weight::Bold,
-                    color: Theme::PRIMARY,
-                )
-            }
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
-                padding: Spacing::PANEL_PADDING,
+                border_style: BorderStyle::Round,
+                border_color: border_color,
                 overflow: Overflow::Hidden,
             ) {
-                #(if contacts.is_empty() {
-                    Some(element! {
-                        Text(content: "No contacts yet", color: Theme::TEXT_MUTED)
+                View(padding_left: Spacing::PANEL_PADDING) {
+                    Text(
+                        content: format!("Contacts ({})", contacts.len()),
+                        weight: Weight::Bold,
+                        color: Theme::PRIMARY,
+                    )
+                }
+                crate::tui::rendered_controls::ObservedClipView(
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    padding: Spacing::PANEL_PADDING,
+                    overflow: Overflow::Hidden,
+                ) {
+                    #(if contacts.is_empty() {
+                        Some(element! {
+                            Text(content: "No contacts yet", color: Theme::TEXT_MUTED)
+                        })
+                    } else {
+                        None
                     })
-                } else {
-                    None
-                })
-                #(contacts
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, contact)| {
-                        let is_selected = idx == selected;
-                        let id = contact.id.clone();
-                        element! {
-                            View(key: id) {
-                                ContactItem(contact: contact.clone(), is_selected: is_selected)
+                    #(contacts
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, contact)| {
+                            let is_selected = idx == selected;
+                            let id = contact.id.clone();
+                            element! {
+                                View(key: id) {
+                                    ContactItem(contact: contact.clone(), is_selected: is_selected)
+                                }
                             }
-                        }
-                    }))
+                        }))
+                }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// Props for ContactDetail
@@ -289,7 +300,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
     });
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0_f32,
             flex_shrink: 1.0,
@@ -300,7 +311,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             View(padding_left: Spacing::PANEL_PADDING) {
                 Text(content: "Details", weight: Weight::Bold, color: Theme::PRIMARY)
             }
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
@@ -382,6 +393,16 @@ pub fn ContactsScreen(
     props: &ContactsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Screen(
+                aura_app::ui::contract::ScreenId::Contacts,
+            ),
+            rendered: true,
+        },
+    );
+
     // Get AppCoreContext for reactive signal subscription (required for domain data)
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
@@ -511,120 +532,126 @@ pub fn ContactsScreen(
             })
             .unwrap_or_else(|| vec![format!("Selected contact: {selected_label}")]);
 
-        return element! {
+        return crate::tui::rendered_controls::register_native_view(
+            element! {
+                View(
+                    flex_direction: FlexDirection::Column,
+                    width: dim::TOTAL_WIDTH,
+                    height: dim::MIDDLE_HEIGHT,
+                    overflow: Overflow::Hidden,
+                    padding_left: 1,
+                    padding_right: 1,
+                ) {
+                    Text(content: "Contacts", weight: Weight::Bold, color: Theme::PRIMARY)
+                    Text(
+                        content: format!("Nearby peers: {}", lan_peers_state.read().peers.len()),
+                        color: Theme::TEXT_MUTED,
+                    )
+                    Text(
+                        content: format!("Contacts: {}", display_contacts.len()),
+                        color: Theme::TEXT,
+                    )
+                    Text(
+                        content: format!("Pending invites: {pending_invites}"),
+                        color: Theme::TEXT_MUTED,
+                    )
+                    #(detail_lines.into_iter().map(|line| {
+                        element! {
+                            Text(content: line, color: Theme::TEXT)
+                        }
+                    }))
+                }
+            },
+            vec![control_layout_0],
+        );
+    }
+
+    // Layout: Full 25 rows for content (no input bar on this screen)
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
                 flex_direction: FlexDirection::Column,
                 width: dim::TOTAL_WIDTH,
                 height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
-                padding_left: 1,
-                padding_right: 1,
             ) {
-                Text(content: "Contacts", weight: Weight::Bold, color: Theme::PRIMARY)
-                Text(
-                    content: format!("Nearby peers: {}", lan_peers_state.read().peers.len()),
-                    color: Theme::TEXT_MUTED,
-                )
-                Text(
-                    content: format!("Contacts: {}", display_contacts.len()),
-                    color: Theme::TEXT,
-                )
-                Text(
-                    content: format!("Pending invites: {pending_invites}"),
-                    color: Theme::TEXT_MUTED,
-                )
-                #(detail_lines.into_iter().map(|line| {
-                    element! {
-                        Text(content: line, color: Theme::TEXT)
-                    }
-                }))
-            }
-        };
-    }
-
-    // Layout: Full 25 rows for content (no input bar on this screen)
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            overflow: Overflow::Hidden,
-        ) {
-            // Main content: list + detail - full 25 rows (matches settings screen ratio)
-            View(
-                flex_direction: FlexDirection::Row,
-                height: dim::MIDDLE_HEIGHT,
-                overflow: Overflow::Hidden,
-                gap: dim::TWO_PANEL_GAP,
-            ) {
-                // Left column: bootstrap candidates + contacts list (matches settings screen)
-                View(
-                    width: dim::TWO_PANEL_LEFT_WIDTH,
+                // Main content: list + detail - full 25 rows (matches settings screen ratio)
+                crate::tui::rendered_controls::ObservedClipView(
+                    flex_direction: FlexDirection::Row,
                     height: dim::MIDDLE_HEIGHT,
-                    flex_direction: FlexDirection::Column,
                     overflow: Overflow::Hidden,
-                    gap: 0,
+                    gap: dim::TWO_PANEL_GAP,
                 ) {
-                    // Discovered bootstrap candidates panel
-                    #({
-                        let state = lan_peers_state.read();
-                        let now_ms = props.now_ms;
-                        let last_updated_ms = state.last_updated_ms;
-                        let status = if let Some(now) = now_ms {
-                            if last_updated_ms > 0 {
-                                format!(
-                                    "Last scan: {}",
-                                    format_relative_time_from(now, last_updated_ms)
-                                )
+                    // Left column: bootstrap candidates + contacts list (matches settings screen)
+                    crate::tui::rendered_controls::ObservedClipView(
+                        width: dim::TWO_PANEL_LEFT_WIDTH,
+                        height: dim::MIDDLE_HEIGHT,
+                        flex_direction: FlexDirection::Column,
+                        overflow: Overflow::Hidden,
+                        gap: 0,
+                    ) {
+                        // Discovered bootstrap candidates panel
+                        #({
+                            let state = lan_peers_state.read();
+                            let now_ms = props.now_ms;
+                            let last_updated_ms = state.last_updated_ms;
+                            let status = if let Some(now) = now_ms {
+                                if last_updated_ms > 0 {
+                                    format!(
+                                        "Last scan: {}",
+                                        format_relative_time_from(now, last_updated_ms)
+                                    )
+                                } else {
+                                    "Discovery idle".to_string()
+                                }
                             } else {
                                 "Discovery idle".to_string()
-                            }
-                        } else {
-                            "Discovery idle".to_string()
-                        };
+                            };
 
-                        let age_secs = if let Some(now) = now_ms {
-                            now.saturating_sub(last_updated_ms) / 1000
-                        } else {
-                            0
-                        };
-                        let peers_with_age: Vec<DiscoveredPeerInfo> = state
-                            .peers
-                            .iter()
-                            .cloned()
-                            .map(|peer| peer.with_age(age_secs))
-                            .collect();
+                            let age_secs = if let Some(now) = now_ms {
+                                now.saturating_sub(last_updated_ms) / 1000
+                            } else {
+                                0
+                            };
+                            let peers_with_age: Vec<DiscoveredPeerInfo> = state
+                                .peers
+                                .iter()
+                                .cloned()
+                                .map(|peer| peer.with_age(age_secs))
+                                .collect();
 
-                        Some(element! {
-                            DiscoveredPeersPanel(
-                                peers: peers_with_age,
-                                selected_index: props.view.lan_selected_index,
-                                focused: lan_focused,
-                                status_line: status,
-                            )
+                            Some(element! {
+                                DiscoveredPeersPanel(
+                                    peers: peers_with_age,
+                                    selected_index: props.view.lan_selected_index,
+                                    focused: lan_focused,
+                                    status_line: status,
+                                )
+                            })
                         })
-                    })
-                    // Contacts list
-                    ContactList(
-                        contacts: display_contacts,
-                        selected_index: current_selected,
-                        focused: contacts_focused,
-                    )
-                }
-                // Detail (matches settings screen width)
-                View(
-                    width: dim::TWO_PANEL_RIGHT_WIDTH,
-                    height: dim::MIDDLE_HEIGHT,
-                    overflow: Overflow::Hidden,
-                ) {
-                    ContactDetail(
-                        contact: selected_contact,
-                        focused: props.view.focus.is_detail(),
-                    )
+                        // Contacts list
+                        ContactList(
+                            contacts: display_contacts,
+                            selected_index: current_selected,
+                            focused: contacts_focused,
+                        )
+                    }
+                    // Detail (matches settings screen width)
+                    crate::tui::rendered_controls::ObservedClipView(
+                        width: dim::TWO_PANEL_RIGHT_WIDTH,
+                        height: dim::MIDDLE_HEIGHT,
+                        overflow: Overflow::Hidden,
+                    ) {
+                        ContactDetail(
+                            contact: selected_contact,
+                            focused: props.view.focus.is_detail(),
+                        )
+                    }
                 }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// Run the contacts screen (requires AppCoreContext for domain data)

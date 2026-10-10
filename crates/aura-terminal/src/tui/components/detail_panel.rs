@@ -53,7 +53,7 @@ pub fn DetailPanel<'a>(props: &mut DetailPanelProps<'a>) -> impl Into<AnyElement
     };
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0_f32,
             flex_shrink: 1.0,
@@ -66,7 +66,7 @@ pub fn DetailPanel<'a>(props: &mut DetailPanelProps<'a>) -> impl Into<AnyElement
                 Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
             }
             // Scrollable content area
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0_f32,
                 flex_shrink: 1.0,

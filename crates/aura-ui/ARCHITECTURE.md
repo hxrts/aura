@@ -194,3 +194,17 @@ Completed owned runtime refreshes schedule semantic publication even when render
 The subscription supervisor awaits the app-owned attached receiver before reading initial state or reporting Healthy. Native and browser observers share this ordering; owned cancellation still drops the receiver with the mounted subscription owner.
 
 Native integration tests may opt into app `test-support` fixture publication, which delegates existing observed-projection owners to publish a detached HomesState or mutate only the mode of an exact materialized home. The feature is absent from default/wasm production frontends and does not add a production mutation bypass.
+
+The existing snapshot publication owner also issues opaque renderer capture
+receipts. New captures revoke old positive observations and superseded/remounted
+callbacks cannot publish. Renderer observations retain the full control multiset
+and are invalidated if the final AppCore observation changes their semantic
+source. The serialized renderer revision is diagnostic, never receipt authority.
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.

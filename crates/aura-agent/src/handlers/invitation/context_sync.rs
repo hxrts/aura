@@ -72,8 +72,8 @@ impl DigestPage {
     /// from the requester.
     fn wants(&self, digest: &Hash32) -> bool {
         digest_bucket(digest) == self.bucket
-            && self.after.map_or(true, |after| *digest > after)
-            && self.upto.map_or(true, |upto| *digest <= upto)
+            && self.after.is_none_or(|after| *digest > after)
+            && self.upto.is_none_or(|upto| *digest <= upto)
             && !self.held.contains(digest)
     }
 
@@ -950,7 +950,7 @@ mod tests {
         let mut requester: BTreeSet<Hash32> = server
             .iter()
             .enumerate()
-            .filter(|(index, _)| index % 97 != 0)
+            .filter(|(index, _)| !index.is_multiple_of(97))
             .map(|(_, digest)| *digest)
             .collect();
         requester.extend(digests(50_000..50_010));
@@ -959,7 +959,7 @@ mod tests {
 
         // First round: every other served fact is dropped in transit.
         let (served, _) = pull_round(context_id, &requester, &server, max_message_len, |digest| {
-            digest.as_bytes()[31] % 2 == 0
+            digest.as_bytes()[31].is_multiple_of(2)
         });
         assert!(served.is_subset(&missing));
         assert!(served.len() < missing.len(), "the drop lost some facts");

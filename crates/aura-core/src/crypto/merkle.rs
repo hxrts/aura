@@ -250,7 +250,7 @@ pub fn verify_merkle_proof(proof: &SimpleMerkleProof, root: &[u8; 32], leaf_valu
         let mut combined = Vec::with_capacity(64);
 
         // Determine if we're the left or right child based on index
-        if index % 2 == 0 {
+        if index.is_multiple_of(2) {
             // We're the left child, sibling is right
             combined.extend_from_slice(&current_hash);
             combined.extend_from_slice(sibling_hash);

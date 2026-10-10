@@ -121,7 +121,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                 View(padding_left: Spacing::PANEL_PADDING) {
                     Text(content: "Guardians", weight: Weight::Bold, color: Theme::PRIMARY)
                 }
-                View(
+                crate::tui::rendered_controls::ObservedClipView(
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
                     padding: Spacing::PANEL_PADDING,
@@ -238,7 +238,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
     let approvals = status.approvals.clone();
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
@@ -271,7 +271,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
             }
 
             // Approvals list (remaining space)
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,
                 border_color: Theme::BORDER,
@@ -282,7 +282,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
                 View(padding_left: Spacing::PANEL_PADDING) {
                     Text(content: "Guardian Approvals", weight: Weight::Bold, color: Theme::PRIMARY)
                 }
-                View(
+                crate::tui::rendered_controls::ObservedClipView(
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
                     padding: Spacing::PANEL_PADDING,
@@ -341,7 +341,7 @@ pub fn PendingRequestsPanel(props: &PendingRequestsPanelProps) -> impl Into<AnyE
                 View(padding_left: Spacing::PANEL_PADDING) {
                     Text(content: "Recovery Requests", weight: Weight::Bold, color: Theme::PRIMARY)
                 }
-                View(
+                crate::tui::rendered_controls::ObservedClipView(
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
                     padding: Spacing::PANEL_PADDING,
@@ -477,8 +477,7 @@ pub fn RecoveryScreen(
             };
 
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
-                let (guardians, threshold, total, status, pending) =
-                    convert_state(&recovery_state);
+                let (guardians, threshold, total, status, pending) = convert_state(&recovery_state);
                 reactive_guardians.set(guardians);
                 reactive_threshold_required.set(threshold);
                 reactive_threshold_total.set(total);
@@ -508,7 +507,7 @@ pub fn RecoveryScreen(
 
     // Layout: TabBar (2 rows) + Content (23 rows) = 25 = MIDDLE_HEIGHT
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             width: dim::TOTAL_WIDTH,
             height: dim::MIDDLE_HEIGHT,
@@ -520,7 +519,7 @@ pub fn RecoveryScreen(
             }
 
             // Content based on active tab (23 rows)
-            View(height: 23, width: 100pct, overflow: Overflow::Hidden) {
+            crate::tui::rendered_controls::ObservedClipView(height: 23, width: 100pct, overflow: Overflow::Hidden) {
                 #(match current_tab {
                     RecoveryTab::Guardians => vec![element! {
                         View(height: 23, width: 100pct) {

@@ -590,6 +590,9 @@ pub(crate) fn mark_generation_rebinding(window: &web_sys::Window, reason: &str) 
 }
 
 pub(crate) fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
+    if !crate::shell::capture_current_layout() {
+        return JsValue::NULL;
+    }
     let window_contract = HarnessWindowContract::new(window.clone());
     let published_json = window_contract
         .get(UI_STATE_JSON_KEY)

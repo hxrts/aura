@@ -3,7 +3,7 @@ use crate::semantic_lifecycle::{
     UiLocalOperationOwner, UiOperationTransferScope, UiWorkflowHandoffOwner,
 };
 use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
-use aura_app::ui_contract::{
+use aura_app::ui::contract::{
     ControlId, OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
@@ -26,10 +26,6 @@ fn handle_workflow_error(controller: &UiController, error: SubmittedOperationWor
             controller.runtime_error_toast(detail);
         }
     }
-}
-
-fn control_dom_id(control_id: ControlId) -> Option<String> {
-    control_id.web_dom_id().map(str::to_string)
 }
 
 fn amp_observed_action(
@@ -496,7 +492,7 @@ pub(in crate::app) fn NotificationActionBar(
         }
         NotificationRuntimeAction::AmpRaiseEmergencyAlarm => rsx! {
             UiButton {
-                id: control_dom_id(ControlId::AmpRaiseEmergencyAlarmButton),
+                control_id: Some(ControlId::AmpRaiseEmergencyAlarmButton),
                 label: "Raise Alarm".to_string(),
                 variant: ButtonVariant::Secondary,
                 onclick: move |_| {
@@ -513,7 +509,7 @@ pub(in crate::app) fn NotificationActionBar(
         },
         NotificationRuntimeAction::AmpApproveQuarantine => rsx! {
             UiButton {
-                id: control_dom_id(ControlId::AmpApproveQuarantineButton),
+                control_id: Some(ControlId::AmpApproveQuarantineButton),
                 label: "Approve Quarantine".to_string(),
                 variant: ButtonVariant::Primary,
                 onclick: move |_| {
@@ -530,7 +526,7 @@ pub(in crate::app) fn NotificationActionBar(
         },
         NotificationRuntimeAction::AmpApproveCryptoshred => rsx! {
             UiButton {
-                id: control_dom_id(ControlId::AmpApproveCryptoshredButton),
+                control_id: Some(ControlId::AmpApproveCryptoshredButton),
                 label: "Confirm Cryptoshred".to_string(),
                 variant: ButtonVariant::Primary,
                 onclick: move |_| {
@@ -547,7 +543,7 @@ pub(in crate::app) fn NotificationActionBar(
         },
         NotificationRuntimeAction::AmpViewConflictEvidence => rsx! {
             UiButton {
-                id: control_dom_id(ControlId::AmpViewConflictEvidenceButton),
+                control_id: Some(ControlId::AmpViewConflictEvidenceButton),
                 label: "View Evidence".to_string(),
                 variant: ButtonVariant::Secondary,
                 onclick: move |_| {
@@ -564,7 +560,7 @@ pub(in crate::app) fn NotificationActionBar(
         },
         NotificationRuntimeAction::AmpViewFinalizationStatus => rsx! {
             UiButton {
-                id: control_dom_id(ControlId::AmpViewFinalizationStatusButton),
+                control_id: Some(ControlId::AmpViewFinalizationStatusButton),
                 label: "Finalization Status".to_string(),
                 variant: ButtonVariant::Secondary,
                 onclick: move |_| {

@@ -17,7 +17,7 @@ use crate::readiness_owner;
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::frontend_primitives::ClipboardPort;
-use aura_app::ui_contract::{
+use aura_app::ui::contract::{
     next_projection_revision, InvitationFactKind, ProjectionRevision, QuiescenceSnapshot,
     RuntimeFact, SemanticOperationCausality, SemanticOperationPhase, SemanticOperationStatus,
     SubscriptionHealthSnapshot, SubscriptionHealthState,
@@ -1023,13 +1023,36 @@ impl UiModel {
     }
 }
 
+/// Opaque observed-render receipt issued by this controller publication owner.
+/// Its identity rejects callbacks from superseded renders and previous mounts.
+#[derive(Clone)]
+pub struct RendererCaptureReceipt {
+    identity: Arc<()>,
+    revision: u64,
+}
+impl RendererCaptureReceipt {
+    /// Monotonic diagnostic renderer revision; identity remains opaque.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+#[derive(Default)]
+struct SnapshotPublicationOwner {
+    snapshot: Option<UiSnapshot>,
+    active_renderer: Option<RendererCaptureReceipt>,
+    next_renderer_revision: u64,
+    next_layout_revision: u64,
+    pending_delivery: Option<UiSnapshot>,
+    delivering: bool,
+}
+
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
     model: RwLock<UiModel>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     ui_snapshot_sink: Mutex<Option<UiSnapshotSink>>,
-    last_published_ui_snapshot: Mutex<Option<UiSnapshot>>,
+    last_published_ui_snapshot: Mutex<SnapshotPublicationOwner>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     runtime_device_enrollment_ceremony:
         Mutex<Option<runtime_events::RuntimeDeviceEnrollmentCeremony>>,
@@ -1104,7 +1127,7 @@ impl UiController {
             clipboard,
             authority_switcher,
             ui_snapshot_sink: Mutex::new(None),
-            last_published_ui_snapshot: Mutex::new(None),
+            last_published_ui_snapshot: Mutex::new(SnapshotPublicationOwner::default()),
             rerender: Mutex::new(None),
             runtime_device_enrollment_ceremony: Mutex::new(None),
         }
@@ -1130,6 +1153,17 @@ impl UiController {
         if let Ok(mut slot) = self.ui_snapshot_sink.lock() {
             *slot = Some(sink);
         }
+    }
+
+    /// Detach future snapshot deliveries. Already selected callbacks require
+    /// their original producer owner to drain before the receiver is disposed.
+    pub fn clear_ui_snapshot_sink(&self) -> Result<(), std::sync::PoisonError<()>> {
+        let mut slot = self
+            .ui_snapshot_sink
+            .lock()
+            .map_err(|_| std::sync::PoisonError::new(()))?;
+        *slot = None;
+        Ok(())
     }
 
     pub fn send_keys(&self, keys: &str) {
@@ -1481,10 +1515,10 @@ mod tests {
     };
     use crate::MemoryClipboard;
     use crate::UiController;
+    use aura_app::ui::contract::{InvitationFactKind, RuntimeFact, SubscriptionHealthState};
     use aura_app::ui::contract::{
         OperationId, OperationInstanceId, OperationState, RuntimeEventKind,
     };
-    use aura_app::ui_contract::{InvitationFactKind, RuntimeFact, SubscriptionHealthState};
     use aura_app::{AppConfig, AppCore};
     use aura_core::types::identifiers::AuthorityId;
     use std::sync::Arc;
@@ -1877,7 +1911,7 @@ mod tests {
         controller.set_subscription_health(
             signal,
             SubscriptionHealthState::Degraded {
-                reason: aura_app::ui_contract::SubscriptionFailureCode::RegistrationFailed,
+                reason: aura_app::ui::contract::SubscriptionFailureCode::RegistrationFailed,
             },
         );
         let failed = controller.ui_snapshot();
@@ -1885,7 +1919,7 @@ mod tests {
         assert!(matches!(
             failed.subscription_health[0].state,
             SubscriptionHealthState::Degraded {
-                reason: aura_app::ui_contract::SubscriptionFailureCode::RegistrationFailed
+                reason: aura_app::ui::contract::SubscriptionFailureCode::RegistrationFailed
             }
         ));
         controller.set_subscription_health(signal, SubscriptionHealthState::Recovering);

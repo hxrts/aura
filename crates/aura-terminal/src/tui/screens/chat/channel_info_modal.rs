@@ -24,11 +24,25 @@ pub struct ChannelInfoModalProps {
 
 /// Modal displaying channel information
 #[component]
-pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'static>> {
+pub fn ChannelInfoModal(
+    props: &ChannelInfoModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::ChannelInfo,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     if !props.visible {
-        return element! {
-            View {}
-        };
+        return AnyElement::from(crate::tui::rendered_controls::register_native_view(
+            element! { View {} },
+            vec![control_layout_0],
+        ));
     }
 
     let channel_name = props.channel_name.clone();
@@ -49,62 +63,65 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
         KeyHint::new("t", "Edit topic"),
     ]);
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: Theme::PRIMARY,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
-            #(Some(modal_header(&header_props).into()))
-
-            // Body - fills available space
+    AnyElement::from(crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                padding: Spacing::MODAL_PADDING,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
-                gap: Spacing::XS,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: Theme::PRIMARY,
                 overflow: Overflow::Hidden,
             ) {
-                // Topic section
-                View(flex_direction: FlexDirection::Column) {
-                    Text(
-                        content: "Topic:",
-                        weight: Weight::Bold,
-                        color: Theme::TEXT_MUTED,
-                    )
-                    Text(
-                        content: topic,
-                        color: Theme::TEXT,
-                    )
+                // Header
+                #(Some(modal_header(&header_props).into()))
+
+                // Body - fills available space
+                crate::tui::rendered_controls::ObservedClipView(
+                    width: 100pct,
+                    padding: Spacing::MODAL_PADDING,
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    gap: Spacing::XS,
+                    overflow: Overflow::Hidden,
+                ) {
+                    // Topic section
+                    View(flex_direction: FlexDirection::Column) {
+                        Text(
+                            content: "Topic:",
+                            weight: Weight::Bold,
+                            color: Theme::TEXT_MUTED,
+                        )
+                        Text(
+                            content: topic,
+                            color: Theme::TEXT,
+                        )
+                    }
+
+                    // Participants section
+                    View(flex_direction: FlexDirection::Column, margin_top: Spacing::XS) {
+                        Text(
+                            content: format!("Participants ({}):", participant_count),
+                            weight: Weight::Bold,
+                            color: Theme::TEXT_MUTED,
+                        )
+                        Text(
+                            content: if participants.is_empty() {
+                                "No participants".to_string()
+                            } else {
+                                participants.join(", ")
+                            },
+                            color: Theme::TEXT,
+                        )
+                    }
                 }
 
-                // Participants section
-                View(flex_direction: FlexDirection::Column, margin_top: Spacing::XS) {
-                    Text(
-                        content: format!("Participants ({}):", participant_count),
-                        weight: Weight::Bold,
-                        color: Theme::TEXT_MUTED,
-                    )
-                    Text(
-                        content: if participants.is_empty() {
-                            "No participants".to_string()
-                        } else {
-                            participants.join(", ")
-                        },
-                        color: Theme::TEXT,
-                    )
-                }
+                // Footer
+                #(Some(modal_footer(&footer_props).into()))
             }
-
-            // Footer
-            #(Some(modal_footer(&footer_props).into()))
-        }
-    }
+        },
+        vec![control_layout_0],
+    ))
 }

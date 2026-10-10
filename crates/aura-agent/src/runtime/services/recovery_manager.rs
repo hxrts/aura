@@ -134,7 +134,7 @@ impl RecoveryManager {
                 let before = state.recoveries.len();
                 state
                     .recoveries
-                    .retain(|_, r| r.request.expires_at.map_or(true, |exp| exp > current_time));
+                    .retain(|_, r| r.request.expires_at.is_none_or(|exp| exp > current_time));
                 before - state.recoveries.len()
             },
             |state| state.validate(),

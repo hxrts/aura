@@ -540,3 +540,17 @@ The shared `UiSnapshot.home_modes` observation is required on observation surfac
 Frontend signal observers await `AppCore::subscribe_attached` before their initial snapshot and healthy publication. The existing reactive owner installs the graph receiver before returning, so an immediate update cannot fall between reported attachment and actual admission.
 
 Native integration tests may opt into app `test-support` fixture publication, which delegates existing observed-projection owners to publish a detached HomesState or mutate only the mode of an exact materialized home. The feature is absent from default/wasm production frontends and does not add a production mutation bypass.
+
+The shared UI contract distinguishes renderer-committed control layout from
+semantic eligibility/focus. A capture binds semantic source and a renderer
+revision, and disposal is irreversible. Native/web producers must prove the
+actual renderer commit and live nonhidden nonempty clipped layout. These pure
+observations never authorize business mutation (docs/117).
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.

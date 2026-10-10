@@ -16,7 +16,7 @@ use super::modal_overlays::{
     render_topic_modal, GlobalModalProps,
 };
 
-use aura_app::ui_contract::{OperationId, SemanticOperationKind};
+use aura_app::ui::contract::{OperationId, SemanticOperationKind};
 use iocraft::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -26,12 +26,12 @@ use aura_app::harness_mode_enabled;
 use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui::contract::OperationState;
+use aura_app::ui::contract::{RuntimeEventKind, RuntimeFact};
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
-use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::{execute_with_retry_budget, RetryRunError};
 use aura_effects::time::PhysicalTimeHandler;
@@ -830,12 +830,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let settlement = match operation_handle {
                         Some(operation)
                             if operation.operation_id()
-                                == &aura_app::ui_contract::OperationId::create_channel()
+                                == &aura_app::ui::contract::OperationId::create_channel()
                                 || operation.operation_id()
-                                    == &aura_app::ui_contract::OperationId::join_channel() =>
+                                    == &aura_app::ui::contract::OperationId::join_channel() =>
                         {
                             if operation.operation_id()
-                                == &aura_app::ui_contract::OperationId::join_channel()
+                                == &aura_app::ui::contract::OperationId::join_channel()
                             {
                                 if let Some(binding) = immediate_join_binding {
                                     accept_harness_command_submission(
@@ -863,7 +863,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         Some(operation)
                             if operation.operation_id()
-                                == &aura_app::ui_contract::OperationId::invitation_create()
+                                == &aura_app::ui::contract::OperationId::invitation_create()
                                 && matches!(
                                     submission.command,
                                     HarnessUiCommand::CreateContactInvitation { .. }
@@ -1054,8 +1054,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if !harness_devices.is_empty() {
         *last_exported_devices.write() = harness_devices.clone();
     }
-    if let Some(app_snapshot) = app_snapshot.as_ref() {
-        if let Err(error) = maybe_export_ui_snapshot(
+    let rendered_control_frame = if let Some(app_snapshot) = app_snapshot.as_ref() {
+        match crate::tui::harness_state::prepare_rendered_ui_snapshot(
             &tui_snapshot,
             TuiSemanticInputs {
                 app_snapshot,
@@ -1067,12 +1067,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             },
             app_ctx.app_core.runtime().as_deref(),
         ) {
-            tracing::warn!(
-                error = %error,
-                "failed to publish TUI harness snapshot during render"
-            );
+            Ok(snapshot) => Some(crate::tui::rendered_controls::RenderedControlFrame::new(
+                snapshot,
+            )),
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to prepare TUI render snapshot");
+                None
+            }
         }
-    }
+    } else {
+        None
+    };
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();
 
@@ -1327,10 +1332,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     if render_should_exit {
         system.exit();
-        return element! { View {} };
+        return AnyElement::from(element! { View {} });
     }
     if render_short_circuit {
-        return element! { View {} };
+        if let Err(error) = publish_loading_ui_snapshot(&tui_snapshot) {
+            tracing::warn!(error = %error, "failed to invalidate unavailable TUI render observation");
+        }
+        return AnyElement::from(element! { View {} });
     }
 
     // Nav bar status is updated reactively from signals.
@@ -1344,13 +1352,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Content always renders. Modals overlay via ModalFrame (Position::Absolute).
     // ModalFrame positions at top: NAV_HEIGHT to overlay the content area.
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            width: dim::TOTAL_WIDTH,
-            height: dim::TOTAL_HEIGHT,
-            overflow: Overflow::Hidden,
-        ) {
+    AnyElement::from(element! {
+        crate::tui::rendered_controls::RenderedTerminalRoot(frame: rendered_control_frame) {
             // Nav bar area (2 rows) - tabs + border
             NavBar(
                 active_screen: current_screen,
@@ -1358,7 +1361,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // Middle content area (26 rows) - always renders screen content
             // Modals overlay via ModalFrame (absolute positioning)
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: dim::TOTAL_WIDTH,
                 height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
@@ -1501,5 +1504,5 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 None
             })
         }
-    }
+    })
 }

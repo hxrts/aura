@@ -130,7 +130,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
         .collect::<Vec<_>>();
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             width: dim::TOTAL_WIDTH,
             height: dim::FOOTER_HEIGHT,
             flex_direction: FlexDirection::Column,
@@ -147,7 +147,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
 
             // Row 2: Screen-specific hints (cols 1-5) + sync status (col 6)
             // Uses same 6-column layout as nav bar for perfect alignment
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 height: 1u16,
                 flex_direction: FlexDirection::Row,
@@ -167,7 +167,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
 
             // Row 3: Global hints (cols 1-5) + peer count (col 6)
             // Uses same 6-column layout as nav bar for perfect alignment
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 height: 1u16,
                 flex_direction: FlexDirection::Row,
@@ -192,7 +192,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
 #[component]
 pub fn EmptyFooter() -> impl Into<AnyElement<'static>> {
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             width: dim::TOTAL_WIDTH,
             height: dim::FOOTER_HEIGHT,
             flex_direction: FlexDirection::Column,

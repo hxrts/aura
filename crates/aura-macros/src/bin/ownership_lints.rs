@@ -926,7 +926,7 @@ fn scan_function(
                 .contains("crates/aura-app/src/workflows/")
                 && file
                     .file_name()
-                    .map_or(true, |name| name != "semantic_facts.rs")
+                    .is_none_or(|name| name != "semantic_facts.rs")
         }
         LintMode::ProofIssuerAuthoritativeSource => false,
         LintMode::ParityCriticalIgnoredResults => {

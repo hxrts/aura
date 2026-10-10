@@ -296,6 +296,8 @@
           ++ toolkitSupport.buildInputs
           # Linux-only: patchbay network simulation dependencies
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            chromium
+            chromedriver
             iproute2 # tc command for traffic control
             nftables # nft command for NAT rules
             iptables # iptables-legacy for some nftables compat
@@ -303,6 +305,10 @@
 
           shellHook = ''
             ${toolkitSupport.shellHook}
+            ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+              export AURA_TEST_CHROMIUM="${pkgs.chromium}/bin/chromium"
+              export AURA_TEST_CHROMEDRIVER="${pkgs.chromedriver}/bin/chromedriver"
+            ''}
             if [ -d "$PWD/../toolkit/xtask" ]; then
               export TOOLKIT_ROOT="$PWD/../toolkit"
             fi
@@ -428,10 +434,15 @@
           ++ toolkitSupport.packages
           ++ toolkitCommands
           ++ toolkitSupport.buildInputs
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.chromium pkgs.chromedriver ]
           ;
 
           shellHook = ''
             ${toolkitSupport.shellHook}
+            ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+              export AURA_TEST_CHROMIUM="${pkgs.chromium}/bin/chromium"
+              export AURA_TEST_CHROMEDRIVER="${pkgs.chromedriver}/bin/chromedriver"
+            ''}
             if [ -d "$PWD/../toolkit/xtask" ]; then
               export TOOLKIT_ROOT="$PWD/../toolkit"
             fi

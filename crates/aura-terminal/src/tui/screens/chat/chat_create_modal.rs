@@ -62,11 +62,25 @@ pub struct ChatCreateModalProps {
 
 /// Modal for creating new chat groups
 #[component]
-pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'static>> {
+pub fn ChatCreateModal(
+    props: &ChatCreateModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::CreateChannel,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     if !props.visible {
-        return element! {
-            View {}
-        };
+        return AnyElement::from(crate::tui::rendered_controls::register_native_view(
+            element! { View {} },
+            vec![control_layout_0],
+        ));
     }
 
     let name = props.name.clone();
@@ -122,91 +136,96 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
         ModalStatus::Idle
     };
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
-            #(Some(modal_header(&header_props).into()))
-
-            // Body - fills available space
+    AnyElement::from(crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                padding_left: Spacing::MODAL_PADDING,
-                padding_right: Spacing::MODAL_PADDING,
-                padding_top: Spacing::XS,
-                padding_bottom: Spacing::MODAL_PADDING,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: border_color,
                 overflow: Overflow::Hidden,
             ) {
-                #(match step {
-                    CreateChannelStep::Details => {
-                        let name_input = LabeledInputProps::new("Group Name:", "Enter group name...")
-                            .with_value(name)
-                            .with_focused(active_field == 0);
-                        let topic_input = LabeledInputProps::new("Topic (optional):", "Enter topic...")
-                            .with_value(topic)
-                            .with_focused(active_field == 1);
-                        vec![element! {
-                            View(flex_direction: FlexDirection::Column, gap: Spacing::SM) {
-                                #(Some(labeled_input(&name_input).into()))
-                                #(Some(labeled_input(&topic_input).into()))
-                            }
-                        }.into_any()]
-                    }
-                    CreateChannelStep::Members => {
-                        let items = props
-                            .contacts
-                            .iter()
-                            .map(|(_, name)| ContactMultiSelectItem {
-                                name: name.clone(),
-                                badge: None,
-                            })
-                            .collect::<Vec<_>>();
-                        let selector = ContactMultiSelectProps {
-                            prompt: "Invite Contacts".to_string(),
-                            items,
-                            selected: props.selected_indices.clone(),
-                            focused: props.focused_index,
-                            min_selected: None,
-                            footer_hint: Some(
-                                "↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel".to_string(),
-                            ),
-                        };
-                        vec![contact_multi_select(&selector).into()]
-                    }
-                    CreateChannelStep::Threshold => {
-                        let selector = ThresholdSelectorProps {
-                            prompt: "Group Threshold".to_string(),
-                            subtext: Some(format!(
-                                "Require {} of {} signatures (includes you)",
-                                props.threshold_k, props.threshold_n
-                            )),
-                            k: props.threshold_k,
-                            n: props.threshold_n,
-                            low_hint: Some("Low: any one signer".to_string()),
-                            show_hint: true,
-                        };
-                        vec![threshold_selector(&selector).into()]
-                    },
-                })
+                // Header
+                #(Some(modal_header(&header_props).into()))
 
-                // Status message (error/loading)
-                #(Some(status_message(&status).into()))
+                // Body - fills available space
+                crate::tui::rendered_controls::ObservedClipView(
+                    width: 100pct,
+                    padding_left: Spacing::MODAL_PADDING,
+                    padding_right: Spacing::MODAL_PADDING,
+                    padding_top: Spacing::XS,
+                    padding_bottom: Spacing::MODAL_PADDING,
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
+                ) {
+                    #(match step {
+                        CreateChannelStep::Details => {
+                            let name_input = LabeledInputProps::new("Group Name:", "Enter group name...")
+                                .with_field(aura_app::ui::contract::FieldId::CreateChannelName)
+            .with_value(name)
+                                .with_focused(active_field == 0);
+                            let topic_input = LabeledInputProps::new("Topic (optional):", "Enter topic...")
+                                .with_field(aura_app::ui::contract::FieldId::CreateChannelTopic)
+            .with_value(topic)
+                                .with_focused(active_field == 1);
+                            vec![element! {
+                                View(flex_direction: FlexDirection::Column, gap: Spacing::SM) {
+                                    #(Some(labeled_input(&name_input).into()))
+                                    #(Some(labeled_input(&topic_input).into()))
+                                }
+                            }.into_any()]
+                        }
+                        CreateChannelStep::Members => {
+                            let items = props
+                                .contacts
+                                .iter()
+                                .map(|(_, name)| ContactMultiSelectItem {
+                                    name: name.clone(),
+                                    badge: None,
+                                })
+                                .collect::<Vec<_>>();
+                            let selector = ContactMultiSelectProps {
+                                prompt: "Invite Contacts".to_string(),
+                                items,
+                                selected: props.selected_indices.clone(),
+                                focused: props.focused_index,
+                                min_selected: None,
+                                footer_hint: Some(
+                                    "↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel".to_string(),
+                                ),
+                            };
+                            vec![contact_multi_select(&selector).into()]
+                        }
+                        CreateChannelStep::Threshold => {
+                            let selector = ThresholdSelectorProps {
+                                prompt: "Group Threshold".to_string(),
+                                subtext: Some(format!(
+                                    "Require {} of {} signatures (includes you)",
+                                    props.threshold_k, props.threshold_n
+                                )),
+                                k: props.threshold_k,
+                                n: props.threshold_n,
+                                low_hint: Some("Low: any one signer".to_string()),
+                                show_hint: true,
+                            };
+                            vec![threshold_selector(&selector).into()]
+                        },
+                    })
+
+                    // Status message (error/loading)
+                    #(Some(status_message(&status).into()))
+                }
+
+                // Footer with key hints
+                #(Some(modal_footer(&footer_props).into()))
             }
-
-            // Footer with key hints
-            #(Some(modal_footer(&footer_props).into()))
-        }
-    }
+        },
+        vec![control_layout_0],
+    ))
 }
 
 /// State for chat create modal

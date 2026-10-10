@@ -343,7 +343,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
                     .map(|c| Self::decode_key_segment(&c.as_os_str().to_string_lossy()))
                     .collect::<Result<Vec<_>, _>>()?;
                 let key = segments.join("/");
-                if prefix.map_or(true, |prefix| key.starts_with(prefix)) {
+                if prefix.is_none_or(|prefix| key.starts_with(prefix)) {
                     keys.push(key);
                 }
             }

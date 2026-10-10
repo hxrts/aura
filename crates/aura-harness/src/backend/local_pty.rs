@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -195,10 +196,7 @@ fn require_channel_binding_submission(
 fn is_modal_control(control_id: ControlId) -> bool {
     matches!(
         control_id,
-        ControlId::ModalConfirmButton
-            | ControlId::ModalCancelButton
-            | ControlId::ModalCopyButton
-            | ControlId::ModalInput
+        ControlId::ModalConfirmButton | ControlId::ModalCancelButton | ControlId::ModalCopyButton
     )
 }
 
@@ -272,6 +270,9 @@ struct RunningSession {
     ui_snapshot_listener_status: Arc<BlockingStatusCell<Option<String>>>,
     ui_snapshot_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_stop: Arc<AtomicU64>,
+    ui_snapshot_wake: UnixStream,
+    #[cfg(test)]
+    ui_snapshot_read_started: std::sync::mpsc::Receiver<()>,
     transient_root: PathBuf,
     socket_root: PathBuf,
     ui_snapshot_socket_path: PathBuf,
@@ -329,7 +330,7 @@ impl LocalPtyBackend {
         session
             .reader_thread
             .as_ref()
-            .map_or(true, |thread| !thread.is_finished())
+            .is_none_or(|thread| !thread.is_finished())
     }
 
     fn ensure_session_alive(&self, session: &RunningSession, context: &str) -> Result<()> {
@@ -344,7 +345,7 @@ impl LocalPtyBackend {
         let ui_snapshot_thread_alive = session
             .ui_snapshot_thread
             .as_ref()
-            .map_or(true, |thread| !thread.is_finished());
+            .is_none_or(|thread| !thread.is_finished());
         let reader_status = session.reader_status.lock().clone();
         let ui_snapshot_listener_status = session.ui_snapshot_listener_status.lock().clone();
         anyhow::bail!(
@@ -512,7 +513,8 @@ impl LocalPtyBackend {
         feed: &Arc<UiSnapshotFeed>,
         stop_flag: &Arc<AtomicU64>,
         listener_status: &Arc<BlockingStatusCell<Option<String>>>,
-    ) -> Result<thread::JoinHandle<()>> {
+        #[cfg(test)] read_started: std::sync::mpsc::Sender<()>,
+    ) -> Result<(thread::JoinHandle<()>, UnixStream)> {
         let _ = fs::remove_file(socket_path);
         if let Some(parent) = socket_path.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -534,28 +536,114 @@ impl LocalPtyBackend {
                 socket_path.display()
             )
         })?;
-        let socket_path = socket_path.clone();
         let feed = Arc::clone(feed);
         let stop_flag = Arc::clone(stop_flag);
         let listener_status = Arc::clone(listener_status);
-        Ok(thread::spawn(move || {
+        let (wake_reader, wake_writer) =
+            UnixStream::pair().context("create original listener wake owner")?;
+        let thread = thread::spawn(move || {
             let set_status = |status: String| {
                 *listener_status.lock() = Some(status);
             };
-            for stream in listener.incoming() {
-                if stop_flag.load(Ordering::Acquire) > 0 {
+            'accept: loop {
+                let mut readiness = [
+                    nix::poll::PollFd::new(listener.as_raw_fd(), nix::poll::PollFlags::POLLIN),
+                    nix::poll::PollFd::new(wake_reader.as_raw_fd(), nix::poll::PollFlags::POLLIN),
+                ];
+                if let Err(error) = nix::poll::poll(&mut readiness, -1) {
+                    if error == nix::errno::Errno::EINTR {
+                        continue;
+                    }
+                    set_status(format!("listener readiness failed: {error}"));
+                    break;
+                }
+                if stop_flag.load(Ordering::Acquire) > 0
+                    || readiness[1]
+                        .revents()
+                        .is_some_and(|events| !events.is_empty())
+                {
                     set_status("stopped by harness request".to_string());
                     break;
                 }
-                let Ok(mut stream) = stream else {
+                let events = readiness[0]
+                    .revents()
+                    .unwrap_or(nix::poll::PollFlags::empty());
+                if events.intersects(
+                    nix::poll::PollFlags::POLLERR
+                        | nix::poll::PollFlags::POLLNVAL
+                        | nix::poll::PollFlags::POLLHUP,
+                ) {
+                    set_status(format!("original listener descriptor failed: {events:?}"));
+                    break;
+                }
+                if !events.contains(nix::poll::PollFlags::POLLIN) {
+                    continue;
+                }
+                let Ok((mut stream, _)) = listener.accept() else {
                     set_status("listener accept failed".to_string());
                     continue;
                 };
-                let mut payload = String::new();
-                if let Err(error) = stream.read_to_string(&mut payload) {
-                    set_status(format!("listener failed reading snapshot payload: {error}"));
-                    continue;
+                let mut payload = Vec::new();
+                loop {
+                    let mut readiness = [
+                        nix::poll::PollFd::new(stream.as_raw_fd(), nix::poll::PollFlags::POLLIN),
+                        nix::poll::PollFd::new(
+                            wake_reader.as_raw_fd(),
+                            nix::poll::PollFlags::POLLIN,
+                        ),
+                    ];
+                    if let Err(error) = nix::poll::poll(&mut readiness, -1) {
+                        if error == nix::errno::Errno::EINTR {
+                            continue;
+                        }
+                        set_status(format!("snapshot read readiness failed: {error}"));
+                        break 'accept;
+                    }
+                    if stop_flag.load(Ordering::Acquire) > 0
+                        || readiness[1]
+                            .revents()
+                            .is_some_and(|events| !events.is_empty())
+                    {
+                        set_status("stopped by original listener wake".to_string());
+                        break 'accept;
+                    }
+                    let events = readiness[0]
+                        .revents()
+                        .unwrap_or(nix::poll::PollFlags::empty());
+                    if events
+                        .intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLNVAL)
+                    {
+                        set_status(format!(
+                            "original snapshot stream descriptor failed: {events:?}"
+                        ));
+                        continue 'accept;
+                    }
+                    if !events
+                        .intersects(nix::poll::PollFlags::POLLIN | nix::poll::PollFlags::POLLHUP)
+                    {
+                        continue;
+                    }
+                    let mut buffer = [0u8; 8192];
+                    match stream.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(count) => {
+                            payload.extend_from_slice(&buffer[..count]);
+                            #[cfg(test)]
+                            let _ = read_started.send(());
+                        }
+                        Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                        Err(error) => {
+                            set_status(format!(
+                                "listener failed reading snapshot payload: {error}"
+                            ));
+                            continue 'accept;
+                        }
+                    }
                 }
+                let Ok(payload) = String::from_utf8(payload) else {
+                    set_status("listener received non-UTF8 snapshot".to_string());
+                    continue;
+                };
                 if payload.trim() == "__AURA_UI_STATE_SHUTDOWN__" {
                     set_status("received harness shutdown sentinel".to_string());
                     break;
@@ -576,8 +664,8 @@ impl LocalPtyBackend {
                 *listener_status.lock() =
                     Some("listener exited without explicit status".to_string());
             }
-            let _ = fs::remove_file(socket_path);
-        }))
+        });
+        Ok((thread, wake_writer))
     }
 
     fn default_command(&self) -> (String, Vec<String>) {
@@ -862,36 +950,11 @@ impl InstanceBackend for LocalPtyBackend {
         if Self::env_value("AURA_CLIPBOARD_MODE", &self.config.env).is_none() {
             command.env("AURA_CLIPBOARD_MODE", "file_only");
         }
-        let transient_root = self.transient_root();
-        fs::create_dir_all(&transient_root).with_context(|| {
-            format!(
-                "failed to create instance transient root {}",
-                transient_root.display()
-            )
-        })?;
-        fs::set_permissions(&transient_root, fs::Permissions::from_mode(0o700)).with_context(
-            || {
-                format!(
-                    "failed to restrict instance transient root permissions {}",
-                    transient_root.display()
-                )
-            },
-        )?;
+        let transient_root = crate::provisioning::validate_transient_root(self.transient_root())?;
+        crate::provisioning::prepare_owned_transient_root(&transient_root)?;
+
         let socket_root = self.socket_root();
-        fs::create_dir_all(&socket_root).with_context(|| {
-            format!(
-                "failed to create instance socket root {}",
-                socket_root.display()
-            )
-        })?;
-        fs::set_permissions(&socket_root, fs::Permissions::from_mode(0o700)).with_context(
-            || {
-                format!(
-                    "failed to restrict instance socket root permissions {}",
-                    socket_root.display()
-                )
-            },
-        )?;
+        crate::provisioning::prepare_private_directory(&socket_root)?;
         if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
             let clipboard_file = Self::absolutize_path(self.clipboard_file_path());
             command.env(
@@ -974,19 +1037,21 @@ impl InstanceBackend for LocalPtyBackend {
         let clipboard_file_path = Self::absolutize_path(self.clipboard_file_path());
         let child_pid_path = Self::absolutize_path(self.child_pid_path(session_generation));
         let ui_snapshot_listener_status = Arc::new(BlockingStatusCell::new(None));
-        let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
+        #[cfg(test)]
+        let (read_started_tx, ui_snapshot_read_started) = std::sync::mpsc::channel();
+        let (ui_snapshot_thread, mut ui_snapshot_wake) = Self::spawn_ui_snapshot_listener(
             &ui_snapshot_socket_path,
             &ui_snapshot_feed,
             &ui_snapshot_stop,
             &ui_snapshot_listener_status,
+            #[cfg(test)]
+            read_started_tx,
         )?;
         let child = match pair.slave.spawn_command(command) {
             Ok(child) => child,
             Err(error) => {
                 ui_snapshot_stop.store(1, Ordering::Release);
-                if let Ok(mut stream) = UnixStream::connect(&ui_snapshot_socket_path) {
-                    let _ = stream.write_all(b"__AURA_UI_STATE_SHUTDOWN__");
-                }
+                let _ = ui_snapshot_wake.write_all(&[1]);
                 let _ = ui_snapshot_thread.join();
                 return Err(error)
                     .with_context(|| format!("failed to spawn process for {}", self.config.id));
@@ -1067,6 +1132,9 @@ impl InstanceBackend for LocalPtyBackend {
             ui_snapshot_listener_status,
             ui_snapshot_thread: Some(ui_snapshot_thread),
             ui_snapshot_stop,
+            ui_snapshot_wake,
+            #[cfg(test)]
+            ui_snapshot_read_started,
             transient_root,
             socket_root,
             ui_snapshot_socket_path,
@@ -1084,11 +1152,13 @@ impl InstanceBackend for LocalPtyBackend {
             return Ok(());
         }
 
+        let mut path_error = None;
         if let Some(mut session) = self.session.take() {
+            path_error =
+                crate::provisioning::validate_owned_transient_cleanup(&session.transient_root)
+                    .err();
             session.ui_snapshot_stop.store(1, Ordering::Release);
-            if let Ok(mut stream) = UnixStream::connect(&session.ui_snapshot_socket_path) {
-                let _ = stream.write_all(b"__AURA_UI_STATE_SHUTDOWN__");
-            }
+            let _ = session.ui_snapshot_wake.write_all(&[1]);
             {
                 let mut child = session
                     .child
@@ -1104,15 +1174,25 @@ impl InstanceBackend for LocalPtyBackend {
             if let Some(handle) = session.ui_snapshot_thread.take() {
                 let _ = handle.join();
             }
-            let _ = fs::remove_file(&session.child_pid_path);
-            let _ = fs::remove_file(&session.command_socket_path);
-            let _ = fs::remove_file(&session.ui_snapshot_socket_path);
-            let _ = fs::remove_file(&session.clipboard_file_path);
-            let _ = fs::remove_dir_all(&session.socket_root);
-            let _ = fs::remove_dir_all(&session.transient_root);
+            if path_error.is_none() {
+                path_error =
+                    crate::provisioning::validate_owned_transient_cleanup(&session.transient_root)
+                        .err();
+            }
+            if path_error.is_none() {
+                let _ = fs::remove_file(&session.child_pid_path);
+                let _ = fs::remove_file(&session.command_socket_path);
+                let _ = fs::remove_file(&session.ui_snapshot_socket_path);
+                let _ = fs::remove_file(&session.clipboard_file_path);
+                let _ = fs::remove_dir_all(&session.socket_root);
+                let _ = fs::remove_dir_all(&session.transient_root);
+            }
         }
 
         self.state = BackendState::Stopped;
+        if let Some(error) = path_error {
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -1381,7 +1461,7 @@ impl ObservationBackend for LocalPtyBackend {
         loop {
             if let Some(snapshot) = guard.latest.clone() {
                 let version = guard.version;
-                if after_version.map_or(true, |required| version > required) {
+                if after_version.is_none_or(|required| version > required) {
                     return Some(Ok(UiSnapshotEvent { snapshot, version }));
                 }
             }
@@ -1457,7 +1537,7 @@ impl RawUiBackend for LocalPtyBackend {
             if bytes[index] == 0x1b
                 && bytes
                     .get(index + 1)
-                    .map_or(true, |next| *next != b'[' && *next != b'O')
+                    .is_none_or(|next| *next != b'[' && *next != b'O')
             {
                 // Prevent accidental Alt-key combos when callers intend standalone Esc.
                 blocking_sleep(Duration::from_millis(40));
@@ -1615,39 +1695,6 @@ impl RawUiBackend for LocalPtyBackend {
             target_index,
             snapshot.focused_control
         );
-        if matches!(list_id, ListId::InvitationTypes) {
-            if current_index == target_index {
-                return Ok(());
-            }
-            match snapshot.focused_control {
-                Some(ControlId::Field(FieldId::InvitationType)) => {}
-                Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
-                Some(ControlId::Field(FieldId::InvitationTtl)) => self.send_keys("\u{1b}[B")?,
-                Some(other) => anyhow::bail!(
-                    "invitation type selector is visible but focus is on incompatible control {other:?}"
-                ),
-                None => anyhow::bail!(
-                    "invitation type selector is visible but the TUI snapshot has no focused control"
-                ),
-            }
-
-            let len = list.items.len();
-            if len == 0 {
-                return Ok(());
-            }
-            let forward_steps = (target_index + len - current_index) % len;
-            let backward_steps = (current_index + len - target_index) % len;
-            if forward_steps <= backward_steps {
-                for _ in 0..forward_steps {
-                    self.send_keys("\u{1b}[C")?;
-                }
-            } else {
-                for _ in 0..backward_steps {
-                    self.send_keys("\u{1b}[D")?;
-                }
-            }
-            return Ok(());
-        }
         let delta = target_index as isize - current_index as isize;
         let sequence = if matches!(list_id, ListId::Homes) {
             if delta < 0 {
@@ -2133,7 +2180,10 @@ mod tests {
         assert!(is_modal_control(ControlId::ModalCancelButton));
         assert!(!is_modal_control(ControlId::NavChat));
         let source = include_str!("local_pty.rs");
-        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let production = source
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or(source);
         assert!(
             production
                 .contains("if snapshot.open_modal.is_none() {\n                anyhow::bail!("),
@@ -2504,7 +2554,10 @@ mod tests {
         let backend_path = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
         let source = std::fs::read_to_string(&backend_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", backend_path.display()));
-        let production_source = source.split("#[cfg(test)]").next().unwrap_or(&source);
+        let production_source = source
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or(&source);
         let ui_snapshot_body = production_source
             .split("fn ui_snapshot(&self) -> Result<UiSnapshot> {")
             .nth(1)
@@ -2546,6 +2599,136 @@ mod tests {
         backend
             .stop()
             .unwrap_or_else(|error| panic!("backend must stop: {error}"));
+    }
+
+    #[test]
+    fn replaced_transient_root_refuses_paths_and_settles_original_process_and_held_client() {
+        use std::os::unix::fs::symlink;
+        let selected = tempfile::Builder::new()
+            .prefix("ah316-")
+            .tempdir_in("/tmp")
+            .expect("selected test owner");
+        let root = selected.path().join("owned");
+        let target = selected.path().join("foreign-target");
+        fs::create_dir(&target).expect("untouched target");
+        fs::write(target.join("sentinel"), "original").expect("target sentinel");
+        let mut config = test_config();
+        config.env.push(format!(
+            "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT={}",
+            root.display()
+        ));
+        let mut backend = LocalPtyBackend::new(config, Some(40), Some(120));
+        backend.start().expect("original actual backend");
+        let session = backend.session.as_ref().expect("original session");
+        let child_pid = session
+            .child
+            .try_lock()
+            .expect("original child lock")
+            .process_id()
+            .expect("actual original child pid");
+        let mut held_client =
+            UnixStream::connect(&session.ui_snapshot_socket_path).expect("actual client");
+        held_client
+            .write_all(b"{")
+            .expect("incomplete payload keeps client open");
+        session
+            .ui_snapshot_read_started
+            .recv()
+            .expect("actual listener read original partial payload before stop");
+        let retired = selected.path().join("retired-original");
+        fs::rename(&root, &retired).expect("replace original namespace entry");
+        symlink(&target, &root).expect("untrusted replacement");
+        assert!(
+            backend.stop().is_err(),
+            "replaced owner must refuse destructive paths"
+        );
+        assert!(
+            backend.session.is_none(),
+            "original listener/readers joined despite path refusal"
+        );
+        assert_eq!(
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(i32::try_from(child_pid).expect("native pid fits")),
+                None
+            ),
+            Err(nix::errno::Errno::ESRCH),
+            "actual original child was reaped"
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("sentinel")).expect("target retained"),
+            "original"
+        );
+        assert!(fs::symlink_metadata(&root)
+            .expect("replacement retained")
+            .file_type()
+            .is_symlink());
+        drop(held_client);
+    }
+
+    #[test]
+    fn deep_data_path_uses_original_short_socket_owner_and_cleans_each_generation() {
+        use std::os::unix::fs::PermissionsExt;
+        let selected = tempfile::Builder::new()
+            .prefix("ah316-")
+            .tempdir_in("/tmp")
+            .expect("selected short test owner");
+        let deep = selected.path().join("deep-worktree".repeat(12));
+        let mut backends = Vec::new();
+        let mut roots = Vec::new();
+        for identity in [1, 2] {
+            let root = crate::provisioning::select_owned_transient_root(
+                identity,
+                None,
+                [selected.path().to_path_buf()],
+            )
+            .expect("original selected root");
+            let mut config = test_config();
+            config.id = format!("actual-{identity}");
+            config.data_dir = deep.join(&config.id);
+            config.env.push(format!(
+                "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT={}",
+                root.display()
+            ));
+            let mut backend = LocalPtyBackend::new(config, Some(40), Some(120));
+            backend
+                .start()
+                .unwrap_or_else(|error| panic!("actual backend startup: {error:#}"));
+            let socket = backend.ui_state_socket_path(backend.session_generation);
+            assert!(socket.as_os_str().len() <= 100);
+            assert_eq!(
+                fs::metadata(&root)
+                    .expect("owned root")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&socket)
+                    .expect("actual listener")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            UnixStream::connect(&socket)
+                .expect("actual deep-profile observer socket accepts connection");
+            roots.push(root);
+            backends.push(backend);
+        }
+        assert_ne!(roots[0], roots[1]);
+        let original_socket = backends[0].ui_state_socket_path(backends[0].session_generation);
+        backends[0].stop().expect("original owner cleanup");
+        assert!(!roots[0].exists());
+        assert!(roots[1].exists());
+        backends[0].start().expect("next actual generation");
+        let next_socket = backends[0].ui_state_socket_path(backends[0].session_generation);
+        assert_ne!(original_socket, next_socket);
+        assert!(!original_socket.exists());
+        for backend in &mut backends {
+            backend.stop().expect("owned final cleanup");
+        }
+        assert!(roots.iter().all(|root| !root.exists()));
     }
 
     #[test]

@@ -5,11 +5,11 @@ use crate::semantic_lifecycle::{
 };
 use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
 use aura_app::ui::contract::contacts_friend_action_controls;
-use aura_app::ui::types::ContactRelationshipState;
-use aura_app::ui_contract::{
+use aura_app::ui::contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
+use aura_app::ui::types::ContactRelationshipState;
 
 fn command_failure(detail: impl Into<String>) -> SemanticOperationError {
     SemanticOperationError::new(
@@ -103,7 +103,7 @@ pub(super) fn ContactsScreen(
                         if runtime.lan_peers.is_empty() {
                             p { class: "m-0 mt-3 text-sm text-muted-foreground", "No bootstrap candidates discovered yet." }
                         } else {
-                            div { class: "mt-3 space-y-2",
+                            crate::rendered_control::RenderedRegion { control_id: ControlId::List(ListId::BootstrapCandidates), class: "mt-3 space-y-2",
                                 for peer in &runtime.lan_peers {
                                     div {
                                         class: "flex items-center gap-2",
@@ -215,7 +215,8 @@ pub(super) fn ContactsScreen(
                         } else {
                             ScrollArea {
                                 class: Some("h-full pr-1".to_string()),
-                                ScrollAreaViewport {
+                                crate::rendered_control::RenderedScrollViewport {
+                                    list_id: ListId::Contacts,
                                     class: Some("aura-list space-y-2".to_string()),
                                     for contact in contacts.iter() {
                                         button {
@@ -250,12 +251,7 @@ pub(super) fn ContactsScreen(
                         extra_class: None,
                         div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
-                                id: Some(
-                                    ControlId::ContactsAcceptInvitationButton
-                                        .web_dom_id()
-                                        .required_dom_id("ControlId::ContactsAcceptInvitationButton must define a web DOM id")
-                                        .to_string(),
-                                ),
+                                control_id: Some(ControlId::ContactsAcceptInvitationButton),
                                 label: "Accept Invitation".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: move |_| {
@@ -264,12 +260,7 @@ pub(super) fn ContactsScreen(
                                 }
                             }
                             UiButton {
-                                id: Some(
-                                    ControlId::ContactsCreateInvitationButton
-                                        .web_dom_id()
-                                        .required_dom_id("ControlId::ContactsCreateInvitationButton must define a web DOM id")
-                                        .to_string(),
-                                ),
+                                control_id: Some(ControlId::ContactsCreateInvitationButton),
                                 label: "Create Invitation".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -411,14 +402,7 @@ pub(super) fn ContactsScreen(
                                 if contacts_friend_action_controls(contact.relationship_state)
                                     .contains(&ControlId::ContactsSendFriendRequestButton) {
                                     UiButton {
-                                        id: Some(
-                                            ControlId::ContactsSendFriendRequestButton
-                                                .web_dom_id()
-                                                .required_dom_id(
-                                                    "ControlId::ContactsSendFriendRequestButton must define a web DOM id",
-                                                )
-                                                .to_string(),
-                                        ),
+                                        control_id: Some(ControlId::ContactsSendFriendRequestButton),
                                         label: "Send Friend Request".to_string(),
                                         variant: ButtonVariant::Primary,
                                         onclick: {
@@ -463,14 +447,7 @@ pub(super) fn ContactsScreen(
                                 if contacts_friend_action_controls(contact.relationship_state)
                                     .contains(&ControlId::ContactsRemoveFriendButton) {
                                     UiButton {
-                                        id: Some(
-                                            ControlId::ContactsRemoveFriendButton
-                                                .web_dom_id()
-                                                .required_dom_id(
-                                                    "ControlId::ContactsRemoveFriendButton must define a web DOM id",
-                                                )
-                                                .to_string(),
-                                        ),
+                                        control_id: Some(ControlId::ContactsRemoveFriendButton),
                                         label: if matches!(contact.relationship_state, ContactRelationshipState::PendingOutbound) {
                                             "Cancel Friend Request".to_string()
                                         } else {
@@ -523,12 +500,7 @@ pub(super) fn ContactsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::ContactsStartChatButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::ContactsStartChatButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::ContactsStartChatButton),
                                     label: "Start Chat".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -571,14 +543,7 @@ pub(super) fn ContactsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::ContactsInviteToChannelButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::ContactsInviteToChannelButton must define a web DOM id",
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::ContactsInviteToChannelButton),
                                     label: "Invite to Channel".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: {
@@ -646,14 +611,7 @@ pub(super) fn ContactsScreen(
                                 }
                                 if !contact.is_guardian {
                                     UiButton {
-                                        id: Some(
-                                            ControlId::ContactsAddGuardianButton
-                                                .web_dom_id()
-                                                .required_dom_id(
-                                                    "ControlId::ContactsAddGuardianButton must define a web DOM id",
-                                                )
-                                                .to_string(),
-                                        ),
+                                        control_id: Some(ControlId::ContactsAddGuardianButton),
                                         label: "Add Guardian".to_string(),
                                         variant: ButtonVariant::Primary,
                                         onclick: {
@@ -716,14 +674,7 @@ pub(super) fn ContactsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::ContactsEditNicknameButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::ContactsEditNicknameButton must define a web DOM id",
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::ContactsEditNicknameButton),
                                     label: "Edit Nickname".to_string(),
                                     variant: ButtonVariant::Secondary,
                                     onclick: move |_| {
@@ -732,14 +683,7 @@ pub(super) fn ContactsScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::ContactsRemoveContactButton
-                                            .web_dom_id()
-                                            .required_dom_id(
-                                                "ControlId::ContactsRemoveContactButton must define a web DOM id",
-                                            )
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::ContactsRemoveContactButton),
                                     label: "Remove Contact".to_string(),
                                     variant: ButtonVariant::Secondary,
                                     onclick: move |_| {

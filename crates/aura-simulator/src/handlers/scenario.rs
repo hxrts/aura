@@ -2637,7 +2637,7 @@ impl SimulationScenarioHandler {
                     completed_after_ticks.map(|delta| state.current_tick.saturating_add(delta));
                 let deadline_tick = state.current_tick.saturating_add(deadline_ticks);
                 let within_deadline =
-                    completed_at_tick.map_or(true, |completed| completed <= deadline_tick);
+                    completed_at_tick.is_none_or(|completed| completed <= deadline_tick);
                 state.adaptive_privacy.accountability_replies.insert(
                     reply_id.clone(),
                     AccountabilityReplyState {
