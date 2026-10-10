@@ -37,6 +37,14 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Invariants
 
+- Harness IPC uses one selected short local runtime root, shared by run
+  provisioning and coordinator admission. Run, instance/profile and session
+  generation remain isolated independently of checkout depth. Explicit roots
+  remain selected and fail with a concrete path error before socket binding if
+  they cannot fit the platform limit. Namespace, instance and socket directories
+  must be native owner directories; symlink/foreign-owner paths cannot redirect
+  creation, chmod or cleanup. Private directories use `0700` and sockets `0600`.
+
 - The LAN driver signals only a REPL whose retained birth, executable, config
   and checkout identity match the live process. Missing or mismatched identity
   and surviving checkout-owned harness IPC fail closed without discarding run
@@ -267,3 +275,16 @@ cargo test -p aura-harness
 Device enrollment import carries three explicit actor-supplied values. Enrollment readiness capture reads actual manifest/verifier payloads from the matched runtime event and stores companion variables; it fails when those values are absent. Clipboard fallback, payload-derived initiator pins, and independently invented devices cannot authorize enrollment.
 
 See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+Ordinary control visibility requires an actual rendered-control observation
+with the current semantic source and Visible state. Focus cannot satisfy it.
+Observations retain duplicate control instances. Missing producer coverage stays
+unsupported; onboarding is the first native/web producer, not a full inventory.
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.

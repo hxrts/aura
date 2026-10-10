@@ -195,9 +195,9 @@ fn take_due_peers<K: Copy + Eq + std::hash::Hash>(
     peers
         .into_iter()
         .filter(|peer| {
-            let due = recent.get(peer).map_or(true, |last| {
-                now_ms.saturating_sub(*last) >= MIN_PEER_RESYNC_INTERVAL_MS
-            });
+            let due = recent
+                .get(peer)
+                .is_none_or(|last| now_ms.saturating_sub(*last) >= MIN_PEER_RESYNC_INTERVAL_MS);
             if due {
                 recent.insert(*peer, now_ms);
             }

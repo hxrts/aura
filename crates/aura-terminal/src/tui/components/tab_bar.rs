@@ -68,7 +68,7 @@ pub fn TabBar(props: &TabBarProps) -> impl Into<AnyElement<'static>> {
     let gap = props.gap.unwrap_or(Spacing::MD);
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Row,
             width: 100pct,
             overflow: Overflow::Hidden,

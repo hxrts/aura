@@ -1144,7 +1144,7 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
                             && diagnostic
                                 .2
                                 .as_ref()
-                                .map_or(true, |digest| &proof.output_digest == digest)
+                                .is_none_or(|digest| &proof.output_digest == digest)
                     })
                     .and_then(|proof| {
                         let operation_id = format!("materialization:{}", proof.proof_id);

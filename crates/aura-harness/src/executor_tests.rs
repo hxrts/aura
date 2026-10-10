@@ -3,14 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
 use crate::config::{
-    CompatibilityAction, CompatibilityStep, InstanceConfig, InstanceMode, RunConfig,
-    RunSection, ScreenSource,
+    CompatibilityAction, CompatibilityStep, InstanceConfig, InstanceMode, RunConfig, RunSection,
+    ScreenSource,
 };
 use crate::coordinator::HarnessCoordinator;
 use aura_app::ui::contract::{
     ConfirmationState, FieldId, ListId, ListItemSnapshot, ListSnapshot, OperationId,
-    OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
-    RuntimeEventSnapshot, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId, RuntimeEventSnapshot,
+    ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::scenarios::ScenarioAction;
 use aura_app::ui_contract::{
@@ -182,8 +182,9 @@ fn shared_open_screen_and_settings_use_semantic_submission_not_raw_ui() {
         "shared OpenSettingsSection branch must submit the semantic intent"
     );
     assert!(
-        !open_screen_branch
-            .contains("plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id))"),
+        !open_screen_branch.contains(
+            "plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id))"
+        ),
         "shared OpenScreen branch must not fall back to raw control activation"
     );
     assert!(
@@ -429,6 +430,8 @@ fn semantic_wait_can_require_confirmed_list_items() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: vec![SelectionSnapshot {
             list: ListId::Contacts,
             item_id: "authority-1".to_string(),
@@ -506,6 +509,8 @@ fn semantic_wait_for_instance_requires_list_count_match() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: Vec::new(),
         lists: vec![ListSnapshot {
             id: ListId::Devices,
@@ -552,6 +557,8 @@ fn semantic_wait_rejects_pending_local_when_confirmed_is_required() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: vec![SelectionSnapshot {
             list: ListId::Contacts,
             item_id: "authority-1".to_string(),
@@ -594,6 +601,8 @@ fn semantic_wait_can_require_ready_state() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: Vec::new(),
         lists: Vec::new(),
         messages: Vec::new(),
@@ -626,6 +635,8 @@ fn semantic_wait_can_require_operation_state() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: Vec::new(),
         lists: Vec::new(),
         messages: Vec::new(),
@@ -663,6 +674,8 @@ fn semantic_wait_operation_state_uses_recorded_handle_for_instance() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: Vec::new(),
         lists: Vec::new(),
         messages: Vec::new(),
@@ -720,6 +733,8 @@ fn operation_handle_match_requires_matching_instance_and_state() {
         quiescence: QuiescenceSnapshot::settled(),
         projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
         home_modes: Vec::new(),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui_contract::RenderedControlFrame::Unavailable,
         selections: Vec::new(),
         lists: Vec::new(),
         messages: Vec::new(),
@@ -1229,8 +1244,8 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
         }],
     );
 
-    let coordinator = HarnessCoordinator::from_run_config(&run)
-        .unwrap_or_else(|error| panic!("{error}"));
+    let coordinator =
+        HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
     let clipboard_path = coordinator
         .instance_transient_dir("alice")
         .unwrap_or_else(|error| panic!("{error}"))
@@ -1368,8 +1383,8 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
         + &"x".repeat(CLIPBOARD_PASTE_CHUNK_CHARS * 3 + 7)
         + ":127.0.0.1:41001";
 
-    let coordinator = HarnessCoordinator::from_run_config(&run)
-        .unwrap_or_else(|error| panic!("{error}"));
+    let coordinator =
+        HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
     let clipboard_path = coordinator
         .instance_transient_dir("alice")
         .unwrap_or_else(|error| panic!("{error}"))
@@ -1415,8 +1430,7 @@ fn wait_contract_refs_cover_all_parity_wait_kinds() {
     let runtime = WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted);
     let screen = WaitContractRef::Screen(ScreenId::Chat);
     let readiness = WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready);
-    let quiescence =
-        WaitContractRef::Quiescence(aura_app::ui_contract::QuiescenceState::Settled);
+    let quiescence = WaitContractRef::Quiescence(aura_app::ui_contract::QuiescenceState::Settled);
     let operation = WaitContractRef::OperationState {
         operation_id: OperationId::invitation_accept_contact(),
         state: OperationState::Succeeded,
@@ -1502,7 +1516,7 @@ fn shared_intent_waits_bind_only_to_declared_barriers() {
 
     let import_contract = IntentAction::ImportDeviceEnrollmentCode {
         code: "invite".to_string(),
-                manifest_transfer: None,
+        manifest_transfer: None,
     }
     .contract();
     assert!(ensure_wait_contract_declared(
@@ -1583,10 +1597,9 @@ fn exact_handle_required_for_parity_critical_submission() {
     };
     let response = SemanticCommandResponse::accepted_without_value();
 
-    let error =
-        require_semantic_unit_submission_with_exact_handle(&step, "join_channel", response)
-            .err()
-            .unwrap_or_else(|| panic!("missing handle must fail"));
+    let error = require_semantic_unit_submission_with_exact_handle(&step, "join_channel", response)
+        .err()
+        .unwrap_or_else(|| panic!("missing handle must fail"));
 
     assert!(
         error
@@ -1970,9 +1983,8 @@ fn semantic_wait_channel_runtime_events_require_authoritative_channel_binding_id
     context.current_channel_binding.insert(
         "bob".to_string(),
         ChannelBinding {
-            channel_id:
-                "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
-                    .to_string(),
+            channel_id: "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                .to_string(),
             context_id: "ctx:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
                 .to_string(),
         },

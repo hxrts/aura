@@ -172,6 +172,7 @@ pub fn modal_footer(props: &ModalFooterProps) -> impl Into<AnyElement<'static>> 
 /// header/body/footer chrome.
 #[derive(Default, Props)]
 pub struct ModalScaffoldProps<'a> {
+    pub(crate) control_layout: Vec<crate::tui::rendered_controls::ControlLayoutRegistration>,
     pub children: Vec<AnyElement<'a>>,
     pub header: ModalHeaderProps,
     pub footer: ModalFooterProps,
@@ -190,6 +191,7 @@ pub fn ModalScaffold<'a>(props: &mut ModalScaffoldProps<'a>) -> impl Into<AnyEle
 
     element! {
         ModalContent(
+            control_layout: props.control_layout.clone(),
             flex_direction: FlexDirection::Column,
             border_style: Borders::PRIMARY,
             border_color: Some(border_color),
@@ -243,6 +245,8 @@ pub fn key_hint_group(key: &str, action: &str) -> impl Into<AnyElement<'static>>
 /// Props for labeled_input function
 #[derive(Clone, Debug, Default)]
 pub struct LabeledInputProps {
+    /// Canonical field rendered by this input, assigned by its actual owner.
+    pub field_id: Option<aura_app::ui::contract::FieldId>,
     /// Label text displayed above the input
     pub label: String,
     /// Current input value
@@ -260,6 +264,7 @@ pub struct LabeledInputProps {
 impl LabeledInputProps {
     pub fn new(label: impl Into<String>, placeholder: impl Into<String>) -> Self {
         Self {
+            field_id: None,
             label: label.into(),
             value: String::new(),
             placeholder: placeholder.into(),
@@ -267,6 +272,12 @@ impl LabeledInputProps {
             required: false,
             error: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_field(mut self, field: aura_app::ui::contract::FieldId) -> Self {
+        self.field_id = Some(field);
+        self
     }
 
     pub fn with_value(mut self, value: impl Into<String>) -> Self {
@@ -346,17 +357,8 @@ pub fn labeled_input(props: &LabeledInputProps) -> impl Into<AnyElement<'static>
             Text(content: label, color: Theme::TEXT_MUTED)
 
             // Input box (tight styling - no gap between label and input)
-            View(
-                width: 100pct,
-                border_style: Borders::INPUT,
-                border_color: border_color,
-                padding_left: Spacing::XS,
-                padding_right: Spacing::XS,
-                padding_top: 0,
-                padding_bottom: 0,
-            ) {
-                Text(content: display_text, color: text_color)
-            }
+            RenderedInputBox(field: props.field_id, display_text: display_text,
+                text_color: text_color, border_color: border_color)
 
             // Error message (if any)
             #(error.map(|err| {
@@ -500,7 +502,7 @@ pub fn multi_select_list(props: &MultiSelectListProps) -> impl Into<AnyElement<'
     let max_height = props.max_height.unwrap_or(12);
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             border_style: Borders::INPUT,
             border_color: Theme::BORDER,
@@ -536,7 +538,7 @@ pub fn multi_select_list(props: &MultiSelectListProps) -> impl Into<AnyElement<'
 //
 // Standard modal body layout:
 // ```
-// View(
+// crate::tui::rendered_controls::ObservedClipView(
 //     width: 100pct,
 //     padding: Spacing::MODAL_PADDING,
 //     flex_direction: FlexDirection::Column,
@@ -549,3 +551,44 @@ pub fn multi_select_list(props: &MultiSelectListProps) -> impl Into<AnyElement<'
 // ```
 //
 // For field groups, use gap: Spacing::SM between fields.
+
+#[derive(Props)]
+struct RenderedInputBoxProps {
+    field: Option<aura_app::ui::contract::FieldId>,
+    display_text: String,
+    text_color: Color,
+    border_color: Color,
+}
+impl Default for RenderedInputBoxProps {
+    fn default() -> Self {
+        Self {
+            field: None,
+            display_text: String::new(),
+            text_color: Theme::TEXT,
+            border_color: Theme::BORDER,
+        }
+    }
+}
+#[component]
+fn RenderedInputBox(
+    props: &RenderedInputBoxProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        props.field.map_or(
+            crate::tui::rendered_controls::DrawObservationRole::PassThrough,
+            |field| crate::tui::rendered_controls::DrawObservationRole::Control {
+                id: aura_app::ui::contract::ControlId::Field(field),
+                rendered: true,
+            },
+        ),
+    );
+    crate::tui::rendered_controls::register_native_view(
+        element! { View(width: 100pct, border_style: Borders::INPUT, border_color: props.border_color,
+            padding_left: Spacing::XS, padding_right: Spacing::XS, padding_top: 0, padding_bottom: 0) {
+            Text(content: props.display_text.clone(), color: props.text_color)
+        }},
+        vec![control_layout_0],
+    )
+}

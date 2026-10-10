@@ -25,11 +25,27 @@ pub struct DeviceSelectModalProps {
 
 /// Modal for selecting a device to remove
 #[component]
-pub fn DeviceSelectModal(props: &DeviceSelectModalProps) -> impl Into<AnyElement<'static>> {
+pub fn DeviceSelectModal(
+    props: &DeviceSelectModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::SelectDeviceToRemove,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     if !props.visible {
-        return element! {
-            View {}
-        }
+        return crate::tui::rendered_controls::register_native_view(
+            element! {
+                View {}
+            },
+            vec![control_layout_0],
+        )
         .into_any();
     }
 
@@ -53,6 +69,7 @@ pub fn DeviceSelectModal(props: &DeviceSelectModalProps) -> impl Into<AnyElement
 
     element! {
         ModalContent(
+            control_layout: vec![control_layout_0],
             flex_direction: FlexDirection::Column,
             border_style: Borders::PRIMARY,
             border_color: Some(Theme::PRIMARY),
@@ -61,7 +78,7 @@ pub fn DeviceSelectModal(props: &DeviceSelectModalProps) -> impl Into<AnyElement
             #(Some(modal_header(&header_props).into()))
 
             // Body - device list
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,

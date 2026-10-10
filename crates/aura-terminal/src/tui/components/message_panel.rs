@@ -141,7 +141,7 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
     );
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0_f32,
             border_style: BorderStyle::Round,
@@ -161,13 +161,13 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
                     }
                 }
             }))
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 flex_direction: FlexDirection::Row,
                 flex_grow: 1.0_f32,
                 overflow: Overflow::Hidden,
             ) {
                 // Messages area
-                View(
+                crate::tui::rendered_controls::ObservedClipView(
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0_f32,
                     overflow: Overflow::Hidden,

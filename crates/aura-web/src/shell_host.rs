@@ -499,7 +499,7 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
         HARNESS_UI_SNAPSHOT_PUBLISH_COUNT.with(|count| {
             let next = count.get().saturating_add(1);
             count.set(next);
-            if next <= 8 || next % 64 == 0 {
+            if next <= 8 || next.is_multiple_of(64) {
                 web_sys::console::log_1(
                     &format!(
                         "[web-harness-diag] snapshot_publish count={next};screen={:?};readiness={:?};revision={:?}",
@@ -641,7 +641,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         );
         if pending_device_enrollment_code
             .as_ref()
-            .map_or(true, |code| code.is_empty())
+            .is_none_or(|code| code.is_empty())
         {
             if let Some(rendezvous) = agent.runtime().rendezvous() {
                 match rendezvous.take_bootstrap_broker_invitations().await {

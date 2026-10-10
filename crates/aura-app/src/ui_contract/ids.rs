@@ -281,7 +281,6 @@ pub enum FieldId {
     AccountName,
     InvitationCode,
     InvitationReceiver,
-    InvitationType,
     InvitationReceiverNickname,
     InvitationMessage,
     InvitationTtl,
@@ -313,7 +312,6 @@ impl FieldId {
             }
             Self::InvitationCode => Some("aura-field-invitation-code"),
             Self::InvitationReceiver => Some("aura-field-invitation-receiver"),
-            Self::InvitationType => Some("aura-field-invitation-type"),
             Self::InvitationReceiverNickname => Some("aura-field-invitation-receiver-nickname"),
             Self::InvitationMessage => Some("aura-field-invitation-message"),
             Self::InvitationTtl => Some("aura-field-invitation-ttl"),
@@ -394,7 +392,6 @@ pub enum ListId {
     Channels,
     Contacts,
     Notifications,
-    InvitationTypes,
     Homes,
     NeighborhoodMembers,
     Devices,
@@ -412,7 +409,6 @@ impl ListId {
             Self::Channels => "channels",
             Self::Contacts => "contacts",
             Self::Notifications => "notifications",
-            Self::InvitationTypes => "invitation-types",
             Self::Homes => "homes",
             Self::NeighborhoodMembers => "neighborhood-members",
             Self::Devices => "devices",
@@ -429,7 +425,6 @@ impl ListId {
             Self::Channels => "aura-list-channels",
             Self::Contacts => "aura-list-contacts",
             Self::Notifications => "aura-list-notifications",
-            Self::InvitationTypes => "aura-list-invitation-types",
             Self::Homes => "aura-list-homes",
             Self::NeighborhoodMembers => "aura-list-neighborhood-members",
             Self::Devices => "aura-list-devices",
@@ -700,7 +695,6 @@ pub enum ControlId {
     ModalConfirmButton,
     ModalCancelButton,
     ContactsAcceptInvitationButton,
-    ModalInput,
     SettingsAddDeviceButton,
     SettingsRemoveDeviceButton,
     ChatSendMessageButton,
@@ -759,7 +753,6 @@ impl ControlId {
             Self::AuthorityPickerConfirmButton => Some("aura-authority-picker-confirm-button"),
             Self::ModalConfirmButton => Some("aura-modal-confirm-button"),
             Self::ModalCancelButton => Some("aura-modal-cancel-button"),
-            Self::ModalInput => Some("aura-modal-input"),
             Self::ContactsAcceptInvitationButton => Some("aura-contacts-accept-invitation"),
             Self::SettingsAddDeviceButton => Some("aura-settings-add-device"),
             Self::SettingsRemoveDeviceButton => Some("aura-settings-remove-device"),
@@ -907,6 +900,21 @@ mod tests {
         assert_eq!(
             ControlId::AmpViewFinalizationStatusButton.web_dom_id(),
             Some("aura-amp-view-finalization-status")
+        );
+    }
+}
+
+#[cfg(test)]
+mod removed_modal_contract_tests {
+    use super::*;
+    #[test]
+    fn removed_selector_and_generic_input_ids_have_no_legacy_decoder() {
+        assert!(serde_json::from_str::<ListId>("\"invitation_types\"").is_err());
+        assert!(serde_json::from_str::<FieldId>("\"invitation_type\"").is_err());
+        assert!(serde_json::from_str::<ControlId>("\"modal_input\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<ControlId>("{\"field\":\"invitation_message\"}").unwrap(),
+            ControlId::Field(FieldId::InvitationMessage)
         );
     }
 }

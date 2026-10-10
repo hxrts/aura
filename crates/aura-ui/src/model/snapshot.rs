@@ -176,8 +176,8 @@ impl UiModel {
             })
             .collect::<Vec<_>>();
         let open_modal = self.modal_state().map(ModalState::contract_id);
-        let focused_control = if self.modal_field_id().is_some() {
-            Some(ControlId::ModalInput)
+        let focused_control = if let Some(field) = self.modal_field_id() {
+            Some(ControlId::Field(field))
         } else if let Some(open_modal) = open_modal {
             Some(ControlId::Modal(open_modal))
         } else if self.account_ready() {
@@ -199,6 +199,8 @@ impl UiModel {
             revision: self.semantic_revision,
             projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
             home_modes: Vec::new(),
+            rendered_controls: Vec::new(),
+            rendered_control_frame: aura_app::ui::contract::RenderedControlFrame::Unavailable,
             quiescence: QuiescenceSnapshot::derive(
                 readiness_owner::account_gate_readiness(self.account_ready()),
                 open_modal,
@@ -274,17 +276,125 @@ impl UiController {
         snapshot
     }
 
-    pub fn publish_ui_snapshot(&self, mut snapshot: UiSnapshot) {
+    pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
+        self.publish_ui_snapshot_with_capture(snapshot, None);
+    }
+
+    fn publish_ui_snapshot_with_capture(
+        &self,
+        mut snapshot: UiSnapshot,
+        receipt: Option<&RendererCaptureReceipt>,
+    ) {
+        let rendered_source = aura_app::ui::contract::ControlRenderSource::from_snapshot(&snapshot);
+        let observations_match = snapshot.rendered_controls.iter().all(|observation| {
+            observation.source == rendered_source
+                && receipt.is_none_or(|receipt| observation.capture_revision == receipt.revision)
+        });
         self.observe_app_snapshot(&mut snapshot);
+        let source = aura_app::ui::contract::ControlRenderSource::from_snapshot(&snapshot);
+        snapshot
+            .rendered_controls
+            .retain(|observation| observation.source == source);
+        if let Some(receipt) = receipt.filter(|_| rendered_source == source && observations_match) {
+            snapshot.rendered_control_frame =
+                aura_app::ui::contract::RenderedControlFrame::Committed {
+                    capture_revision: receipt.revision,
+                    layout_revision: receipt.revision,
+                    source: source.clone(),
+                };
+        } else {
+            snapshot.rendered_control_frame =
+                aura_app::ui::contract::RenderedControlFrame::Unavailable;
+            if receipt.is_some() {
+                snapshot.rendered_controls.clear();
+            }
+        }
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid published UI snapshot: {error}"));
-        if let Ok(mut last_snapshot) = self.last_published_ui_snapshot.lock() {
+        let should_drain = if let Ok(mut publication) = self.last_published_ui_snapshot.lock() {
+            if let Some(receipt) = receipt {
+                if !publication
+                    .active_renderer
+                    .as_ref()
+                    .is_some_and(|active| Arc::ptr_eq(&active.identity, &receipt.identity))
+                {
+                    return;
+                }
+                snapshot
+                    .rendered_controls
+                    .retain(|observation| observation.capture_revision == receipt.revision);
+            }
+            if let aura_app::ui::contract::RenderedControlFrame::Committed {
+                layout_revision, ..
+            } = &mut snapshot.rendered_control_frame
+            {
+                if receipt.is_some() {
+                    let Some(next) = publication.next_layout_revision.checked_add(1) else {
+                        return;
+                    };
+                    publication.next_layout_revision = next;
+                    *layout_revision = next;
+                }
+            }
+            let last_snapshot = &mut publication.snapshot;
+            if receipt.is_none() && snapshot.rendered_controls.is_empty() {
+                if let Some(previous) = last_snapshot.as_ref() {
+                    if matches!(&previous.rendered_control_frame, aura_app::ui::contract::RenderedControlFrame::Committed { source: previous_source, .. } if previous_source == &source)
+                    {
+                        snapshot.rendered_control_frame = previous.rendered_control_frame.clone();
+                    }
+                    snapshot.rendered_controls = previous
+                        .rendered_controls
+                        .iter()
+                        .filter(|observation| observation.source == source)
+                        .cloned()
+                        .collect();
+                }
+            }
             if last_snapshot.as_ref() == Some(&snapshot) {
                 return;
             }
             *last_snapshot = Some(snapshot.clone());
+            publication.pending_delivery = Some(snapshot);
+            let should_drain = !publication.delivering;
+            publication.delivering = true;
+            should_drain
+        } else {
+            false
+        };
+        if should_drain {
+            self.drain_ui_snapshot_delivery();
         }
+    }
+
+    fn drain_ui_snapshot_delivery(&self) {
+        loop {
+            let snapshot = {
+                let Ok(mut publication) = self.last_published_ui_snapshot.lock() else {
+                    return;
+                };
+                match publication.pending_delivery.take() {
+                    Some(snapshot) => snapshot,
+                    None => {
+                        publication.delivering = false;
+                        return;
+                    }
+                }
+            };
+            self.emit_published_ui_snapshot(snapshot);
+        }
+    }
+
+    /// Whether the publication owner is currently delivering to an external
+    /// observer. A reentrant layout read must withhold fresh publication here.
+    pub fn is_delivering_ui_snapshot(&self) -> bool {
+        self.last_published_ui_snapshot
+            .lock()
+            .map_or(true, |publication| publication.delivering)
+    }
+
+    fn emit_published_ui_snapshot(&self, snapshot: UiSnapshot) {
         if let Ok(slot) = self.ui_snapshot_sink.lock() {
             let sink = slot.as_ref().cloned();
             drop(slot);
@@ -294,9 +404,86 @@ impl UiController {
         }
     }
 
+    /// Publish actual renderer evidence through the existing snapshot owner.
+    /// The final AppCore observation invalidates any mismatched source.
+    pub fn begin_renderer_capture(&self) -> Option<RendererCaptureReceipt> {
+        let mut publication = self.last_published_ui_snapshot.lock().ok()?;
+        publication.next_renderer_revision = publication.next_renderer_revision.checked_add(1)?;
+        let receipt = RendererCaptureReceipt {
+            identity: Arc::new(()),
+            revision: publication.next_renderer_revision,
+        };
+        publication.active_renderer = Some(receipt.clone());
+        let invalidated = publication.snapshot.as_mut().map(|snapshot| {
+            snapshot.rendered_control_frame =
+                aura_app::ui::contract::RenderedControlFrame::Unavailable;
+            for observation in &mut snapshot.rendered_controls {
+                observation.state = aura_app::ui::contract::ControlLayoutState::Unavailable;
+                observation.capture_revision = receipt.revision;
+            }
+            snapshot.clone()
+        });
+        let should_drain = if let Some(snapshot) = invalidated {
+            publication.pending_delivery = Some(snapshot);
+            let should_drain = !publication.delivering;
+            publication.delivering = true;
+            should_drain
+        } else {
+            false
+        };
+        drop(publication);
+        if should_drain {
+            self.drain_ui_snapshot_delivery();
+        }
+        Some(receipt)
+    }
+
+    /// Publish the complete rendered-control multiset for the exact active receipt.
+    pub fn invalidate_rendered_control_layout(&self, receipt: &RendererCaptureReceipt) {
+        let should_drain = if let Ok(mut publication) = self.last_published_ui_snapshot.lock() {
+            if !publication
+                .active_renderer
+                .as_ref()
+                .is_some_and(|active| Arc::ptr_eq(&active.identity, &receipt.identity))
+            {
+                return;
+            }
+            let Some(snapshot) = publication.snapshot.as_mut() else {
+                return;
+            };
+            snapshot.rendered_control_frame =
+                aura_app::ui::contract::RenderedControlFrame::Unavailable;
+            for observation in &mut snapshot.rendered_controls {
+                observation.state = aura_app::ui::contract::ControlLayoutState::Unavailable;
+            }
+            publication.pending_delivery = Some(snapshot.clone());
+            let should_drain = !publication.delivering;
+            publication.delivering = true;
+            should_drain
+        } else {
+            false
+        };
+        if should_drain {
+            self.drain_ui_snapshot_delivery();
+        }
+    }
+
+    /// Publish the complete rendered-control multiset for the exact active receipt.
+    pub fn publish_rendered_control_snapshot(
+        &self,
+        receipt: &RendererCaptureReceipt,
+        mut snapshot: UiSnapshot,
+        observations: Vec<aura_app::ui::contract::RenderedControlObservation>,
+    ) {
+        snapshot.rendered_controls = observations;
+        self.publish_ui_snapshot_with_capture(snapshot, Some(receipt));
+    }
+
     pub fn reset_published_ui_snapshot(&self) {
-        if let Ok(mut last_snapshot) = self.last_published_ui_snapshot.lock() {
-            *last_snapshot = None;
+        if let Ok(mut publication) = self.last_published_ui_snapshot.lock() {
+            publication.snapshot = None;
+            publication.active_renderer = None;
+            publication.pending_delivery = None;
         }
     }
 }
@@ -316,5 +503,202 @@ mod notification_snapshot_tests {
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("snapshot must stay valid: {error}"));
+    }
+}
+
+#[cfg(test)]
+mod rendered_publication_tests {
+    use super::*;
+    use aura_app::ui::contract::{
+        ControlId, ControlLayoutState, ControlRenderSource, RenderedControlObservation,
+    };
+    fn controller() -> UiController {
+        UiController::new(
+            Arc::new(async_lock::RwLock::new(
+                aura_app::AppCore::new(aura_app::AppConfig::default()).expect("fixture app"),
+            )),
+            Arc::new(crate::MemoryClipboard::default()),
+        )
+    }
+    fn observation(
+        snapshot: &UiSnapshot,
+        receipt: &RendererCaptureReceipt,
+        state: ControlLayoutState,
+    ) -> RenderedControlObservation {
+        RenderedControlObservation {
+            control: ControlId::OnboardingRoot,
+            capture_revision: receipt.revision(),
+            source: ControlRenderSource::from_snapshot(snapshot),
+            state,
+        }
+    }
+    #[test]
+    fn previous_mount_disposal_cannot_overwrite_new_mount_with_identical_source() {
+        let controller = controller();
+        let old = controller.begin_renderer_capture().expect("old mount");
+        let current = controller.begin_renderer_capture().expect("new mount");
+        let snapshot = controller.semantic_model_snapshot();
+        controller.publish_rendered_control_snapshot(
+            &current,
+            snapshot.clone(),
+            vec![observation(
+                &snapshot,
+                &current,
+                ControlLayoutState::Visible,
+            )],
+        );
+        controller.publish_rendered_control_snapshot(
+            &old,
+            snapshot.clone(),
+            vec![observation(&snapshot, &old, ControlLayoutState::Disposed)],
+        );
+        let published = controller.last_published_ui_snapshot.lock().expect("owner");
+        let actual = &published
+            .snapshot
+            .as_ref()
+            .expect("published")
+            .rendered_controls;
+        assert_eq!(actual.len(), 1);
+        assert_eq!(actual[0].capture_revision, current.revision());
+        assert_eq!(actual[0].state, ControlLayoutState::Visible);
+    }
+    #[test]
+    fn duplicate_rendered_instances_survive_publication_and_same_source_hidden_supersedes() {
+        let controller = controller();
+        let receipt = controller.begin_renderer_capture().expect("capture");
+        let snapshot = controller.semantic_model_snapshot();
+        let visible = observation(&snapshot, &receipt, ControlLayoutState::Visible);
+        controller.publish_rendered_control_snapshot(
+            &receipt,
+            snapshot.clone(),
+            vec![visible.clone(), visible],
+        );
+        assert_eq!(
+            controller
+                .last_published_ui_snapshot
+                .lock()
+                .expect("owner")
+                .snapshot
+                .as_ref()
+                .expect("published")
+                .rendered_controls
+                .len(),
+            2
+        );
+        let next = controller
+            .begin_renderer_capture()
+            .expect("local hidden render");
+        controller.publish_rendered_control_snapshot(
+            &next,
+            snapshot.clone(),
+            vec![observation(&snapshot, &next, ControlLayoutState::Hidden)],
+        );
+        let published = controller.last_published_ui_snapshot.lock().expect("owner");
+        let actual = &published
+            .snapshot
+            .as_ref()
+            .expect("published")
+            .rendered_controls;
+        assert_eq!(actual.len(), 1);
+        assert_eq!(actual[0].state, ControlLayoutState::Hidden);
+    }
+    #[test]
+    fn reentrant_sink_can_reset_begin_read_and_publish_without_deadlock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let controller = Arc::new(controller());
+        let weak = Arc::downgrade(&controller);
+        let entered = Arc::new(AtomicBool::new(false));
+        let delivered = Arc::new(Mutex::new(Vec::new()));
+        let captured = delivered.clone();
+        controller.set_ui_snapshot_sink(Arc::new(move |snapshot| {
+            captured.lock().expect("events").push(snapshot);
+            if !entered.swap(true, Ordering::SeqCst) {
+                let controller = weak.upgrade().expect("live controller");
+                controller.reset_published_ui_snapshot();
+                let receipt = controller
+                    .begin_renderer_capture()
+                    .expect("reentrant capture");
+                let snapshot = controller.semantic_model_snapshot();
+                controller.publish_rendered_control_snapshot(
+                    &receipt,
+                    snapshot.clone(),
+                    vec![observation(&snapshot, &receipt, ControlLayoutState::Hidden)],
+                );
+            }
+        }));
+        let receipt = controller
+            .begin_renderer_capture()
+            .expect("initial capture");
+        let snapshot = controller.semantic_model_snapshot();
+        controller.publish_rendered_control_snapshot(
+            &receipt,
+            snapshot.clone(),
+            vec![observation(
+                &snapshot,
+                &receipt,
+                ControlLayoutState::Visible,
+            )],
+        );
+        controller.publish_rendered_control_snapshot(
+            &receipt,
+            snapshot.clone(),
+            vec![observation(
+                &snapshot,
+                &receipt,
+                ControlLayoutState::Disposed,
+            )],
+        );
+        let delivered = delivered.lock().expect("events");
+        assert_eq!(delivered.len(), 2);
+        assert!(
+            delivered[1].rendered_controls[0].capture_revision
+                > delivered[0].rendered_controls[0].capture_revision
+        );
+        assert_eq!(
+            delivered[1].rendered_controls[0].state,
+            ControlLayoutState::Hidden
+        );
+    }
+    #[test]
+    fn final_app_source_rejects_foreign_observation_without_reusing_previous_positive() {
+        let controller = controller();
+        let receipt = controller.begin_renderer_capture().expect("capture");
+        let snapshot = controller.semantic_model_snapshot();
+        let mut stale = observation(&snapshot, &receipt, ControlLayoutState::Visible);
+        stale.source.projections.homes = Some(u64::MAX);
+        controller.publish_rendered_control_snapshot(&receipt, snapshot, vec![stale]);
+        assert!(controller
+            .last_published_ui_snapshot
+            .lock()
+            .expect("owner")
+            .snapshot
+            .as_ref()
+            .expect("published")
+            .rendered_controls
+            .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod modal_focus_tests {
+    use super::*;
+    #[test]
+    fn actual_modal_snapshot_retains_each_exact_active_field() {
+        for field in [
+            FieldId::Nickname,
+            FieldId::InvitationReceiverNickname,
+            FieldId::InvitationMessage,
+            FieldId::InvitationTtl,
+        ] {
+            let mut model = UiModel::new("local".to_string());
+            model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+                active_field: field,
+                ..Default::default()
+            }));
+            assert_eq!(
+                model.semantic_snapshot().focused_control,
+                Some(ControlId::Field(field))
+            );
+        }
     }
 }

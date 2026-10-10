@@ -335,7 +335,7 @@ mod tests {
         for send in 0..200 {
             assert!(generation < sender.limit(), "send {send} within allowance");
             generation += 1;
-            if generation % 2 == 0 {
+            if generation.is_multiple_of(2) {
                 continue;
             }
             if let Some(checkpoint) = receiver

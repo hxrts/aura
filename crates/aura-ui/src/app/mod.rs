@@ -24,6 +24,9 @@ use crate::model::{
 use crate::readiness_owner;
 use crate::task_owner::spawn_ui;
 use aura_app::ui::contract::{
+    bridged_operation_statuses, AuthoritativeSemanticFact, ChannelFactKey, RuntimeFact,
+};
+use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
     ListSnapshot, MessageSnapshot, ModalId, OperationState, SelectionSnapshot, UiSnapshot,
 };
@@ -41,9 +44,6 @@ use aura_app::ui::workflows::{
     recovery as recovery_workflows, settings as settings_workflows, system as system_workflows,
     time as time_workflows,
 };
-use aura_app::ui_contract::{
-    bridged_operation_statuses, AuthoritativeSemanticFact, ChannelFactKey, RuntimeFact,
-};
 use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
@@ -51,14 +51,11 @@ use dioxus::dioxus_core::schedule_update;
 use dioxus::events::KeyboardData;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle};
-use dioxus_shadcn::components::scroll_area::{ScrollArea, ScrollAreaViewport};
+use dioxus_shadcn::components::scroll_area::ScrollArea;
 use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastPosition, ToastProvider};
 use dioxus_shadcn::theme::{themes, use_theme, ColorScheme, ThemeProvider};
 use runtime_views::*;
-use screens::{
-    nav_button_id, nav_tab_class, nav_tabs, neighborhood_member_selection_key,
-    render_screen_content,
-};
+use screens::{nav_tab_class, nav_tabs, neighborhood_member_selection_key, render_screen_content};
 use std::sync::Arc;
 use std::time::Duration;
 

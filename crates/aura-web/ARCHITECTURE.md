@@ -361,3 +361,13 @@ See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/1
 Browser semantic observation surface version 2 includes required `UiSnapshot.home_modes`. The shared UI controller derives it from canonical app `HomesState` and the same `StateSnapshot` as the homes source revision, through `aura-app` projection observations. Browser caches, DOM text and neighborhood labels do not supply mode flags or context bindings. Loading explicitly exports an empty vector.
 
 If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
+
+The onboarding rendered-control producer retains actual renderer-registered
+node instances and uses the renderer-owned edit-batch observer for before-render
+revocation, before-commit source binding, and after-flush acknowledgment.
+It never finds controls by selector or equates focus/mounting with visibility.
+The existing UI snapshot publication owner issues opaque active capture receipts;
+replacement/remount revokes old callbacks, including old disposal callbacks.
+Actual node style/ancestor clipping/disposal and nonempty layout determine the
+captured observation. Browser tests run the actual dioxus-web renderer, not
+native VirtualDom mounted-event simulation. See docs/117 and docs/804.

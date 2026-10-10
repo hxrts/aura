@@ -172,7 +172,7 @@ fn test_consistency_map_query_performance() {
         let id = format!("item-{i:05}");
 
         // Vary the consistency state
-        let consistency = if i % 3 == 0 {
+        let consistency = if i.is_multiple_of(3) {
             // Finalized
             Consistency::optimistic()
                 .with_agreement(Agreement::finalized(ConsensusId::new([i as u8; 32])))

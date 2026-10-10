@@ -8,7 +8,10 @@ mod socket;
 pub(crate) use commands::apply_harness_command;
 pub use commands::TuiSemanticInputs;
 pub(crate) use config::harness_bridge_enabled;
-pub use snapshot::{maybe_export_ui_snapshot, publish_loading_ui_snapshot};
+pub use snapshot::{
+    maybe_export_ui_snapshot, prepare_rendered_ui_snapshot, publish_loading_ui_snapshot,
+    publish_rendered_ui_snapshot,
+};
 pub(crate) use socket::{
     accept_harness_command_submission, clear_harness_command_sender,
     complete_pending_semantic_submission, ensure_harness_command_listener,
@@ -37,14 +40,14 @@ mod tests {
     use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
     use aura_app::ui::contract::{
+        AuthenticatedHarnessUiCommand, InvitationFactKind, RuntimeFact,
+        HARNESS_COMMAND_MAX_FRAME_BYTES,
+    };
+    use aura_app::ui::contract::{
         ControlId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, OperationId, OperationState,
         ScreenId, UiReadiness,
     };
     use aura_app::ui::types::StateSnapshot;
-    use aura_app::ui_contract::{
-        AuthenticatedHarnessUiCommand, InvitationFactKind, RuntimeFact,
-        HARNESS_COMMAND_MAX_FRAME_BYTES,
-    };
     use aura_core::effects::PhysicalTimeEffects;
     use aura_core::{
         execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
@@ -973,7 +976,7 @@ mod tests {
                 } => {
                     accept_harness_command_submission(
                         submission_id,
-                        None::<aura_app::ui_contract::HarnessUiOperationHandle>,
+                        None::<aura_app::ui::contract::HarnessUiOperationHandle>,
                         None::<aura_app::scenario_contract::SemanticCommandValue>,
                     )
                     .await
@@ -1043,9 +1046,9 @@ mod tests {
                         },
                 } => {
                     assert_eq!(receiver_authority_id, "authority:test-peer");
-                    let operation = aura_app::ui_contract::HarnessUiOperationHandle::new(
+                    let operation = aura_app::ui::contract::HarnessUiOperationHandle::new(
                         OperationId::invitation_create(),
-                        aura_app::ui_contract::OperationInstanceId(
+                        aura_app::ui::contract::OperationInstanceId(
                             "test-contact-invitation-instance".to_string(),
                         ),
                     );
@@ -1085,9 +1088,9 @@ mod tests {
             assert_eq!(
                 receipt,
                 HarnessUiCommandReceipt::AcceptedWithOperation {
-                    operation: aura_app::ui_contract::HarnessUiOperationHandle::new(
+                    operation: aura_app::ui::contract::HarnessUiOperationHandle::new(
                         OperationId::invitation_create(),
-                        aura_app::ui_contract::OperationInstanceId(
+                        aura_app::ui::contract::OperationInstanceId(
                             "test-contact-invitation-instance".to_string(),
                         ),
                     ),
@@ -1266,7 +1269,7 @@ mod tests {
                 } => {
                     accept_harness_command_submission(
                         submission_id,
-                        None::<aura_app::ui_contract::HarnessUiOperationHandle>,
+                        None::<aura_app::ui::contract::HarnessUiOperationHandle>,
                         None::<aura_app::scenario_contract::SemanticCommandValue>,
                     )
                     .await
@@ -1388,7 +1391,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("snapshot export should succeed: {error}"));
         let payload = std::fs::read(&output_path)
             .unwrap_or_else(|error| panic!("failed to read written snapshot: {error}"));
-        let snapshot: aura_app::ui_contract::UiSnapshot = serde_json::from_slice(&payload)
+        let snapshot: aura_app::ui::contract::UiSnapshot = serde_json::from_slice(&payload)
             .unwrap_or_else(|error| panic!("failed to decode written snapshot: {error}"));
         assert_eq!(snapshot.readiness, UiReadiness::Loading);
     }
@@ -1528,15 +1531,15 @@ mod tests {
         let mut state = TuiState::new();
         state.notifications.selected_index = 0;
         state.upsert_runtime_fact(RuntimeFact::AmpChannelTransitionUpdated {
-            transition: aura_app::ui_contract::AmpChannelTransitionSnapshot {
-                channel: aura_app::ui_contract::ChannelFactKey::identified("channel-a"),
+            transition: aura_app::ui::contract::AmpChannelTransitionSnapshot {
+                channel: aura_app::ui::contract::ChannelFactKey::identified("channel-a"),
                 stable_epoch: 4,
-                state: aura_app::ui_contract::AmpTransitionState::A2Conflict,
+                state: aura_app::ui::contract::AmpTransitionState::A2Conflict,
                 live_transition_id: None,
                 finalized_transition_id: None,
                 conflict_evidence: vec!["evidence-a".to_string()],
                 emergency_policy: Some(
-                    aura_app::ui_contract::AmpTransitionPolicySnapshot::EmergencyQuarantine,
+                    aura_app::ui::contract::AmpTransitionPolicySnapshot::EmergencyQuarantine,
                 ),
                 suspect_authorities: vec!["authority-a".to_string()],
                 quarantine_epochs: vec![5],
@@ -1570,7 +1573,7 @@ mod tests {
             .iter()
             .any(|item| item.id == "amp-transition:channel-a"));
         assert!(snapshot.has_runtime_event(
-            aura_app::ui_contract::RuntimeEventKind::AmpChannelTransitionUpdated,
+            aura_app::ui::contract::RuntimeEventKind::AmpChannelTransitionUpdated,
             Some("evidence-a"),
         ));
     }

@@ -36,10 +36,15 @@ pub fn materialize_run_config_with_artifact_base(
 
     for instance in &mut config.instances {
         let instance_root = root.join("instances").join(&instance.id);
-        let transient_root = transient_root(&run_name, &instance.id, run_token.as_deref());
         if !instance.data_dir.is_absolute() {
             instance.data_dir = instance_root.join("state");
         }
+        let transient_root = transient_root(
+            &run_name,
+            &instance.id,
+            run_token.as_deref(),
+            &instance.data_dir,
+        )?;
         if instance.log_path.is_none() {
             instance.log_path = Some(instance_root.join("instance.log"));
         }
@@ -186,21 +191,184 @@ fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {
     }
 }
 
-fn transient_root(run_name: &str, instance_id: &str, token: Option<&str>) -> PathBuf {
-    if let Some(explicit) = std::env::var_os("AURA_HARNESS_TRANSIENT_ROOT") {
-        return absolutize_path(PathBuf::from(explicit)).join(instance_id);
+// Reserve the longest existing generation socket filename and its terminator.
+const MAX_TRANSIENT_SOCKET_PATH: usize = 100;
+pub(crate) fn validate_transient_root(root: PathBuf) -> Result<PathBuf> {
+    let longest = root.join("tui").join("uffffffffffffffff.sock");
+    if longest.as_os_str().len() > MAX_TRANSIENT_SOCKET_PATH {
+        return Err(anyhow::Error::new(TransientSocketPathTooLong { root }));
     }
+    Ok(root)
+}
+#[derive(Debug)]
+struct TransientSocketPathTooLong {
+    root: PathBuf,
+}
+impl std::fmt::Display for TransientSocketPathTooLong {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "selected harness transient root cannot fit owned Unix sockets: {}",
+            self.root.display()
+        )
+    }
+}
+impl std::error::Error for TransientSocketPathTooLong {}
 
+pub(crate) fn select_owned_transient_root(
+    identity: u64,
+    explicit: Option<PathBuf>,
+    runtime_candidates: impl IntoIterator<Item = PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(root) = explicit {
+        return validate_transient_root(absolutize_path(root));
+    }
+    let namespace = format!("aura-harness-{}", nix::unistd::getuid().as_raw());
+    for candidate in runtime_candidates
+        .into_iter()
+        .chain([PathBuf::from("/tmp")])
+    {
+        if !candidate.is_absolute() {
+            continue;
+        }
+        let Ok(candidate) = std::fs::canonicalize(candidate) else {
+            continue;
+        };
+        let root = candidate.join(&namespace).join(format!("{identity:016x}"));
+        if let Ok(root) = validate_transient_root(root) {
+            return Ok(root);
+        }
+    }
+    bail!("no selected local runtime directory can fit owned harness sockets")
+}
+
+fn validate_owned_directory(path: &Path, allow_shared_base: bool) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(path)?;
+    let shared_base = allow_shared_base && metadata.uid() == 0 && metadata.mode() & 0o1000 != 0;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || (metadata.uid() != nix::unistd::getuid().as_raw() && !shared_base)
+    {
+        bail!(
+            "harness directory is not an original owned native directory: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_private_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    validate_owned_directory(path, false)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+fn prepare_selected_parent(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => validate_owned_directory(path, true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            prepare_selected_parent(
+                path.parent()
+                    .ok_or_else(|| anyhow!("selected parent has no owner"))?,
+            )?;
+            prepare_private_directory(path)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn prepare_owned_transient_root(root: &Path) -> Result<()> {
+    let parent = root
+        .parent()
+        .ok_or_else(|| anyhow!("transient root has no original parent"))?;
+    let namespace = format!("aura-harness-{}", nix::unistd::getuid().as_raw());
+    if parent
+        .file_name()
+        .is_some_and(|name| name == namespace.as_str())
+    {
+        let base = parent
+            .parent()
+            .ok_or_else(|| anyhow!("runtime namespace has no parent"))?;
+        validate_owned_directory(base, true)?;
+        prepare_private_directory(parent)?;
+    } else {
+        prepare_selected_parent(parent)?;
+    }
+    prepare_private_directory(root)
+}
+
+/// Validate the original private namespace before any destructive traversal.
+pub(crate) fn validate_owned_transient_cleanup(root: &Path) -> Result<()> {
+    if !root.is_absolute() {
+        bail!("selected harness transient root must be absolute");
+    }
+    let parent = root
+        .parent()
+        .ok_or_else(|| anyhow!("transient root has no parent"))?;
+    let namespace = format!("aura-harness-{}", nix::unistd::getuid().as_raw());
+    if parent
+        .file_name()
+        .is_some_and(|name| name == namespace.as_str())
+    {
+        validate_owned_directory(
+            parent
+                .parent()
+                .ok_or_else(|| anyhow!("namespace has no parent"))?,
+            true,
+        )?;
+        validate_owned_directory(parent, false)?;
+    } else {
+        validate_owned_directory(parent, true)?;
+    }
+    validate_owned_directory(root, false)?;
+    let tui = root.join("tui");
+    match std::fs::symlink_metadata(&tui) {
+        Ok(_) => validate_owned_directory(&tui, false)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_owned_transient_reset(root: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(root) {
+        Ok(_) => validate_owned_transient_cleanup(root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            prepare_owned_transient_root(root)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn owned_transient_root_for_scope(identity: u64) -> Result<PathBuf> {
+    let explicit = std::env::var_os("AURA_HARNESS_TRANSIENT_ROOT")
+        .map(PathBuf::from)
+        .map(|root| root.join(format!("{identity:016x}")));
+    let candidates = ["XDG_RUNTIME_DIR", "TMPDIR"]
+        .into_iter()
+        .filter_map(|key| std::env::var_os(key).map(PathBuf::from));
+    select_owned_transient_root(identity, explicit, candidates)
+}
+
+pub(crate) fn transient_root(
+    run_name: &str,
+    instance_id: &str,
+    token: Option<&str>,
+    data_dir: &Path,
+) -> Result<PathBuf> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     run_name.hash(&mut hasher);
     instance_id.hash(&mut hasher);
     token.unwrap_or_default().hash(&mut hasher);
-    workspace_root()
-        .join(".tmp")
-        .join("harness")
-        .join("transient")
-        .join(format!("{:016x}", hasher.finish()))
-        .join(instance_id)
+    data_dir.hash(&mut hasher);
+    owned_transient_root_for_scope(hasher.finish())
 }
 
 fn absolutize_path(path: PathBuf) -> PathBuf {
@@ -479,5 +647,96 @@ mod tests {
                 },
             ],
         }
+    }
+}
+
+#[cfg(test)]
+mod short_transient_owner_tests {
+    use super::*;
+    #[test]
+    fn selected_short_root_is_honored_and_overlong_explicit_root_is_typed_failure() {
+        let owner = tempfile::Builder::new()
+            .prefix("ah316-")
+            .tempdir_in("/tmp")
+            .expect("short original test owner");
+        let explicit = owner.path().join("exact");
+        assert_eq!(
+            select_owned_transient_root(1, Some(explicit.clone()), [PathBuf::from("/ignored")])
+                .expect("valid selected root"),
+            explicit
+        );
+        let deep = owner.path().join("x".repeat(120));
+        let error = select_owned_transient_root(1, Some(deep), [owner.path().to_path_buf()])
+            .expect_err("explicit invalid root cannot redirect");
+        assert!(error.downcast_ref::<TransientSocketPathTooLong>().is_some());
+        assert!(!owner.path().join("exact").exists());
+    }
+}
+
+#[cfg(test)]
+mod private_namespace_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    #[test]
+    fn existing_symlink_namespace_and_tui_cannot_redirect_chmod_or_creation() {
+        let original = tempfile::Builder::new()
+            .prefix("ah316-")
+            .tempdir_in("/tmp")
+            .expect("original test owner");
+        let target = original.path().join("untouched");
+        std::fs::create_dir(&target).expect("actual target");
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+            .expect("target mode");
+        let namespace = original
+            .path()
+            .join(format!("aura-harness-{}", nix::unistd::getuid().as_raw()));
+        symlink(&target, &namespace).expect("actual untrusted namespace alias");
+        assert!(prepare_owned_transient_root(&namespace.join("scope")).is_err());
+        assert!(prepare_owned_transient_reset(&namespace.join("absent-reset-child")).is_err());
+        assert!(!target.join("absent-reset-child").exists());
+        assert!(!target.join("scope").exists());
+        assert_eq!(
+            std::fs::metadata(&target)
+                .expect("target unchanged")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        let root = original.path().join("owned");
+        prepare_owned_transient_root(&root).expect("actual owned root");
+        symlink(&target, root.join("tui")).expect("actual untrusted socket directory alias");
+        assert!(prepare_private_directory(&root.join("tui")).is_err());
+        assert_eq!(
+            std::fs::metadata(&target)
+                .expect("target unchanged")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
+    #[test]
+    fn foreign_owned_namespace_is_refused_without_permission_change() {
+        use std::os::unix::fs::MetadataExt;
+        let foreign = Path::new("/private/tmp");
+        let foreign = if foreign.exists() {
+            foreign
+        } else {
+            Path::new("/tmp")
+        };
+        let before = std::fs::symlink_metadata(foreign).expect("actual shared OS directory");
+        assert_ne!(
+            before.uid(),
+            nix::unistd::getuid().as_raw(),
+            "fixture requires actual foreign-owned OS directory"
+        );
+        assert!(prepare_private_directory(foreign).is_err());
+        assert_eq!(
+            std::fs::symlink_metadata(foreign)
+                .expect("unchanged foreign directory")
+                .mode(),
+            before.mode()
+        );
     }
 }

@@ -222,7 +222,7 @@ fn test_guardian_setup_empty_when_no_contacts() {
 
     assert!(modal.is_empty(), "Modal should have no contacts");
     assert!(
-        modal.selected_indices().map_or(true, |v| v.is_empty()),
+        modal.selected_indices().is_none_or(|v| v.is_empty()),
         "No contacts means no selections"
     );
 }

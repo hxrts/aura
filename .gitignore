@@ -4,6 +4,8 @@ target/
 **/*.rs.bk
 *.pdb
 Cargo.lock
+# Standalone vendored renderer tooling uses the reviewed workspace dependency graph.
+!/vendor/dioxus-web-0.7.4/Cargo.lock
 result
 result-*
 

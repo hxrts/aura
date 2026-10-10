@@ -41,11 +41,24 @@ pub struct AccountSetupModalProps {
 
 /// Account setup modal for first-time users
 #[component]
-pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement<'static>> {
+pub fn AccountSetupModal(
+    props: &AccountSetupModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::OnboardingRoot,
+            rendered: props.visible,
+        },
+    );
     if !props.visible {
-        return element! {
-            View {}
-        }
+        return crate::tui::rendered_controls::register_native_view(
+            element! {
+                View {}
+            },
+            vec![control_layout_0],
+        )
         .into_any();
     }
 
@@ -67,6 +80,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
         return element! {
             ModalContent(
+            control_layout: vec![control_layout_0],
                 flex_direction: FlexDirection::Column,
                 border_style: Borders::PRIMARY,
                 border_color: Some(status_color),
@@ -124,6 +138,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     // Input field props
     let input_props = LabeledInputProps::new("Create a new account", "Enter your nickname...")
+        .with_field(aura_app::ui::contract::FieldId::AccountName)
         .with_value(nickname_suggestion)
         .with_focused(props.name_focused)
         .with_error((!props.nickname_error.is_empty()).then(|| props.nickname_error.clone()));
@@ -131,27 +146,31 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         "Join an existing account",
         "Enter device enrollment code...",
     )
+    .with_field(aura_app::ui::contract::FieldId::DeviceImportCode)
     .with_value(device_import_code)
     .with_focused(props.import_code_focused);
 
     let manifest_props =
         LabeledInputProps::new("Signed enrollment manifest", "Paste manifest code...")
+            .with_field(aura_app::ui::contract::FieldId::DeviceImportManifest)
             .with_value(props.device_import_manifest.clone())
             .with_focused(props.import_manifest_focused);
     let verifier_props = LabeledInputProps::new(
         "Initiator verifier (separate transfer)",
         "Paste verifier code...",
     )
+    .with_field(aura_app::ui::contract::FieldId::DeviceImportInitiatorVerifier)
     .with_value(props.device_import_initiator_verifier.clone())
     .with_focused(props.import_initiator_verifier_focused);
     element! {
         ModalContent(
+            control_layout: vec![control_layout_0],
             flex_direction: FlexDirection::Column,
             border_style: Borders::PRIMARY,
             border_color: Some(Theme::PRIMARY),
         ) {
             // Header
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 height: 3,
                 flex_shrink: 0.0,
@@ -171,7 +190,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             }
 
             // Form content
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,

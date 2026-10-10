@@ -385,3 +385,19 @@ failures without touching OS credentials. TUI account reload must retain native
 agent causes and reach authoritative ready/settled state after account creation;
 compile success and the pre-reload success operation alone are insufficient.
 See `docs/804_testing_guide.md` for the provider and live-run procedure.
+
+Renderer visibility coverage adds first-producer onboarding observations from
+actual native canvas drawing and browser registered-node/post-flush rendering.
+Required regressions cover hidden/zero-clipped layout, disposal, same-semantic
+source rerender/remount, stale capture refusal, final AppCore source mismatch,
+and duplicate control-instance preservation. These regression declarations are
+source-only until the native/browser gates execute; paired LAN control visibility
+and the remaining complete control inventory remain unproven.
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.

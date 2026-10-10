@@ -208,7 +208,7 @@ pub async fn handle_daemon_mode(
                     tick_count += 1;
                     let health = manager.health().await;
                     eprintln!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
-                    if tick_count % 5 == 0 {
+                    if tick_count.is_multiple_of(5) {
                         if let Some(metrics) = manager.metrics().await {
                             eprintln!("  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
                                 metrics.requests_processed, metrics.errors_encountered, metrics.avg_latency_ms);

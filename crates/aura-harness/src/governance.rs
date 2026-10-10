@@ -476,10 +476,7 @@ pub fn validate_scenario_shape_contract() -> Result<()> {
     if !config.compatibility_steps.is_empty() {
         bail!("semantic shared scenarios must not store mirrored frontend-conformance execution steps");
     }
-    if config
-        .semantic_steps()
-        .map_or(true, |steps| steps.is_empty())
-    {
+    if config.semantic_steps().is_none_or(|steps| steps.is_empty()) {
         bail!("semantic shared scenarios must retain semantic steps");
     }
 

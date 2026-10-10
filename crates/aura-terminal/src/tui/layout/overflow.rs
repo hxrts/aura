@@ -108,7 +108,7 @@ impl<R: LayoutRegion> ContentBuilder<R> {
 
         // Combine elements into vertical stack with fixed dimensions
         let combined = element! {
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: dim::TOTAL_WIDTH,
                 height: R::HEIGHT,
                 flex_direction: FlexDirection::Column,

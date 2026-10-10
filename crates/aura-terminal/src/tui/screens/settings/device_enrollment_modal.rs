@@ -29,7 +29,20 @@ pub struct DeviceEnrollmentModalProps {
 }
 
 #[component]
-pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<AnyElement<'static>> {
+pub fn DeviceEnrollmentModal(
+    props: &DeviceEnrollmentModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::AddDevice,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     let status = if props.has_failed {
         CodeDisplayStatus::Error
     } else if props.is_complete {
@@ -53,6 +66,7 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
 
     element! {
         CodeDisplayModal(
+            control_layout: vec![control_layout_0],
             visible: props.visible,
             title: step_title,
             status: status,

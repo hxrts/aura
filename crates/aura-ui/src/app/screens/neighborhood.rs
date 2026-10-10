@@ -1,6 +1,6 @@
 use super::*;
 use crate::semantic_lifecycle::UiLocalOperationOwner;
-use aura_app::ui_contract::{
+use aura_app::ui::contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
@@ -237,7 +237,7 @@ pub(super) fn NeighborhoodScreen(
                                         if display_channels.is_empty() {
                                             p { class: "m-0 text-sm text-muted-foreground", "No channels" }
                                         } else {
-                                            div { class: "aura-list space-y-2 min-w-0",
+                                            crate::rendered_control::RenderedRegion { control_id: ControlId::List(ListId::Channels), class: "aura-list space-y-2 min-w-0",
                                                 for (channel_id, channel_name, channel_topic, is_selected) in &display_channels {
                                                     button {
                                                         r#type: "button",
@@ -271,7 +271,7 @@ pub(super) fn NeighborhoodScreen(
                                     p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Members & Participants" }
                                     div {
                                         class: "mt-3 flex-1 lg:min-h-0 overflow-y-auto pr-1",
-                                        div { class: "aura-list space-y-2",
+                                        crate::rendered_control::RenderedRegion { control_id: ControlId::List(ListId::NeighborhoodMembers), class: "aura-list space-y-2",
                                             for (idx, member) in display_members.iter().enumerate() {
                                                 button {
                                                     r#type: "button",
@@ -392,7 +392,7 @@ pub(super) fn NeighborhoodScreen(
                         } else {
                             div {
                                 class: "flex-1 lg:min-h-0 overflow-y-auto pr-1",
-                                div { class: "aura-list space-y-2",
+                                crate::rendered_control::RenderedRegion { control_id: ControlId::List(ListId::Homes), class: "aura-list space-y-2",
                                     for home in &home_rows {
                                         button {
                                             r#type: "button",
@@ -445,7 +445,7 @@ pub(super) fn NeighborhoodScreen(
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
-                                    id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().required_dom_id("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
+                                    control_id: Some(ControlId::NeighborhoodNewHomeButton),
                                     label: "New Home".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: move |_| {
@@ -454,12 +454,7 @@ pub(super) fn NeighborhoodScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(
-                                        ControlId::NeighborhoodAcceptInvitationButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
+                                    control_id: Some(ControlId::NeighborhoodAcceptInvitationButton),
                                     label: "Accept Invitation".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: move |_| {

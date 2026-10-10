@@ -16,17 +16,21 @@ cat > "$fixture/bin/cargo" <<'MOCK'
 set -euo pipefail
 [[ ! ${CARGO_TARGET_DIR+x} && "$CARGO_BUILD_JOBS" == 4 ]]
 phase=$1; shift
-manifest='' package='' locked=false
+manifest='' package='' locked=false target=''
 while (( $# )); do
   case "$1" in
     --manifest-path) manifest=$2; shift 2;;
     --package) package=$2; shift 2;;
     --locked) locked=true; shift;;
+    --target-dir) target=$2; shift 2;;
     *) shift;;
   esac
 done
 [[ -f "$manifest" ]]
 [[ "$phase" == fmt || "$locked" == true ]]
+if [[ "$phase" == check ]]; then
+  [[ "$target" == "$(git rev-parse --show-toplevel)/target" ]]
+fi
 if [[ "$phase" == metadata ]]; then
   package=$(awk '/^name = / {gsub(/"/, "", $3); print $3; exit}' "$manifest")
 fi

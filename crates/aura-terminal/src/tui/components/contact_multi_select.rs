@@ -61,7 +61,7 @@ pub fn contact_multi_select(props: &ContactMultiSelectProps) -> impl Into<AnyEle
                 color: Theme::TEXT_MUTED,
             )
 
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 margin_top: Spacing::XS,
                 flex_direction: FlexDirection::Column,
                 border_style: BorderStyle::Round,

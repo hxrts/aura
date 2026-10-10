@@ -303,7 +303,7 @@ fn resolve_verify_input(
 
 fn decode_cli_bytes(encoded: &str, field_name: &str) -> TerminalResult<Vec<u8>> {
     if !encoded.is_empty()
-        && encoded.len() % 2 == 0
+        && encoded.len().is_multiple_of(2)
         && encoded.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return hex::decode(encoded).map_err(|err| {

@@ -1249,9 +1249,12 @@ pinned runs, active runs, and older bundles without a manifest. The command
 lists exact candidate paths and estimated bytes before removing anything.
 Each host runs retention only against its own artifact root. Never delete
 the whole `.tmp/` tree as CI cleanup.
-The harness matrix owns separate run and transient roots under
-`.tmp/harness/`; its run-scope cleanup does not manage LAN bundles or
-override their outcome-based retention.
+The harness matrix retains run artifacts under `.tmp/harness/` and owns a
+separate private short IPC root allocated with `mktemp` under `/tmp`. Rust
+admission validates the selected native owner directory and derives fixed
+scope children; checkout depth and actor labels cannot extend socket paths.
+Its run-scope cleanup does not manage LAN bundles or override their
+outcome-based retention.
 
 ### Debugging Browser Failures
 
@@ -2302,6 +2305,43 @@ If the shared controller cannot acquire the app snapshot, it exports the existin
 
 Completed owned runtime refreshes schedule semantic publication even when rendered view values compare equal: mode-only canonical changes must wake pushed snapshot observers. Display signals remain updated only when their values change, and the existing snapshot sink deduplicates identical observations.
 
+
+### Renderer-backed control observations
+
+Ordinary `control_visible` expectations use renderer-committed control layout,
+not focus, eligibility, screen selection, or DOM-selector fallbacks. Onboarding
+is the first explicit native/web producer. Unsupported controls fail explicitly
+until their actual renderer owners publish observations. Observation wire version
+3 adds required `rendered_controls` and `rendered_control_frame` without a legacy decoder. An empty Committed frame requires the real renderer commit receipt; an empty Unavailable frame is not unmount evidence. Fresh layout measurements retain that same renderer receipt and advance a separate layout revision. Capture receipts
+are private to the UI publication owner; serialized capture revisions cannot
+replace receipt identity. A superseding render first invalidates old visibility,
+and stale callbacks from a previous mount cannot overwrite the active capture.
+
+Browser regression execution must use `wasm-bindgen-test` in a real browser with
+feature `web`; the fixture runs the actual dioxus-web renderer through the
+sanctioned WebTaskOwner. Native canvas regressions draw the actual account modal
+and its clipping ancestry. Neither a pure capture test nor native VirtualDom
+simulated mounted events substitute for these producer tests. This first producer
+does not close the full control inventory or the paired-client LAN release gate.
+
+Native nested clipping instrumentation delegates the original iocraft View props,
+layout and drawing on the same node. Hidden and Scroll overflow boundaries, the
+terminal-provided viewport and actual registered field/list nodes compose their
+bounds; keyboard-only actions do not gain fabricated button observations.
+Browser layout fixtures include child-owned rerenders with a memoized parent,
+real resize notification, an exact-target actual scroll-listener witness and a
+fresh canonical snapshot measurement. DOM references arrange these changes;
+typed renderer observations are their postconditions. Dependency graph updates
+and executed native/browser gates are required before treating this candidate as
+integration evidence.
+
+Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
+from the active modal field. A generic modal-input identity cannot replace that
+field and focus does not prove rendered visibility. The unused invitation-type
+list/field and generic modal-input wire variants are removed with their raw-key
+selector/fallback paths; no compatibility decoder remains. Actual native and
+shared UI snapshot regressions cover all four contact-invitation fields. These
+are local observation checks, not paired-client business completion evidence.
 LAN lifecycle locking uses the pinned cross-platform `flock` tool in both the
 normal and CI Nix shells. The driver takes a nonblocking lock on its persistent
 lifecycle-file descriptor; process death releases custody, and long-lived
@@ -2316,3 +2356,13 @@ helper paths and exact process/run identity checks remain in force. The remote
 does not build a binary. Run the retention lifecycle and ship fixtures to verify
 contention, dead-holder release, descriptor noninheritance, missing-tool refusal
 and old-checkout bootstrap before another LAN confirmation batch.
+
+The browser WASM test lane uses `scripts/verify/wasm-browser.sh` to validate the
+selected Chromium and ChromeDriver build versions, write private capabilities,
+and delegate to the existing Cargo.lock-matched wasm-bindgen runner. Linux Nix
+shells supply both executables from the same pinned package set. Native macOS
+runs must explicitly select their actual browser and matching driver with
+`AURA_TEST_CHROMIUM` and `AURA_TEST_CHROMEDRIVER`; an absent or mismatched pair
+refuses before runner execution. The wrapper preserves runner status and removes
+its private capabilities file after success or failure. Playwright is a separate
+protocol and cannot serve as a WebDriver executable.

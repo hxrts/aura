@@ -122,7 +122,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
             #(Some(modal_header(&header_props).into()))
 
             // Body - display grouped commands in grid
-            View(
+            crate::tui::rendered_controls::ObservedClipView(
                 width: 100pct,
                 padding_top: 1,
                 padding_left: Spacing::MODAL_PADDING,

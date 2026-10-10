@@ -25,8 +25,13 @@ mod ids;
 mod operations;
 mod parity;
 mod projection_observations;
+mod rendered_controls;
 mod shared_flow_support;
 mod snapshots;
+pub use rendered_controls::{
+    ControlLayoutState, ControlRenderCapture, ControlRenderSource, RenderedControlFrame,
+    RenderedControlLayout, RenderedControlObservation,
+};
 
 pub use projection_observations::{
     observed_chat_projection, observed_contacts_projection, observed_home_modes,

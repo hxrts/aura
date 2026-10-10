@@ -55,11 +55,25 @@ pub struct InvitationCreateModalProps {
 
 /// Modal for creating new invitations
 #[component]
-pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<AnyElement<'static>> {
+pub fn InvitationCreateModal(
+    props: &InvitationCreateModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::CreateInvitation,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     if !props.visible {
-        return element! {
-            View {}
-        };
+        return AnyElement::from(crate::tui::rendered_controls::register_native_view(
+            element! { View {} },
+            vec![control_layout_0],
+        ));
     }
 
     let creating = props.creating;
@@ -209,134 +223,108 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         ModalStatus::Idle
     };
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
-            #(Some(modal_header(&header_props).into()))
-
-            // Form content - fills available space
+    AnyElement::from(crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                padding_left: Spacing::MODAL_PADDING,
-                padding_right: Spacing::MODAL_PADDING,
-                padding_bottom: Spacing::XS,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: if props.focused { Theme::BORDER_FOCUS } else { Theme::BORDER },
                 overflow: Overflow::Hidden,
             ) {
-                // Optional nickname
-                View(flex_direction: FlexDirection::Column) {
-                    View(flex_direction: FlexDirection::Row) {
-                        Text(content: nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
-                        Text(content: "Nickname", color: if nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                        Text(content: " - ", color: Theme::TEXT_MUTED)
-                        Text(content: "What the recipient should call you", color: Theme::TEXT_MUTED)
+                // Header
+                #(Some(modal_header(&header_props).into()))
+
+                // Form content - fills available space
+                crate::tui::rendered_controls::ObservedClipView(
+                    width: 100pct,
+                    padding_left: Spacing::MODAL_PADDING,
+                    padding_right: Spacing::MODAL_PADDING,
+                    padding_bottom: Spacing::XS,
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
+                ) {
+                    // Optional nickname
+                    View(flex_direction: FlexDirection::Column) {
+                        View(flex_direction: FlexDirection::Row) {
+                            Text(content: nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                            Text(content: "Nickname", color: if nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                            Text(content: " - ", color: Theme::TEXT_MUTED)
+                            Text(content: "What the recipient should call you", color: Theme::TEXT_MUTED)
+                        }
+                        RenderedInvitationTextInput(field: aura_app::ui::contract::FieldId::Nickname,
+                            display: nickname_display, color: nickname_color, border: nickname_border)
                     }
-                    View(
-                        margin_left: 2,
-                        width: 26,
-                        border_style: Borders::INPUT,
-                        border_color: nickname_border,
-                        padding_left: Spacing::PANEL_PADDING,
-                        padding_right: Spacing::PANEL_PADDING,
-                    ) {
-                        Text(content: nickname_display, color: nickname_color)
+
+                    // Optional invitee nickname
+                    View(flex_direction: FlexDirection::Column) {
+                        View(flex_direction: FlexDirection::Row) {
+                            Text(content: receiver_nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                            Text(content: "Their Nickname", color: if receiver_nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                            Text(content: " - ", color: Theme::TEXT_MUTED)
+                            Text(content: "How this pending invite should be labeled for you", color: Theme::TEXT_MUTED)
+                        }
+                        RenderedInvitationTextInput(field: aura_app::ui::contract::FieldId::InvitationReceiverNickname,
+                            display: receiver_nickname_display, color: receiver_nickname_color, border: receiver_nickname_border)
                     }
+
+                    // Optional message
+                    View(flex_direction: FlexDirection::Column) {
+                        View(flex_direction: FlexDirection::Row) {
+                            Text(content: message_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                            Text(content: "Message", color: if message_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                            Text(content: " - ", color: Theme::TEXT_MUTED)
+                            Text(content: "Personal note included with the invitation", color: Theme::TEXT_MUTED)
+                        }
+                        RenderedInvitationTextInput(field: aura_app::ui::contract::FieldId::InvitationMessage,
+                            display: message_display, color: message_color, border: message_border)
+                    }
+
+                    // TTL selector: a single row so it stays visible below the
+                    // three text fields within the modal height.
+                    RenderedInvitationTtl(pointer: ttl_pointer.to_string(), display: ttl_display, focused: ttl_focused)
+
+                    // Error message
+                    #(Some(status_message(&status).into()))
                 }
 
-                // Optional invitee nickname
-                View(flex_direction: FlexDirection::Column) {
-                    View(flex_direction: FlexDirection::Row) {
-                        Text(content: receiver_nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
-                        Text(content: "Their Nickname", color: if receiver_nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                        Text(content: " - ", color: Theme::TEXT_MUTED)
-                        Text(content: "How this pending invite should be labeled for you", color: Theme::TEXT_MUTED)
+                // Footer with hints
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    padding: Spacing::PANEL_PADDING,
+                    gap: Spacing::LG,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Top,
+                    border_color: Theme::BORDER,
+                ) {
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                        Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
+                        Text(content: "Navigate", color: Theme::TEXT_MUTED)
                     }
-                    View(
-                        margin_left: 2,
-                        width: 26,
-                        border_style: Borders::INPUT,
-                        border_color: receiver_nickname_border,
-                        padding_left: Spacing::PANEL_PADDING,
-                        padding_right: Spacing::PANEL_PADDING,
-                    ) {
-                        Text(content: receiver_nickname_display, color: receiver_nickname_color)
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                        Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
+                        Text(content: "TTL", color: Theme::TEXT_MUTED)
                     }
-                }
-
-                // Optional message
-                View(flex_direction: FlexDirection::Column) {
-                    View(flex_direction: FlexDirection::Row) {
-                        Text(content: message_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
-                        Text(content: "Message", color: if message_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                        Text(content: " - ", color: Theme::TEXT_MUTED)
-                        Text(content: "Personal note included with the invitation", color: Theme::TEXT_MUTED)
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                        Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
+                        Text(content: "Cancel", color: Theme::TEXT_MUTED)
                     }
-                    View(
-                        margin_left: 2,
-                        width: 26,
-                        border_style: Borders::INPUT,
-                        border_color: message_border,
-                        padding_left: Spacing::PANEL_PADDING,
-                        padding_right: Spacing::PANEL_PADDING,
-                    ) {
-                        Text(content: message_display, color: message_color)
+                    View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                        Text(content: "Enter", weight: Weight::Bold, color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
+                        Text(content: "Generate", color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
                     }
-                }
-
-                // TTL selector: a single row so it stays visible below the
-                // three text fields within the modal height.
-                View(flex_direction: FlexDirection::Row, flex_shrink: 0.0) {
-                    Text(content: ttl_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
-                    Text(content: "Expiry: ", color: if ttl_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                    Text(content: ttl_display, color: if ttl_focused { Theme::PRIMARY } else { Theme::TEXT }, weight: Weight::Bold)
-                    Text(content: " - How long the invite code remains valid", color: Theme::TEXT_MUTED)
-                }
-
-                // Error message
-                #(Some(status_message(&status).into()))
-            }
-
-            // Footer with hints
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                padding: Spacing::PANEL_PADDING,
-                gap: Spacing::LG,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "↑/↓", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Navigate", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "TTL", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Cancel", color: Theme::TEXT_MUTED)
-                }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Enter", weight: Weight::Bold, color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
-                    Text(content: "Generate", color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED })
                 }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    ))
 }
 
 #[cfg(test)]
@@ -352,4 +340,73 @@ mod tests {
         assert!(rendered.contains("Expiry"), "{rendered}");
         assert!(rendered.contains("1 day"), "{rendered}");
     }
+}
+
+#[derive(Props)]
+struct RenderedInvitationTextInputProps {
+    field: aura_app::ui::contract::FieldId,
+    display: String,
+    color: Color,
+    border: Color,
+}
+impl Default for RenderedInvitationTextInputProps {
+    fn default() -> Self {
+        Self {
+            field: aura_app::ui::contract::FieldId::Nickname,
+            display: String::new(),
+            color: Theme::TEXT,
+            border: Theme::BORDER,
+        }
+    }
+}
+#[component]
+fn RenderedInvitationTextInput(
+    props: &RenderedInvitationTextInputProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Field(props.field),
+            rendered: true,
+        },
+    );
+    crate::tui::rendered_controls::register_native_view(
+        element! { View(margin_left: 2, width: 26, border_style: Borders::INPUT,
+            border_color: props.border, padding_left: Spacing::PANEL_PADDING, padding_right: Spacing::PANEL_PADDING) {
+            Text(content: props.display.clone(), color: props.color)
+        }},
+        vec![control_layout_0],
+    )
+}
+
+#[derive(Default, Props)]
+struct RenderedInvitationTtlProps {
+    pointer: String,
+    display: String,
+    focused: bool,
+}
+#[component]
+fn RenderedInvitationTtl(
+    props: &RenderedInvitationTtlProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Field(
+                aura_app::ui::contract::FieldId::InvitationTtl,
+            ),
+            rendered: true,
+        },
+    );
+    crate::tui::rendered_controls::register_native_view(
+        element! { View(flex_direction: FlexDirection::Row, flex_shrink: 0.0) {
+            Text(content: props.pointer.clone(), color: Theme::PRIMARY, weight: Weight::Bold)
+            Text(content: "Expiry: ", color: if props.focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+            Text(content: props.display.clone(), color: if props.focused { Theme::PRIMARY } else { Theme::TEXT }, weight: Weight::Bold)
+            Text(content: " - How long the invite code remains valid", color: Theme::TEXT_MUTED)
+        }},
+        vec![control_layout_0],
+    )
 }

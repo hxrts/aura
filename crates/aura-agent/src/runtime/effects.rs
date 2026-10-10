@@ -3437,7 +3437,7 @@ mod tests {
             let cloned_crypto = effects.crypto.clone();
             let mut draws = Vec::new();
             for (index, length) in [17, 29, 11, 43].into_iter().enumerate() {
-                let actual = if index % 2 == 0 {
+                let actual = if index.is_multiple_of(2) {
                     RandomCoreEffects::random_bytes(&effects, length).await
                 } else {
                     cloned_crypto.random_bytes(length)

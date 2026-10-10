@@ -46,6 +46,7 @@ pub mod hooks;
 pub mod iocraft_adapter;
 pub mod layout;
 pub mod props;
+mod rendered_controls;
 pub mod runtime;
 pub mod screens;
 pub mod state;

@@ -1,6 +1,7 @@
 pub(crate) mod app;
 pub(crate) mod bootstrap;
 pub(crate) mod maintenance;
+mod rendered_controls;
 pub(crate) mod storage;
 
 pub(crate) use app::App;
@@ -21,3 +22,8 @@ pub(crate) use storage::{
     pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
     persist_selected_runtime_identity, selected_runtime_identity_key,
 };
+
+#[cfg(all(test, target_arch = "wasm32", feature = "web"))]
+mod rendered_controls_browser_tests;
+
+pub(crate) use rendered_controls::{capture_current_layout, launch_observed};

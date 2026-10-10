@@ -62,7 +62,14 @@ pub struct ChannelListProps {
 
 /// A list of channels in the sidebar
 #[component]
-pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
+pub fn ChannelList(props: &ChannelListProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(aura_app::ui::contract::ListId::Channels),
+            rendered: true,
+        },
+    );
     let selected_idx = props.selected_index;
     let items: Vec<AnyElement<'static>> = props
         .channels
@@ -94,17 +101,20 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
         })
         .collect();
 
-    element! {
-        View(width: dim::TWO_PANEL_LEFT_WIDTH) {
-            ListPanel(
-                title: "Channels".to_string(),
-                count: props.channels.len(),
-                focused: props.focused,
-                items: items,
-                empty_message: "No channels yet".to_string(),
-            )
-        }
-    }
+    crate::tui::rendered_controls::register_native_view(
+        element! {
+            View(width: dim::TWO_PANEL_LEFT_WIDTH) {
+                ListPanel(
+                    title: "Channels".to_string(),
+                    count: props.channels.len(),
+                    focused: props.focused,
+                    items: items,
+                    empty_message: "No channels yet".to_string(),
+                )
+            }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// Shared selected channel identity for cross-component communication.
@@ -167,6 +177,14 @@ pub struct ChatScreenProps {
 /// - The selected channel changes
 #[component]
 pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Screen(aura_app::ui::contract::ScreenId::Chat),
+            rendered: true,
+        },
+    );
+
     // Get AppCoreContext for reactive signal subscription (required for domain data)
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
@@ -431,53 +449,56 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // This component is purely presentational.
 
     // Layout: Main content (22 rows) + MessageInput (3 rows) = 25 = MIDDLE_HEIGHT
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            overflow: Overflow::Hidden,
-        ) {
-            // Main content area - fixed 22 rows
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                flex_direction: FlexDirection::Row,
-                height: 22,
+                flex_direction: FlexDirection::Column,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
-                gap: dim::TWO_PANEL_GAP,
             ) {
-                // Left panel: Channel list (matches other two-panel screens)
-                View(width: dim::TWO_PANEL_LEFT_WIDTH, height: 22) {
-                    ChannelList(
-                        channels: channels,
-                        selected_index: current_channel_idx,
-                        focused: false,
-                    )
+                // Main content area - fixed 22 rows
+                crate::tui::rendered_controls::ObservedClipView(
+                    flex_direction: FlexDirection::Row,
+                    height: 22,
+                    overflow: Overflow::Hidden,
+                    gap: dim::TWO_PANEL_GAP,
+                ) {
+                    // Left panel: Channel list (matches other two-panel screens)
+                    View(width: dim::TWO_PANEL_LEFT_WIDTH, height: 22) {
+                        ChannelList(
+                            channels: channels,
+                            selected_index: current_channel_idx,
+                            focused: false,
+                        )
+                    }
+                    // Right panel: Messages (matches other two-panel screens)
+                    View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: 22) {
+                        MessagePanel(
+                            messages: messages.clone(),
+                            title: Some("Messages".to_string()),
+                            empty_message: Some(empty_message),
+                            scroll_offset: props.view.message_scroll,
+                            message_count: messages.len(),
+                            visible_rows: Some(dim::VISIBLE_MESSAGE_ROWS as usize),
+                        )
+                    }
                 }
-                // Right panel: Messages (matches other two-panel screens)
-                View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: 22) {
-                    MessagePanel(
-                        messages: messages.clone(),
-                        title: Some("Messages".to_string()),
-                        empty_message: Some(empty_message),
-                        scroll_offset: props.view.message_scroll,
-                        message_count: messages.len(),
-                        visible_rows: Some(dim::VISIBLE_MESSAGE_ROWS as usize),
-                    )
-                }
-            }
 
-            // Message input (3 rows) - full width
-            View(height: 3, width: dim::TOTAL_WIDTH) {
-                MessageInput(
-                    value: display_input_text,
-                    placeholder: "Type a message...".to_string(),
-                    focused: input_focused,
-                    reply_to: None::<String>,
-                    sending: false,
-                )
+                // Message input (3 rows) - full width
+                View(height: 3, width: dim::TOTAL_WIDTH) {
+                    MessageInput(
+                        value: display_input_text,
+                        placeholder: "Type a message...".to_string(),
+                        focused: input_focused,
+                        reply_to: None::<String>,
+                        sending: false,
+                    )
+                }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// Run the chat screen (requires AppCoreContext for domain data)

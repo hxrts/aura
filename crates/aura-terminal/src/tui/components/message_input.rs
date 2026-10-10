@@ -25,7 +25,16 @@ pub struct MessageInputProps {
 ///
 /// State management handled by parent component.
 #[component]
-pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>> {
+pub fn MessageInput(props: &MessageInputProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Field(
+                aura_app::ui::contract::FieldId::ChatInput,
+            ),
+            rendered: true,
+        },
+    );
     let border_color = focus_border_color(props.focused);
 
     let is_empty = props.value.is_empty();
@@ -44,62 +53,65 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
     let reply_to = props.reply_to.clone();
     let has_reply = reply_to.is_some();
 
-    element! {
-        View(
-            flex_direction: FlexDirection::Column,
-            width: 100pct,
-            border_style: Borders::INPUT,
-            border_color: border_color,
-        ) {
-            // Reply context (if any)
-            #(if has_reply {
-                let reply_text = reply_to.unwrap_or_default();
-                Some(element! {
-                    View(
-                        flex_direction: FlexDirection::Row,
-                        padding_left: Spacing::LIST_ITEM_PADDING,
-                        padding_right: Spacing::LIST_ITEM_PADDING,
-                        border_style: BorderStyle::Single,
-                        border_edges: Edges::Bottom,
-                        border_color: border_color,
-                    ) {
-                        Text(content: "↩ Reply to: ", color: Theme::TEXT_MUTED)
-                        Text(content: reply_text, color: Theme::TEXT)
-                        View(flex_grow: 1.0_f32)
-                        Text(content: "[Esc] Cancel", color: Theme::TEXT_MUTED)
-                    }
-                })
-            } else {
-                None
-            })
-            // Input area
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                flex_direction: FlexDirection::Row,
-                padding_left: Spacing::LIST_ITEM_PADDING,
-                padding_right: Spacing::LIST_ITEM_PADDING,
-                align_items: AlignItems::Center,
-            ) {
-                Text(content: "> ", color: Theme::PRIMARY)
-                Text(content: display_text, color: text_color, wrap: TextWrap::NoWrap)
-            }
-            // Hint bar - border color matches focus state
-            View(
-                flex_direction: FlexDirection::Row,
-                padding_left: Spacing::LIST_ITEM_PADDING,
-                padding_right: Spacing::LIST_ITEM_PADDING,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
+                flex_direction: FlexDirection::Column,
+                width: 100pct,
+                border_style: Borders::INPUT,
                 border_color: border_color,
             ) {
-                Text(content: "Enter", color: Theme::SECONDARY)
-                Text(content: " Send  ", color: Theme::TEXT_MUTED)
-                Text(content: "Shift+Enter", color: Theme::SECONDARY)
-                Text(content: " Newline  ", color: Theme::TEXT_MUTED)
-                Text(content: "/", color: Theme::SECONDARY)
-                Text(content: " Commands", color: Theme::TEXT_MUTED)
+                // Reply context (if any)
+                #(if has_reply {
+                    let reply_text = reply_to.unwrap_or_default();
+                    Some(element! {
+                        View(
+                            flex_direction: FlexDirection::Row,
+                            padding_left: Spacing::LIST_ITEM_PADDING,
+                            padding_right: Spacing::LIST_ITEM_PADDING,
+                            border_style: BorderStyle::Single,
+                            border_edges: Edges::Bottom,
+                            border_color: border_color,
+                        ) {
+                            Text(content: "↩ Reply to: ", color: Theme::TEXT_MUTED)
+                            Text(content: reply_text, color: Theme::TEXT)
+                            View(flex_grow: 1.0_f32)
+                            Text(content: "[Esc] Cancel", color: Theme::TEXT_MUTED)
+                        }
+                    })
+                } else {
+                    None
+                })
+                // Input area
+                View(
+                    flex_direction: FlexDirection::Row,
+                    padding_left: Spacing::LIST_ITEM_PADDING,
+                    padding_right: Spacing::LIST_ITEM_PADDING,
+                    align_items: AlignItems::Center,
+                ) {
+                    Text(content: "> ", color: Theme::PRIMARY)
+                    Text(content: display_text, color: text_color, wrap: TextWrap::NoWrap)
+                }
+                // Hint bar - border color matches focus state
+                View(
+                    flex_direction: FlexDirection::Row,
+                    padding_left: Spacing::LIST_ITEM_PADDING,
+                    padding_right: Spacing::LIST_ITEM_PADDING,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Top,
+                    border_color: border_color,
+                ) {
+                    Text(content: "Enter", color: Theme::SECONDARY)
+                    Text(content: " Send  ", color: Theme::TEXT_MUTED)
+                    Text(content: "Shift+Enter", color: Theme::SECONDARY)
+                    Text(content: " Newline  ", color: Theme::TEXT_MUTED)
+                    Text(content: "/", color: Theme::SECONDARY)
+                    Text(content: " Commands", color: Theme::TEXT_MUTED)
+                }
             }
-        }
-    }
+        },
+        vec![control_layout_0],
+    )
 }
 
 /// State helper for message input

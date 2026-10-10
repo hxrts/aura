@@ -1061,7 +1061,7 @@ impl HoldManager {
                     .objects
                     .iter()
                     .filter(|((candidate_scope, _), _)| {
-                        scope.map_or(true, |value| *candidate_scope == value)
+                        scope.is_none_or(|value| *candidate_scope == value)
                     })
                     .filter_map(|(key, stored)| {
                         let expired_caps = stored
@@ -1084,7 +1084,7 @@ impl HoldManager {
                         .objects
                         .iter()
                         .filter(|((candidate_scope, _), _)| {
-                            scope.map_or(true, |value| *candidate_scope == value)
+                            scope.is_none_or(|value| *candidate_scope == value)
                         })
                         .map(|(key, stored)| {
                             (

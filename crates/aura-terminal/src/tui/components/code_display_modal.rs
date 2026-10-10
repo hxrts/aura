@@ -57,6 +57,8 @@ impl CodeDisplayStatus {
 /// Props for CodeDisplayModal
 #[derive(Default, Props)]
 pub struct CodeDisplayModalProps {
+    /// Registrations attached to the selected native modal root.
+    pub(crate) control_layout: Vec<crate::tui::rendered_controls::ControlLayoutRegistration>,
     /// Whether the modal is visible
     pub visible: bool,
     /// Main title (e.g., "Enroll device: MyPhone" or "Invitation Created")
@@ -87,7 +89,7 @@ pub struct CodeDisplayModalProps {
 #[component]
 pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
-        return element! { View {} };
+        return AnyElement::from(element! { View {} });
     }
 
     // Format long codes into multiple lines for readability.
@@ -136,142 +138,145 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
         ModalStatus::Idle
     };
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
-        ) {
-            // Header
+    AnyElement::from(crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                padding_left: Spacing::PANEL_PADDING,
-                padding_right: Spacing::PANEL_PADDING,
-                padding_top: Spacing::XS,
-                padding_bottom: Spacing::XS,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
+                background_color: Theme::BG_MODAL,
+                border_style: Borders::PRIMARY,
+                border_color: border_color,
+                overflow: Overflow::Hidden,
             ) {
-                // Title row (with optional icon for success status)
-                View(flex_direction: FlexDirection::Row, gap: 1) {
-                    #(if props.status == CodeDisplayStatus::Success {
+                // Header
+                View(
+                    width: 100pct,
+                    padding_left: Spacing::PANEL_PADDING,
+                    padding_right: Spacing::PANEL_PADDING,
+                    padding_top: Spacing::XS,
+                    padding_bottom: Spacing::XS,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Bottom,
+                    border_color: Theme::BORDER,
+                ) {
+                    // Title row (with optional icon for success status)
+                    View(flex_direction: FlexDirection::Row, gap: 1) {
+                        #(if props.status == CodeDisplayStatus::Success {
+                            Some(element! {
+                                Text(content: status_icon.clone(), color: status_color, weight: Weight::Bold)
+                            })
+                        } else {
+                            None
+                        })
+                        Text(
+                            content: props.title.clone(),
+                            weight: Weight::Bold,
+                            color: if props.status == CodeDisplayStatus::Success { status_color } else { Theme::TEXT },
+                        )
+                    }
+                    // Status row (for pending/error) or subtitle (for success)
+                    #(if props.status == CodeDisplayStatus::Success && has_subtitle {
                         Some(element! {
-                            Text(content: status_icon.clone(), color: status_color, weight: Weight::Bold)
+                            View(margin_top: Spacing::XS) {
+                                Text(content: props.subtitle.clone(), color: Theme::TEXT_MUTED)
+                            }
+                        })
+                    } else if props.status != CodeDisplayStatus::Success {
+                        Some(element! {
+                            View(flex_direction: FlexDirection::Row, gap: 1) {
+                                Text(content: status_icon, color: status_color)
+                                Text(content: status_text, color: status_color, weight: Weight::Bold)
+                                #(if has_progress {
+                                    Some(element! {
+                                        View(flex_direction: FlexDirection::Row) {
+                                            Text(content: " — ", color: Theme::TEXT_MUTED)
+                                            Text(content: props.progress_text.clone(), color: Theme::TEXT_MUTED)
+                                        }
+                                    })
+                                } else {
+                                    None
+                                })
+                            }
                         })
                     } else {
                         None
                     })
-                    Text(
-                        content: props.title.clone(),
-                        weight: Weight::Bold,
-                        color: if props.status == CodeDisplayStatus::Success { status_color } else { Theme::TEXT },
-                    )
                 }
-                // Status row (for pending/error) or subtitle (for success)
-                #(if props.status == CodeDisplayStatus::Success && has_subtitle {
-                    Some(element! {
-                        View(margin_top: Spacing::XS) {
-                            Text(content: props.subtitle.clone(), color: Theme::TEXT_MUTED)
-                        }
-                    })
-                } else if props.status != CodeDisplayStatus::Success {
-                    Some(element! {
-                        View(flex_direction: FlexDirection::Row, gap: 1) {
-                            Text(content: status_icon, color: status_color)
-                            Text(content: status_text, color: status_color, weight: Weight::Bold)
-                            #(if has_progress {
-                                Some(element! {
-                                    View(flex_direction: FlexDirection::Row) {
-                                        Text(content: " — ", color: Theme::TEXT_MUTED)
-                                        Text(content: props.progress_text.clone(), color: Theme::TEXT_MUTED)
-                                    }
-                                })
-                            } else {
-                                None
-                            })
-                        }
-                    })
-                } else {
-                    None
-                })
-            }
 
-            // Body
-            View(
-                width: 100pct,
-                padding_left: Spacing::MODAL_PADDING,
-                padding_right: Spacing::MODAL_PADDING,
-                padding_top: Spacing::XS,
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0_f32,
-                flex_shrink: 1.0,
-                overflow: Overflow::Hidden,
-            ) {
-                // Instruction
-                #(if !props.instruction.is_empty() {
-                    Some(element! {
-                        View(margin_bottom: Spacing::XS) {
-                            Text(content: props.instruction.clone(), color: Theme::TEXT)
-                        }
-                    })
-                } else {
-                    None
-                })
-
-                // Code box
-                View(
+                // Body
+                crate::tui::rendered_controls::ObservedClipView(
                     width: 100pct,
+                    padding_left: Spacing::MODAL_PADDING,
+                    padding_right: Spacing::MODAL_PADDING,
+                    padding_top: Spacing::XS,
                     flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: Theme::PRIMARY,
-                    padding_left: Spacing::PANEL_PADDING,
-                    padding_right: Spacing::PANEL_PADDING,
+                    flex_grow: 1.0_f32,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
                 ) {
-                    Text(
-                        content: formatted_code,
-                        color: Theme::PRIMARY,
-                        wrap: TextWrap::Wrap,
-                    )
+                    // Instruction
+                    #(if !props.instruction.is_empty() {
+                        Some(element! {
+                            View(margin_bottom: Spacing::XS) {
+                                Text(content: props.instruction.clone(), color: Theme::TEXT)
+                            }
+                        })
+                    } else {
+                        None
+                    })
+
+                    // Code box
+                    View(
+                        width: 100pct,
+                        flex_direction: FlexDirection::Column,
+                        border_style: Borders::INPUT,
+                        border_color: Theme::PRIMARY,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
+                    ) {
+                        Text(
+                            content: formatted_code,
+                            color: Theme::PRIMARY,
+                            wrap: TextWrap::Wrap,
+                        )
+                    }
+
+                    // Help text
+                    #(if has_help_text {
+                        Some(element! {
+                            View(margin_top: Spacing::SM) {
+                                Text(content: props.help_text.clone(), color: Theme::TEXT_MUTED)
+                            }
+                        })
+                    } else {
+                        None
+                    })
+
+                    // Error message
+                    #(Some(status_message(&error_status).into()))
+
+                    // Copy feedback
+                    #(if props.copied {
+                        Some(element! {
+                            View(margin_top: Spacing::XS, flex_direction: FlexDirection::Row, gap: Spacing::XS) {
+                                Text(content: Icons::CHECK, color: Theme::SUCCESS)
+                                Text(content: "Copied to clipboard", color: Theme::SUCCESS)
+                            }
+                        })
+                    } else {
+                        None
+                    })
                 }
 
-                // Help text
-                #(if has_help_text {
-                    Some(element! {
-                        View(margin_top: Spacing::SM) {
-                            Text(content: props.help_text.clone(), color: Theme::TEXT_MUTED)
-                        }
-                    })
-                } else {
-                    None
-                })
-
-                // Error message
-                #(Some(status_message(&error_status).into()))
-
-                // Copy feedback
-                #(if props.copied {
-                    Some(element! {
-                        View(margin_top: Spacing::XS, flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                            Text(content: Icons::CHECK, color: Theme::SUCCESS)
-                            Text(content: "Copied to clipboard", color: Theme::SUCCESS)
-                        }
-                    })
-                } else {
-                    None
-                })
+                // Footer
+                #(Some(modal_footer(&footer_props).into()))
             }
-
-            // Footer
-            #(Some(modal_footer(&footer_props).into()))
-        }
-    }
+        },
+        props.control_layout.clone(),
+    ))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

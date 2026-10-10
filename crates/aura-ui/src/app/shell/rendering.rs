@@ -2,6 +2,7 @@ use super::*;
 
 #[component]
 pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
+    let toast_mounted = crate::rendered_control::use_rendered_control(ControlId::ToastRegion);
     rsx! {
         ThemeProvider {
             theme: themes::neutral(),
@@ -37,6 +38,7 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
                 id: ControlId::ToastRegion
                     .web_dom_id()
                     .required_dom_id("ToastRegion must define a web DOM id"),
+                onmounted: move |event| toast_mounted.call(event),
                 style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border); position: relative; z-index: 2147483647;",
                 ToastProvider {
                     default_duration: Duration::from_secs(5),
@@ -51,6 +53,11 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
 
 #[component]
 fn AuraUiShell(controller: Arc<UiController>) -> Element {
+    let app_mounted = crate::rendered_control::use_rendered_control(ControlId::AppRoot);
+    let nav_mounted = crate::rendered_control::use_rendered_control(ControlId::NavRoot);
+    let navigation_mounted =
+        crate::rendered_control::use_rendered_control(ControlId::List(ListId::Navigation));
+    let modal_mounted = crate::rendered_control::use_rendered_control(ControlId::ModalRegion);
     let mut render_tick = use_signal(|| 0_u64);
     let render_tick_value = render_tick();
     let mut last_toast_key = use_signal(|| None::<String>);
@@ -238,6 +245,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             tabindex: 0,
             autofocus: true,
             onmounted: move |mounted| {
+                app_mounted.call(mounted.clone());
                 spawn_ui(async move {
                     let _ = mounted.data().set_focus(true).await;
                 });
@@ -313,6 +321,10 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 id: ControlId::NavRoot
                     .web_dom_id()
                     .required_dom_id("NavRoot must define a web DOM id"),
+                onmounted: move |event| {
+                    nav_mounted.call(event.clone());
+                    navigation_mounted.call(event);
+                },
                 class: "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 onclick: move |_| {
                     if shell_state.should_exit_insert_mode {
@@ -342,13 +354,13 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         div {
                             class: "mx-auto flex h-8 min-w-max items-center justify-center gap-2",
                             for (screen, label, is_active) in nav_tabs(model.screen) {
-                                button {
+                                crate::rendered_control::RenderedButton {
                                     r#type: "button",
-                                    id: nav_button_id(screen),
+                                    control_id: aura_app::ui::contract::nav_control_id_for_screen(screen),
                                     class: nav_tab_class(is_active),
                                     onclick: {
                                         let controller = controller.clone();
-                                        move |_| {
+                                        move |_: MouseEvent| {
                                             let before_log = format!(
                                                 "nav_click start screen={}",
                                                 screen.help_label()
@@ -392,6 +404,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 id: ControlId::ModalRegion
                     .web_dom_id()
                     .required_dom_id("ModalRegion must define a web DOM id"),
+                onmounted: move |event| modal_mounted.call(event),
                 class: "contents",
                 if let Some(modal) = modal {
                     if let Some(add_device_state) = model.add_device_modal() {

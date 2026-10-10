@@ -24,44 +24,95 @@ pub struct NavBarProps {
 /// ├─────────────────────────────────────────────────────────────────┤ Row 2: Border
 /// ```
 #[component]
-pub fn NavBar(props: &NavBarProps) -> impl Into<AnyElement<'static>> {
+pub fn NavBar(props: &NavBarProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::NavRoot,
+            rendered: true,
+        },
+    );
+    let control_layout_1 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::List(aura_app::ui::contract::ListId::Navigation),
+            rendered: true,
+        },
+    );
     let active = props.active_screen;
 
-    element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::NAV_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            overflow: Overflow::Hidden,
-        ) {
-            // Row 1: Screen tabs evenly spaced
+    crate::tui::rendered_controls::register_native_view(
+        element! {
             View(
-                width: 100pct,
-                height: 1,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceEvenly,
+                width: dim::TOTAL_WIDTH,
+                height: dim::NAV_HEIGHT,
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::Hidden,
             ) {
-                #(Screen::all().iter().map(|&screen| {
-                    let is_active = screen == active;
-                    let color = if is_active { Theme::PRIMARY } else { Theme::TEXT_MUTED };
-                    let weight = if is_active { Weight::Bold } else { Weight::Normal };
-                    let title = screen.name().to_string();
-                    element! {
-                        Text(content: title, color: color, weight: weight)
-                    }
-                }))
-            }
+                // Row 1: Screen tabs evenly spaced
+                View(
+                    width: 100pct,
+                    height: 1,
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceEvenly,
+                ) {
+                    #(Screen::all().iter().map(|&screen| {
+                        let is_active = screen == active;
+                        let color = if is_active { Theme::PRIMARY } else { Theme::TEXT_MUTED };
+                        let weight = if is_active { Weight::Bold } else { Weight::Normal };
+                        let title = screen.name().to_string();
+                        element! {
+                            ObservedNavTab(screen: screen, title: title, color: color, weight: weight)
+                        }
+                    }))
+                }
 
-            // Row 2: Bottom border (1 row)
-            View(
-                width: 100pct,
-                height: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            )
+                // Row 2: Bottom border (1 row)
+                View(
+                    width: 100pct,
+                    height: 1,
+                    border_style: BorderStyle::Single,
+                    border_edges: Edges::Top,
+                    border_color: Theme::BORDER,
+                )
+            }
+        },
+        vec![control_layout_0, control_layout_1],
+    )
+}
+
+#[derive(Props)]
+struct ObservedNavTabProps {
+    screen: Screen,
+    title: String,
+    color: Color,
+    weight: Weight,
+}
+
+impl Default for ObservedNavTabProps {
+    fn default() -> Self {
+        Self {
+            screen: Screen::default(),
+            title: String::new(),
+            color: Theme::TEXT,
+            weight: Weight::Normal,
         }
     }
+}
+
+#[component]
+fn ObservedNavTab(props: &ObservedNavTabProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::nav_control_id_for_screen(props.screen.into()),
+            rendered: true,
+        },
+    );
+    crate::tui::rendered_controls::register_native_text(
+        element! { Text(content: props.title.clone(), color: props.color, weight: props.weight) },
+        vec![control_layout_0],
+    )
 }
 
 #[cfg(test)]

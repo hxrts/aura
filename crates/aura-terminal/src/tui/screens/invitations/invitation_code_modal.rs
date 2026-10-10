@@ -28,9 +28,23 @@ pub struct InvitationCodeModalProps {
 
 /// Modal for displaying shareable invite codes
 #[component]
-pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyElement<'static>> {
+pub fn InvitationCodeModal(
+    props: &InvitationCodeModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        crate::tui::rendered_controls::DrawObservationRole::Control {
+            id: aura_app::ui::contract::ControlId::Modal(
+                aura_app::ui::contract::ModalId::InvitationCode,
+            ),
+            rendered: props.visible,
+        },
+    );
+
     element! {
         CodeDisplayModal(
+            control_layout: vec![control_layout_0],
             visible: props.visible,
             title: "Invitation Created".to_string(),
             subtitle: format!("Type: {}", props.invitation_type),

@@ -68,13 +68,41 @@ pub(crate) struct SelectionModalProps {
     pub selected_ids: Vec<String>,
     pub multi_select: bool,
     pub error: String,
+    pub list_id: Option<aura_app::ui::contract::ListId>,
+    pub modal_id: Option<aura_app::ui::contract::ModalId>,
 }
 #[component]
-pub(crate) fn SelectionModal(props: &SelectionModalProps) -> impl Into<AnyElement<'static>> {
+pub(crate) fn SelectionModal(
+    props: &SelectionModalProps,
+    mut hooks: Hooks,
+) -> impl Into<AnyElement<'static>> {
+    let control_layout_0 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        props.modal_id.map_or(
+            crate::tui::rendered_controls::DrawObservationRole::PassThrough,
+            |id| crate::tui::rendered_controls::DrawObservationRole::Control {
+                id: aura_app::ui::contract::ControlId::Modal(id),
+                rendered: props.visible,
+            },
+        ),
+    );
+    let control_layout_1 = crate::tui::rendered_controls::observe_context_draw(
+        &mut hooks,
+        props.list_id.map_or(
+            crate::tui::rendered_controls::DrawObservationRole::PassThrough,
+            |id| crate::tui::rendered_controls::DrawObservationRole::Control {
+                id: aura_app::ui::contract::ControlId::List(id),
+                rendered: props.visible,
+            },
+        ),
+    );
     if !props.visible {
-        return element! {
-            View {}
-        }
+        return crate::tui::rendered_controls::register_native_view(
+            element! {
+                View {}
+            },
+            vec![control_layout_0, control_layout_1],
+        )
         .into_any();
     }
 
@@ -118,6 +146,7 @@ pub(crate) fn SelectionModal(props: &SelectionModalProps) -> impl Into<AnyElemen
 
     element! {
         ModalScaffold(
+            control_layout: vec![control_layout_0, control_layout_1],
             header: header_props,
             footer: footer_props,
             status: error_status,

@@ -195,7 +195,7 @@ pub struct ToastFrameProps<'a> {
 #[component]
 pub fn ToastFrame<'a>(props: &mut ToastFrameProps<'a>) -> impl Into<AnyElement<'a>> {
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             position: Position::Absolute,
             top: dim::NAV_HEIGHT + dim::MIDDLE_HEIGHT,  // Row 28 (footer start)
             left: 0u16,
@@ -272,7 +272,7 @@ pub fn ToastContent<'a>(props: &mut ToastContentProps<'a>) -> impl Into<AnyEleme
     let pad_right = props.padding_right.unwrap_or(1);
 
     element! {
-        View(
+        crate::tui::rendered_controls::ObservedClipView(
             // Size is always 100% - this is enforced, not configurable
             width: 100pct,
             height: 100pct,

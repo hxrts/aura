@@ -1,8 +1,6 @@
 //! Snapshot export for harness observation.
 
-use super::commands::{
-    map_modal, map_screen, map_toast_kind, push_list, visible_home_ids, TuiSemanticInputs,
-};
+use super::commands::{map_modal, map_toast_kind, push_list, visible_home_ids, TuiSemanticInputs};
 use super::config::{
     configured_ui_state_file, configured_ui_state_socket, ensure_private_parent_dir,
     reject_symlink_target, set_private_permissions,
@@ -12,15 +10,15 @@ use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
+    next_projection_revision, InvitationFactKind, OperationState, ProjectionRevision,
+    QuiescenceSnapshot, QuiescenceState, RuntimeFact, SubscriptionHealthSnapshot,
+};
+use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::RuntimeBridge;
 use aura_app::ui::types::StateSnapshot;
-use aura_app::ui_contract::{
-    next_projection_revision, InvitationFactKind, OperationState, ProjectionRevision,
-    QuiescenceSnapshot, QuiescenceState, RuntimeFact, SubscriptionHealthSnapshot,
-};
 use parking_lot::Mutex;
 use std::fs;
 use std::io;
@@ -132,8 +130,7 @@ fn build_authoritative_ui_snapshot(
     let focused_control = if onboarding_active {
         Some(ControlId::OnboardingRoot)
     } else if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
-        let _ = modal_state;
-        Some(ControlId::ModalInput)
+        Some(ControlId::Field(modal_state.focused_field.into()))
     } else if let Some(modal_id) = open_modal {
         Some(ControlId::Modal(modal_id))
     } else {
@@ -152,7 +149,7 @@ fn build_authoritative_ui_snapshot(
     let navigation_ids = Screen::all()
         .iter()
         .map(|candidate| {
-            let id = map_screen(*candidate);
+            let id = ScreenId::from(*candidate);
             ListItemSnapshot {
                 id: screen_item_id(id).to_string(),
                 selected: !onboarding_active && *candidate == state.screen(),
@@ -454,6 +451,8 @@ fn build_authoritative_ui_snapshot(
         revision,
         projection_source_revisions: app_snapshot.projection_source_revisions,
         home_modes: aura_app::ui::contract::observed_home_modes(&app_snapshot.homes),
+        rendered_controls: Vec::new(),
+        rendered_control_frame: aura_app::ui::contract::RenderedControlFrame::Unavailable,
         quiescence: QuiescenceSnapshot::derive(readiness, open_modal, &operations),
         selections,
         lists,
@@ -496,7 +495,7 @@ fn authoritative_screen_id(state: &TuiState) -> ScreenId {
     ) {
         ScreenId::Onboarding
     } else {
-        map_screen(state.screen())
+        ScreenId::from(state.screen())
     }
 }
 
@@ -573,11 +572,11 @@ pub fn publish_loading_ui_snapshot(state: &TuiState) -> Result<(), String> {
     publish_snapshot(&snapshot)
 }
 
-pub fn maybe_export_ui_snapshot(
+pub fn prepare_rendered_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,
     runtime: Option<&dyn RuntimeBridge>,
-) -> Result<(), String> {
+) -> Result<UiSnapshot, String> {
     // Build a canonical snapshot with a stable placeholder revision so identical
     // semantic state deduplicates cleanly instead of generating a fresh revision
     // and flooding the harness bridge on every render.
@@ -591,6 +590,19 @@ pub fn maybe_export_ui_snapshot(
     snapshot.message_drops = runtime
         .map(RuntimeBridge::message_drops)
         .unwrap_or_default();
+    Ok(snapshot)
+}
+
+pub fn publish_rendered_ui_snapshot(snapshot: &UiSnapshot) -> Result<(), String> {
+    publish_snapshot(snapshot)
+}
+
+pub fn maybe_export_ui_snapshot(
+    state: &TuiState,
+    inputs: TuiSemanticInputs<'_>,
+    runtime: Option<&dyn RuntimeBridge>,
+) -> Result<(), String> {
+    let snapshot = prepare_rendered_ui_snapshot(state, inputs, runtime)?;
     publish_snapshot(&snapshot)
 }
 
@@ -773,6 +785,46 @@ mod tests {
                 .map(|message| message.id.as_str())
                 .collect::<Vec<_>>();
             assert_eq!(ids, vec![expected]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod modal_focus_tests {
+    use super::*;
+    use crate::tui::state::views::{CreateInvitationField, CreateInvitationModalState};
+    #[test]
+    fn actual_native_snapshot_retains_each_exact_active_invitation_field() {
+        use aura_app::ui::contract::FieldId;
+        for (focused_field, expected) in [
+            (CreateInvitationField::Nickname, FieldId::Nickname),
+            (
+                CreateInvitationField::ReceiverNickname,
+                FieldId::InvitationReceiverNickname,
+            ),
+            (CreateInvitationField::Message, FieldId::InvitationMessage),
+            (CreateInvitationField::Ttl, FieldId::InvitationTtl),
+        ] {
+            let mut state = TuiState::new();
+            state
+                .modal_queue
+                .enqueue(QueuedModal::ContactsCreate(CreateInvitationModalState {
+                    focused_field,
+                    ..Default::default()
+                }));
+            let app_snapshot = StateSnapshot::default();
+            let snapshot = authoritative_ui_snapshot(
+                &state,
+                TuiSemanticInputs {
+                    app_snapshot: &app_snapshot,
+                    contacts: &[],
+                    settings_devices: &[],
+                    chat_channels: &[],
+                    chat_messages: &[],
+                    bootstrap_candidates: &[],
+                },
+            );
+            assert_eq!(snapshot.focused_control, Some(ControlId::Field(expected)));
         }
     }
 }

@@ -771,7 +771,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
             || state
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .map_or(true, |device| !expected.contains(&device))
+                .is_none_or(|device| !expected.contains(&device))
             || state.participants != expected
             || usize::from(state.total_n) != expected.len()
             || state.threshold_k != self.owner.response_policy()?.required()
@@ -1063,7 +1063,7 @@ impl AuraEffectSystem {
             || original
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .map_or(true, |device| !expected.contains(&device))
+                .is_none_or(|device| !expected.contains(&device))
             || !original.accepted_participants.is_empty()
             || original.is_committed
             || original.terminal_outcome.is_some()
@@ -1811,7 +1811,7 @@ impl AuraEffectSystem {
             || original
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .map_or(true, |device| !expected.contains(&device))
+                .is_none_or(|device| !expected.contains(&device))
             || original.terminal_outcome.is_some()
             || !original.accepted_participants.is_empty()
         {
@@ -2098,7 +2098,7 @@ impl AuraEffectSystem {
             || original
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .map_or(true, |device| !participants.contains(&device))
+                .is_none_or(|device| !participants.contains(&device))
             || !original.accepted_participants.is_empty()
             || original.is_committed
         {

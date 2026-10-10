@@ -145,7 +145,17 @@ pub fn UiCard(
 }
 
 #[component]
-pub fn UiCardBody(id: Option<String>, extra_class: Option<String>, children: Element) -> Element {
+pub fn UiCardBody(
+    id: Option<String>,
+    #[props(default)] control_id: Option<ControlId>,
+    extra_class: Option<String>,
+    children: Element,
+) -> Element {
+    let mounted = crate::rendered_control::use_optional_rendered_control(control_id);
+    let id = control_id
+        .and_then(ControlId::web_dom_id)
+        .map(str::to_owned)
+        .or(id);
     let class = match extra_class {
         Some(extra_class) if !extra_class.is_empty() => {
             format!("flex flex-1 min-h-0 min-w-0 flex-col {extra_class}")
@@ -156,6 +166,7 @@ pub fn UiCardBody(id: Option<String>, extra_class: Option<String>, children: Ele
     rsx! {
         div {
             id,
+            onmounted: move |event| mounted.call(event),
             class: "{class}",
             {children}
         }
@@ -184,11 +195,17 @@ pub fn UiCardFooter(extra_class: Option<String>, children: Element) -> Element {
 #[component]
 pub fn UiButton(
     id: Option<String>,
+    #[props(default)] control_id: Option<ControlId>,
     label: String,
     variant: ButtonVariant,
     width_class: Option<String>,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let mounted = crate::rendered_control::use_optional_rendered_control(control_id);
+    let id = control_id
+        .and_then(ControlId::web_dom_id)
+        .map(str::to_owned)
+        .or(id);
     let class = match width_class {
         Some(width_class) if !width_class.is_empty() => {
             format!("{} {}", ui_button_class(variant), width_class)
@@ -200,6 +217,7 @@ pub fn UiButton(
         button {
             r#type: "button",
             id,
+            onmounted: move |event| mounted.call(event),
             class: "{class}",
             onclick: move |evt| onclick.call(evt),
             "{label}"
@@ -210,11 +228,17 @@ pub fn UiButton(
 #[component]
 pub fn UiListButton(
     id: Option<String>,
+    #[props(default)] control_id: Option<ControlId>,
     label: String,
     active: bool,
     extra_class: Option<String>,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let mounted = crate::rendered_control::use_optional_rendered_control(control_id);
+    let id = control_id
+        .and_then(ControlId::web_dom_id)
+        .map(str::to_owned)
+        .or(id);
     let base_class = if active {
         "inline-flex h-9 w-full items-center justify-start rounded-sm bg-accent pl-4 text-left text-sm font-medium leading-none text-foreground"
     } else {
@@ -229,6 +253,7 @@ pub fn UiListButton(
         button {
             r#type: "button",
             id,
+            onmounted: move |event| mounted.call(event),
             aria_pressed: Some(active),
             class: "{class}",
             onclick: move |evt| onclick.call(evt),
@@ -276,6 +301,8 @@ pub fn UiModal(
     #[props(default)] on_toggle_selection: Option<EventHandler<usize>>,
     #[props(default)] on_footer_action: Option<EventHandler<usize>>,
 ) -> Element {
+    let modal_mounted =
+        crate::rendered_control::use_rendered_control(ControlId::Modal(modal.modal_id));
     let mut open = use_signal(|| Some(true));
     let modal_dom_id = modal.modal_id.web_dom_id().to_string();
     let description_id = format!("{modal_dom_id}-description");
@@ -283,6 +310,7 @@ pub fn UiModal(
     rsx! {
         LbDialogRoot {
             id: Some(modal_dom_id),
+            attributes: vec![dioxus::events::onmounted(move |event: MountedEvent| modal_mounted.call(event))],
             open,
             on_open_change: move |is_open| {
                 open.set(Some(is_open));
@@ -379,12 +407,12 @@ pub fn UiModal(
                                 div {
                                     class: "space-y-2",
                                     label {
-                                        r#for: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).required_dom_id(\"modal input field identifier must be defined\")}",
+                                        r#for: "{input_view.field_id.web_dom_id().required_dom_id(\"modal input field identifier must be defined\")}",
                                         class: "text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
                                         "{input_view.label}"
                                     }
-                                    input {
-                                        id: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).required_dom_id(\"modal input field identifier must be defined\")}",
+                                    crate::rendered_control::RenderedInput {
+                                        control_id: ControlId::Field(input_view.field_id),
                                         class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
                                         autocomplete: "off",
                                         autofocus: input_index == 0,
@@ -471,10 +499,7 @@ pub fn UiModal(
                     class: "bg-card px-4 pt-4 pb-3 border-t border-border flex items-center justify-end gap-2",
                         for (index, action) in modal.footer_actions.clone().into_iter().enumerate() {
                             UiButton {
-                                id: action
-                                    .control_id
-                                    .and_then(ControlId::web_dom_id)
-                                    .map(str::to_string),
+                                control_id: action.control_id,
                                 label: action.label,
                                 variant: ButtonVariant::Secondary,
                                 width_class: None,
@@ -505,12 +530,7 @@ pub fn UiModal(
                             }
                         }
                         UiButton {
-                            id: Some(
-                                ControlId::ModalCancelButton
-                                    .web_dom_id()
-                                    .required_dom_id("ControlId::ModalCancelButton must define a web DOM id")
-                                    .to_string(),
-                            ),
+                            control_id: Some(ControlId::ModalCancelButton),
                             label: modal.cancel_label.clone(),
                             variant: ButtonVariant::Secondary,
                             width_class: None,
@@ -518,12 +538,7 @@ pub fn UiModal(
                         }
                         if modal.show_confirm {
                             UiButton {
-                                id: Some(
-                                    ControlId::ModalConfirmButton
-                                    .web_dom_id()
-                                    .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
-                                        .to_string(),
-                                ),
+                                control_id: Some(ControlId::ModalConfirmButton),
                                 label: modal.enter_label,
                                 variant: ButtonVariant::Primary,
                                 width_class: None,
@@ -555,6 +570,7 @@ pub fn UiDeviceEnrollmentModal(
     on_copy: EventHandler<()>,
     on_primary: EventHandler<()>,
 ) -> Element {
+    let modal_mounted = crate::rendered_control::use_rendered_control(ControlId::Modal(modal_id));
     let mut open = use_signal(|| Some(true));
     let status_label = if has_failed {
         "Failed"
@@ -583,6 +599,7 @@ pub fn UiDeviceEnrollmentModal(
     rsx! {
         LbDialogRoot {
             id: Some(modal_id.web_dom_id().to_string()),
+            attributes: vec![dioxus::events::onmounted(move |event: MountedEvent| modal_mounted.call(event))],
             open,
             on_open_change: move |is_open| {
                 open.set(Some(is_open));
@@ -690,14 +707,7 @@ pub fn UiDeviceEnrollmentModal(
                     div {
                         class: "flex items-center gap-2",
                         UiButton {
-                            id: Some(
-                                ControlId::DeviceEnrollmentCancelButton
-                                    .web_dom_id()
-                                    .required_dom_id(
-                                        "ControlId::DeviceEnrollmentCancelButton must define a web DOM id",
-                                    )
-                                    .to_string(),
-                            ),
+                            control_id: Some(ControlId::DeviceEnrollmentCancelButton),
                             label: if is_complete || has_failed {
                                 "Close".to_string()
                             } else {
@@ -708,12 +718,7 @@ pub fn UiDeviceEnrollmentModal(
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
-                            id: Some(
-                                ControlId::ModalCopyButton
-                                    .web_dom_id()
-                                    .required_dom_id("ControlId::ModalCopyButton must define a web DOM id")
-                                    .to_string(),
-                            ),
+                            control_id: Some(ControlId::ModalCopyButton),
                             label: if copied {
                                 "Copied".to_string()
                             } else {
@@ -724,14 +729,7 @@ pub fn UiDeviceEnrollmentModal(
                             onclick: move |_| on_copy.call(()),
                         }
                         UiButton {
-                            id: Some(
-                                ControlId::DeviceEnrollmentPrimaryButton
-                                    .web_dom_id()
-                                    .required_dom_id(
-                                        "ControlId::DeviceEnrollmentPrimaryButton must define a web DOM id",
-                                    )
-                                    .to_string(),
-                            ),
+                            control_id: Some(ControlId::DeviceEnrollmentPrimaryButton),
                             label: primary_label,
                             variant: ButtonVariant::Primary,
                             width_class: Some("w-[9rem]".to_string()),
@@ -756,6 +754,7 @@ pub fn UiAuthorityPickerModal(
     on_select: EventHandler<usize>,
     on_confirm: EventHandler<()>,
 ) -> Element {
+    let modal_mounted = crate::rendered_control::use_rendered_control(ControlId::Modal(modal_id));
     let mut open = use_signal(|| Some(true));
     let authority_count = authorities.len();
     let selected_authority = authorities.iter().find(|authority| authority.is_selected);
@@ -767,6 +766,7 @@ pub fn UiAuthorityPickerModal(
     rsx! {
         LbDialogRoot {
             id: Some(modal_id.web_dom_id().to_string()),
+            attributes: vec![dioxus::events::onmounted(move |event: MountedEvent| modal_mounted.call(event))],
             open,
             on_open_change: move |is_open| {
                 open.set(Some(is_open));
@@ -856,7 +856,8 @@ pub fn UiAuthorityPickerModal(
                                 "Stored Authorities"
                             }
                         }
-                        div {
+                        crate::rendered_control::RenderedRegion {
+                            control_id: ControlId::List(ListId::Authorities),
                             class: "max-h-[18rem] overflow-y-auto p-2 space-y-2",
                             if authorities.is_empty() {
                                 div {
@@ -922,28 +923,14 @@ pub fn UiAuthorityPickerModal(
                     div {
                         class: "flex items-center gap-2",
                         UiButton {
-                            id: Some(
-                                ControlId::AuthorityPickerCancelButton
-                                    .web_dom_id()
-                                    .required_dom_id(
-                                        "ControlId::AuthorityPickerCancelButton must define a web DOM id",
-                                    )
-                                    .to_string(),
-                            ),
+                            control_id: Some(ControlId::AuthorityPickerCancelButton),
                             label: "Cancel".to_string(),
                             variant: ButtonVariant::Secondary,
                             width_class: None,
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
-                            id: Some(
-                                ControlId::AuthorityPickerConfirmButton
-                                    .web_dom_id()
-                                    .required_dom_id(
-                                        "ControlId::AuthorityPickerConfirmButton must define a web DOM id",
-                                    )
-                                    .to_string(),
-                            ),
+                            control_id: Some(ControlId::AuthorityPickerConfirmButton),
                             label: "Switch".to_string(),
                             variant: ButtonVariant::Primary,
                             width_class: None,
