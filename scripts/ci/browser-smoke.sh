@@ -20,16 +20,24 @@ web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
 run_dx_build() {
   local attempt=1
   local max_attempts=2
+  local status attempt_log attempt_dir
+  attempt_dir=$(mktemp -d "$repo_root/artifacts/harness/browser/dx-build.XXXXXXXX")
 
   while true; do
     mkdir -p \
       "$repo_root/target/dx/aura-web/release/web/public/assets" \
       "$repo_root/target/dx/aura-web/release/web/public/fonts"
-    if NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness >/dev/null; then
+    attempt_log="$attempt_dir/attempt-$attempt.log"
+    if NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness >"$attempt_log" 2>&1; then
+      cat "$attempt_log"
       return 0
+    else
+      status=$?
     fi
+    echo "[browser-smoke] dx attempt $attempt failed with status $status; diagnostics: $attempt_log" >&2
+    cat "$attempt_log" >&2
     if [ "$attempt" -ge "$max_attempts" ]; then
-      return 1
+      return "$status"
     fi
     echo "[browser-smoke] dx build failed; recreating output directories and retrying once" >&2
     attempt=$((attempt + 1))

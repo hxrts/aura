@@ -12,6 +12,11 @@ in src/cfg.rs and src/lib.rs. It contains no Aura types or workflow behavior.
 Hydration and external asset mutation explicitly withhold this commit contract.
 Cargo and generated Cargo.nix must resolve this same checked-in source.
 
+The archive's original src/js/hash.txt is retained alongside eval.js. The
+upstream build script uses this witness to validate the unchanged TypeScript
+bindings without regenerating JavaScript. A narrow ignore exception keeps it
+in clean checkouts despite the repository's general text-file ignore rule.
+
 The normalized package manifest has an empty local workspace boundary so direct
 Cargo tooling does not discover an enclosing Aura checkout from nested worktrees.
 This packaging change does not alter the upstream dependency or feature contract.

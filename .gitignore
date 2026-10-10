@@ -61,6 +61,7 @@ logs/
 *.tmp
 *.temp
 *.txt
+!/vendor/dioxus-web-0.7.4/src/js/hash.txt
 !scripts/verify/kani-consensus-inventory.txt
 work/
 ext/

@@ -87,3 +87,34 @@ for script in browser-smoke web-matrix; do
   [[ $(cat "$fixture/target/aura-web-tools-ci/sentinel") == retained ]]
   echo "$script complete owned tool/harness/cache fixtures passed"
 done
+
+# Preserve actual compiler diagnostics and final status across the existing
+# two-attempt asset-directory recovery; never run the scenario after failure.
+cat > "$fixture/scripts/web/dx.sh" <<'DX'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $AURA_BUILD_BUDGET_HELD == "$FIXTURE_ROOT" ]] || exit 99
+attempt=0
+[[ ! -f "$FIXTURE_ROOT/dx-attempt" ]] || attempt=$(cat "$FIXTURE_ROOT/dx-attempt")
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" > "$FIXTURE_ROOT/dx-attempt"
+printf 'compiler stdout attempt%s\n' "$attempt"
+printf 'compiler stderr attempt%s\n' "$attempt" >&2
+[[ "$attempt" != 1 ]] || exit 17
+exit "$DX_SECOND_RESULT"
+DX
+for second_result in 23 0; do
+  rm -f "$fixture/dx-attempt" "$fixture/owned-tools"
+  status=0
+  DX_SECOND_RESULT="$second_result" bash "$fixture/scripts/ci/browser-smoke.sh" > "$fixture/dx-case.log" 2>&1 || status=$?
+  [[ "$status" == "$second_result" && $(cat "$fixture/dx-attempt") == 2 ]]
+  for attempt in 1 2; do
+    for stream in stdout stderr; do
+      rg -Fxq "compiler $stream attempt$attempt" "$fixture/artifacts/harness/browser/ci-browser.log"
+    done
+  done
+  expected_cargo_calls=1
+  [[ "$second_result" != 0 ]] || expected_cargo_calls=2
+  [[ $(rg -c '^cargo$' "$fixture/owned-tools") == "$expected_cargo_calls" ]]
+  echo "browser-smoke retained dx diagnostics/final status $second_result fixtures passed"
+done
