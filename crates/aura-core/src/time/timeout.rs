@@ -1133,22 +1133,30 @@ where
     });
     let deadline =
         Box::pin(time.wait_until_physical_deadline(WindowPosition::new(budget.deadline_at_ms())));
-    match futures::future::select(deadline, observation).await {
+    let witness = match futures::future::select(deadline, observation).await {
         Either::Left((witness, observation)) => {
             drop(observation);
-            expire_witnessed_deadline(
-                budget,
-                witness
-                    .map_err(time_error)
-                    .map_err(TimeoutRunError::Timeout)?,
-            )
-            .map_err(TimeoutRunError::Timeout)
+            witness
         }
-        Either::Right((result, deadline)) => {
-            drop(deadline);
-            result
+        Either::Right((result, mut deadline)) => {
+            // Observation can make the original endpoint ready in its own poll.
+            // Preserve deadline priority before releasing a successful result.
+            match futures::poll!(deadline.as_mut()) {
+                std::task::Poll::Ready(witness) => {
+                    drop(result);
+                    witness
+                }
+                std::task::Poll::Pending => return result,
+            }
         }
-    }
+    };
+    expire_witnessed_deadline(
+        budget,
+        witness
+            .map_err(time_error)
+            .map_err(TimeoutRunError::Timeout)?,
+    )
+    .map_err(TimeoutRunError::Timeout)
 }
 
 /// Execute under a deadline whose owner acknowledges every observation before
@@ -1712,6 +1720,76 @@ mod tests {
         assert!(!published.get());
         assert!(budget.clock.observation_gate.try_lock().is_some());
     }
+    #[tokio::test]
+    async fn required_terminal_ack_prefers_endpoint_ready_during_checkpoint_over_earlier_postread()
+    {
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        post_release.send(physical_time(350)).unwrap();
+        let budget = terminal_test_budget();
+        read.send(physical_time(350)).unwrap();
+        let published = std::cell::Cell::new(false);
+        let result = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async move {
+                endpoint.send(Ok(physical_time(500))).unwrap();
+                Ok(())
+            },
+            || published.set(true),
+        )
+        .await;
+        assert!(
+            matches!(
+                result,
+                Err(TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    ..
+                })
+            ),
+            "result={result:?}, published={}, original_deadline=500",
+            published.get()
+        );
+        assert!(!published.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+    #[tokio::test]
+    async fn required_terminal_ack_retains_timer_failure_ready_during_checkpoint() {
+        use std::error::Error;
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let (post_release, post_read) = futures::channel::oneshot::channel();
+        *clock.post_read.lock() = Some(post_read);
+        post_release.send(physical_time(350)).unwrap();
+        read.send(physical_time(350)).unwrap();
+        let budget = terminal_test_budget();
+        let published = std::cell::Cell::new(false);
+        let error = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async move {
+                endpoint
+                    .send(Err(TimeError::ProviderFailure {
+                        operation: crate::effects::time::TimeProviderOperation::WaitTimer,
+                        source: Some(Arc::new(NativeTerminalTimerFailure)),
+                    }))
+                    .unwrap();
+                Ok(())
+            },
+            || published.set(true),
+        )
+        .await
+        .expect_err("same-poll selected timer fault cannot publish");
+        assert!(error
+            .source()
+            .and_then(|cause| cause.source())
+            .and_then(|cause| cause.source())
+            .is_some_and(|cause| cause.is::<NativeTerminalTimerFailure>()));
+        assert!(!published.get());
+        assert!(budget.remaining_at(&physical_time(350)).is_ok());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
     #[tokio::test]
     async fn required_terminal_ack_bounds_hung_postcheckpoint_read() {
         let (clock, read, endpoint) = TerminalObservationClock::controlled();
