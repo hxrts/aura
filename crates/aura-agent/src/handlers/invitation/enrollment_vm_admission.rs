@@ -2901,7 +2901,10 @@ mod committed_receipt_tests {
                     .await
                     .unwrap();
                 let manifest = selected.manifest();
-                assert_eq!(manifest.version, 2);
+                assert_eq!(
+                    manifest.version,
+                    aura_invitation::enrollment_manifest::EnrollmentTrustManifest::CURRENT_VERSION
+                );
                 assert_eq!(
                     aura_invitation::shareable::ShareableInvitation::from_code(
                         &second.enrollment_code

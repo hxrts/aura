@@ -4596,6 +4596,32 @@ async fn shareable_invitation_signed_envelope_binds_transport_metadata() {
     assert!(!verified);
 }
 
+async fn import_storage_snapshot(effects: &AuraEffectSystem) -> Vec<(String, Option<Vec<u8>>)> {
+    let mut keys = effects.list_keys(None).await.unwrap();
+    keys.sort();
+    let mut snapshot = Vec::new();
+    for key in keys {
+        let value = effects.retrieve(&key).await.unwrap();
+        snapshot.push((key, value));
+    }
+    snapshot
+}
+
+fn import_verification_cause(
+    failure: &AgentError,
+) -> &aura_invitation::shareable::ImportedInvitationVerificationError {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(failure);
+    while let Some(error) = cause {
+        if let Some(original) =
+            error.downcast_ref::<aura_invitation::shareable::ImportedInvitationVerificationError>()
+        {
+            return original;
+        }
+        cause = error.source();
+    }
+    panic!("missing concrete import verification cause: {failure:?}");
+}
+
 #[tokio::test]
 async fn production_import_rejects_unsigned_shareable_invitation() {
     let authority = create_test_authority(241);
@@ -4621,11 +4647,22 @@ async fn production_import_rejects_unsigned_shareable_invitation() {
     };
     let code = shareable.to_code().unwrap();
 
+    let before_storage = import_storage_snapshot(&effects).await;
     let err = handler
         .import_invitation_code(&effects, &code)
         .await
         .expect_err("production import must reject unsigned codes");
-    assert!(err.to_string().contains("missing sender proof"));
+    assert!(matches!(
+        import_verification_cause(&err),
+        aura_invitation::shareable::ImportedInvitationVerificationError::Code(
+            ShareableInvitationError::MissingSenderProof
+        )
+    ));
+    let after_storage = import_storage_snapshot(&effects).await;
+    assert_eq!(
+        after_storage, before_storage,
+        "rejected import must not publish storage state"
+    );
 }
 
 #[tokio::test]
@@ -4813,13 +4850,21 @@ async fn production_import_accepts_signed_self_certified_opaque_sender() {
     parts[2] = &tampered_payload;
     let tampered_code = parts.join(":");
 
+    let before_storage = import_storage_snapshot(&effects).await;
     let err = handler
         .import_invitation_code(&effects, &tampered_code)
         .await
         .expect_err("tampered sender id must invalidate the signed proof");
-    assert!(
-        err.to_string().contains("sender proof is invalid"),
-        "unexpected tampered sender error: {err}"
+    assert!(matches!(
+        import_verification_cause(&err),
+        aura_invitation::shareable::ImportedInvitationVerificationError::Code(
+            ShareableInvitationError::InvalidSenderProof
+        )
+    ));
+    let after_storage = import_storage_snapshot(&effects).await;
+    assert_eq!(
+        after_storage, before_storage,
+        "rejected import must not publish storage state"
     );
 
     let imported = handler
@@ -5128,11 +5173,22 @@ async fn production_import_rejects_expired_signed_invitation_code() {
         })
         .unwrap();
 
+    let before_storage = import_storage_snapshot(&effects).await;
     let err = handler
         .import_invitation_code(&effects, &code)
         .await
         .expect_err("expired signed invite code must be rejected");
-    assert!(err.to_string().contains("invite code expired"));
+    assert!(matches!(
+        import_verification_cause(&err),
+        aura_invitation::shareable::ImportedInvitationVerificationError::Code(
+            ShareableInvitationError::Expired
+        )
+    ));
+    let after_storage = import_storage_snapshot(&effects).await;
+    assert_eq!(
+        after_storage, before_storage,
+        "rejected import must not publish storage state"
+    );
 }
 
 #[tokio::test]
@@ -5189,11 +5245,22 @@ async fn production_import_rejects_tampered_signed_invitation_type() {
     parts[2] = &tampered_payload;
     let tampered_code = parts.join(":");
 
+    let before_storage = import_storage_snapshot(&effects).await;
     let err = handler
         .import_invitation_code(&effects, &tampered_code)
         .await
         .expect_err("tampered signed invite type must be rejected");
-    assert!(err.to_string().contains("sender proof is invalid"));
+    assert!(matches!(
+        import_verification_cause(&err),
+        aura_invitation::shareable::ImportedInvitationVerificationError::Code(
+            ShareableInvitationError::InvalidSenderProof
+        )
+    ));
+    let after_storage = import_storage_snapshot(&effects).await;
+    assert_eq!(
+        after_storage, before_storage,
+        "rejected import must not publish storage state"
+    );
 }
 
 #[tokio::test]
@@ -5254,11 +5321,22 @@ async fn production_import_rejects_signed_channel_replay_against_another_context
     parts[2] = &tampered_payload;
     let tampered_code = parts.join(":");
 
+    let before_storage = import_storage_snapshot(&effects).await;
     let err = handler
         .import_invitation_code(&effects, &tampered_code)
         .await
         .expect_err("replayed channel invite context must be rejected");
-    assert!(err.to_string().contains("sender proof is invalid"));
+    assert!(matches!(
+        import_verification_cause(&err),
+        aura_invitation::shareable::ImportedInvitationVerificationError::Code(
+            ShareableInvitationError::InvalidSenderProof
+        )
+    ));
+    let after_storage = import_storage_snapshot(&effects).await;
+    assert_eq!(
+        after_storage, before_storage,
+        "rejected import must not publish storage state"
+    );
 }
 
 #[test]

@@ -226,6 +226,8 @@ impl EnrollmentTrustManifest {
         }
         Ok(&self.final_inventory)
     }
+    /// Current signed enrollment manifest schema.
+    pub const CURRENT_VERSION: u16 = 3;
     pub const MAX_BYTES: usize = 1_048_576;
     pub const MAX_PARENTS: usize = 4096;
     /// Maximum canonical operations in an enrollment baseline.
@@ -233,7 +235,7 @@ impl EnrollmentTrustManifest {
     pub const MAX_PARTICIPANTS: usize = 1024;
 
     pub fn validate_shape(&self) -> Result<(), EnrollmentManifestError> {
-        if self.version != 3
+        if self.version != Self::CURRENT_VERSION
             || self.parents.is_empty()
             || self.parents.len() > Self::MAX_PARENTS
             || self.starting_epoch > self.final_epoch
@@ -517,7 +519,7 @@ mod tests {
     fn manifest(verifier: Vec<u8>) -> EnrollmentTrustManifest {
         let device = DeviceId::new_from_entropy([91; 32]);
         EnrollmentTrustManifest {
-            version: 3,
+            version: EnrollmentTrustManifest::CURRENT_VERSION,
             subject: AuthorityId::new_from_entropy([92; 32]),
             initiator_device: device,
             invitee_authority: AuthorityId::new_from_entropy([93; 32]),

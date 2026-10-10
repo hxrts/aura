@@ -343,7 +343,7 @@ impl AgentRuntimeBridge {
         )
         .map_err(|e| IssueError::at(Stage::PendingConfigRead, e))?;
         let manifest = aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
-            version: 3,
+            version: aura_invitation::enrollment_manifest::EnrollmentTrustManifest::CURRENT_VERSION,
             subject: authority_id,
             initiator_device: current_device_id,
             invitee_authority: invitee_authority_id,
