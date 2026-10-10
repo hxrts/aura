@@ -166,49 +166,22 @@ where
 #[cfg(test)]
 mod shutdown_window_tests {
     use super::*;
-    use aura_core::{effects::time::TimeError, PhysicalTime};
-    use std::sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    };
-
-    struct ControlledShutdownClock {
-        now: Arc<AtomicU64>,
-        last_sleep: AtomicU64,
-    }
-
-    #[async_trait::async_trait]
-    impl PhysicalTimeEffects for ControlledShutdownClock {
-        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
-            Ok(PhysicalTime {
-                ts_ms: self.now.load(Ordering::SeqCst),
-                uncertainty: None,
-            })
-        }
-        async fn sleep_ms(&self, duration: u64) -> Result<(), TimeError> {
-            self.last_sleep.store(duration, Ordering::SeqCst);
-            self.now.fetch_add(duration, Ordering::SeqCst);
-            Ok(())
-        }
-    }
+    use aura_testkit::time::ManualPhysicalClock;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn bootstrap_exit_and_task_drain_share_original_shutdown_endpoint() {
-        let now = Arc::new(AtomicU64::new(1000));
-        let time = ControlledShutdownClock {
-            now: now.clone(),
-            last_sleep: AtomicU64::new(0),
-        };
+        let time = Arc::new(ManualPhysicalClock::new(1000));
         // Explicit positive test-only fixture owns the actual effect provider
         // and immutable deadline; both phases execute the production run method.
         let start = time.physical_time().await.unwrap();
         let window = TerminalShutdownWindow {
-            time,
+            time: time.clone(),
             budget: TimeoutBudget::from_start_and_timeout(&start, Duration::from_secs(5)).unwrap(),
         };
         let exit = window
             .run(|| async {
-                now.store(5000, Ordering::SeqCst);
+                time.set_time(5000);
                 Ok(())
             })
             .await;
@@ -216,40 +189,36 @@ mod shutdown_window_tests {
             matches!(exit, Ok(())),
             "fullscreen completion still lies in original window"
         );
-        let result = window
-            .run(|| futures::future::pending::<Result<(), std::io::Error>>())
-            .await;
-        let source = result.expect_err("original endpoint expires");
+        let drainage = window.run(|| futures::future::pending::<Result<(), std::io::Error>>());
+        futures::pin_mut!(drainage);
+        assert!(futures::poll!(drainage.as_mut()).is_pending());
+        assert_eq!(time.now_ms(), 5000);
+        time.advance(1000);
+        let source = drainage.await.expect_err("original endpoint expires");
         assert_eq!(source.kind(), std::io::ErrorKind::TimedOut);
         assert!(matches!(
             source
                 .get_ref()
                 .and_then(|source| source.downcast_ref::<aura_core::TimeoutBudgetError>()),
-            Some(aura_core::TimeoutBudgetError::DeadlineExceeded { .. })
+            Some(aura_core::TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 6000,
+                observed_at_ms: 6000,
+            })
         ));
-        assert_eq!(
-            window.time.last_sleep.load(Ordering::SeqCst),
-            1000,
-            "task drainage receives only the original remaining second"
-        );
-        assert_eq!(now.load(Ordering::SeqCst), 6000);
+        assert_eq!(time.now_ms(), 6000);
     }
 
     #[tokio::test]
     async fn shutdown_clock_rollback_retains_native_budget_cause_without_timeout_classification() {
-        let now = Arc::new(AtomicU64::new(1000));
-        let time = ControlledShutdownClock {
-            now: now.clone(),
-            last_sleep: AtomicU64::new(0),
-        };
+        let time = Arc::new(ManualPhysicalClock::new(1000));
         let start = time.physical_time().await.unwrap();
         let window = TerminalShutdownWindow {
-            time,
+            time: time.clone(),
             budget: TimeoutBudget::from_start_and_timeout(&start, Duration::from_secs(5)).unwrap(),
         };
         let first = window.run(|| async { Ok(()) }).await;
         assert!(first.is_ok());
-        now.store(999, Ordering::SeqCst);
+        time.set_time(999);
         let failure = window.run(|| async { Ok(()) }).await.unwrap_err();
         assert_eq!(failure.kind(), std::io::ErrorKind::Other);
         assert!(matches!(
@@ -258,7 +227,7 @@ mod shutdown_window_tests {
                 .and_then(|source| source.downcast_ref::<aura_core::TimeoutBudgetError>()),
             Some(aura_core::TimeoutBudgetError::ClockRollback { .. })
         ));
-        assert_eq!(window.time.last_sleep.load(Ordering::SeqCst), 0);
+        assert_eq!(time.now_ms(), 999);
     }
 
     #[tokio::test]
@@ -266,23 +235,21 @@ mod shutdown_window_tests {
         #[derive(Debug, thiserror::Error)]
         #[error("actual harness sender clearing fault")]
         struct NativeClearFailure;
-        let now = Arc::new(AtomicU64::new(1000));
-        let time = ControlledShutdownClock {
-            now: now.clone(),
-            last_sleep: AtomicU64::new(0),
-        };
+        let time = Arc::new(ManualPhysicalClock::new(1000));
         let start = time.physical_time().await.unwrap();
         let window = TerminalShutdownWindow {
-            time,
+            time: time.clone(),
             budget: TimeoutBudget::from_start_and_timeout(&start, Duration::from_secs(5)).unwrap(),
         };
-        let failure = run_terminal_shutdown_cleanup(
+        let cleanup = run_terminal_shutdown_cleanup(
             &window,
             || async { Err(std::io::Error::other(NativeClearFailure)) },
             || futures::future::pending::<()>(),
-        )
-        .await
-        .unwrap_err();
+        );
+        futures::pin_mut!(cleanup);
+        assert!(futures::poll!(cleanup.as_mut()).is_pending());
+        time.advance(5000);
+        let failure = cleanup.await.unwrap_err();
         let retained = failure
             .get_ref()
             .and_then(|source| source.downcast_ref::<ShutdownCleanupFailure>())
@@ -297,8 +264,11 @@ mod shutdown_window_tests {
                 .drain
                 .get_ref()
                 .and_then(|source| source.downcast_ref::<aura_core::TimeoutBudgetError>()),
-            Some(aura_core::TimeoutBudgetError::DeadlineExceeded { .. })
+            Some(aura_core::TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 6000,
+                observed_at_ms: 6000,
+            })
         ));
-        assert_eq!(now.load(Ordering::SeqCst), 6000);
+        assert_eq!(time.now_ms(), 6000);
     }
 }
