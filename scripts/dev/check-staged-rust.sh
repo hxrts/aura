@@ -147,5 +147,6 @@ for ((index=0; index<count; index++)); do
 done
 for ((index=0; index<count; index++)); do
   bash "$root/scripts/dev/build-budget.sh" --lane pre-commit -- \
-    cargo check --locked --manifest-path "${manifests[index]}" --package "${packages[index]}" --quiet
+    cargo check --locked --manifest-path "${manifests[index]}" --package "${packages[index]}" \
+      --target-dir "$root/target" --quiet
 done
