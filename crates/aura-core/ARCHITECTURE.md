@@ -314,3 +314,20 @@ only diagnostics. Required source/discovery/execution covers these boundaries.
 `MAX_PROFILE_ALLOCATION_COUNT` is the explicit count bound for original protected
 profile inventory. Its 4096 value bounds arithmetic/data shape, not ownership or
 admission authority. The native style/unit gate enforces its count suffix.
+
+Plain timeout execution and final observation acknowledgment share one bounded
+observation primitive. The original selected-provider deadline bounds observation
+gate acquisition, the initial clock read, operation execution, and the success
+clock read. Deadline arbitration runs first and retains the provider's actual
+`PhysicalTime` witness; losing owned work is dropped before expiration is
+recorded. Plain observations grant neither domain completion nor durable checkpoint
+authority. The checkpointed enrollment executor retains its distinct required
+durability contract; a plain observation cannot replace its acknowledgment.
+
+Initial publication uses `acknowledge_initial_publication_with_timeout_budget`:
+the actual owner-provided publication and readback precede the first physical
+clock read. One original deadline bounds gate acquisition, publication, and
+subsequent selected-provider validation. The helper returns the caller's actual
+acknowledgment only while that window remains valid; it constructs no domain or
+durability proof. Publication failures retain their concrete operation error,
+and cancellation drops the losing work and any unexposed acknowledgment.
