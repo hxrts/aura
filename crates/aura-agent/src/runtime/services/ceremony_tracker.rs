@@ -2243,7 +2243,7 @@ impl CeremonyTracker {
         {
             let canonical = generation.canonical_invitation();
             let crate::handlers::invitation::InvitationType::DeviceEnrollment {
-                setup_binding: Some(binding),
+                setup_binding: binding,
                 ..
             } = &canonical.invitation_type
             else {

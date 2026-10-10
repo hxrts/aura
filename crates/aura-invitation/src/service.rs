@@ -733,9 +733,12 @@ mod tests {
             subject_authority: test_authority(),
         };
         let device = InvitationType::DeviceEnrollment {
-            setup_binding: None,
+            setup_binding: aura_core::invitation::DeviceEnrollmentSetupBinding {
+                nonce: [5; 32],
+                digest: [6; 32],
+            },
             subject_authority: test_authority(),
-            invitee_authority: Some(test_receiver()),
+            invitee_authority: test_receiver(),
             initiator_device_id: aura_core::DeviceId::from_bytes([220; 32]),
             device_id: aura_core::DeviceId::from_bytes([221; 32]),
             nickname_suggestion: None,

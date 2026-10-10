@@ -18,7 +18,6 @@ pub enum ShareableInvitationError {
     MissingSenderProof,
     InvalidSenderProof,
     MissingChannelContext,
-    MissingEnrollmentSetupBinding,
     Expired,
 }
 
@@ -37,9 +36,6 @@ impl std::fmt::Display for ShareableInvitationError {
             Self::InvalidSenderProof => write!(f, "invite code sender proof is invalid"),
             Self::MissingChannelContext => {
                 write!(f, "channel invitation missing authoritative context")
-            }
-            Self::MissingEnrollmentSetupBinding => {
-                write!(f, "legacy enrollment requires a new setup transfer")
             }
             Self::Expired => write!(f, "invite code expired"),
         }
@@ -137,7 +133,7 @@ pub struct ShareableInvitationTranscriptPayload {
     transport: ShareableInvitationTransportMetadata,
 }
 
-/// Untrusted public signing data. It identifies an exact v3 transport transcript
+/// Untrusted public signing data. It identifies an exact v4 transport transcript
 /// without disclosing the new physical device's private pending key package.
 /// Only independently approved native runtime custody may authorize signing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -151,7 +147,7 @@ impl PublicEnrollmentTransportSigningIntent {
     pub fn transport_metadata(&self) -> &ShareableInvitationTransportMetadata {
         &self.payload.transport
     }
-    /// Extract the exact public v3 enrollment transport transcript after size and metadata validation.
+    /// Extract the exact public v4 enrollment transport transcript after size and metadata validation.
     pub fn from_invitation(
         invitation: &ShareableInvitation,
         transport: &ShareableInvitationTransportMetadata,
@@ -193,8 +189,8 @@ impl PublicEnrollmentTransportSigningIntent {
 
 impl SecurityTranscript for PublicEnrollmentTransportSigningIntent {
     type Payload = ShareableInvitationTranscriptPayload;
-    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.enrollment-shareable-code.v3";
-    const SCHEMA_VERSION: u16 = 3;
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.enrollment-shareable-code.v4";
+    const SCHEMA_VERSION: u16 = 4;
     fn transcript_payload(&self) -> Self::Payload {
         self.payload.clone()
     }
@@ -230,31 +226,33 @@ impl SecurityTranscript for ShareableInvitationTranscript<'_> {
     const DOMAIN_SEPARATOR: &'static str = "aura.invitation.shareable-code";
 
     fn transcript_bytes(&self) -> crate::Result<Vec<u8>> {
-        let (domain, version) =
-            if self.invitation.version == ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
-                ("aura.invitation.enrollment-shareable-code.v3", 3)
-            } else {
-                (Self::DOMAIN_SEPARATOR, Self::SCHEMA_VERSION)
-            };
+        let (domain, version) = if matches!(
+            self.invitation.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            ("aura.invitation.enrollment-shareable-code.v4", 4)
+        } else {
+            (Self::DOMAIN_SEPARATOR, Self::SCHEMA_VERSION)
+        };
         crate::encode_transcript(domain, version, &self.transcript_payload())
     }
 
     fn required_transcript_bytes(&self) -> Result<Vec<u8>, crate::RequiredTranscriptEncodingError> {
-        let (domain, version) =
-            if self.invitation.version == ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
-                ("aura.invitation.enrollment-shareable-code.v3", 3)
-            } else {
-                (Self::DOMAIN_SEPARATOR, Self::SCHEMA_VERSION)
-            };
+        let (domain, version) = if matches!(
+            self.invitation.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            ("aura.invitation.enrollment-shareable-code.v4", 4)
+        } else {
+            (Self::DOMAIN_SEPARATOR, Self::SCHEMA_VERSION)
+        };
         crate::encode_transcript_required(domain, version, &self.transcript_payload())
     }
 
     fn transcript_payload(&self) -> Self::Payload {
         let mut invitation_type = self.invitation.invitation_type.clone();
-        if self.invitation.version == ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
-            if let InvitationType::DeviceEnrollment { key_package, .. } = &mut invitation_type {
-                *key_package = hash(key_package).to_vec();
-            }
+        if let InvitationType::DeviceEnrollment { key_package, .. } = &mut invitation_type {
+            *key_package = hash(key_package).to_vec();
         }
         ShareableInvitationTranscriptPayload {
             version: self.invitation.version,
@@ -271,7 +269,7 @@ impl SecurityTranscript for ShareableInvitationTranscript<'_> {
 
 impl ShareableInvitation {
     /// Enrollment uses the public commitment transcript rather than private share bytes.
-    pub const ENROLLMENT_QUORUM_VERSION: u8 = 3;
+    pub const ENROLLMENT_QUORUM_VERSION: u8 = 4;
 
     pub fn with_enrollment_quorum_transcript(mut self) -> Result<Self, ShareableInvitationError> {
         if !matches!(
@@ -282,19 +280,6 @@ impl ShareableInvitation {
         }
         self.version = Self::ENROLLMENT_QUORUM_VERSION;
         Ok(self)
-    }
-    /// Require the actual device-issued setup binding for enrollment admission.
-    pub fn require_enrollment_setup_binding(&self) -> Result<(), ShareableInvitationError> {
-        if matches!(
-            &self.invitation_type,
-            InvitationType::DeviceEnrollment {
-                setup_binding: None,
-                ..
-            }
-        ) {
-            return Err(ShareableInvitationError::MissingEnrollmentSetupBinding);
-        }
-        Ok(())
     }
     pub const CURRENT_VERSION: u8 = 2;
     pub const PREFIX: &'static str = "aura";
@@ -543,6 +528,17 @@ impl ShareableInvitation {
     }
 
     fn validate_size_limits(&self) -> Result<(), ShareableInvitationError> {
+        let expected_version = if matches!(
+            self.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            Self::ENROLLMENT_QUORUM_VERSION
+        } else {
+            Self::CURRENT_VERSION
+        };
+        if self.version != expected_version {
+            return Err(ShareableInvitationError::UnsupportedVersion(self.version));
+        }
         ensure_len(
             "invitation_id",
             self.invitation_id.as_str().len(),
@@ -704,7 +700,11 @@ fn validate_sender_device_id_segment(
 impl From<&Invitation> for ShareableInvitation {
     fn from(inv: &Invitation) -> Self {
         Self {
-            version: ShareableInvitation::CURRENT_VERSION,
+            version: if matches!(inv.invitation_type, InvitationType::DeviceEnrollment { .. }) {
+                ShareableInvitation::ENROLLMENT_QUORUM_VERSION
+            } else {
+                ShareableInvitation::CURRENT_VERSION
+            },
             invitation_id: inv.invitation_id.clone(),
             sender_id: inv.sender_id,
             context_id: Some(inv.context_id),
@@ -732,7 +732,6 @@ impl ValidatedImportedInvitation {
     ) -> Result<Self, ImportedInvitationVerificationError> {
         let (shareable, proof, transport) =
             ShareableInvitation::from_code_with_proof_and_transport(code)?;
-        shareable.require_enrollment_setup_binding()?;
         let proof = proof.ok_or(ShareableInvitationError::MissingSenderProof)?;
         // This checks code integrity against the key carried in the code.
         // Known-sender identity trust is resolved separately by the importer.
@@ -769,7 +768,7 @@ impl ValidatedImportedInvitation {
         };
         let receiver_id = match &shareable.invitation_type {
             InvitationType::DeviceEnrollment {
-                invitee_authority: Some(invitee),
+                invitee_authority: invitee,
                 ..
             } => *invitee,
             _ => own_id,

@@ -65,16 +65,14 @@ pub enum InvitationType {
     /// This is primarily intended for out-of-band transfer (QR/copy-paste) and
     /// carries the key-share material required for the new device to install.
     DeviceEnrollment {
-        /// Legacy decode may lack this field; it never authorizes a response.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        setup_binding: Option<DeviceEnrollmentSetupBinding>,
+        /// Exact device-issued setup binding carried by current enrollment codes.
+        setup_binding: DeviceEnrollmentSetupBinding,
         /// Account authority being modified
         subject_authority: AuthorityId,
         /// Authority the new device was invited as. The new device may re-import
         /// the code after its runtime switches to `subject_authority`, so the
         /// invited identity is carried in the signed invitation itself.
-        #[serde(default)]
-        invitee_authority: Option<AuthorityId>,
+        invitee_authority: AuthorityId,
         /// Initiator device id (used for routing acceptance back to the right device runtime)
         initiator_device_id: DeviceId,
         /// Device id being enrolled
@@ -224,5 +222,47 @@ mod tests {
             serde_json::from_value::<DeviceEnrollmentSetupBinding>(encoded).unwrap(),
             binding
         );
+    }
+    #[test]
+    fn enrollment_wire_requires_original_setup_and_invitee_fields() {
+        let authority = AuthorityId::new_from_entropy(crate::hash::hash(
+            b"core.invitation.required-enrollment-fields.authority",
+        ));
+        let device = DeviceId::new_from_entropy(crate::hash::hash(
+            b"core.invitation.required-enrollment-fields.device",
+        ));
+        let invitation = InvitationType::DeviceEnrollment {
+            setup_binding: DeviceEnrollmentSetupBinding {
+                nonce: [31; 32],
+                digest: [32; 32],
+            },
+            subject_authority: authority,
+            invitee_authority: authority,
+            initiator_device_id: device,
+            device_id: device,
+            nickname_suggestion: None,
+            ceremony_id: CeremonyId::new("required enrollment wire fields"),
+            pending_epoch: 1,
+            key_package: vec![1],
+            threshold_config: vec![2],
+            public_key_package: vec![3],
+            baseline_tree_ops: vec![],
+        };
+        let encoded = serde_json::to_value(&invitation).unwrap();
+        assert_eq!(
+            serde_json::from_value::<InvitationType>(encoded.clone()).unwrap(),
+            invitation
+        );
+        for required in ["setup_binding", "invitee_authority"] {
+            let mut missing = encoded.clone();
+            missing["DeviceEnrollment"]
+                .as_object_mut()
+                .unwrap()
+                .remove(required);
+            assert!(serde_json::from_value::<InvitationType>(missing).is_err());
+            let mut null = encoded.clone();
+            null["DeviceEnrollment"][required] = serde_json::Value::Null;
+            assert!(serde_json::from_value::<InvitationType>(null).is_err());
+        }
     }
 }

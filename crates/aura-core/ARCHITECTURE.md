@@ -8,6 +8,8 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 These serializable values are observations, not issuance, admission, original
 policy approval or journal-commit evidence. Feature capability policy stays in
 `aura-invitation`; lower-layer admission must retain its independent owner.
+Device enrollment requires the original setup binding and invited authority in
+the canonical schema; omitted or null fields fail decoding.
 
 The AMP error interface includes `RejoinRequiresMembershipEvidence` with exact context,
 channel and participant diagnostics. This typed refusal identifies an

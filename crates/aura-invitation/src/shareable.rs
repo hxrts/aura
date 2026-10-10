@@ -38,12 +38,12 @@ pub fn require_transport_manifest(
         || payload.sender_id != manifest.subject
         || transport.sender_device_id != Some(manifest.initiator_device)
         || *subject_authority != manifest.subject
-        || *invitee_authority != Some(manifest.invitee_authority)
+        || *invitee_authority != manifest.invitee_authority
         || *initiator_device_id != manifest.initiator_device
         || *device_id != manifest.invitee_device
         || *ceremony_id != manifest.ceremony
         || *pending_epoch != manifest.pending_epoch
-        || setup_binding.as_ref() != Some(&manifest.setup)
+        || setup_binding != &manifest.setup
         || key_package.as_slice() != manifest.pending_share_digest.as_slice()
         || hash(public_key_package) != manifest.pending_public_key_package_digest
         || aura_core::Hash32::from_bytes(threshold_config)
@@ -216,12 +216,12 @@ mod enrollment_quorum_transport_tests {
             sender_id: AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.sender-authority")),
             context_id: Some(ContextId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.context"))),
             invitation_type: InvitationType::DeviceEnrollment {
-                setup_binding: Some(crate::enrollment_setup::DeviceEnrollmentSetupBinding {
+                setup_binding: crate::enrollment_setup::DeviceEnrollmentSetupBinding {
                     nonce: [203; 32],
                     digest: [204; 32],
-                }),
+                },
                 subject_authority: AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.sender-authority")),
-                invitee_authority: Some(AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.invitee-authority"))),
+                invitee_authority: AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.invitee-authority")),
                 initiator_device_id: DeviceId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.initiator-device")),
                 device_id: DeviceId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.invitee-device")),
                 nickname_suggestion: Some("Actual next device".into()),
@@ -259,7 +259,7 @@ mod enrollment_quorum_transport_tests {
         assert_eq!(
             message,
             public_intent.required_transcript_bytes().unwrap(),
-            "required public transport encoding preserves exact original v3 bytes"
+            "required public transport encoding preserves exact original v4 bytes"
         );
         assert_eq!(
             message,
@@ -274,16 +274,19 @@ mod enrollment_quorum_transport_tests {
                 .signing_transcript_with_transport(&transport)
                 .required_transcript_bytes()
                 .unwrap(),
-            "required native transport encoding preserves exact original v3 bytes"
+            "required native transport encoding preserves exact original v4 bytes"
         );
-        let mut legacy = invitation.clone();
-        legacy.version = 2;
-        let legacy_transcript = legacy.signing_transcript_with_transport(&transport);
-        assert_eq!(
-            legacy_transcript.transcript_bytes().unwrap(),
-            legacy_transcript.required_transcript_bytes().unwrap(),
-            "required native transport encoding preserves exact legacy bytes"
-        );
+        for obsolete_version in [2, 3] {
+            let mut obsolete = invitation.clone();
+            obsolete.version = obsolete_version;
+            assert!(
+                matches!(obsolete.to_code(), Err(ShareableInvitationError::UnsupportedVersion(found)) if found == obsolete_version)
+            );
+            assert!(
+                PublicEnrollmentTransportSigningIntent::from_invitation(&obsolete, &transport)
+                    .is_err()
+            );
+        }
         let private_payload: Vec<u8> = (0u8..128).collect();
         assert!(!message
             .windows(private_payload.len())

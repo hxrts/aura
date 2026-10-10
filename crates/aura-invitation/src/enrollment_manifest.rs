@@ -51,9 +51,8 @@ pub struct EnrollmentTrustManifest {
     pub starting_commitment: [u8; 32],
     pub parents: Vec<EnrollmentParentVerifier>,
     /// Active exact-node verification inventory, distinct from historical op parents.
-    /// Legacy v1 absence is preserved and cannot authorize a new peer response.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_inventory: Option<Vec<EnrollmentParentVerifier>>,
+    /// Required exact independently authenticated active inventory.
+    pub final_inventory: Vec<EnrollmentParentVerifier>,
     pub final_epoch: u64,
     pub final_commitment: [u8; 32],
     pub pending_epoch: u64,
@@ -67,32 +66,31 @@ pub struct EnrollmentTrustManifest {
 
 impl SecurityTranscript for EnrollmentTrustManifest {
     type Payload = Self;
-    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.enrollment-trust-manifest.v1";
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.enrollment-trust-manifest.v3";
     fn transcript_bytes(&self) -> aura_signature::Result<Vec<u8>> {
-        let domain = if self.version == 2 {
-            "aura.invitation.enrollment-trust-manifest.v2"
-        } else {
-            Self::DOMAIN_SEPARATOR
-        };
-        aura_signature::encode_transcript(domain, self.version, self)
+        aura_signature::encode_transcript(Self::DOMAIN_SEPARATOR, self.version, self)
     }
+
     fn transcript_payload(&self) -> Self {
         self.clone()
     }
     fn required_transcript_bytes(
         &self,
     ) -> Result<Vec<u8>, aura_signature::RequiredTranscriptEncodingError> {
-        let domain = if self.version == 2 {
-            "aura.invitation.enrollment-trust-manifest.v2"
-        } else {
-            Self::DOMAIN_SEPARATOR
-        };
-        aura_signature::encode_transcript_required(domain, self.version, self)
+        aura_signature::encode_transcript_required(Self::DOMAIN_SEPARATOR, self.version, self)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnrollmentManifestError {
+    #[error("enrollment manifest canonical codec failed")]
+    Codec(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("enrollment manifest baseline reduction failed")]
+    Baseline(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("enrollment manifest native proof failed")]
+    NativeProof(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("enrollment verifier transfer encoding failed")]
+    PinEncoding(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("enrollment manifest runtime stage failed")]
     Runtime(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("enrollment initiator verifier must be transferred separately")]
@@ -220,12 +218,13 @@ impl EnrollmentTrustManifest {
         }
         Ok(policy)
     }
-    /// This getter requires the signed v2 field; historical parent tuples are
+    /// This getter requires the current signed inventory; historical parent tuples are
     /// never promoted to an active epoch or substituted for this inventory.
     pub fn final_inventory(&self) -> Result<&[EnrollmentParentVerifier], EnrollmentManifestError> {
-        self.final_inventory
-            .as_deref()
-            .ok_or(EnrollmentManifestError::MissingFinalInventory)
+        if self.final_inventory.is_empty() {
+            return Err(EnrollmentManifestError::MissingFinalInventory);
+        }
+        Ok(&self.final_inventory)
     }
     pub const MAX_BYTES: usize = 1_048_576;
     pub const MAX_PARENTS: usize = 4096;
@@ -234,7 +233,7 @@ impl EnrollmentTrustManifest {
     pub const MAX_PARTICIPANTS: usize = 1024;
 
     pub fn validate_shape(&self) -> Result<(), EnrollmentManifestError> {
-        if !matches!(self.version, 1 | 2)
+        if self.version != 3
             || self.parents.is_empty()
             || self.parents.len() > Self::MAX_PARENTS
             || self.starting_epoch > self.final_epoch
@@ -247,12 +246,8 @@ impl EnrollmentTrustManifest {
         {
             return Err(EnrollmentManifestError::Shape);
         }
-        if (self.version == 1 && self.final_inventory.is_some())
-            || (self.version == 2 && self.final_inventory.is_none())
         {
-            return Err(EnrollmentManifestError::Shape);
-        }
-        if let Some(inventory) = &self.final_inventory {
+            let inventory = &self.final_inventory;
             if inventory.is_empty() || inventory.len() > Self::MAX_PARENTS {
                 return Err(EnrollmentManifestError::Shape);
             }
@@ -285,7 +280,7 @@ impl EnrollmentTrustManifest {
         let mut keys = std::collections::BTreeSet::new();
         for p in &self.parents {
             let node = aura_core::util::serialization::to_vec(&p.signing_node)
-                .map_err(|_| EnrollmentManifestError::Shape)?;
+                .map_err(|source| EnrollmentManifestError::Codec(Box::new(source)))?;
             if !keys.insert((p.epoch, p.commitment, node))
                 || p.epoch < self.starting_epoch
                 || p.epoch > self.final_epoch
@@ -306,7 +301,8 @@ impl EnrollmentTrustManifest {
                 return Err(EnrollmentManifestError::Shape);
             }
         }
-        if let Some(inventory) = &self.final_inventory {
+        {
+            let inventory = &self.final_inventory;
             for active in inventory {
                 match active.mode {
                     SigningMode::SingleSigner => {
@@ -379,79 +375,19 @@ mod tests {
     use aura_core::effects::CryptoCoreEffects;
     use aura_effects::crypto::RealCryptoHandler;
 
-    #[derive(Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct HistoricalManifestV1 {
-        pub version: u16,
-        pub subject: AuthorityId,
-        pub initiator_device: DeviceId,
-        pub invitee_authority: AuthorityId,
-        pub invitee_device: DeviceId,
-        pub setup: DeviceEnrollmentSetupBinding,
-        pub invitation: InvitationId,
-        pub ceremony: CeremonyId,
-        pub expires_at_ms: u64,
-        pub baseline_digest: [u8; 32],
-        pub baseline_count: u32,
-        pub starting_epoch: u64,
-        pub starting_commitment: [u8; 32],
-        pub parents: Vec<EnrollmentParentVerifier>,
-        pub final_epoch: u64,
-        pub final_commitment: [u8; 32],
-        pub pending_epoch: u64,
-        pub pending_share_digest: [u8; 32],
-        pub pending_public_key_package_digest: [u8; 32],
-        /// Public content hash of the exact pending configuration bytes, not key material.
-        pub pending_threshold_config_digest: aura_core::Hash32,
-        /// Included for exact matching; never used as its own trust anchor.
-        pub initiator_confirmation_verifier: Vec<u8>,
-    }
-    #[tokio::test]
-    async fn historical_v1_codec_and_signature_bytes_do_not_upgrade_final_inventory() {
-        let crypto = RealCryptoHandler::for_simulation_seed([114; 32]);
-        let (private, public) = crypto.ed25519_generate_keypair().await.unwrap();
-        let old: HistoricalManifestV1 =
-            serde_json::from_value(serde_json::to_value(manifest(public.clone())).unwrap())
-                .unwrap();
-        let historical_bytes = aura_core::util::serialization::to_vec(&old).unwrap();
-        let decoded: EnrollmentTrustManifest =
-            aura_core::util::serialization::from_slice(&historical_bytes).unwrap();
-        assert!(decoded.final_inventory.is_none());
-        assert!(matches!(
-            decoded.final_inventory(),
-            Err(EnrollmentManifestError::MissingFinalInventory)
-        ));
-        assert_eq!(
-            aura_core::util::serialization::to_vec(&decoded).unwrap(),
-            historical_bytes
-        );
-        let old_transcript = aura_signature::encode_transcript(
-            "aura.invitation.enrollment-trust-manifest.v1",
-            1,
-            &old,
-        )
-        .unwrap();
-        assert_eq!(decoded.transcript_bytes().unwrap(), old_transcript);
-        let signature = crypto
-            .ed25519_sign(&old_transcript, &private)
-            .await
-            .unwrap();
-        decoded
-            .clone()
-            .verify_signature(&crypto, &public, &signature)
-            .await
-            .unwrap();
-        let signed = SignedEnrollmentTrustManifest {
-            manifest: decoded,
-            signature,
-        };
-        let code = signed.encode().unwrap();
-        assert!(code.starts_with("aura-enrollment-manifest:v1:"));
-        assert!(SignedEnrollmentTrustManifest::decode(&code)
-            .unwrap()
-            .manifest
-            .final_inventory()
-            .is_err());
+    #[test]
+    fn missing_final_inventory_and_obsolete_manifest_versions_are_rejected() {
+        let current = manifest(vec![114; 32]);
+        let mut missing = serde_json::to_value(&current).unwrap();
+        missing.as_object_mut().unwrap().remove("final_inventory");
+        assert!(serde_json::from_value::<EnrollmentTrustManifest>(missing).is_err());
+        for version in [1, 2] {
+            let code = format!("aura-enrollment-manifest:v{version}:AA");
+            assert!(SignedEnrollmentTrustManifest::decode(&code).is_err());
+            let mut old = current.clone();
+            old.version = version;
+            assert!(old.validate_shape().is_err());
+        }
     }
 
     #[tokio::test]
@@ -459,7 +395,7 @@ mod tests {
         let crypto = RealCryptoHandler::for_simulation_seed([115; 32]);
         let (private, public) = crypto.ed25519_generate_keypair().await.unwrap();
         let mut current = manifest(public.clone());
-        current.version = 2;
+        current.version = 3;
         let package =
             aura_core::crypto::single_signer::SingleSignerPublicKeyPackage::try_new(public.clone())
                 .unwrap();
@@ -467,7 +403,7 @@ mod tests {
         active.epoch = current.final_epoch;
         active.commitment = current.final_commitment;
         active.public_key_package = package.to_bytes().unwrap();
-        current.final_inventory = Some(vec![active]);
+        current.final_inventory = vec![active];
         let signature = aura_signature::sign_ed25519_transcript(&crypto, &current, &private)
             .await
             .unwrap();
@@ -477,13 +413,13 @@ mod tests {
             .await
             .unwrap();
         let mut changed = current.clone();
-        changed.final_inventory.as_mut().unwrap()[0].public_key_package[0] ^= 1;
+        changed.final_inventory[0].public_key_package[0] ^= 1;
         assert!(changed
             .verify_signature(&crypto, &public, &signature)
             .await
             .is_err());
         let mut promoted = current.clone();
-        promoted.final_inventory = Some(promoted.parents.clone());
+        promoted.final_inventory = promoted.parents.clone();
         assert!(promoted.validate_shape().is_err());
         let old_domain = aura_signature::encode_transcript(
             "aura.invitation.enrollment-trust-manifest.v1",
@@ -503,8 +439,8 @@ mod tests {
             signature,
         };
         let code = signed.encode().unwrap();
-        assert!(code.starts_with("aura-enrollment-manifest:v2:"));
-        let confused = code.replacen(":v2:", ":v1:", 1);
+        assert!(code.starts_with("aura-enrollment-manifest:v3:"));
+        let confused = code.replacen(":v3:", ":v2:", 1);
         assert!(SignedEnrollmentTrustManifest::decode(&confused).is_err());
     }
 
@@ -513,7 +449,7 @@ mod tests {
     // an app-owned transfer pin, authenticated baseline or response lease.
     #[test]
     fn selected_setup_validity_can_only_be_attenuated() {
-        let mut value = manifest(Vec::new());
+        let mut value = manifest(vec![113; 32]);
         let setup = crate::enrollment_setup::DeviceEnrollmentSetupStatement {
             version: 1,
             authority: value.invitee_authority,
@@ -541,9 +477,29 @@ mod tests {
     }
 
     #[test]
-    fn required_manifest_encoding_preserves_legacy_and_current_domain_bytes() {
-        for version in [1, 2] {
-            let mut original = manifest(Vec::new());
+    fn required_manifest_codec_failures_preserve_native_causes() {
+        use std::error::Error;
+        let base64 =
+            SignedEnrollmentTrustManifest::decode("aura-enrollment-manifest:v3:!").unwrap_err();
+        assert!(matches!(base64, EnrollmentManifestError::Codec(_)));
+        assert!(base64.source().unwrap().is::<base64::DecodeError>());
+        let canonical =
+            SignedEnrollmentTrustManifest::decode("aura-enrollment-manifest:v3:AA").unwrap_err();
+        assert!(matches!(canonical, EnrollmentManifestError::Codec(_)));
+        assert!(canonical
+            .source()
+            .unwrap()
+            .is::<aura_core::util::serialization::SerializationError>());
+        let pin = decode_initiator_verifier_transfer("aura-initiator-verifier:v1:!").unwrap_err();
+        assert!(matches!(pin, EnrollmentManifestError::PinEncoding(_)));
+        assert!(pin.source().unwrap().is::<base64::DecodeError>());
+    }
+
+    #[test]
+    fn required_manifest_encoding_preserves_current_domain_bytes() {
+        let version = 3;
+        {
+            let mut original = manifest(vec![113; 32]);
             original.version = version;
             let diagnostic = original
                 .transcript_bytes()
@@ -561,7 +517,7 @@ mod tests {
     fn manifest(verifier: Vec<u8>) -> EnrollmentTrustManifest {
         let device = DeviceId::new_from_entropy([91; 32]);
         EnrollmentTrustManifest {
-            version: 1,
+            version: 3,
             subject: AuthorityId::new_from_entropy([92; 32]),
             initiator_device: device,
             invitee_authority: AuthorityId::new_from_entropy([93; 32]),
@@ -577,7 +533,22 @@ mod tests {
             baseline_count: 1,
             starting_epoch: 0,
             starting_commitment: [98; 32],
-            final_inventory: None,
+            final_inventory: vec![EnrollmentParentVerifier {
+                epoch: 1,
+                commitment: [99; 32],
+                signing_node: NodeIndex(0),
+                mode: SigningMode::SingleSigner,
+                threshold: 1,
+                participants: vec![ParticipantIdentity::device(device)],
+                public_key_package:
+                    aura_core::crypto::single_signer::SingleSignerPublicKeyPackage::try_new(
+                        verifier.clone(),
+                    )
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap(),
+                agreement: AgreementMode::ConsensusFinalized,
+            }],
             final_epoch: 1,
             final_commitment: [99; 32],
             pending_epoch: 2,
@@ -700,7 +671,7 @@ impl VerifiedEnrollmentManifestSignature {
             return Err(EnrollmentManifestError::Shape);
         }
         let encoded = aura_core::util::serialization::to_vec(&baseline)
-            .map_err(|_| EnrollmentManifestError::Shape)?;
+            .map_err(|source| EnrollmentManifestError::Codec(Box::new(source)))?;
         if encoded.len() > EnrollmentTrustManifest::MAX_BYTES
             || aura_core::hash::hash(&encoded) != self.manifest.baseline_digest
         {
@@ -709,7 +680,7 @@ impl VerifiedEnrollmentManifestSignature {
         let mut staged = Vec::with_capacity(baseline.len());
         let mut used = std::collections::BTreeSet::new();
         let mut state = aura_journal::commitment_tree::reduce(&staged)
-            .map_err(|_| EnrollmentManifestError::Shape)?;
+            .map_err(|source| EnrollmentManifestError::Baseline(Box::new(source)))?;
         if state.epoch.value() != self.manifest.starting_epoch
             || state.root_commitment != self.manifest.starting_commitment
         {
@@ -720,7 +691,7 @@ impl VerifiedEnrollmentManifestSignature {
                 return Err(EnrollmentManifestError::Shape);
             }
             let op: aura_core::AttestedOp = aura_core::util::serialization::from_slice(bytes)
-                .map_err(|_| EnrollmentManifestError::Shape)?;
+                .map_err(|source| EnrollmentManifestError::Codec(Box::new(source)))?;
             if op.op.parent_epoch != state.epoch || op.op.parent_commitment != state.root_commitment
             {
                 return Err(EnrollmentManifestError::Shape);
@@ -748,20 +719,20 @@ impl VerifiedEnrollmentManifestSignature {
             let key: [u8; 32] = match parent.mode {
                 SigningMode::SingleSigner => {
                     SingleSignerPublicKeyPackage::from_bytes(&parent.public_key_package)
-                        .map_err(|_| EnrollmentManifestError::Shape)?
+                        .map_err(|source| EnrollmentManifestError::NativeProof(Box::new(source)))?
                         .verifying_key()
                         .try_into()
-                        .map_err(|_| EnrollmentManifestError::Shape)?
+                        .map_err(|source| EnrollmentManifestError::NativeProof(Box::new(source)))?
                 }
                 SigningMode::Threshold => {
                     aura_core::crypto::tree_signing::public_key_package_from_bytes(
                         &parent.public_key_package,
                     )
-                    .map_err(|_| EnrollmentManifestError::Shape)?
+                    .map_err(|source| EnrollmentManifestError::NativeProof(Box::new(source)))?
                     .group_public_key
                     .as_slice()
                     .try_into()
-                    .map_err(|_| EnrollmentManifestError::Shape)?
+                    .map_err(|source| EnrollmentManifestError::NativeProof(Box::new(source)))?
                 }
             };
             let branch = BranchSigningKey::new(key, op.op.parent_epoch);
@@ -773,10 +744,10 @@ impl VerifiedEnrollmentManifestSignature {
                 return Err(EnrollmentManifestError::Shape);
             }
             verify_attested_op(&op, &branch, parent.threshold, state.epoch)
-                .map_err(|_| EnrollmentManifestError::Signature)?;
+                .map_err(|source| EnrollmentManifestError::NativeProof(Box::new(source)))?;
             staged.push(op);
             state = aura_journal::commitment_tree::reduce(&staged)
-                .map_err(|_| EnrollmentManifestError::Shape)?;
+                .map_err(|source| EnrollmentManifestError::Baseline(Box::new(source)))?;
         }
         if used.len() != self.manifest.parents.len()
             || state.epoch.value() != self.manifest.final_epoch
@@ -784,7 +755,8 @@ impl VerifiedEnrollmentManifestSignature {
         {
             return Err(EnrollmentManifestError::Shape);
         }
-        if let Some(inventory) = &self.manifest.final_inventory {
+        {
+            let inventory = &self.manifest.final_inventory;
             let devices: std::collections::BTreeSet<_> = state
                 .leaves
                 .values()
@@ -831,7 +803,7 @@ impl SignedEnrollmentTrustManifest {
             return Err(EnrollmentManifestError::Signature);
         }
         let bytes = aura_core::util::serialization::to_vec(self)
-            .map_err(|_| EnrollmentManifestError::Shape)?;
+            .map_err(|source| EnrollmentManifestError::Codec(Box::new(source)))?;
         if bytes.len() > EnrollmentTrustManifest::MAX_BYTES {
             return Err(EnrollmentManifestError::Shape);
         }
@@ -843,14 +815,10 @@ impl SignedEnrollmentTrustManifest {
     }
     pub fn decode(code: &str) -> Result<Self, EnrollmentManifestError> {
         use base64::Engine;
-        let (outer_version, encoded) =
-            if let Some(encoded) = code.strip_prefix("aura-enrollment-manifest:v2:") {
-                (2, encoded)
-            } else if let Some(encoded) = code.strip_prefix("aura-enrollment-manifest:v1:") {
-                (1, encoded)
-            } else {
-                return Err(EnrollmentManifestError::Shape);
-            };
+        let outer_version = 3;
+        let encoded = code
+            .strip_prefix("aura-enrollment-manifest:v3:")
+            .ok_or(EnrollmentManifestError::Shape)?;
         if encoded.len()
             > aura_core::envelope::max_base64_encoded_len(EnrollmentTrustManifest::MAX_BYTES)
         {
@@ -858,12 +826,12 @@ impl SignedEnrollmentTrustManifest {
         }
         let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(encoded)
-            .map_err(|_| EnrollmentManifestError::Shape)?;
+            .map_err(|source| EnrollmentManifestError::Codec(Box::new(source)))?;
         if bytes.len() > EnrollmentTrustManifest::MAX_BYTES {
             return Err(EnrollmentManifestError::Shape);
         }
         let value: Self = aura_core::util::serialization::from_slice(&bytes)
-            .map_err(|_| EnrollmentManifestError::Shape)?;
+            .map_err(|source| EnrollmentManifestError::Codec(Box::new(source)))?;
         if value.manifest.version != outer_version {
             return Err(EnrollmentManifestError::Shape);
         }
@@ -897,13 +865,13 @@ pub fn decode_initiator_verifier_transfer(
     }
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(encoded)
-        .map_err(|_| EnrollmentManifestError::Pin)?;
+        .map_err(|source| EnrollmentManifestError::PinEncoding(Box::new(source)))?;
     if bytes.len() > 512 {
         return Err(EnrollmentManifestError::Pin);
     }
     let selected: InitiatorVerifierTransferStatement =
         aura_core::util::serialization::from_slice(&bytes)
-            .map_err(|_| EnrollmentManifestError::Pin)?;
+            .map_err(|source| EnrollmentManifestError::PinEncoding(Box::new(source)))?;
     if selected.version != 1 {
         return Err(EnrollmentManifestError::Pin);
     }
@@ -917,7 +885,7 @@ pub fn encode_initiator_verifier_transfer(
     use base64::Engine;
     let verifying_key = verifier
         .try_into()
-        .map_err(|_| EnrollmentManifestError::Pin)?;
+        .map_err(|source| EnrollmentManifestError::PinEncoding(Box::new(source)))?;
     let selected = InitiatorVerifierTransferStatement {
         version: 1,
         subject,
@@ -925,7 +893,7 @@ pub fn encode_initiator_verifier_transfer(
         verifying_key,
     };
     let bytes = aura_core::util::serialization::to_vec(&selected)
-        .map_err(|_| EnrollmentManifestError::Pin)?;
+        .map_err(|source| EnrollmentManifestError::PinEncoding(Box::new(source)))?;
     Ok(format!(
         "aura-initiator-verifier:v1:{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)

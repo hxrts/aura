@@ -790,8 +790,7 @@ impl AuraEffectSystem {
             custody.require_manifest(self, manifest)?;
             // require_manifest establishes exact equality with independently
             // retained original custody before these public fields are read.
-            let retained = manifest.final_inventory.as_ref()
-                .and_then(|inventory| inventory.iter().find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0)))
+            let retained = manifest.final_inventory.iter().find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
                 .ok_or_else(|| aura_core::AuraError::permission_denied("owned signing route lacks original retained root inventory"))?;
             if !retained.participants.contains(&aura_core::ParticipantIdentity::device(destination_device))
                 || destination_device == self.device_id()

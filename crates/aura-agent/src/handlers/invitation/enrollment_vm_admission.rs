@@ -1431,7 +1431,7 @@ pub(super) async fn sign_acceptance_for_request(
         device_id: setup.device,
         acceptor_id: setup.authority,
         signature,
-        manifest_digest: Some(admitted.manifest_digest()),
+        manifest_digest: admitted.manifest_digest(),
     })
 }
 
@@ -1497,7 +1497,7 @@ pub(super) async fn sign_refusal_for_request(
             device_id: setup.device,
             acceptor_id: setup.authority,
             signature,
-            manifest_digest: Some(admitted.manifest_digest()),
+            manifest_digest: admitted.manifest_digest(),
         },
     })
 }
@@ -1724,7 +1724,7 @@ mod tests {
                 sign_acceptance_for_request(invitee_effects.as_ref(), &admitted, &request)
                     .await
                     .expect("actual retained setup signer");
-            assert_eq!(acceptance.manifest_digest, Some(admitted.manifest_digest()));
+            assert_eq!(acceptance.manifest_digest, admitted.manifest_digest());
             assert_eq!(
                 acceptance.device_id,
                 admitted.local_setup().statement().device

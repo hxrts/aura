@@ -345,7 +345,7 @@ impl EnrollmentFinalVerifierInventoryCapability<'_, '_> {
             || manifest.invitation != *self.reservation.invitation_id()
             || manifest.pending_epoch != self.reservation.pending_epoch()
             || manifest.setup.digest != self.reservation.setup_digest()
-            || manifest.version != 2
+            || manifest.version != 3
         {
             return Err(final_inventory_error(
                 EnrollmentFinalInventoryError::OwnerBinding,
@@ -708,7 +708,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
             || *initiator_device_id != effects.device_id()
             || *ceremony_id != self.owner.ceremony
             || *pending_epoch != self.pending_epoch()
-            || setup_binding.as_ref().map(|binding| binding.digest) != Some(self.setup_digest())
+            || setup_binding.digest != self.setup_digest()
             || state.kind != aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
             || state.initiator_id != self.owner.authority
             || state.ceremony_id != self.owner.ceremony

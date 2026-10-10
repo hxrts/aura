@@ -11,6 +11,8 @@ use aura_core::AuraError;
 pub(crate) enum IssuedInvitationIdentityError {
     #[error("original invitation issuer identity binding is invalid")]
     Binding,
+    #[error("enrollment transfer requires its retained original enrollment owner")]
+    EnrollmentOwnerRequired,
     #[error("original invitation issuer identity is absent")]
     Missing,
     #[error("original invitation issuer identity exceeds its 4096-byte record bound")]
@@ -19,7 +21,9 @@ pub(crate) enum IssuedInvitationIdentityError {
 fn invalid(cause: IssuedInvitationIdentityError) -> AgentError {
     let storage = match &cause {
         IssuedInvitationIdentityError::Missing => true,
-        IssuedInvitationIdentityError::Binding | IssuedInvitationIdentityError::Oversized => false,
+        IssuedInvitationIdentityError::Binding
+        | IssuedInvitationIdentityError::Oversized
+        | IssuedInvitationIdentityError::EnrollmentOwnerRequired => false,
     };
     let message = cause.to_string();
     let source = Some(Arc::new(cause) as Arc<dyn std::error::Error + Send + Sync>);

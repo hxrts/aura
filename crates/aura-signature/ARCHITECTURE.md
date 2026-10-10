@@ -15,7 +15,9 @@ provider outage. Native sources are process-local and do not grant approval.
 Import validity uses the canonical invitation expiry predicate: the local
 interval excludes its expiry endpoint. The codec rejects obsolete version-one
 transfers and bare legacy payloads; test-only unsigned fixtures use the same
-current envelope shape and cannot mint import evidence.
+current envelope shape and cannot mint import evidence. Enrollment uses only
+version four with a required setup binding and invited authority; obsolete
+enrollment versions two and three cannot select a private-payload transcript.
 
 Define identity semantics and signature verification logic, combining cryptographic verification with authority lifecycle management and session validation.
 

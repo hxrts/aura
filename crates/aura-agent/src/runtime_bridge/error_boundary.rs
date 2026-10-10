@@ -145,14 +145,19 @@ pub(super) fn native_cause_kind(
         {
             use aura_invitation::enrollment_manifest::EnrollmentManifestError as Manifest;
             let kind = match manifest {
-                Manifest::MissingPin | Manifest::MissingFinalInventory | Manifest::Pin => {
-                    Some(Kind::Unauthorized)
-                }
+                Manifest::MissingPin
+                | Manifest::MissingFinalInventory
+                | Manifest::Pin
+                | Manifest::PinEncoding(_) => Some(Kind::Unauthorized),
                 Manifest::Unavailable | Manifest::Time(_) => Some(Kind::Service),
-                Manifest::Expired | Manifest::Shape | Manifest::SetupValidity => {
-                    Some(Kind::Validation)
+                Manifest::Expired
+                | Manifest::Shape
+                | Manifest::SetupValidity
+                | Manifest::Baseline(_) => Some(Kind::Validation),
+                Manifest::Signature | Manifest::Transcript(_) | Manifest::NativeProof(_) => {
+                    Some(Kind::Crypto)
                 }
-                Manifest::Signature | Manifest::Transcript(_) => Some(Kind::Crypto),
+                Manifest::Codec(_) => Some(Kind::Serialization),
                 Manifest::RequiredTranscript(aura_signature::TranscriptCryptoError::Encoding(
                     _,
                 )) => Some(Kind::Serialization),
@@ -309,6 +314,18 @@ mod native_tests {
             .source()
             .unwrap()
             .is::<aura_core::AuraError>());
+        let codec = aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest::decode(
+            "aura-enrollment-manifest:v3:!",
+        )
+        .unwrap_err();
+        assert_eq!(native_cause_kind(&codec), Kind::Serialization);
+        assert!(codec.source().unwrap().is::<base64::DecodeError>());
+        let pin = aura_invitation::enrollment_manifest::decode_initiator_verifier_transfer(
+            "aura-initiator-verifier:v1:!",
+        )
+        .unwrap_err();
+        assert_eq!(native_cause_kind(&pin), Kind::Unauthorized);
+        assert!(pin.source().unwrap().is::<base64::DecodeError>());
     }
 
     #[test]

@@ -331,7 +331,7 @@ impl PinnedEnrollmentResponseVerifierCapability {
             }
         };
         let pin = &self.verifier.0;
-        if binding.manifest_digest != Some(self.manifest_digest)
+        if binding.manifest_digest != self.manifest_digest
             || binding.invitation_id != self.canonical_invitation.invitation_id
             || binding.ceremony_id != pin.ceremony
             || binding.device_id != pin.setup.device
@@ -557,9 +557,7 @@ impl RetainedEnrollmentVerifier {
             let (original, _) =
                 recover_verified_response_receipt(effects, &self.0.ceremony).await?;
             let transcript = super::DeviceEnrollmentAcceptanceTranscript {
-                manifest_digest: accept
-                    .manifest_digest
-                    .ok_or(EnrollmentVerifierError::RecordBinding)?,
+                manifest_digest: accept.manifest_digest,
                 invitation,
                 acceptor_id: accept.acceptor_id,
                 subject_authority: self.0.subject,
@@ -567,10 +565,7 @@ impl RetainedEnrollmentVerifier {
                 device_id: accept.device_id,
             };
             let original_transcript = super::DeviceEnrollmentAcceptanceTranscript {
-                manifest_digest: original
-                    .acceptance
-                    .manifest_digest
-                    .ok_or(EnrollmentVerifierError::RecordBinding)?,
+                manifest_digest: original.acceptance.manifest_digest,
                 invitation: &original.canonical_invitation,
                 acceptor_id: original.acceptance.acceptor_id,
                 subject_authority: original.subject,
@@ -607,7 +602,7 @@ impl RetainedEnrollmentVerifier {
         }
         let manifest_digest =
             load_issued_enrollment_manifest_digest(effects, &self.0, invitation).await?;
-        if accept.manifest_digest != Some(manifest_digest) {
+        if accept.manifest_digest != manifest_digest {
             return Err(EnrollmentVerifierError::RecordBinding.into());
         }
         let super::InvitationType::DeviceEnrollment {
@@ -623,9 +618,8 @@ impl RetainedEnrollmentVerifier {
             return Err(EnrollmentVerifierError::RecordBinding.into());
         };
         if self.0.subject != *subject_authority
-            || setup_binding.as_ref().map_or(true, |binding| {
-                binding.digest != self.0.setup_digest || binding.nonce != self.0.setup.nonce
-            })
+            || (setup_binding.digest != self.0.setup_digest
+                || setup_binding.nonce != self.0.setup.nonce)
             || self.0.pending_epoch != *pending_epoch
             || self.0.ceremony != *ceremony_id
             || self.0.initiator_device != *initiator_device_id
@@ -641,9 +635,7 @@ impl RetainedEnrollmentVerifier {
             return Err(EnrollmentVerifierError::RecordBinding.into());
         }
         let transcript = super::DeviceEnrollmentAcceptanceTranscript {
-            manifest_digest: accept
-                .manifest_digest
-                .ok_or(EnrollmentVerifierError::RecordBinding)?,
+            manifest_digest: accept.manifest_digest,
             invitation,
             acceptor_id: self.0.setup.authority,
             subject_authority: self.0.subject,
@@ -1396,21 +1388,26 @@ mod real_crypto_tests {
             .unwrap();
             assert_eq!(witness.ceremony_id(), &start.ceremony_id);
             assert_eq!(witness.invitation_id(), invitation.invitation_id);
-            assert!(accept.manifest_digest.is_some());
+            assert_ne!(accept.manifest_digest, [0; 32]);
             let mut substitute = accept.clone();
             substitute.signature.public_key_package[0] ^= 1;
             assert!(expected
                 .verify_acceptance(effects.as_ref(), &invitation, &substitute)
                 .await
                 .is_err());
-            let mut missing_manifest = accept.clone();
-            missing_manifest.manifest_digest = None;
-            assert!(expected
-                .verify_acceptance(effects.as_ref(), &invitation, &missing_manifest)
-                .await
-                .is_err());
+            let mut missing_manifest = serde_json::to_value(&accept).unwrap();
+            missing_manifest
+                .as_object_mut()
+                .unwrap()
+                .remove("manifest_digest");
+            assert!(
+                serde_json::from_value::<aura_invitation::protocol::DeviceEnrollmentAccept>(
+                    missing_manifest
+                )
+                .is_err()
+            );
             let mut other_manifest = accept.clone();
-            other_manifest.manifest_digest.as_mut().unwrap()[0] ^= 1;
+            other_manifest.manifest_digest[0] ^= 1;
             assert!(expected
                 .verify_acceptance(effects.as_ref(), &invitation, &other_manifest)
                 .await
@@ -1479,7 +1476,7 @@ pub(crate) async fn verify_actual_invitee_acceptance_for_test(
         device_id: device,
         acceptor_id: invitation.receiver_id,
         signature,
-        manifest_digest: Some(manifest_digest),
+        manifest_digest,
     };
     expected
         .verify_acceptance(issuer, invitation, &acceptance)
@@ -1763,9 +1760,8 @@ pub(crate) async fn recover_pending_enrollment_registration(
     .await?;
     if raw.version != 1
         || ceremony_id != ceremony
-        || setup_binding.as_ref().map_or(true, |binding| {
-            binding.nonce != retained.0.setup.nonce || binding.digest != retained.0.setup_digest
-        })
+        || (setup_binding.nonce != retained.0.setup.nonce
+            || setup_binding.digest != retained.0.setup_digest)
     {
         return Err(EnrollmentVerifierError::RecordBinding.into());
     }
@@ -2372,7 +2368,7 @@ impl RetainedEnrollmentVmControl {
             pending_epoch,
             initiator_device_id,
             device_id,
-            invitee_authority: Some(invitee),
+            invitee_authority: invitee,
             ..
         } = &invitation.invitation_type
         else {
@@ -2423,7 +2419,8 @@ impl RetainedEnrollmentVmControl {
         {
             return Err(EnrollmentVerifierError::RecordBinding.into());
         }
-        if let Some(inventory) = &signed.manifest.final_inventory {
+        {
+            let inventory = &signed.manifest.final_inventory;
             let root = inventory
                 .iter()
                 .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
