@@ -109,18 +109,15 @@ struct StoredEnrollmentActivation {
     pending_epoch: u64,
     prestate: Hash32,
     setup_digest: [u8; 32],
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    epoch_fence: Option<AttestedOp>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    baseline: Option<Vec<AttestedOp>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    manifest_digest: Option<[u8; 32]>,
+    epoch_fence: AttestedOp,
+    baseline: Vec<AttestedOp>,
+    manifest_digest: [u8; 32],
     attested: AttestedOp,
 }
 #[derive(Debug, thiserror::Error)]
 enum EnrollmentEpochFenceError {
-    #[error("legacy enrollment activation has no authenticated epoch fence")]
-    LegacyMissingFence,
+    #[error("enrollment activation schema is unsupported")]
+    UnsupportedSchema,
     #[error("enrollment activation differs from its owned original generation")]
     Binding,
     #[error("enrollment tree changed from the original signed activation history")]
@@ -389,7 +386,7 @@ impl DeviceEpochRotationService {
                             enrollment_fence_failure(EnrollmentEpochFenceError::Binding)
                         })?,
                         attested_epoch_op_hash: attested_epoch_op_hash.ok_or_else(|| {
-                            enrollment_fence_failure(EnrollmentEpochFenceError::LegacyMissingFence)
+                            enrollment_fence_failure(EnrollmentEpochFenceError::Binding)
                         })?,
                     },
                 );
@@ -811,7 +808,7 @@ impl DeviceEpochRotationService {
                 self.build_signed_commit(
                     proposal,
                     Some(owned.stored.attested.clone()),
-                    owned.stored.epoch_fence.clone(),
+                    Some(owned.stored.epoch_fence.clone()),
                 )
                 .await?
             }
@@ -1079,18 +1076,13 @@ impl DeviceEpochRotationService {
             return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
         }
         let raw: StoredEnrollmentActivation = from_slice(&bytes).map_err(map_decode_error)?;
-        if raw.version != 2 {
+        if raw.version != 3 {
             return Err(enrollment_fence_failure(
-                EnrollmentEpochFenceError::LegacyMissingFence,
+                EnrollmentEpochFenceError::UnsupportedSchema,
             ));
         }
-        let fence = raw.epoch_fence.as_ref().ok_or_else(|| {
-            enrollment_fence_failure(EnrollmentEpochFenceError::LegacyMissingFence)
-        })?;
-        let baseline = raw
-            .baseline
-            .as_ref()
-            .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
+        let fence = &raw.epoch_fence;
+        let baseline = &raw.baseline;
         let proof = self
             .ceremony_tracker
             .verified_enrollment_response(&ceremony.ceremony_id)
@@ -1108,7 +1100,6 @@ impl DeviceEpochRotationService {
             || raw.prestate != ceremony.prestate_hash
             || raw.setup_digest != proof.setup_digest()
             || raw.manifest_digest != proof.acceptance().manifest_digest
-            || raw.manifest_digest.is_none()
             || Some(leaf.device_id) != ceremony.enrollment_device_id
             || leaf.role != LeafRole::Device
             || *under != NodeIndex(0)
@@ -1370,15 +1361,15 @@ impl DeviceEpochRotationService {
             .await
             .map_err(AgentError::from)?;
         let prepared = StoredEnrollmentActivation {
-            version: 2,
+            version: 3,
             subject: self.authority_id,
             ceremony: ceremony_id.clone(),
             pending_epoch: ceremony_state.new_epoch,
             prestate: ceremony_state.prestate_hash,
             setup_digest: proof.setup_digest(),
             attested: attested.clone(),
-            epoch_fence: Some(epoch_fence),
-            baseline: Some(baseline),
+            epoch_fence,
+            baseline,
             manifest_digest: proof.acceptance().manifest_digest,
         };
         let bytes = to_vec(&prepared).map_err(map_encode_error)?;
@@ -1412,16 +1403,9 @@ impl DeviceEpochRotationService {
         #[cfg(all(test, not(target_arch = "wasm32")))]
         inject_activation_fault(self.effects.as_ref(), ceremony_id, false).await?;
 
-        tree.install_authenticated_extension(
-            prepared
-                .baseline
-                .as_ref()
-                .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?
-                .len(),
-            &candidate,
-        )
-        .await
-        .map_err(AgentError::from)?;
+        tree.install_authenticated_extension(prepared.baseline.len(), &candidate)
+            .await
+            .map_err(AgentError::from)?;
         #[cfg(all(test, not(target_arch = "wasm32")))]
         inject_activation_fault(self.effects.as_ref(), ceremony_id, true).await?;
         Ok(PreparedEnrollmentActivationCapability {
@@ -2131,100 +2115,113 @@ mod tests {
             .contains("authority signature verification failed"));
     }
     #[test]
-    fn genuine_legacy_activation_codec_has_no_fence_and_cannot_resume() {
+    fn enrollment_activation_requires_fence_baseline_and_manifest_before_resume() {
         crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
-            #[derive(serde::Serialize)]
-            struct LegacyActivation {
-                version: u16,
-                subject: AuthorityId,
-                ceremony: CeremonyId,
-                pending_epoch: u64,
-                prestate: Hash32,
-                setup_digest: [u8; 32],
-                attested: AttestedOp,
+            for field in ["epoch_fence", "baseline", "manifest_digest"] {
+                for null in [false, true] {
+                    let label = format!("activation-required-{field}-{null}");
+                    let (issuer, _invitee, _invitation, start, _accept, proof) = Box::pin(
+                        crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                            &label,
+                        ),
+                    )
+                    .await;
+                    let effects = issuer.runtime().effects();
+                    let tracker = issuer.runtime().ceremony_tracker();
+                    let state = tracker
+                        .get(&start.ceremony_id)
+                        .await
+                        .expect("actual registration");
+                    let original = effects
+                        .export_tree_ops()
+                        .await
+                        .expect("actual original history");
+                    // Actual exported attestations exercise the persisted codec only;
+                    // this record is never admitted as an approved activation.
+                    let attested = original.first().expect("bootstrap attestation").clone();
+                    let current = StoredEnrollmentActivation {
+                        version: 3,
+                        subject: issuer.authority_id(),
+                        ceremony: start.ceremony_id.clone(),
+                        pending_epoch: state.new_epoch,
+                        prestate: state.prestate_hash,
+                        setup_digest: proof.setup_digest(),
+                        attested: attested.clone(),
+                        epoch_fence: attested,
+                        baseline: original.clone(),
+                        manifest_digest: proof.acceptance().manifest_digest,
+                    };
+                    let mut wire = serde_json::to_value(current).expect("current persisted fields");
+                    if null {
+                        wire[field] = serde_json::Value::Null;
+                    } else {
+                        wire.as_object_mut().expect("record").remove(field);
+                    }
+                    let bytes = to_vec(&wire).expect("canonical incomplete record");
+                    assert!(from_slice::<StoredEnrollmentActivation>(&bytes).is_err());
+                    let location = enrollment_activation_location(&start.ceremony_id);
+                    effects
+                        .secure_store_immutable(
+                            &location,
+                            &bytes,
+                            &[
+                                SecureStorageCapability::Read,
+                                SecureStorageCapability::Write,
+                            ],
+                        )
+                        .await
+                        .expect("actual persisted malformed record");
+                    let service = DeviceEpochRotationService::new(
+                        issuer.authority_id(),
+                        effects.clone(),
+                        tracker.clone(),
+                        issuer.runtime().ceremony_runner().clone(),
+                        issuer.runtime().threshold_signing(),
+                        issuer.runtime().reconfiguration().clone(),
+                    );
+                    let tree = effects.lock_tree_decision().await;
+                    let error = match service
+                        .recover_prepared_enrollment_activation(&state, &tree)
+                        .await
+                    {
+                        Ok(_) => panic!("missing or null {field} cannot resume activation"),
+                        Err(error) => error,
+                    };
+                    let AgentError::Aura(aura_core::AuraError::Internal {
+                        source: Some(source),
+                        ..
+                    }) = error
+                    else {
+                        panic!("persisted decoder must preserve its concrete cause")
+                    };
+                    assert!(source
+                        .downcast_ref::<aura_core::util::serialization::SerializationError>()
+                        .is_some());
+                    assert_eq!(
+                        effects
+                            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                            .await
+                            .expect("unchanged activation"),
+                        bytes
+                    );
+                    assert_eq!(
+                        effects
+                            .export_tree_ops()
+                            .await
+                            .expect("unchanged original history"),
+                        original
+                    );
+                    assert_eq!(
+                        issuer
+                            .runtime()
+                            .ceremony_runner()
+                            .terminal_outcome(&start.ceremony_id)
+                            .await
+                            .expect("original ceremony"),
+                        None
+                    );
+                }
             }
-            // Real prechange schema representation and actual owner-exported
-            // attestation. This tests legacy codec/admission, never trusts a fixture.
-            let (issuer, _invitee, _invitation, start, _accept, proof) = Box::pin(
-                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
-                    "legacy-activation-fence-codec",
-                ),
-            )
-            .await;
-            let effects = issuer.runtime().effects();
-            let tracker = issuer.runtime().ceremony_tracker();
-            let state = tracker
-                .get(&start.ceremony_id)
-                .await
-                .expect("actual registration");
-            let original = effects
-                .export_tree_ops()
-                .await
-                .expect("actual original history");
-            let legacy = LegacyActivation {
-                version: 1,
-                subject: issuer.authority_id(),
-                ceremony: start.ceremony_id.clone(),
-                pending_epoch: state.new_epoch,
-                prestate: state.prestate_hash,
-                setup_digest: proof.setup_digest(),
-                attested: original
-                    .first()
-                    .expect("actual bootstrap attestation")
-                    .clone(),
-            };
-            let bytes = to_vec(&legacy).expect("actual prechange codec");
-            let decoded: StoredEnrollmentActivation =
-                from_slice(&bytes).expect("real legacy binary decodes with absent v2 fields");
-            assert!(decoded.epoch_fence.is_none());
-            assert!(decoded.baseline.is_none());
-            assert!(decoded.manifest_digest.is_none());
-            assert_eq!(to_vec(&decoded).expect("legacy reencoding"), bytes);
-            effects
-                .secure_store_immutable(
-                    &enrollment_activation_location(&start.ceremony_id),
-                    &bytes,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await
-                .expect("actual legacy storage fixture");
-            let service = DeviceEpochRotationService::new(
-                issuer.authority_id(),
-                effects.clone(),
-                tracker.clone(),
-                issuer.runtime().ceremony_runner().clone(),
-                issuer.runtime().threshold_signing(),
-                issuer.runtime().reconfiguration().clone(),
-            );
-            let tree = effects.lock_tree_decision().await;
-            let error = match service
-                .recover_prepared_enrollment_activation(&state, &tree)
-                .await
-            {
-                Ok(_) => panic!("legacy activation cannot invent a missing signed fence"),
-                Err(error) => error,
-            };
-            let AgentError::Aura(aura_core::AuraError::PermissionDenied {
-                source: Some(source),
-                ..
-            }) = error
-            else {
-                panic!("legacy failure must preserve its typed cause")
-            };
-            assert!(matches!(
-                source.downcast_ref::<EnrollmentEpochFenceError>(),
-                Some(EnrollmentEpochFenceError::LegacyMissingFence)
-            ));
-            assert_eq!(
-                effects
-                    .export_tree_ops()
-                    .await
-                    .expect("unchanged original history"),
-                original
-            );
         });
     }
 }

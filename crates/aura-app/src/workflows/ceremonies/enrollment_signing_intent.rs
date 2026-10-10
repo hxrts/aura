@@ -150,7 +150,7 @@ pub fn select_user_transferred_enrollment_signing_intent(
             source: Some(Arc::new(source)),
         }
     })?;
-    if canonical != reencoded || manifest.version != 2 || manifest.final_inventory.is_none() {
+    if canonical != reencoded || manifest.version != 3 || manifest.final_inventory.is_empty() {
         return Err(AuraError::invalid(
             "noncanonical or historical enrollment signing intent",
         ));

@@ -297,12 +297,12 @@ impl InvitationServiceApi {
             || invitation.sender_id != manifest.subject
             || invitation.receiver_id != manifest.invitee_authority
             || *subject_authority != manifest.subject
-            || *invitee_authority != Some(manifest.invitee_authority)
+            || *invitee_authority != manifest.invitee_authority
             || *initiator_device_id != manifest.initiator_device
             || *device_id != manifest.invitee_device
             || *ceremony_id != manifest.ceremony
             || *pending_epoch != manifest.pending_epoch
-            || setup_binding.as_ref() != Some(&manifest.setup)
+            || setup_binding != &manifest.setup
             || aura_core::hash::hash(key_package) != manifest.pending_share_digest
             || aura_core::hash::hash(public_key_package)
                 != manifest.pending_public_key_package_digest
@@ -1686,9 +1686,9 @@ impl InvitationServiceApi {
             reserved,
             receiver_id,
             InvitationType::DeviceEnrollment {
-                setup_binding: Some(setup_binding),
+                setup_binding,
                 subject_authority,
-                invitee_authority: Some(receiver_id),
+                invitee_authority: receiver_id,
                 initiator_device_id,
                 device_id,
                 nickname_suggestion,
@@ -2102,12 +2102,12 @@ impl InvitationServiceApi {
             || invitation.sender_id != manifest.subject
             || invitation.receiver_id != manifest.invitee_authority
             || *subject_authority != manifest.subject
-            || *invitee_authority != Some(manifest.invitee_authority)
+            || *invitee_authority != manifest.invitee_authority
             || *initiator_device_id != manifest.initiator_device
             || *device_id != manifest.invitee_device
             || *ceremony_id != manifest.ceremony
             || *pending_epoch != manifest.pending_epoch
-            || setup_binding.as_ref() != Some(&manifest.setup)
+            || setup_binding != &manifest.setup
             || aura_core::hash::hash(key_package) != manifest.pending_share_digest
             || aura_core::hash::hash(public_key_package)
                 != manifest.pending_public_key_package_digest
@@ -2161,15 +2161,15 @@ impl InvitationServiceApi {
         effects: &AuraEffectSystem,
         invitation: &Invitation,
         transport: &ShareableInvitationTransportMetadata,
-        _legacy_allow_ephemeral_fallback: bool,
     ) -> AgentResult<String> {
         if matches!(
             invitation.invitation_type,
             InvitationType::DeviceEnrollment { .. }
         ) {
-            return Err(invitation_shareable_failure(
-                ShareableInvitationError::MissingEnrollmentSetupBinding,
-            ));
+            return Err(AgentError::Aura(aura_core::AuraError::Invalid {
+                message: "enrollment transfer requires its original owner".into(),
+                source: Some(Arc::new(super::invitation::issued_identity::IssuedInvitationIdentityError::EnrollmentOwnerRequired)),
+            }));
         }
         let issued = super::invitation::issued_identity::select_original_identity(
             effects,
@@ -2202,7 +2202,6 @@ impl InvitationServiceApi {
         &self,
         invitation: &Invitation,
         transport: &ShareableInvitationTransportMetadata,
-        _legacy_allow_ephemeral_fallback: bool,
     ) -> AgentResult<String> {
         let sender = self
             .handler
@@ -2286,11 +2285,7 @@ impl InvitationServiceApi {
         }
         let transport = self.sender_transport_metadata();
         let code = self
-            .export_signed_invitation(
-                invitation,
-                &transport,
-                self.effects.is_testing() || self.effects.harness_mode_enabled(),
-            )
+            .export_signed_invitation(invitation, &transport)
             .await?;
         Ok(self.append_sender_hint(code, &transport))
     }
@@ -2355,33 +2350,6 @@ impl InvitationServiceApi {
             .import_invitation_code(&self.effects, code)
             .await
     }
-}
-
-fn invitation_shareable_failure(source: ShareableInvitationError) -> AgentError {
-    let cause = Arc::new(source);
-    let error = match cause.as_ref() {
-        ShareableInvitationError::SerializationFailed(_) => aura_core::AuraError::Serialization {
-            message: "serialize invitation transfer".into(),
-            source: Some(cause),
-        },
-        ShareableInvitationError::InvalidSenderProof => aura_core::AuraError::Crypto {
-            message: "verify invitation transfer".into(),
-            source: Some(cause),
-        },
-        ShareableInvitationError::InvalidFormat
-        | ShareableInvitationError::UnsupportedVersion(_)
-        | ShareableInvitationError::SizeLimitExceeded(_)
-        | ShareableInvitationError::DecodingFailed(_)
-        | ShareableInvitationError::ParsingFailed(_)
-        | ShareableInvitationError::MissingSenderProof
-        | ShareableInvitationError::MissingChannelContext
-        | ShareableInvitationError::MissingEnrollmentSetupBinding
-        | ShareableInvitationError::Expired => aura_core::AuraError::Invalid {
-            message: "validate invitation transfer".into(),
-            source: Some(cause),
-        },
-    };
-    AgentError::from(error)
 }
 
 /// Builds the invitation sender hint: a comma-separated list with one
@@ -3597,16 +3565,15 @@ mod enrollment_code_owner_tests {
                 issuer.runtime().effects().as_ref(),
                 &invitation,
                 &transport,
-                true,
             )
             .await
-            .expect_err("testing fallback cannot sign an enrollment without its retained owner");
+            .expect_err("generic export cannot sign an enrollment without its retained owner");
             let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&rejected);
             let mut missing = false;
             while let Some(cause) = source {
                 missing |= matches!(
-                    cause.downcast_ref::<ShareableInvitationError>(),
-                    Some(ShareableInvitationError::MissingEnrollmentSetupBinding)
+                    cause.downcast_ref::<super::super::invitation::issued_identity::IssuedInvitationIdentityError>(),
+                    Some(super::super::invitation::issued_identity::IssuedInvitationIdentityError::EnrollmentOwnerRequired)
                 );
                 source = cause.source();
             }
@@ -3636,61 +3603,5 @@ mod enrollment_code_owner_tests {
             .await
             .unwrap());
         });
-    }
-
-    #[test]
-    fn general_invitation_failure_keeps_its_domain_category_and_actual_enum_source() {
-        enum Expected {
-            Serialization,
-            Crypto,
-            Invalid,
-        }
-        for (original, expected) in [
-            (
-                ShareableInvitationError::SerializationFailed(Arc::new(
-                    serde_json::from_str::<serde_json::Value>("not json").unwrap_err(),
-                )),
-                Expected::Serialization,
-            ),
-            (
-                ShareableInvitationError::InvalidSenderProof,
-                Expected::Crypto,
-            ),
-            (
-                ShareableInvitationError::MissingChannelContext,
-                Expected::Invalid,
-            ),
-        ] {
-            let retained = original.clone();
-            let failure = invitation_shareable_failure(original);
-            let AgentError::Aura(error) = failure else {
-                panic!("general transfer error cannot become an enrollment admission failure")
-            };
-            assert!(matches!(
-                (&error, expected),
-                (
-                    aura_core::AuraError::Serialization { .. },
-                    Expected::Serialization
-                ) | (aura_core::AuraError::Crypto { .. }, Expected::Crypto)
-                    | (aura_core::AuraError::Invalid { .. }, Expected::Invalid)
-            ));
-            let actual = std::error::Error::source(&error)
-                .unwrap()
-                .downcast_ref::<ShareableInvitationError>()
-                .unwrap();
-            assert_eq!(
-                std::mem::discriminant(actual),
-                std::mem::discriminant(&retained)
-            );
-            if let ShareableInvitationError::SerializationFailed(retained) = &retained {
-                let ShareableInvitationError::SerializationFailed(actual_source) = actual else {
-                    panic!("serialization source variant must survive conversion");
-                };
-                assert!(Arc::ptr_eq(actual_source, retained));
-                assert!(std::error::Error::source(actual)
-                    .unwrap()
-                    .is::<serde_json::Error>());
-            }
-        }
     }
 }

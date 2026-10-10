@@ -564,7 +564,6 @@ impl ContactPair {
                 sender_device_id: Some(self.sender_effects.device_id()),
                 ..ShareableInvitationTransportMetadata::default()
             },
-            false,
         )
         .await
         .expect("signed invitation code should export")
@@ -1360,7 +1359,6 @@ large_stack_async_test!(
             sender_device_id: Some(sender_effects.device_id()),
             ..ShareableInvitationTransportMetadata::default()
         },
-        false,
     )
     .await
     .expect("guardian invitation code must carry sender proof");
@@ -3880,15 +3878,18 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
     let key_package = vec![3, 4, 5];
 
     let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
+        version: ShareableInvitation::ENROLLMENT_QUORUM_VERSION,
         invitation_id: InvitationId::new("inv-device-enrollment"),
         sender_id,
         context_id: Some(context_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority,
             // Codec fixture only; deliberately no authorization evidence.
-            setup_binding: None,
-            invitee_authority: None,
+            setup_binding: aura_core::invitation::DeviceEnrollmentSetupBinding {
+                nonce: [5; 32],
+                digest: [6; 32],
+            },
+            invitee_authority: sender_id,
             initiator_device_id,
             device_id,
             nickname_suggestion: Some("WebApp".to_string()),
@@ -3947,9 +3948,12 @@ fn test_device_enrollment_invitation(invitation_id: &str) -> Invitation {
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
-            // Legacy cache fixture; secure caching cannot mint setup trust.
-            setup_binding: None,
-            invitee_authority: None,
+            // Observed cache fixture; secure caching cannot mint setup trust.
+            setup_binding: aura_core::invitation::DeviceEnrollmentSetupBinding {
+                nonce: [5; 32],
+                digest: [6; 32],
+            },
+            invitee_authority: AuthorityId::new_from_entropy([151u8; 32]),
             initiator_device_id: DeviceId::new_from_entropy([152u8; 32]),
             device_id: DeviceId::new_from_entropy([153u8; 32]),
             nickname_suggestion: Some("Tablet".to_string()),
@@ -4056,7 +4060,7 @@ async fn device_enrollment_imported_cache_redacts_regular_storage_and_restores_s
     let effects = effects_for(&authority).await;
     let invitation = test_device_enrollment_invitation("imported-device-secret-cache");
     let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
+        version: ShareableInvitation::ENROLLMENT_QUORUM_VERSION,
         invitation_id: invitation.invitation_id.clone(),
         sender_id: invitation.sender_id,
         context_id: Some(invitation.context_id),
@@ -4116,10 +4120,13 @@ fn device_enrollment_test_invitation(
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
-            // Negative/legacy fixture. Positive authentication uses actual
+            // Untrusted negative fixture. Positive authentication uses actual
             // device export and explicit app transfer instead.
-            setup_binding: None,
-            invitee_authority: None,
+            setup_binding: aura_core::invitation::DeviceEnrollmentSetupBinding {
+                nonce: [5; 32],
+                digest: [6; 32],
+            },
+            invitee_authority: receiver_id,
             initiator_device_id: DeviceId::new_from_entropy([153u8; 32]),
             device_id,
             nickname_suggestion: Some("Tablet".to_string()),
@@ -4324,7 +4331,7 @@ async fn actual_pinned_device_enrollment_fixture_owned(
         ceremony_id: start.ceremony_id.clone(),
         device_id: start.device_id,
         acceptor_id: invitee.authority_id(),
-        manifest_digest: Some(manifest_digest),
+        manifest_digest,
         signature: sign_invitation_acceptance_transcript(
             invitee.runtime().effects().as_ref(),
             invitee.authority_id(),

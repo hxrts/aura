@@ -156,7 +156,7 @@ See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/1
 
 ### Enrollment response manifest binding
 
-`DeviceEnrollmentAccept` includes an optional manifest digest for wire compatibility. Legacy absence does not authorize enrollment. The runtime's v3 acceptance transcript binds that digest together with the canonical invitation, setup, subject, physical device, ceremony and decision. The invitee selects it only through independent manifest admission; the issuer compares it to its own retained signed artifact. Persistence and process-local proof constructors belong to `aura-agent`.
+`DeviceEnrollmentAccept` requires the original admitted manifest digest; missing or null wire fields are rejected during decoding. The runtime's v3 acceptance transcript binds that digest together with the canonical invitation, setup, subject, physical device, ceremony and decision. The invitee selects it only through independent manifest admission; the issuer compares it to its own retained signed artifact. Persistence and process-local proof constructors belong to `aura-agent`.
 
 ### Required invitation fact decoding
 
@@ -198,9 +198,9 @@ expiry times. Pure guard tests enforce this distinction and reject expired or
 future reservations. Required execution retains `InvitationGuardDenial` and its
 structural policy reason; display-only compatibility planning is observational.
 
-### Enrollment manifest v2
+### Enrollment manifest v3
 
-The signed manifest has an explicit final active verifier inventory distinct from historical baseline parents. Its version-2 transcript and code prefix bind bounded exact epoch/head/node/mode/roster/quorum/package tuples. Legacy version-1 decoding omits the new field and preserves its original canonical signature bytes; missing inventory is never repaired from historical parents. Shape/signature evidence remains separate from runtime capture custody and independent transfer provenance.
+The signed manifest has an explicit final active verifier inventory distinct from historical baseline parents. Its version-3 transcript and code prefix bind bounded exact epoch/head/node/mode/roster/quorum/package tuples. Only the current encoding is accepted: missing or null inventory and obsolete code prefixes are rejected; historical parents cannot repair an omitted active inventory. Shape/signature evidence remains separate from runtime capture custody and independent transfer provenance.
 
 Enrollment setup possession parses bounded public signature encodings before
 calling the verification provider. `InputEncoding` retains native public-input
@@ -226,6 +226,6 @@ The typed initial Request transcript derives only from the canonical manifest:
 manifest digest, invitation, subject, ceremony, pending epoch and invitee device.
 Its version 2 control domain and absence of committed operations remain exact.
 The versioned signing intent explicitly enumerates this third domain alongside
-manifest and public v3 transport. Earlier two-domain consent cannot authorize it;
+manifest and public v4 transport. Earlier two-domain consent cannot authorize it;
 the pure transcript shape itself grants no runtime signing, membership or window
 capability. Committed and Failed controls are separate approval domains.

@@ -82,8 +82,8 @@ impl EnrollmentSigningIntent {
     pub fn validate(&self) -> Result<(), AuraError> {
         if self.version != 2
             || self.domains != Self::DOMAINS
-            || self.manifest.version != 2
-            || self.manifest.final_inventory.is_none()
+            || self.manifest.version != 3
+            || self.manifest.final_inventory.is_empty()
         {
             return Err(AuraError::permission_denied(
                 "signing intent does not explicitly approve current initiation domains",

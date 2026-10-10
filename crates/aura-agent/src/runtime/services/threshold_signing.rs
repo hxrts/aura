@@ -4394,12 +4394,8 @@ impl ThresholdSigningService {
         }
         let root = manifest
             .final_inventory
-            .as_ref()
-            .and_then(|inventory| {
-                inventory
-                    .iter()
-                    .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
-            })
+            .iter()
+            .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
             .ok_or_else(|| {
                 AuraError::permission_denied("approved manifest lacks exact active root inventory")
             })?;

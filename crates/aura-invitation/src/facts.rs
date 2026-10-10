@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-aura_core::define_fact_type_id!(str invitation, "invitation", 3);
+aura_core::define_fact_type_id!(str invitation, "invitation", 4);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CeremonyRelationshipId(String);

@@ -188,9 +188,8 @@ pub struct DeviceEnrollmentAccept {
     /// Acceptor signature over the device-enrollment acceptance transcript.
     pub signature: aura_core::threshold::ThresholdSignature,
     /// Digest of the actual independently admitted signed enrollment manifest.
-    /// Legacy payloads decode but cannot authorize enrollment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manifest_digest: Option<[u8; 32]>,
+    /// Required binding; an absent digest is not a current response encoding.
+    pub manifest_digest: [u8; 32],
 }
 
 /// A response is accepted or refused under separate signing domains.

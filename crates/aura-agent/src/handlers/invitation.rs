@@ -344,7 +344,9 @@ impl SecurityTranscript for DeviceEnrollmentAcceptanceTranscript<'_> {
         DeviceEnrollmentAcceptanceTranscriptPayload {
             manifest_digest: self.manifest_digest,
             setup_binding: match &self.invitation.invitation_type {
-                InvitationType::DeviceEnrollment { setup_binding, .. } => setup_binding.clone(),
+                InvitationType::DeviceEnrollment { setup_binding, .. } => {
+                    Some(setup_binding.clone())
+                }
                 _ => None,
             },
             invitation_id: self.invitation.invitation_id.clone(),
@@ -3442,7 +3444,6 @@ async fn signed_invitation_code_for_notify(
         effects,
         invitation,
         &transport_metadata,
-        effects.is_testing(),
     )
     .await
 }
@@ -3651,7 +3652,7 @@ pub(super) fn imported_invitation_receiver(
 ) -> AuthorityId {
     match invitation_type {
         InvitationType::DeviceEnrollment {
-            invitee_authority: Some(invitee),
+            invitee_authority: invitee,
             ..
         } => *invitee,
         _ => own_id,
@@ -3902,7 +3903,7 @@ impl InvitationHandler {
         let sender = self.context.authority.authority_id();
         let InvitationType::DeviceEnrollment {
             subject_authority,
-            invitee_authority: Some(receiver),
+            invitee_authority: receiver,
             initiator_device_id,
             ..
         } = &invitation_type

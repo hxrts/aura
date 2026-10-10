@@ -1537,6 +1537,11 @@ actual public cancellation/retry coverage enforce this boundary.
 
 ### Current enrollment identity signing ownership
 
+Prepared enrollment activation uses one current version-three persisted record
+with required signed epoch fence, original baseline and exact accepted manifest
+digest. Missing or null fields fail canonical decoding before tree installation;
+recovery retains the original signed operation and execution owner.
+
 Required enrollment identity selection validates the actual active epoch, ordered physical-device signing policy, exact public package, and locally retained encrypted participant package. A valid threshold share does not produce a solo identity capability. It returns the retained `RequiredSigningParticipantError::QuorumOwnerRequired` source through the native Service category; malformed policy, missing material, codec failures, and private/public mismatch retain their own failure categories. The actual finalizer regression exercises genuine transition from single-device bootstrap to threshold policy before selecting the next signing owner. The connected second-issuance regression remains required until an owned multi-party manifest signature and corresponding confirmation owner are integrated.
 
 The required reader separates a domain-valid threshold-one policy from FROST backend support. `BackendThresholdUnsupported` identifies the unsupported retained policy without inventing a provider error; deterministic dependency coverage requires the actual dealer call to return native `InvalidMinSigners`. Required material loss is independently tested through the actual selected-provider backing fault and remains Storage, rather than quorum-unavailable Service.
