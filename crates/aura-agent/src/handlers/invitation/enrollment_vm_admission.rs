@@ -2155,7 +2155,7 @@ mod committed_receipt_tests {
             );
             let verified = original_root
                 .child()
-                .execute(invitee_effects.as_ref(), || async { domain_receiver.await })
+                .execute(invitee_effects.as_ref(), || domain_receiver)
                 .await
                 .expect("original bounded confirmation verification");
             // The genuine original signer roster stays one while AddLeaf creates

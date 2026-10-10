@@ -465,7 +465,7 @@ enum RotatedOwnedProfile {
     Ordinary(RotatedKeyMaterial),
     Enrollment {
         material: RotatedKeyMaterial,
-        original_birth: OriginalEnrollmentAllocationAcknowledgment,
+        original_birth: Box<OriginalEnrollmentAllocationAcknowledgment>,
     },
 }
 
@@ -3013,7 +3013,7 @@ impl AuraEffectSystem {
         Ok(match original_birth {
             Some(original_birth) => RotatedOwnedProfile::Enrollment {
                 material,
-                original_birth,
+                original_birth: Box::new(original_birth),
             },
             None => RotatedOwnedProfile::Ordinary(material),
         })
@@ -3295,7 +3295,7 @@ impl AuraEffectSystem {
                 owner: profile_owner,
                 _owner: plan.generation,
                 _tree: plan.tree,
-                original_birth: Some(original_birth),
+                original_birth: Some(*original_birth),
             },
         ))
     }

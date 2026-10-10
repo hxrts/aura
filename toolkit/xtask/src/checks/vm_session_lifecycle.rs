@@ -492,8 +492,8 @@ LifecycleSuite {
     LifecycleSuite {
         source: "crates/aura-agent/src/runtime/services/enrollment_window.rs",
         functions: &[
-            "actual_admitted_checkpoint_updates_without_mutating_anchor_and_never_repairs_live_loss",
-            "original_legacy_interval_is_attenuated_without_clamping_fresh_signed_window",
+            "actual_admitted_pending_birth_never_repairs_lost_execution_records",
+            "original_signed_interval_rejects_clamped_reconstruction",
         ],
         harness_prefix: "runtime::services::enrollment_window::admitted_clock_split_tests::",
         filter: "runtime::services::enrollment_window::admitted_clock_split_tests::",

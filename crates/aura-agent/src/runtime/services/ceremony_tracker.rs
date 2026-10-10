@@ -2371,7 +2371,7 @@ impl CeremonyTracker {
     #[allow(clippy::too_many_arguments)]
     async fn register_with_generation(
         &self,
-        mut generation: Option<&mut crate::runtime::effects::EnrollmentGenerationReservation<'_>>,
+        generation: Option<&mut crate::runtime::effects::EnrollmentGenerationReservation<'_>>,
         original_tasks: Option<&TaskGroup>,
         ceremony_id: CeremonyId,
         kind: CeremonyKind,
@@ -2510,7 +2510,7 @@ impl CeremonyTracker {
             let effects = self.shared.persistence.as_ref().ok_or_else(|| {
                 original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
             })?;
-            let generation = generation.as_deref_mut().ok_or_else(|| {
+            let generation = generation.ok_or_else(|| {
                 crate::runtime::effects::held_registration_error(
                     crate::runtime::effects::HeldEnrollmentRegistrationError::RequiredOwner,
                 )

@@ -792,6 +792,7 @@ impl Drop for TaskSupervisorOwner {
 }
 
 impl TaskGroup {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn spawn_try_named_observed<F>(
         &self,
         name: impl Into<String>,
@@ -3275,6 +3276,7 @@ mod sealed_group_disposal_tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn running_observation_requires_the_original_live_registration() {
         let supervisor = TaskSupervisor::new();

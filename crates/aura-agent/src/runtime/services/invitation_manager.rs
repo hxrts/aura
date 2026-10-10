@@ -514,7 +514,7 @@ mod tests {
                             0 => candidate.invitation_id = InvitationId::new("foreign-original"),
                             1 => {
                                 candidate.context_id =
-                                    aura_core::ContextId::new_from_entropy([91; 32])
+                                    aura_core::ContextId::new_from_entropy([91; 32]);
                             }
                             2 => candidate.sender_id = AuthorityId::new_from_entropy([92; 32]),
                             3 => candidate.receiver_id = AuthorityId::new_from_entropy([93; 32]),

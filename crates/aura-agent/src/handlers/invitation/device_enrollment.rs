@@ -755,7 +755,7 @@ impl InvitationDeviceEnrollmentHandler {
                 effects.clone(),
                 admitted.as_ref(),
                 choice,
-                &budget,
+                budget,
                 &mut slot,
             ));
             futures::pin_mut!(response, completed);
