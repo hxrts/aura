@@ -40,6 +40,21 @@ Aura tracks three different coverage classes in this document:
 
 This report is a traceability document for those classes. It is not a proof of protocol correctness, and it does not replace conformance or verification lanes.
 
+## Exact semantic expectation coverage
+
+The harness library regressions distinguish list membership, item confirmation
+and explicit selection through the canonical scenario lowering and matcher.
+They cover missing and unrelated selections, absent members, changed confirmation,
+and exclusion of private lowering metadata from serialized compatibility fixtures.
+Focused control identity cannot establish control visibility.
+
+Typed snapshots currently establish screen, list and modal presence. Ordinary
+`ControlVisible` expectations fail explicitly until render-bound observations
+exist. This includes the `onboarding_root` expectations in semantic-observation
+and frontend-conformance smoke scenarios; the matcher tests do not establish
+those flows. Actual native and browser render producers, source-revision binding,
+and paired-client execution remain required before claiming visibility coverage.
+
 ## Reactive observation health
 
 Both frontends export per-owner, per-signal `UiSnapshot.subscription_health` with

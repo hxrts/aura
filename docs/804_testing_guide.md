@@ -155,6 +155,14 @@ Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::n
 
 The shared UX contract is defined in [User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads. The shared semantic scenario contract remains `aura-app::scenario_contract`. Its root may delegate contract families such as submission, actions, expectations, and values into `scenario_contract/*` modules without changing the public harness contract.
 
+Harness waits preserve each typed expectation through internal lowering.
+`ListContains` checks membership regardless of the selected row;
+`SelectionIs` requires an explicit matching selection and a present list item.
+`ListItemConfirmation` checks that item's confirmation independently of selection.
+`ControlVisible` can currently establish screen, list and modal presence from
+typed snapshots. Other controls fail explicitly until authoritative visibility
+observations are available; focused control identity does not prove visibility.
+
 Shared scenarios must submit typed semantic commands through the frontend bridge. They must not use raw PTY keys, raw selector clicks, raw label matching, or incidental focus stepping as primary mechanics. Frontend-specific UI I/O belongs in frontend-conformance coverage rather than the main shared semantic lane. Unsupported semantic commands must fail closed and diagnostically.
 
 Command submission must enter the frontend through its real update and event path. It must not use render-coupled polling or ad hoc harness shims.

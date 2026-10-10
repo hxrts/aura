@@ -58,6 +58,9 @@ impl fmt::Display for CompatibilityAction {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompatibilityStep {
+    /// Exact semantic predicate retained only by the canonical Rust lowering.
+    #[serde(skip)]
+    pub(crate) semantic_expectation: Option<aura_app::scenario_contract::Expectation>,
     pub id: String,
     pub action: CompatibilityAction,
     pub instance: Option<String>,
