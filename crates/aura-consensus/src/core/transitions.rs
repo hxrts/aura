@@ -80,11 +80,18 @@ pub(super) fn abstract_commit_signature(
     result_id: Hash32,
     prestate_hash: Hash32,
 ) -> String {
-    let mut bytes = Vec::with_capacity(96);
-    bytes.extend_from_slice(&cid.0 .0);
-    bytes.extend_from_slice(&result_id.0);
-    bytes.extend_from_slice(&prestate_hash.0);
-    format!("pure-consensus:{}", hex::encode(hash::hash(&bytes)))
+    let mut bytes = [0u8; 96];
+    bytes[..32].copy_from_slice(&cid.0 .0);
+    bytes[32..64].copy_from_slice(&result_id.0);
+    bytes[64..].copy_from_slice(&prestate_hash.0);
+    let mut encoded = [0u8; 64];
+    hex::encode_to_slice(hash::hash(&bytes), &mut encoded)
+        .expect("32-byte digest has exactly 64 hexadecimal bytes");
+    let prefix = "pure-consensus:";
+    let mut signature = String::with_capacity(prefix.len() + encoded.len());
+    signature.push_str(prefix);
+    signature.push_str(std::str::from_utf8(&encoded).expect("hexadecimal encoding is ASCII"));
+    signature
 }
 
 /// Start a new consensus instance.
@@ -369,6 +376,26 @@ mod tests {
                 nonce_binding: "nonce".to_string(),
                 data_binding: "binding".to_string(),
             },
+        }
+    }
+
+    #[test]
+    fn actual_signature_producer_matches_independent_original_byte_format() {
+        for identity in [21, 22] {
+            for prestate in [41, 42] {
+                for result in [1, 2, 3] {
+                    let cid = test_consensus_id(identity);
+                    let rid = test_hash(result);
+                    let prestate = test_hash(prestate);
+                    let bytes =
+                        [cid.0 .0.as_slice(), rid.0.as_slice(), prestate.0.as_slice()].concat();
+                    let reference = format!(
+                        "pure-consensus:{}",
+                        hex::encode(aura_core::hash::hash(&bytes))
+                    );
+                    assert_eq!(abstract_commit_signature(cid, rid, prestate), reference);
+                }
+            }
         }
     }
 

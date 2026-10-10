@@ -207,3 +207,5 @@ fixture over the bounded proof domain and independent identity/prestate variants
 The real wrapper harness retains independently symbolic bounded bindings; fourteen
 kernel successes do not waive that fifteenth allocation-backed proof. Canonical
 Kani budget ownership and forwarding/mutation fixtures are documented in docs806.
+
+The allocation-backed refinement universally selects one of the three actual transition wrappers per symbolic execution, preserving all prior input domains and outcome checks. Binding representatives use three independent boolean choices over the exact existing two-value domains. The production abstract signature still executes canonical BLAKE3 and preserves its exact byte format, using fixed input/hex buffers and one output String. Native tests compare an independent original-format assembly and verify the complete refinement choice domains. These reductions do not establish Linux proof tractability without actual full-gate timing and mutation counterexamples.

@@ -443,12 +443,10 @@ fn production_wrappers_refine_bounded_decisions() {
         kani::assume(state.commit_result.is_some());
     }
     state.fallback_timer_active = kani::any();
-    let identity: u8 = kani::any();
-    let operation: u8 = kani::any();
-    let prestate: u8 = kani::any();
-    kani::assume((21..=22).contains(&identity));
-    kani::assume((31..=32).contains(&operation));
-    kani::assume((41..=42).contains(&prestate));
+    // Boolean choices preserve the exact independent two-value domains while
+    // exposing concrete representatives to constant propagation.
+    let (identity, operation, prestate) =
+        super::refinement_domain::bindings(kani::any(), kani::any(), kani::any());
     let full = materialize(&state, identity, operation, prestate);
     kani::assert(
         super::super::validation::check_all_invariants(&full),
@@ -459,32 +457,44 @@ fn production_wrappers_refine_bounded_decisions() {
     incoming.share.share_value = if kani::any() { "a" } else { "b" }.into();
     incoming.share.nonce_binding = if kani::any() { "c" } else { "d" }.into();
     incoming.share.data_binding = if kani::any() { "e" } else { "f" }.into();
-    match (
-        transitions::apply_share(&full, incoming.clone()),
-        state.apply_share(proposal),
-    ) {
-        (TransitionResult::Ok(actual), Some(expected)) => {
-            assert_storage_parity(&actual, &expected, &full, Some(&incoming))
+    // Universal nondeterminism covers every transition without executing
+    // three independent heap-backed wrappers on each symbolic path.
+    let choice: u8 = kani::any();
+    kani::assume(choice < 3);
+    match super::refinement_domain::transition(choice).expect("validated transition domain") {
+        super::refinement_domain::Transition::ApplyShare => {
+            match (
+                transitions::apply_share(&full, incoming.clone()),
+                state.apply_share(proposal),
+            ) {
+                (TransitionResult::Ok(actual), Some(expected)) => {
+                    assert_storage_parity(&actual, &expected, &full, Some(&incoming))
+                }
+                (TransitionResult::NotEnabled(_), None) => {}
+                _ => kani::assert(false, "wrapper admission matches kernel"),
+            }
         }
-        (TransitionResult::NotEnabled(_), None) => {}
-        _ => kani::assert(false, "wrapper admission matches kernel"),
-    }
-    match (
-        transitions::trigger_fallback(&full),
-        state.trigger_fallback(),
-    ) {
-        (TransitionResult::Ok(actual), Some(expected)) => {
-            assert_storage_parity(&actual, &expected, &full, None)
+        super::refinement_domain::Transition::TriggerFallback => {
+            match (
+                transitions::trigger_fallback(&full),
+                state.trigger_fallback(),
+            ) {
+                (TransitionResult::Ok(actual), Some(expected)) => {
+                    assert_storage_parity(&actual, &expected, &full, None)
+                }
+                (TransitionResult::NotEnabled(_), None) => {}
+                _ => kani::assert(false, "wrapper fallback matches kernel"),
+            }
         }
-        (TransitionResult::NotEnabled(_), None) => {}
-        _ => kani::assert(false, "wrapper fallback matches kernel"),
-    }
-    match (transitions::fail_consensus(&full), state.fail_consensus()) {
-        (TransitionResult::Ok(actual), Some(expected)) => {
-            assert_storage_parity(&actual, &expected, &full, None)
+        super::refinement_domain::Transition::FailConsensus => {
+            match (transitions::fail_consensus(&full), state.fail_consensus()) {
+                (TransitionResult::Ok(actual), Some(expected)) => {
+                    assert_storage_parity(&actual, &expected, &full, None)
+                }
+                (TransitionResult::NotEnabled(_), None) => {}
+                _ => kani::assert(false, "wrapper failure matches kernel"),
+            }
         }
-        (TransitionResult::NotEnabled(_), None) => {}
-        _ => kani::assert(false, "wrapper failure matches kernel"),
     }
     match (&full.commit_fact, &retained_commit) {
         (Some(actual), Some(original)) => kani::assert(

@@ -33,3 +33,6 @@ pub mod quint_mapping;
 // Kani bounded model checking proofs - only compiled when running Kani
 #[cfg(kani)]
 pub mod kani_proofs;
+
+#[cfg(any(kani, test))]
+mod refinement_domain;

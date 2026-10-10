@@ -607,3 +607,5 @@ A nonzero tool exit alone does not pass: each artifact must contain verifier
 failure and the required assertion. Review the actual counterexample; compilation,
 installer, missing tool, timeout and unwind errors cannot replace it. Re-run the
 unchanged full canonical gate after sensitivity evidence. No timeout is widened.
+
+The real-wrapper refinement selects a transition nondeterministically and executes that actual production wrapper, so verification still quantifies all apply/fallback/failure outcomes. Its independent identity/operation/prestate boolean choices preserve the exact previous representative domains. The signature producer uses fixed buffers but still executes the canonical hash and original byte format. Run native signature-format/domain regressions before supported-Linux fifteenth-proof timing, then the complete fifteen-proof gate and both required mutation counterexamples. Allocation reductions are not proof success or a cryptographic injectivity claim.
