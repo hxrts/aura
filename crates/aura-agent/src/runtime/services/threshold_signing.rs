@@ -4058,6 +4058,34 @@ mod original_stop_window_tests {
             .set_status(authority, super::super::AuthorityStatus::Active, 100)
             .await?;
         let original = runtime.close_for_shutdown_test().await?;
+        let original_effects = runtime.effects();
+        let original_tasks = runtime.tasks();
+        original
+            .execute_service(
+                original_effects.as_ref(),
+                &original_tasks,
+                "test_startup_drain",
+                || async {
+                    original_tasks
+                        .await_registered_task_completion_for_test(
+                            "runtime.runtime_startup_maintenance::initial_lan_descriptor",
+                        )
+                        .await
+                        .map_err(|source| {
+                            ServiceError::shutdown_failed(
+                                "test_startup_drain",
+                                "required startup task failed",
+                            )
+                            .with_cause(source)
+                        })
+                },
+            )
+            .await?;
+        assert!(!original_tasks
+            .active_tasks()
+            .iter()
+            .any(|task| { task == "runtime.runtime_startup_maintenance::initial_lan_descriptor" }));
+        assert_eq!(clock.now_ms(), 100);
         let service = runtime.threshold_signing();
         clock
             .fail_next_observation(aura_core::effects::TimeError::ServiceUnavailable)

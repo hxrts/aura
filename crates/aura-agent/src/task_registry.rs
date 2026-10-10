@@ -630,6 +630,37 @@ impl TaskSupervisor {
     pub fn active_tasks(&self) -> Vec<String> {
         self.root.active_tasks()
     }
+
+    #[cfg(test)]
+    pub(crate) async fn await_registered_task_completion_for_test(
+        &self,
+        task_name: &str,
+    ) -> Result<(), TaskSupervisionError> {
+        let registrations = {
+            let mut tree = self.root.shared.tree.state.lock();
+            let mut registrations = Vec::new();
+            for group in self.root.subtree_groups_locked(&mut tree) {
+                for (task_id, task) in group.tasks.lock().iter() {
+                    if format!("{}::{}", group.name, task.task_name) == task_name {
+                        registrations.push((group.clone(), *task_id));
+                    }
+                }
+            }
+            registrations
+        };
+        loop {
+            let changed = self.root.shared.notify.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if registrations
+                .iter()
+                .all(|(group, task_id)| !group.tasks.lock().contains_key(task_id))
+            {
+                return self.terminal_failure().map_or(Ok(()), Err);
+            }
+            changed.await;
+        }
+    }
 }
 
 impl Default for TaskSupervisor {
@@ -1901,6 +1932,13 @@ mod tests {
     impl PhysicalTimeEffects for UnavailableSupervisorClock {
         async fn physical_time(
             &self,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            Err(aura_core::effects::TimeError::ServiceUnavailable)
+        }
+
+        async fn wait_until_physical_deadline(
+            &self,
+            _: aura_core::types::window::WindowPosition<aura_core::types::window::PhysicalMillis>,
         ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
             Err(aura_core::effects::TimeError::ServiceUnavailable)
         }

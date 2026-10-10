@@ -312,7 +312,15 @@ pub async fn link_contacts(inviter: &Peer, invitee: &Peer) -> Result<()> {
     .await?;
     let code = invitation::export_invitation(&inviter.app, invite.invitation_id()).await?;
     let imported = invitation::import_invitation_details(&invitee.app, &code).await?;
-    invitation::accept_invitation(&invitee.app, imported).await?;
+    invitation::accept_invitation_with_terminal_status(
+        &invitee.app,
+        invitation::InvitationAcceptanceRequest::RetainedHandle {
+            invitation: Box::new(imported),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result?;
     wait_until("inviter sees the invitee as contact", || {
         is_contact(&inviter.app, invitee.id)
     })
