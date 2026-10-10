@@ -47,6 +47,7 @@ pub struct OwnedProfileLease {
     pub(crate) keyring_namespace:
         std::sync::OnceLock<Arc<crate::platform_namespace::PlatformNamespaceLease>>,
     _file: std::fs::File,
+    acquiring_process: rustix::process::Pid,
     pub(crate) directory: crate::profile_directory::ProfileDirectory,
     identity: String,
 }
@@ -56,8 +57,26 @@ impl ProfileStorageLease for OwnedProfileLease {
         &self.identity
     }
 }
-// No explicit unlock: closing the sole owned descriptor releases flock.
 // The stable lock inode must NEVER be unlinked, renamed or replaced.
+// Rust owner custody ends on the acquiring process's final Arc drop. An
+// incidental fork descriptor is not a profile lease and cannot extend custody.
+#[cfg(unix)]
+impl OwnedProfileLease {
+    fn release_acquiring_process_lock(&self) {
+        // Keep this helper allocation/lock/log free: the test invokes this exact
+        // final-release decision after fork and before exec. getpid and flock
+        // operate only on the original held resource, never on a raw pathname.
+        if self.acquiring_process == rustix::process::getpid() {
+            let _ = rustix::fs::flock(&self._file, rustix::fs::FlockOperation::Unlock);
+        }
+    }
+}
+#[cfg(unix)]
+impl Drop for OwnedProfileLease {
+    fn drop(&mut self) {
+        self.release_acquiring_process_lock();
+    }
+}
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -169,6 +188,7 @@ impl FilesystemProfileStorageHandler {
                 ))]
                 keyring_namespace: std::sync::OnceLock::new(),
                 _file: file,
+                acquiring_process: rustix::process::getpid(),
                 directory,
                 identity,
             })
@@ -478,6 +498,153 @@ mod contained_directory_tests {
             std::fs::canonicalize(profile.path())?.join("nested/actual")
         );
         assert!(created.is_dir());
+        Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod lease_process_custody_tests {
+    use super::*;
+    use std::io::{BufRead, Write};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+
+    struct OwnedChild(Child);
+    impl Drop for OwnedChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn inherited_descriptor_worker() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(fd) = std::env::var_os("AURA_PROFILE_INHERITED_DESCRIPTOR") else {
+            return Ok(());
+        };
+        // Opening the inherited descriptor then querying it uses fstat. A path
+        // stat of /dev/fd on macOS instead describes its devfs directory entry.
+        let descriptor =
+            std::fs::File::open(format!("/dev/fd/{}", fd.to_string_lossy()))?.metadata()?;
+        assert_eq!(
+            descriptor.dev().to_string(),
+            std::env::var("AURA_PROFILE_INHERITED_DEV")?
+        );
+        assert_eq!(
+            descriptor.ino().to_string(),
+            std::env::var("AURA_PROFILE_INHERITED_INO")?
+        );
+        assert!(
+            descriptor.is_file(),
+            "actual original lock descriptor survives exec"
+        );
+        println!("actual-profile-descriptor-retained");
+        std::io::stdout().flush()?;
+        let mut release = String::new();
+        std::io::stdin().read_line(&mut release)?;
+        assert_eq!(release, "release\n");
+        Ok(())
+    }
+
+    #[test]
+    fn inherited_descriptor_cannot_extend_or_release_original_lease_custody(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let handler = FilesystemProfileStorageHandler::new(profile.path().to_path_buf());
+        let owner = Arc::new(handler.acquire_owned_native()?);
+        let retained_writer = owner.clone();
+        let original_flags = rustix::io::fcntl_getfd(&owner._file)?;
+        let metadata = owner._file.metadata()?;
+        let mut command = Command::new(std::env::current_exe()?);
+        command
+            .args([
+                "--exact",
+                "profile_storage::lease_process_custody_tests::inherited_descriptor_worker",
+                "--nocapture",
+            ])
+            .env(
+                "AURA_PROFILE_INHERITED_DESCRIPTOR",
+                owner._file.as_raw_fd().to_string(),
+            )
+            .env("AURA_PROFILE_INHERITED_DEV", metadata.dev().to_string())
+            .env("AURA_PROFILE_INHERITED_INO", metadata.ino().to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        // SAFETY: this callback calls only the exact production release helper's
+        // getpid/flock decision and fcntl on the inherited child FD only.
+        // It allocates nothing, takes no Rust locks,
+        // logs nothing and drops no Rust-owned resources between fork and exec.
+        // The acquiring-process comparison must refuse the inherited child.
+        #[expect(
+            unsafe_code,
+            reason = "test-only async-signal-safe fork callback validates process-bound lease release"
+        )]
+        unsafe {
+            command.pre_exec(move || {
+                retained_writer.release_acquiring_process_lock();
+                rustix::io::fcntl_setfd(
+                    &retained_writer._file,
+                    original_flags & !rustix::io::FdFlags::CLOEXEC,
+                )
+                .map_err(std::io::Error::from)?;
+                Ok(())
+            });
+        }
+        let mut child = OwnedChild(command.spawn()?);
+        // Drop the parent's callback capture; the separate original owner stays
+        // live. Child readiness means exec completed and the actual FD remains.
+        drop(command);
+        let stdout = child.0.stdout.take().ok_or("child stdout")?;
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut ready = false;
+        for line in (&mut reader).lines() {
+            if line? == "actual-profile-descriptor-retained" {
+                ready = true;
+                break;
+            }
+        }
+        assert!(ready, "child must retain the actual inherited descriptor");
+        assert!(
+            matches!(
+                handler.acquire_owned_native(),
+                Err(ProfileStorageError::Busy)
+            ),
+            "child release helper must not unlock the live original owner"
+        );
+        let retained_writer = owner.clone();
+        drop(owner);
+        assert!(
+            matches!(
+                handler.acquire_owned_native(),
+                Err(ProfileStorageError::Busy)
+            ),
+            "sanctioned Arc writer retains original custody"
+        );
+        drop(retained_writer);
+        let replacement = handler.acquire_owned_native()?;
+        assert!(
+            child.0.try_wait()?.is_none(),
+            "child still holds inherited raw FD"
+        );
+        child
+            .0
+            .stdin
+            .take()
+            .ok_or("child stdin")?
+            .write_all(b"release\n")?;
+        assert!(child.0.wait()?.success());
+        drop(reader);
+        // Child's descriptor close must not release this independently acquired
+        // owner or remove the persistent original lock inode.
+        assert!(matches!(
+            handler.acquire_owned_native(),
+            Err(ProfileStorageError::Busy)
+        ));
+        drop(replacement);
+        handler.acquire_owned_native()?;
+        assert!(profile.path().join(".aura-profile-owner.lock").is_file());
         Ok(())
     }
 }

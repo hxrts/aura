@@ -1804,33 +1804,9 @@ mod tests {
             !child.0.wait()?.success(),
             "actual creator must die before target link"
         );
-        // A killed process's advisory lock can be released slightly after
-        // `wait` returns (macOS exit ordering). Wait until the profile is
-        // actually free before the caller reopens it; the budget starts only
-        // after the kill.
-        use aura_core::effects::time::PhysicalTimeEffects;
-        let time = crate::time::PhysicalTimeHandler::new();
-        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
-            &time.physical_time().await?,
-            std::time::Duration::from_secs(10),
-        )?;
-        loop {
-            match crate::profile_storage::FilesystemProfileStorageHandler::new(
-                profile.to_path_buf(),
-            )
-            .acquire_owned_native()
-            {
-                Ok(probe) => {
-                    drop(probe);
-                    break;
-                }
-                Err(aura_core::effects::profile_storage::ProfileStorageError::Busy) => {
-                    let remaining = budget.remaining_at(&time.physical_time().await?)?;
-                    time.sleep_ms(remaining.as_millis().min(10) as u64).await?;
-                }
-                Err(error) => return Err(error.into()),
-            }
-        }
+        // Exact direct-child wait is the process-death acknowledgment. Final
+        // parent-owned leases release explicitly; unrelated fork descriptors
+        // cannot extend their custody. No wall-clock retry proves readiness.
         Ok(())
     }
     #[tokio::test]
