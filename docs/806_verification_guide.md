@@ -588,16 +588,16 @@ Kani execution environment; macOS refusal/tool failure is not proof success.
 | Evidence | Required execution |
 |---|---|
 | Independent native decision/storage equivalence | `cargo test -p hxrts-aura-consensus --lib exhaustive_native_storage_refines_independent_decisions` under the normal build budget |
-| Real allocation-backed wrapper, including bounded independent identity/prestate fields | Focused `production_wrappers_refine_bounded_decisions`, retain actual verifier result and elapsed time |
-| Fourteen original properties plus real wrapper | Complete canonical `just ci-kani`, retain all fifteen results and whole-gate elapsed time under ten minutes |
+| Real allocation-backed wrapper, including bounded independent identity/prestate fields | Full 120-member `production_wrappers_refine_bounded_decisions_p*_t*_b*` family, retain each result and elapsed time |
+| Fourteen original properties plus real wrapper | Complete canonical `just ci-kani`, retain all 134 results and whole-gate elapsed time under ten minutes |
 | Required-property mutation sensitivity | On a clean committed Linux candidate, `AURA_KANI_SENSITIVITY_ARTIFACTS=/absolute/artifacts bash scripts/verify/test-kani-sensitivity.sh` |
 
 The native fixture independently counts three results over every bounded unique
 witness proposal assignment, admissible equivocator set, threshold and phase,
 including valid stored commits, and checks actual wrapper guards/payloads. It
-also varies independent identity/prestate bindings. The wrapper Kani proof uses
-two symbolic representatives independently for consensus identity, operation and
-prestate; this is bounded binding-discriminator coverage, not a claim of universal
+also varies independent identity/prestate bindings. The wrapper Kani family covers
+all eight independent tuples of two representatives for consensus identity,
+operation and prestate; this is bounded binding-discriminator coverage, not a claim of universal
 256-bit cryptographic injectivity. Signature production remains the actual
 production implementation.
 
@@ -608,4 +608,53 @@ failure and the required assertion. Review the actual counterexample; compilatio
 installer, missing tool, timeout and unwind errors cannot replace it. Re-run the
 unchanged full canonical gate after sensitivity evidence. No timeout is widened.
 
-The real-wrapper refinement selects a transition nondeterministically and executes that actual production wrapper, so verification still quantifies all apply/fallback/failure outcomes. Its independent identity/operation/prestate boolean choices preserve the exact previous representative domains. The signature producer uses fixed buffers but still executes the canonical hash and original byte format. Run native signature-format/domain regressions before supported-Linux fifteenth-proof timing, then the complete fifteen-proof gate and both required mutation counterexamples. Allocation reductions are not proof success or a cryptographic injectivity claim.
+### Complete allocation-backed consensus refinement inventory
+
+`just ci-kani` discovers and executes the exact tracked
+`scripts/verify/kani-consensus-inventory.txt`: fourteen existing kernel proofs and
+120 partitions covering the complete production-wrapper refinement obligation. Names encode phase p0–p4
+(Pending/FastPathActive/FallbackActive/Committed/Failed), transition t0–t2
+(apply/fallback/fail), and independent binding bits b0–b7. The binding domain is
+exactly cid21/22, operation31/32 and prestate41/42. All other original symbolic
+domains remain universal in each partition. Unsupported/terminal branches retain
+actual wrapper rejection checks; committed prestates retain actual commit payloads
+and the original threshold-qualified result requirement. No crypto producer is
+stubbed. Exact signature format checks use independent concatenation and canonical
+BLAKE3, not an assumption about hash uniqueness.
+
+For the supported Linux commit-producing pilot, use the existing pinned installer
+and budget custody:
+
+```sh
+nix develop --command bash scripts/dev/build-budget.sh --lane kani-wrapper-pilot -- \
+  just _run-kani cargo kani --package hxrts-aura-consensus \
+  --harness production_wrappers_refine_bounded_decisions_p1_t0_b0 \
+  --output-format regular
+```
+
+That partition retains commit and noncommit outcomes; it does not constrain the
+state to a successful commit. Retain compiler/solver status and timing. A pilot,
+native tests, or fourteen kernel successes cannot close the complete gate.
+Canonical CI still requires full proofs, both actual threshold/terminal mutation
+counterexamples, and the unchanged full `just ci-kani` rerun. The runner refuses
+zero/partial discovery and execution, preserving logs even on proof failure.
+No Linux timing success is claimed by this source decomposition.
+
+Discovery uses the actual installed CI Kani 0.68.0 `cargo kani list --format json`
+contract: `kani-list.json`, schema 0.1, `standard-harnesses` file-to-name arrays.
+The exact version/schema and complete nonzero inventory are required, retained
+in gate artifacts, and unknown versions fail closed for deliberate review.
+The canonical installer pins 0.68.0, verifies cached binaries and force-reinstalls
+a different release; an unverifiable cache or wrong installed version refuses.
+Upgrading the pin requires auditing this discovery contract. Existing
+cwd discovery output is refused to prevent stale data from certifying a run.
+Execution parsing accepts Kani 0.68.0's exact Checking harness line, including
+its optional numeric Thread prefix; proof exit success and complete executed
+inventory are both required.
+
+CI retains initial full-gate discovery/results under `artifacts/kani/initial`
+and the post-mutation unchanged rerun under `artifacts/kani/unchanged`. The
+existing always-upload step retains both complete trees and
+`artifacts/kani-sensitivity`; the rerun cannot overwrite initial proof evidence.
+
+The canonical `ci-kani` recipe first runs isolated inventory, installer, and workflow-dispatch regressions. Their success does not replace the subsequent complete production proof run; any fixture failure stops the recipe. Fixture artifacts use their own temporary directory even when CI supplies `AURA_KANI_ARTIFACTS`.

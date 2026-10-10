@@ -33,6 +33,7 @@ for mutation in threshold terminal; do
       just _run-kani cargo kani --package hxrts-aura-consensus --harness "$harness" --output-format regular
   ) > "$log" 2>&1 || result=$?
   [[ $result -ne 0 ]] || { printf 'Mutation unexpectedly verified: %s\n' "$mutation" >&2; exit 1; }
+  rg -Ex "(Thread [0-9]+: )?Checking harness core::verification::kani_proofs::$harness\.\.\." "$log" >/dev/null || { printf 'Required mutation harness absent: %s\n' "$log" >&2; exit 1; }
   rg -F 'VERIFICATION:- FAILED' "$log" >/dev/null || { printf 'No actual verification failure: %s\n' "$log" >&2; exit 1; }
   rg -Fx "Failed Checks: $property" "$log" >/dev/null || { printf 'Required property counterexample absent: %s\n' "$log" >&2; exit 1; }
   printf '%s: actual required-property counterexample retained in %s\n' "$mutation" "$log"

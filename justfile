@@ -1021,7 +1021,10 @@ ci-lean-check-sorry:
 
 # Kani bounded model checking
 ci-kani:
-    CARGO_BUILD_JOBS=4 bash scripts/dev/build-budget.sh --lane ci-kani -- just _run-kani cargo kani --package hxrts-aura-consensus --default-unwind 10 --output-format terse
+    bash scripts/verify/test-kani-consensus.sh
+    bash scripts/verify/test-kani-ensure.sh
+    bash scripts/verify/test-workflow-kani.sh
+    CARGO_BUILD_JOBS=4 bash scripts/dev/build-budget.sh --lane ci-kani -- bash scripts/verify/kani-consensus.sh
 
 # ITF conformance tests
 ci-conformance-itf:

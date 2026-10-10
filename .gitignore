@@ -59,6 +59,7 @@ logs/
 *.tmp
 *.temp
 *.txt
+!scripts/verify/kani-consensus-inventory.txt
 work/
 ext/
 outcomes/

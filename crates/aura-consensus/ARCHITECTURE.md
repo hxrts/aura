@@ -193,19 +193,23 @@ threshold-qualified fallback winner. No time value orders this selection.
 Reference checks compare unique winners exactly and tied winners by qualification
 and maximal count. The wrapper refinement compares its selected winner exactly.
 
-The fourteen named property harnesses retain 2–4 witnesses, up to three existing
-proposals and three equality-distinct result representatives. The additional
-`production_wrappers_refine_bounded_decisions` harness executes the real public
-wrappers, including storage allocation, rejection formatting and actual commit
-signature production, and checks original payload, identifier and prestate
-custody. Kernel-only proof success cannot waive this refinement or the complete
-`just ci-kani` gate. See `docs/806_verification_guide.md` for execution and mutation
-sensitivity requirements.
+The fourteen named kernel properties retain 2–4 witnesses, up to three existing
+proposals and three equality-distinct result representatives. The production
+wrapper refinement executes actual allocation, rejection formatting, payload
+storage and signature production. Its complete phase/transition/binding family
+checks original payload, append order, phase/timer and identifier/prestate custody.
+Kernel-only success cannot waive any partition or the complete `just ci-kani`
+gate. Independent exhaustive native storage/reference and signature-format tests
+supplement these proofs; see `docs/806_verification_guide.md` for actual execution,
+whole-gate timing and required mutation counterexamples.
 
-Task76 validation also includes an exhaustive independent native storage/reference
-fixture over the bounded proof domain and independent identity/prestate variants.
-The real wrapper harness retains independently symbolic bounded bindings; fourteen
-kernel successes do not waive that fifteenth allocation-backed proof. Canonical
-Kani budget ownership and forwarding/mutation fixtures are documented in docs806.
-
-The allocation-backed refinement universally selects one of the three actual transition wrappers per symbolic execution, preserving all prior input domains and outcome checks. Binding representatives use three independent boolean choices over the exact existing two-value domains. The production abstract signature still executes canonical BLAKE3 and preserves its exact byte format, using fixed input/hex buffers and one output String. Native tests compare an independent original-format assembly and verify the complete refinement choice domains. These reductions do not establish Linux proof tractability without actual full-gate timing and mutation counterexamples.
+The allocation-backed refinement is decomposed into 120 separately discovered
+proofs: five original phases, three original transitions and eight independent
+identity/operation/prestate tuples. Every partition retains the original
+witness, threshold, proposal, result, equivocator, timer and payload domains.
+Committed inputs retain the existing threshold-backed well-formedness restriction;
+all terminal rejection branches still execute their actual production wrappers.
+The canonical gate requires all fourteen kernel proofs plus all 120 partitions.
+Actual production BLAKE3 remains executed, and signatures are compared against
+independent original-format assembly (prefix, field order and hex encoding),
+without an injectivity claim. Decomposition is not evidence of Linux tractability.

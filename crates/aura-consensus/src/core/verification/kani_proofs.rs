@@ -413,22 +413,36 @@ fn assert_storage_parity(
                 "commit retains original identity",
             );
             kani::assert(
-                !commit.signature.is_empty(),
-                "real signature producer emits nonempty binding",
+                commit.signature
+                    == independent_signature(commit.cid, commit.result_id, commit.prestate_hash),
+                "real signature preserves exact original prefix/input ordering/hex format",
             );
         }
         _ => kani::assert(false, "wrapper commit presence matches kernel"),
     }
 }
+// Independent original-format assembly; this is actual canonical BLAKE3, not
+// a crypto stub or an injectivity assumption.
+fn independent_signature(cid: ConsensusId, result: Hash32, prestate: Hash32) -> String {
+    let bytes = [&cid.0 .0[..], &result.0[..], &prestate.0[..]].concat();
+    format!(
+        "pure-consensus:{}",
+        hex::encode(aura_core::hash::hash(&bytes))
+    )
+}
+
 /// This extra proof deliberately executes the real public wrappers, including
 /// allocation, rejection formatting and the actual abstract signature producer.
 /// It cannot be replaced with a stub or waived when kernel-only proofs pass.
-#[kani::proof]
-#[kani::unwind(130)]
-fn production_wrappers_refine_bounded_decisions() {
+fn production_wrappers_refine_bounded_decisions<
+    const PHASE: u8,
+    const TRANSITION: u8,
+    const IDENTITY: u8,
+    const OPERATION: u8,
+    const PRESTATE: u8,
+>() {
     let mut state = any_state();
-    let phase: u8 = kani::any();
-    kani::assume(phase < 5);
+    let phase = PHASE;
     state.phase = match phase {
         0 => ConsensusPhase::Pending,
         1 => ConsensusPhase::FastPathActive,
@@ -443,24 +457,27 @@ fn production_wrappers_refine_bounded_decisions() {
         kani::assume(state.commit_result.is_some());
     }
     state.fallback_timer_active = kani::any();
-    // Boolean choices preserve the exact independent two-value domains while
-    // exposing concrete representatives to constant propagation.
-    let (identity, operation, prestate) =
-        super::refinement_domain::bindings(kani::any(), kani::any(), kani::any());
+    // Every independent tuple is instantiated by the complete proof inventory.
+    let (identity, operation, prestate) = (IDENTITY, OPERATION, PRESTATE);
     let full = materialize(&state, identity, operation, prestate);
     kani::assert(
         super::super::validation::check_all_invariants(&full),
         "refinement starts from actual well-formed stored state",
     );
+    if let Some(commit) = &full.commit_fact {
+        kani::assert(
+            commit.signature
+                == independent_signature(commit.cid, commit.result_id, commit.prestate_hash),
+            "retained actual commit preserves original signature format",
+        );
+    }
     let retained_commit = full.commit_fact.clone();
     let mut incoming = share(proposal);
     incoming.share.share_value = if kani::any() { "a" } else { "b" }.into();
     incoming.share.nonce_binding = if kani::any() { "c" } else { "d" }.into();
     incoming.share.data_binding = if kani::any() { "e" } else { "f" }.into();
-    // Universal nondeterminism covers every transition without executing
-    // three independent heap-backed wrappers on each symbolic path.
-    let choice: u8 = kani::any();
-    kani::assume(choice < 3);
+    // Every transition executes independently in its inventoried partition.
+    let choice = TRANSITION;
     match super::refinement_domain::transition(choice).expect("validated transition domain") {
         super::refinement_domain::Transition::ApplyShare => {
             match (
@@ -507,4 +524,724 @@ fn production_wrappers_refine_bounded_decisions() {
         (None, None) => {}
         _ => kani::assert(false, "original stored commit presence retained"),
     }
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b0() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b1() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b2() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b3() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b4() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b5() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b6() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t0_b7() {
+    production_wrappers_refine_bounded_decisions::<0, 0, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b0() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b1() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b2() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b3() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b4() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b5() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b6() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t1_b7() {
+    production_wrappers_refine_bounded_decisions::<0, 1, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b0() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b1() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b2() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b3() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b4() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b5() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b6() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p0_t2_b7() {
+    production_wrappers_refine_bounded_decisions::<0, 2, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b0() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b1() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b2() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b3() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b4() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b5() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b6() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t0_b7() {
+    production_wrappers_refine_bounded_decisions::<1, 0, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b0() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b1() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b2() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b3() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b4() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b5() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b6() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t1_b7() {
+    production_wrappers_refine_bounded_decisions::<1, 1, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b0() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b1() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b2() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b3() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b4() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b5() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b6() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p1_t2_b7() {
+    production_wrappers_refine_bounded_decisions::<1, 2, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b0() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b1() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b2() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b3() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b4() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b5() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b6() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t0_b7() {
+    production_wrappers_refine_bounded_decisions::<2, 0, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b0() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b1() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b2() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b3() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b4() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b5() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b6() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t1_b7() {
+    production_wrappers_refine_bounded_decisions::<2, 1, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b0() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b1() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b2() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b3() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b4() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b5() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b6() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p2_t2_b7() {
+    production_wrappers_refine_bounded_decisions::<2, 2, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b0() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b1() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b2() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b3() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b4() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b5() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b6() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t0_b7() {
+    production_wrappers_refine_bounded_decisions::<3, 0, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b0() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b1() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b2() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b3() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b4() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b5() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b6() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t1_b7() {
+    production_wrappers_refine_bounded_decisions::<3, 1, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b0() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b1() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b2() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b3() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b4() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b5() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b6() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p3_t2_b7() {
+    production_wrappers_refine_bounded_decisions::<3, 2, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b0() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b1() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b2() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b3() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b4() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b5() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b6() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t0_b7() {
+    production_wrappers_refine_bounded_decisions::<4, 0, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b0() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b1() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b2() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b3() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b4() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b5() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b6() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t1_b7() {
+    production_wrappers_refine_bounded_decisions::<4, 1, 22, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b0() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 21, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b1() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 22, 31, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b2() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 21, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b3() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 22, 32, 41>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b4() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 21, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b5() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 22, 31, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b6() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 21, 32, 42>();
+}
+
+#[kani::proof]
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions_p4_t2_b7() {
+    production_wrappers_refine_bounded_decisions::<4, 2, 22, 32, 42>();
 }

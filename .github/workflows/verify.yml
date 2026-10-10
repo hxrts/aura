@@ -64,19 +64,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
       - name: Run Kani proofs
+        env:
+          AURA_KANI_ARTIFACTS: ${{ github.workspace }}/artifacts/kani/initial
         run: nix develop .#nightly --command just ci-kani
       - name: Check consensus proof mutation sensitivity
         env:
           AURA_KANI_SENSITIVITY_ARTIFACTS: ${{ github.workspace }}/artifacts/kani-sensitivity
         run: nix develop .#nightly --command bash scripts/verify/test-kani-sensitivity.sh
       - name: Recheck unchanged Kani proofs
+        env:
+          AURA_KANI_ARTIFACTS: ${{ github.workspace }}/artifacts/kani/unchanged
         run: nix develop .#nightly --command just ci-kani
-      - name: Retain Kani mutation counterexamples
+      - name: Retain Kani proof inventories and mutation counterexamples
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kani-sensitivity-${{ github.run_id }}
-          path: artifacts/kani-sensitivity
+          path: |
+            artifacts/kani
+            artifacts/kani-sensitivity
           if-no-files-found: warn
       - name: Failure bundle
         if: failure()
