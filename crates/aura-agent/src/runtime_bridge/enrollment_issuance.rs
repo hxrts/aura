@@ -343,7 +343,7 @@ impl AgentRuntimeBridge {
         )
         .map_err(|e| IssueError::at(Stage::PendingConfigRead, e))?;
         let manifest = aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
-            version: 2,
+            version: aura_invitation::enrollment_manifest::EnrollmentTrustManifest::CURRENT_VERSION,
             subject: authority_id,
             initiator_device: current_device_id,
             invitee_authority: invitee_authority_id,
@@ -366,7 +366,7 @@ impl AgentRuntimeBridge {
             starting_epoch: 0,
             starting_commitment: [0; 32],
             parents,
-            final_inventory: Some(final_inventory.inventory().to_vec()),
+            final_inventory: final_inventory.inventory().to_vec(),
             final_epoch: final_state.epoch.value(),
             final_commitment: final_state.root_commitment,
             pending_epoch: pending_epoch.value(),
@@ -385,9 +385,9 @@ impl AgentRuntimeBridge {
                     &final_inventory,
                     &manifest,
                     aura_invitation::InvitationType::DeviceEnrollment {
-                        setup_binding: Some(manifest.setup.clone()),
+                        setup_binding: manifest.setup.clone(),
                         subject_authority: authority_id,
-                        invitee_authority: Some(invitee_authority_id),
+                        invitee_authority: invitee_authority_id,
                         initiator_device_id: current_device_id,
                         device_id: new_device_id,
                         nickname_suggestion: Some(nickname_suggestion.clone()),

@@ -128,6 +128,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 | proposal/share/transcript/evidence types | `MoveOwned` | Exclusive proposal, share, and transcript authority remains explicit and value-based. |
 | `protocol/`, `frost/`, witness/round coordinators | `ActorOwned` where long-lived | Coordinator ownership is explicit only where lifecycle/supervision matters; not the default for all logic. |
 | `relational/`, `dkg/` orchestration adapters | `MoveOwned`, selective `ActorOwned` | Cross-authority coordination and DKG orchestration remain explicit about owner boundaries. |
+| `dkg::ContextDkgOutput` | `MoveOwned` | Private construction retains the original DKG configuration, local participant, native key packages, and aggregate VSS commitment. Native consistency is not application policy approval. |
 | Observed-only surfaces | none | Projection/diagnostics stay downstream of consensus truth. |
 
 ### Capability-Gated Points
@@ -140,6 +141,15 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 ### Strategy
 
 Consensus safety invariants are the highest-consequence tests in the system. `tests/safety/` validates equivocation detection, guard enforcement, and protocol coherence. `tests/contracts/` validates wire format stability and DKG transcript correctness. Inline tests cover the pure state machine.
+
+Context DKG completion sums the original round-one commitments using the pinned
+native FROST primitive and checks the reconstructed public package against the
+completed ceremony package. The retained aggregate supports native share
+repair without generating a replacement dealer polynomial. Callers must retain
+the independently approved policy and ceremony custody alongside this output;
+matching public mathematics alone cannot authorize enrollment or resharing.
+The runtime retention adapter rejects a configuration or local participant
+different from the completed native output before writing any key material.
 
 ### Commands
 
@@ -166,3 +176,36 @@ cargo test -p aura-consensus
 - [Consensus](../../docs/108_consensus.md)
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [System Internals Guide](../../docs/807_system_internals_guide.md)
+
+### Allocation-free consensus decisions and bounded proofs
+
+`core/decision.rs` owns the shared pure share-admission, phase-transition,
+invariant, membership and threshold-counting algorithms. Production
+`ConsensusState`/transition wrappers feed borrowed identity iterators into this
+kernel, retain full share payloads and materialize commits through the existing
+signature producer. Verification uses fixed storage with the same algorithms;
+it does not replace production decisions with a parallel bounded model.
+
+Maximal-count selection retains the first proposal occurrence on ties. This
+chooses one admissible threshold winner under the threshold-checking contract
+in `docs/108_consensus.md`; Quint `consensus/core.qnt` permits an explicit
+threshold-qualified fallback winner. No time value orders this selection.
+Reference checks compare unique winners exactly and tied winners by qualification
+and maximal count. The wrapper refinement compares its selected winner exactly.
+
+The fourteen named property harnesses retain 2–4 witnesses, up to three existing
+proposals and three equality-distinct result representatives. The additional
+`production_wrappers_refine_bounded_decisions` harness executes the real public
+wrappers, including storage allocation, rejection formatting and actual commit
+signature production, and checks original payload, identifier and prestate
+custody. Kernel-only proof success cannot waive this refinement or the complete
+`just ci-kani` gate. See `docs/806_verification_guide.md` for execution and mutation
+sensitivity requirements.
+
+Task76 validation also includes an exhaustive independent native storage/reference
+fixture over the bounded proof domain and independent identity/prestate variants.
+The real wrapper harness retains independently symbolic bounded bindings; fourteen
+kernel successes do not waive that fifteenth allocation-backed proof. Canonical
+Kani budget ownership and forwarding/mutation fixtures are documented in docs806.
+
+The allocation-backed refinement universally selects one of the three actual transition wrappers per symbolic execution, preserving all prior input domains and outcome checks. Binding representatives use three independent boolean choices over the exact existing two-value domains. The production abstract signature still executes canonical BLAKE3 and preserves its exact byte format, using fixed input/hex buffers and one output String. Native tests compare an independent original-format assembly and verify the complete refinement choice domains. These reductions do not establish Linux proof tractability without actual full-gate timing and mutation counterexamples.

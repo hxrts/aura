@@ -278,6 +278,7 @@ impl ContextKeyRoster {
 
 /// Persist a finished context DKG: the key package (this device's share) in
 /// secure storage, the public key package and roster in storage.
+/// Native output consistency does not establish application policy approval.
 pub(crate) async fn store_context_dkg_output(
     effects: &AuraEffectSystem,
     scope: ChannelKeyScope,
@@ -285,9 +286,23 @@ pub(crate) async fn store_context_dkg_output(
     output: &ContextDkgOutput,
 ) -> Result<(), AuraError> {
     use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, StorageCoreEffects};
+    let mismatch = if config != output.config() {
+        Some(ContextDkgOutputBindingError::Configuration)
+    } else if output.participant() != effects.runtime_authority_id() {
+        Some(ContextDkgOutputBindingError::Participant)
+    } else {
+        None
+    };
+    if let Some(cause) = mismatch {
+        return Err(AuraError::Invalid {
+            message: cause.to_string(),
+            source: Some(std::sync::Arc::new(cause)),
+        });
+    }
+    let config = output.config();
     let epoch = config.epoch;
     let key_package = output
-        .key_package
+        .key_package()
         .serialize()
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     effects
@@ -302,7 +317,7 @@ pub(crate) async fn store_context_dkg_output(
         .await
         .map_err(|error| AuraError::storage(format!("store context DKG share: {error}")))?;
     let public = output
-        .public_key_package
+        .public_key_package()
         .serialize()
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     effects
@@ -321,6 +336,14 @@ pub(crate) async fn store_context_dkg_output(
         .store(&roster_key(scope, epoch), roster)
         .await
         .map_err(|error| AuraError::storage(format!("store context DKG roster: {error}")))
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+enum ContextDkgOutputBindingError {
+    #[error("context DKG retention configuration differs from its original native ceremony")]
+    Configuration,
+    #[error("context DKG retention participant differs from its original local runtime")]
+    Participant,
 }
 
 /// This device's stored key package of a finished ceremony.
@@ -672,6 +695,76 @@ mod tests {
         .collect()
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn native_output_retention_refuses_foreign_config_and_participant_before_writes() {
+        use aura_core::effects::{
+            SecureStorageCapability, SecureStorageEffects, StorageCoreEffects,
+        };
+        let shared = crate::SharedTransport::new();
+        let members = vec![member(&shared, 201).await, member(&shared, 202).await];
+        let scope = scope_of(203, 204);
+        let outputs = establish_context_key(&members, scope, 1).await;
+        let original = outputs[0].config();
+        let mut foreign_epoch = original.clone();
+        foreign_epoch.epoch = 2;
+        let mut foreign_threshold = original.clone();
+        foreign_threshold.threshold = 1;
+        let mut foreign_roster = original.clone();
+        foreign_roster.participants.reverse();
+        for config in [foreign_epoch, foreign_threshold, foreign_roster] {
+            let error = store_context_dkg_output(&members[0].0, scope, &config, &outputs[0])
+                .await
+                .expect_err("foreign metadata must not write native material");
+            assert!(
+                matches!(error, AuraError::Invalid { source: Some(source), .. }
+                if source.downcast_ref::<ContextDkgOutputBindingError>()
+                    == Some(&ContextDkgOutputBindingError::Configuration))
+            );
+        }
+        let effects = &members[0].0;
+        assert!(!effects
+            .secure_exists(&key_package_location(scope, 2))
+            .await
+            .unwrap());
+        assert!(effects
+            .retrieve(&public_package_key(scope, 2))
+            .await
+            .unwrap()
+            .is_none());
+        assert!(effects
+            .retrieve(&roster_key(scope, 2))
+            .await
+            .unwrap()
+            .is_none());
+        let (roster, public) = load_roster(effects, scope, 1).await.unwrap();
+        assert_eq!(roster.participants, original.participants);
+        assert_eq!(roster.threshold, original.threshold);
+        assert_eq!(&public, outputs[0].public_key_package());
+
+        let foreign_effects = &members[1].0;
+        let location = key_package_location(scope, 1);
+        let caps = [SecureStorageCapability::Read];
+        let before = foreign_effects
+            .secure_retrieve(&location, &caps)
+            .await
+            .unwrap();
+        let error = store_context_dkg_output(foreign_effects, scope, original, &outputs[0])
+            .await
+            .expect_err("another participant's output must not replace local material");
+        assert!(
+            matches!(error, AuraError::Invalid { source: Some(source), .. }
+            if source.downcast_ref::<ContextDkgOutputBindingError>()
+                == Some(&ContextDkgOutputBindingError::Participant))
+        );
+        assert_eq!(
+            foreign_effects
+                .secure_retrieve(&location, &caps)
+                .await
+                .unwrap(),
+            before
+        );
+    }
+
     // Three authorities run the DKG over the shared transport, with
     // round-two packages sealed to each recipient device, and end with the
     // same group key; any two members' partials combine to the same PRF
@@ -685,10 +778,10 @@ mod tests {
         }
         let scope = scope_of(64, 65);
         let outputs = establish_context_key(&members, scope, 1).await;
-        let group = outputs[0].public_key_package.verifying_key();
+        let group = outputs[0].public_key_package().verifying_key();
         assert!(outputs
             .iter()
-            .all(|output| output.public_key_package.verifying_key() == group));
+            .all(|output| output.public_key_package().verifying_key() == group));
 
         let input = aura_core::crypto::threshold_prf::channel_base_key_input(
             &scope.context,
@@ -700,8 +793,8 @@ mod tests {
             let partial = context_prf_partial(effects, scope, 1, &input, &[index as u8 + 1; 64])
                 .await
                 .expect("partial");
-            let verifying = output.public_key_package.verifying_shares()
-                [output.key_package.identifier()]
+            let verifying = output.public_key_package().verifying_shares()
+                [output.key_package().identifier()]
             .serialize();
             aura_core::crypto::threshold_prf::verify_partial(&verifying, &input, &partial)
                 .expect("partial verifies against the public package");
@@ -777,7 +870,7 @@ mod tests {
             participants: peers.iter().map(|peer| peer.authority).collect(),
             threshold: 2,
         };
-        let public = &outputs[0].public_key_package;
+        let public = outputs[0].public_key_package();
         let input = aura_core::crypto::threshold_prf::channel_base_key_input(
             &scope.context,
             &scope.channel,

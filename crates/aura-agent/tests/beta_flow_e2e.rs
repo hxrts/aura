@@ -118,7 +118,7 @@ fn test_invitation_code_roundtrip() -> TestResult {
         // Create shareable invitation
         let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
         let shareable = ShareableInvitation {
-            version: 1,
+            version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: InvitationId::new("inv-test-123"),
             sender_id,
             context_id: None,
@@ -142,7 +142,7 @@ fn test_invitation_code_roundtrip() -> TestResult {
             sender_device_id: None,
             key_epoch: Some(1),
         })?;
-        assert!(code.starts_with("aura:v1:"));
+        assert!(code.starts_with(&format!("aura:v{}:", ShareableInvitation::CURRENT_VERSION)));
 
         // Decode back
         let decoded = ShareableInvitation::from_code(&code)?;

@@ -453,6 +453,7 @@ fn build_authoritative_ui_snapshot(
         readiness,
         revision,
         projection_source_revisions: app_snapshot.projection_source_revisions,
+        home_modes: aura_app::ui::contract::observed_home_modes(&app_snapshot.homes),
         quiescence: QuiescenceSnapshot::derive(readiness, open_modal, &operations),
         selections,
         lists,
@@ -676,13 +677,15 @@ mod tests {
 
         let home_id = ChannelId::from_bytes([77u8; 32]);
         let mut app_snapshot = StateSnapshot::default();
-        let home = HomeState::new(
+        let mut home = HomeState::new(
             home_id,
             Some("revision-home".to_string()),
             AuthorityId::new_from_entropy([78u8; 32]),
             0,
             ContextId::new_from_entropy([79u8; 32]),
         );
+        home.mode_flags = Some("mi".into());
+        let context_id = home.context_id.unwrap().to_string();
         let mut detached = serde_json::to_value(&app_snapshot.homes).unwrap();
         detached["homes"]
             .as_object_mut()
@@ -706,6 +709,19 @@ mod tests {
             },
         );
 
+        assert_eq!(
+            snapshot.home_modes,
+            vec![aura_app::ui::contract::HomeModeSnapshot {
+                channel_id: home_id.to_string(),
+                context_id,
+                mode_flags: Some("mi".into())
+            }]
+        );
+        let wire = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(
+            serde_json::from_value::<aura_app::ui::contract::UiSnapshot>(wire).unwrap(),
+            snapshot
+        );
         assert_eq!(snapshot.projection_source_revisions.homes, Some(7));
         assert_eq!(snapshot.projection_source_revisions.neighborhood, Some(4));
         let homes = snapshot

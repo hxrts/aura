@@ -23,10 +23,12 @@ use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
 };
 use crate::InvitationOperation;
-use aura_core::effects::amp::ChannelBootstrapPackage;
+pub use aura_core::invitation::{Invitation, InvitationStatus, InvitationType};
 use aura_core::time::{CausalMetadata, PhysicalTime};
-use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
-use aura_core::{CapabilityName, DeviceId};
+#[cfg(test)]
+use aura_core::types::identifiers::ChannelId;
+use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
+use aura_core::CapabilityName;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -100,176 +102,6 @@ impl InvitationPolicy {
 // Invitation Types
 // =============================================================================
 
-/// Type of invitation
-// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md device-enrollment variant carries encrypted setup payloads for transfer; field-level justifications track migration to secret wrappers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InvitationType {
-    /// Invitation to join a home/channel
-    Channel {
-        /// Home/channel identifier
-        #[serde(with = "channel_id_serde")]
-        home_id: ChannelId,
-        /// Optional nickname suggestion (what the channel/home wants to be called)
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        nickname_suggestion: Option<String>,
-        /// Optional bootstrap key package for provisional AMP messaging.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        bootstrap: Option<ChannelBootstrapPackage>,
-        /// Whether this invites the recipient into the home this channel
-        /// belongs to (`/homeinvite`), not only into the channel.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        home: bool,
-    },
-    /// Invitation to become a guardian
-    Guardian {
-        /// Authority to guard
-        subject_authority: AuthorityId,
-    },
-    /// Invitation to become a contact
-    Contact {
-        /// Optional nickname for the contact
-        nickname: Option<String>,
-    },
-
-    /// Invitation to enroll a new device for an account authority.
-    ///
-    /// This is primarily intended for out-of-band transfer (QR/copy-paste) and
-    /// carries the key-share material required for the new device to install.
-    DeviceEnrollment {
-        /// Legacy decode may lack this field; it never authorizes a response.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        setup_binding: Option<crate::enrollment_setup::DeviceEnrollmentSetupBinding>,
-        /// Account authority being modified
-        subject_authority: AuthorityId,
-        /// Authority the new device was invited as. The new device may re-import
-        /// the code after its runtime switches to `subject_authority`, so the
-        /// invited identity is carried in the signed invitation itself.
-        #[serde(default)]
-        invitee_authority: Option<AuthorityId>,
-        /// Initiator device id (used for routing acceptance back to the right device runtime)
-        initiator_device_id: DeviceId,
-        /// Device id being enrolled
-        device_id: DeviceId,
-        /// Optional nickname suggestion (what the device wants to be called)
-        nickname_suggestion: Option<String>,
-        /// Key-rotation ceremony identifier
-        ceremony_id: CeremonyId,
-        /// Pending epoch created during prepare
-        pending_epoch: u64,
-        /// Encrypted/opaque key package for the invited device
-        // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md encrypted enrollment payload; plaintext key packages must use secret wrappers before wrapping.
-        key_package: Vec<u8>,
-        /// Serialized threshold config metadata for the pending epoch
-        // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md enrollment ceremony metadata until envelope payloads move to SecretBytes.
-        threshold_config: Vec<u8>,
-        /// Untrusted key material: pending-epoch enrollment payload; authentication must resolve expected keys from trusted authority/device state.
-        public_key_package: Vec<u8>,
-        /// Baseline attested tree operations for the current authority state.
-        ///
-        /// Fresh invitees need these ops to materialize the pre-enrollment
-        /// authority tree before applying the enrollment commit.
-        baseline_tree_ops: Vec<Vec<u8>>,
-    },
-}
-
-mod channel_id_serde {
-    use aura_core::types::identifiers::ChannelId;
-    use serde::{Deserialize, Deserializer, Serializer};
-    use std::str::FromStr;
-
-    pub fn serialize<S>(value: &ChannelId, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&value.to_string())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<ChannelId, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        ChannelId::from_str(&raw).map_err(serde::de::Error::custom)
-    }
-}
-
-impl InvitationType {
-    /// Convert to type string for fact storage
-    pub fn as_type_string(&self) -> String {
-        match self {
-            InvitationType::Channel { .. } => "channel".to_string(),
-            InvitationType::Guardian { .. } => "guardian".to_string(),
-            InvitationType::Contact { .. } => "contact".to_string(),
-            InvitationType::DeviceEnrollment { .. } => "device".to_string(),
-        }
-    }
-
-    /// Get required capability for this invitation type (if any)
-    pub fn required_capability(&self) -> Option<CapabilityName> {
-        match self {
-            InvitationType::Channel { .. } => Some(InvitationCapability::Channel.as_name()),
-            InvitationType::Guardian { .. } => Some(InvitationCapability::Guardian.as_name()),
-            InvitationType::Contact { .. } => None,
-            InvitationType::DeviceEnrollment { .. } => {
-                Some(InvitationCapability::DeviceEnroll.as_name())
-            }
-        }
-    }
-}
-
-/// Invitation status
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InvitationStatus {
-    /// Invitation is pending response
-    Pending,
-    /// Invitation was accepted
-    Accepted,
-    /// Invitation was declined
-    Declined,
-    /// Invitation was cancelled by sender
-    Cancelled,
-    /// Invitation has expired
-    Expired,
-}
-
-/// Cached invitation record
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Invitation {
-    /// Unique invitation identifier
-    pub invitation_id: InvitationId,
-    /// Context for the invitation
-    pub context_id: ContextId,
-    /// Sender authority
-    pub sender_id: AuthorityId,
-    /// Receiver authority
-    pub receiver_id: AuthorityId,
-    /// Type of invitation
-    pub invitation_type: InvitationType,
-    /// Current status
-    pub status: InvitationStatus,
-    /// Creation timestamp (ms)
-    pub created_at: u64,
-    /// Expiration timestamp (ms), if any
-    pub expires_at: Option<u64>,
-    /// Optional message
-    pub message: Option<String>,
-    /// Optional sender-local nickname for the invitee on sent invitations.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receiver_nickname: Option<String>,
-}
-
-impl Invitation {
-    /// Check if invitation is expired
-    pub fn is_expired(&self, now_ms: u64) -> bool {
-        self.expires_at.map(|exp| now_ms >= exp).unwrap_or(false)
-    }
-
-    /// Check if invitation is pending
-    pub fn is_pending(&self) -> bool {
-        matches!(self.status, InvitationStatus::Pending)
-    }
-}
-
 /// Result of an invitation action
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationResult {
@@ -315,7 +147,14 @@ impl InvitationService {
         };
 
         require_check
-            .then(|| invitation_type.required_capability())
+            .then(|| match invitation_type {
+                InvitationType::Channel { .. } => Some(InvitationCapability::Channel.as_name()),
+                InvitationType::Guardian { .. } => Some(InvitationCapability::Guardian.as_name()),
+                InvitationType::Contact { .. } => None,
+                InvitationType::DeviceEnrollment { .. } => {
+                    Some(InvitationCapability::DeviceEnroll.as_name())
+                }
+            })
             .flatten()
     }
 
@@ -878,6 +717,58 @@ mod tests {
             InvitationType::Contact { nickname: None }.as_type_string(),
             "contact"
         );
+    }
+
+    #[test]
+    fn canonical_types_retain_feature_capability_policy() {
+        let mut policy =
+            InvitationPolicy::for_snapshot(&InvitationConfig::default(), &test_snapshot());
+        let channel = InvitationType::Channel {
+            home_id: ChannelId::from_bytes([219; 32]),
+            nickname_suggestion: None,
+            bootstrap: None,
+            home: false,
+        };
+        let guardian = InvitationType::Guardian {
+            subject_authority: test_authority(),
+        };
+        let device = InvitationType::DeviceEnrollment {
+            setup_binding: aura_core::invitation::DeviceEnrollmentSetupBinding {
+                nonce: [5; 32],
+                digest: [6; 32],
+            },
+            subject_authority: test_authority(),
+            invitee_authority: test_receiver(),
+            initiator_device_id: aura_core::DeviceId::from_bytes([220; 32]),
+            device_id: aura_core::DeviceId::from_bytes([221; 32]),
+            nickname_suggestion: None,
+            ceremony_id: aura_core::CeremonyId::new("canonical capability policy"),
+            pending_epoch: 1,
+            key_package: Vec::new(),
+            threshold_config: Vec::new(),
+            public_key_package: Vec::new(),
+            baseline_tree_ops: Vec::new(),
+        };
+        for (invitation, expected) in [
+            (&channel, Some(InvitationCapability::Channel.as_name())),
+            (&guardian, Some(InvitationCapability::Guardian.as_name())),
+            (&device, Some(InvitationCapability::DeviceEnroll.as_name())),
+            (&InvitationType::Contact { nickname: None }, None),
+        ] {
+            assert_eq!(
+                InvitationService::maybe_required_type_capability(invitation, &policy),
+                expected
+            );
+        }
+        policy.require_channel_capability = false;
+        policy.require_guardian_capability = false;
+        policy.require_device_capability = false;
+        for invitation in [&channel, &guardian, &device] {
+            assert_eq!(
+                InvitationService::maybe_required_type_capability(invitation, &policy),
+                None
+            );
+        }
     }
 
     #[test]

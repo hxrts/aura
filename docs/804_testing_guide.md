@@ -155,6 +155,14 @@ Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::n
 
 The shared UX contract is defined in [User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads. The shared semantic scenario contract remains `aura-app::scenario_contract`. Its root may delegate contract families such as submission, actions, expectations, and values into `scenario_contract/*` modules without changing the public harness contract.
 
+Harness waits preserve each typed expectation through internal lowering.
+`ListContains` checks membership regardless of the selected row;
+`SelectionIs` requires an explicit matching selection and a present list item.
+`ListItemConfirmation` checks that item's confirmation independently of selection.
+`ControlVisible` can currently establish screen, list and modal presence from
+typed snapshots. Other controls fail explicitly until authoritative visibility
+observations are available; focused control identity does not prove visibility.
+
 Shared scenarios must submit typed semantic commands through the frontend bridge. They must not use raw PTY keys, raw selector clicks, raw label matching, or incidental focus stepping as primary mechanics. Frontend-specific UI I/O belongs in frontend-conformance coverage rather than the main shared semantic lane. Unsupported semantic commands must fail closed and diagnostically.
 
 Command submission must enter the frontend through its real update and event path. It must not use render-coupled polling or ad hoc harness shims.
@@ -844,7 +852,11 @@ The harness is the single executor for real frontend scenarios. Scripted mode us
 
 Multi-host runs use one harness per host with the same run token. Set `[run] fixed_ports = true` so configured `bind_address` and `lan_discovery.port` values stay literal instead of being namespaced by the run token; peers on different hosts must agree on these ports.
 
-The tracked LAN helpers live in `scripts/harness/lan/`. `configs/harness/lan-host-{a,b}.toml` name each host's LAN address as `__HOST_ADDR__`; `drv.sh start` renders the config with `AURA_E2E_HOST_ADDR` (detected from the primary interface by default), so no address is committed. Build the same commit on both hosts with `build.sh <lane>`, then run `AURA_E2E_REMOTE=user@host scripts/harness/lan/fresh.sh <run-token>` from the first host: it starts both drivers on the token, onboards the standard cast and links contacts; `lib.sh` provides the request helpers used by scenario scripts.
+The tracked LAN helpers live in `scripts/harness/lan/`. `configs/harness/lan-host-{a,b}.toml` name each host's LAN address as `__HOST_ADDR__`; `drv.sh start` renders the config with `AURA_E2E_HOST_ADDR` (detected from the primary interface by default), so no address is committed. Build and ship the exact commit's binaries, web bundle and runtime Nix closure from Host A with `ship.sh`; do not build on Air. `fresh.sh <run-token>` starts both drivers, onboards the standard cast and links contacts; `lib.sh` provides the request helpers used by scenario scripts.
+
+Run a complete owned batch with `AURA_E2E_REMOTE=user@host scripts/harness/lan/batch.sh <fresh-token> -- bash <checklist.sh> [arguments...]`. It requires matching clean local/remote commits and the complete local smoke marker. Workflow success, failure and interruption all attempt both hosts' exact-token finalization independently, retain shutdown logs and return failure if cleanup refuses ownership. Interruption first cancels and waits for the owned checklist command before finalizing. The command and commit are recorded in `.tmp/lan-checklist-<token>/`; the caller must describe which flows its checklist actually covers.
+
+`finish-batch.sh <host-or-empty> <checkout> <token> success|failed` delegates to the pinned driver's `finalize` operation. One persistent kernel lock outside the replaceable run directory serializes start, stop, finish and finalization; never unlink its inode while lifecycle users can exist. The driver checks the expected token after Nix bootstrap, binds the process identity to that token plus PID birth, executable and checkout, and retains the same lifecycle owner through shutdown and retention classification. Dead holders release kernel custody automatically; live contention and ambiguous identities fail closed. Background services and read-only process inspection cannot retain the lifecycle descriptor. Isolated retention and batch fixtures cover run replacement during bootstrap, concurrent owners, forced owner death, descriptor inheritance, independent host refusal and interruption. Actual paired-host confirmation remains a separate evidence requirement.
 
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
@@ -1010,6 +1022,22 @@ cargo test --package aura-terminal --test unit_state_machine
 Use `just test` for the full suite. Use `just test-crate` for focused iteration on a single crate.
 
 ### Build and Caching
+
+Workspace Clippy, including `just ci-clippy` and `toolkit-clippy-strict`, uses
+Aura's pinned shell Cargo dispatcher. `scripts/toolkit-shell.sh` routes the
+aggregate Clippy command through that dispatcher and enters Aura's Nix shell
+when needed. The shared toolkit's raw Cargo Clippy command can select installed
+Cargo-home plugins; it must not bypass the Aura dispatcher. The isolated
+`ci-build-cache-policy` fixtures verify arguments and exit status for both entry
+paths.
+
+`just ci-harness-browser` and `just ci-harness-matrix-web` acquire the same
+checkout build budget before preparing browser tools, web assets or harness
+binaries. Nested invocations reuse the held admission. These lanes preserve
+existing tool caches and rely on the canonical sweep and admission policy;
+they do not delete build lanes when disk space is low. Use guarded
+`just prune-inactive-lane <lane> --apply` only for an idle lane. Isolated
+browser admission and command-failure fixtures run in `ci-build-cache-policy`.
 
 Route builds through `scripts/dev/build-budget.sh`. It writes to the
 checkout's own `target/` (it unsets `CARGO_TARGET_DIR`), sweeps that target to a
@@ -2258,3 +2286,24 @@ These observations prove local window handling, not domain completion or durable
 enrollment checkpoint acknowledgment. Exercise native transport separately from
 AMP/member/journal readiness; absence of sibling devices must not invalidate an
 already established cross-authority transport.
+
+Both frontend observation surfaces use version 2 and require `UiSnapshot.home_modes`: a stable list of canonical channel ID, context ID and optional mode flags. The app-owned projection helper derives these observations solely from materialized `HomesState`; entries lacking a canonical context are omitted. Native and browser exports bind these values to `projection_source_revisions.homes` from the same app snapshot. Wait on pushed semantic snapshots for the expected binding and flags, then compare both frontends; DOM labels and rendered mode text are diagnostic only. Loading snapshots contain an explicit empty vector, and missing wire fields fail decoding. Mode changes still require the sanctioned command owner; these observed strings grant no authority.
+
+If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
+
+Completed owned runtime refreshes schedule semantic publication even when rendered view values compare equal: mode-only canonical changes must wake pushed snapshot observers. Display signals remain updated only when their values change, and the existing snapshot sink deduplicates identical observations.
+
+LAN lifecycle locking uses the pinned cross-platform `flock` tool in both the
+normal and CI Nix shells. The driver takes a nonblocking lock on its persistent
+lifecycle-file descriptor; process death releases custody, and long-lived
+children close that descriptor. A missing tool refuses lifecycle mutation before
+creating run state. Platform-provided `lockf` is not a dependency.
+
+`ship.sh` enters the candidate's pinned shell first. It copies and roots the
+portable lock tool's Nix closure on the remote host before stopping an older
+checkout, then streams the exact clean candidate driver into that host's existing
+pinned environment with its real script path. Existing remote configuration,
+helper paths and exact process/run identity checks remain in force. The remote
+does not build a binary. Run the retention lifecycle and ship fixtures to verify
+contention, dead-holder release, descriptor noninheritance, missing-tool refusal
+and old-checkout bootstrap before another LAN confirmation batch.

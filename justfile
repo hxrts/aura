@@ -509,6 +509,7 @@ ci-build-cache-policy:
     bash scripts/dev/test-lan-build-sequence.sh
     bash scripts/dev/test-lan-ship.sh
     bash scripts/dev/test-web-prebuilt-only.sh
+    bash scripts/dev/test-browser-build-budget.sh
     bash scripts/dev/test-retain-e2e-runs.sh
     bash scripts/dev/test-lan-retention.sh
     bash scripts/dev/test-install-aura-binary.sh
@@ -1020,7 +1021,7 @@ ci-lean-check-sorry:
 
 # Kani bounded model checking
 ci-kani:
-    just _run-kani cargo kani --package hxrts-aura-consensus --default-unwind 10 --output-format terse
+    CARGO_BUILD_JOBS=4 bash scripts/dev/build-budget.sh --lane ci-kani -- just _run-kani cargo kani --package hxrts-aura-consensus --default-unwind 10 --output-format terse
 
 # ITF conformance tests
 ci-conformance-itf:

@@ -1814,12 +1814,19 @@ fn semantic_expectation_wait_step(
     context: &ScenarioContext,
 ) -> Result<CompatibilityStep> {
     let mut wait_step = semantic_metadata_step(step);
+    wait_step.semantic_expectation = Some(expectation.clone());
     match expectation {
         Expectation::ScreenIs(screen_id) => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.screen_id = Some(*screen_id);
         }
         Expectation::ControlVisible(control_id) => {
+            if !matches!(
+                control_id,
+                ControlId::Screen(_) | ControlId::List(_) | ControlId::Modal(_)
+            ) {
+                bail!("step {} requires authoritative visible-control observation; focus does not prove visibility", step.id);
+            }
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.control_id = Some(*control_id);
         }
@@ -3155,7 +3162,7 @@ fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> boo
             ControlId::Screen(screen) => snapshot.screen == screen,
             ControlId::List(list) => snapshot.lists.iter().any(|candidate| candidate.id == list),
             ControlId::Modal(modal) => snapshot.open_modal == Some(modal),
-            _ => snapshot.focused_control == Some(control_id),
+            _ => false,
         };
         if !control_visible {
             return false;
@@ -3184,14 +3191,15 @@ fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> boo
                     return false;
                 }
             }
-            if let Some(selection) = snapshot
+            if matches!(
+                &step.semantic_expectation,
+                Some(Expectation::SelectionIs { .. })
+            ) && !snapshot
                 .selections
                 .iter()
-                .find(|selection| selection.list == list_id)
+                .any(|selection| selection.list == list_id && selection.item_id == item_id)
             {
-                if selection.item_id != item_id {
-                    return false;
-                }
+                return false;
             }
         }
     }
@@ -4238,4 +4246,122 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     include!("executor_tests.rs");
+}
+
+#[cfg(test)]
+mod exact_semantic_list_predicate_tests {
+    use super::*;
+    use aura_app::ui_contract::{
+        ConfirmationState, ListItemSnapshot, ListSnapshot, SelectionSnapshot,
+    };
+    fn lowered(expectation: Expectation) -> CompatibilityStep {
+        semantic_expectation_wait_step(
+            &SemanticStep {
+                id: "exact-list".into(),
+                actor: None,
+                timeout_ms: None,
+                action: SemanticAction::Expect(expectation.clone()),
+            },
+            &expectation,
+            &ScenarioContext::default(),
+        )
+        .unwrap()
+    }
+    fn snapshot() -> UiSnapshot {
+        let mut snapshot = UiSnapshot::loading(ScreenId::Neighborhood);
+        snapshot.lists.push(ListSnapshot {
+            id: ListId::Channels,
+            items: vec![ListItemSnapshot {
+                id: "channel-a".into(),
+                selected: false,
+                is_current: false,
+                confirmation: ConfirmationState::Confirmed,
+            }],
+        });
+        snapshot
+    }
+    #[test]
+    fn list_membership_does_not_require_or_reject_unrelated_selection() {
+        let step = lowered(Expectation::ListContains {
+            list: ListId::Channels,
+            item_id: "channel-a".into(),
+        });
+        let mut snapshot = snapshot();
+        assert!(semantic_wait_matches(&step, &snapshot));
+        snapshot.selections.push(SelectionSnapshot {
+            list: ListId::Channels,
+            item_id: "channel-b".into(),
+        });
+        assert!(semantic_wait_matches(&step, &snapshot));
+        snapshot.lists[0].items.clear();
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+    #[test]
+    fn exact_selection_requires_actual_selected_member() {
+        let step = lowered(Expectation::SelectionIs {
+            list: ListId::Channels,
+            item_id: "channel-a".into(),
+        });
+        let mut snapshot = snapshot();
+        assert!(!semantic_wait_matches(&step, &snapshot));
+        snapshot.selections.push(SelectionSnapshot {
+            list: ListId::Channels,
+            item_id: "channel-b".into(),
+        });
+        assert!(!semantic_wait_matches(&step, &snapshot));
+        snapshot.selections[0].item_id = "channel-a".into();
+        assert!(semantic_wait_matches(&step, &snapshot));
+        snapshot.lists[0].items.clear();
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+    #[test]
+    fn confirmation_checks_membership_independently_of_selection() {
+        let step = lowered(Expectation::ListItemConfirmation {
+            list: ListId::Channels,
+            item_id: "channel-a".into(),
+            confirmation: ConfirmationState::Confirmed,
+        });
+        let mut snapshot = snapshot();
+        snapshot.selections.push(SelectionSnapshot {
+            list: ListId::Channels,
+            item_id: "channel-b".into(),
+        });
+        assert!(semantic_wait_matches(&step, &snapshot));
+        snapshot.lists[0].items[0].confirmation = ConfirmationState::PendingLocal;
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+    #[test]
+    fn lowered_selection_metadata_is_not_a_compatibility_wire_extension() {
+        let step = lowered(Expectation::SelectionIs {
+            list: ListId::Channels,
+            item_id: "channel-a".into(),
+        });
+        assert!(step.semantic_expectation.is_some());
+        let json = serde_json::to_value(&step).unwrap();
+        assert!(json.get("semantic_expectation").is_none());
+    }
+    #[test]
+    fn ordinary_focused_control_cannot_claim_authoritative_visibility() {
+        let control = ControlId::Field(FieldId::ChatInput);
+        let expectation = Expectation::ControlVisible(control);
+        let step = SemanticStep {
+            id: "visibility".into(),
+            actor: None,
+            timeout_ms: None,
+            action: SemanticAction::Expect(expectation.clone()),
+        };
+        assert!(
+            semantic_expectation_wait_step(&step, &expectation, &ScenarioContext::default())
+                .is_err()
+        );
+        let mut snapshot = snapshot();
+        snapshot.focused_control = Some(control);
+        assert!(!semantic_wait_matches(
+            &CompatibilityStep {
+                control_id: Some(control),
+                ..Default::default()
+            },
+            &snapshot
+        ));
+    }
 }

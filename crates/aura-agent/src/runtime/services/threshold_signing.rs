@@ -4394,12 +4394,8 @@ impl ThresholdSigningService {
         }
         let root = manifest
             .final_inventory
-            .as_ref()
-            .and_then(|inventory| {
-                inventory
-                    .iter()
-                    .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
-            })
+            .iter()
+            .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
             .ok_or_else(|| {
                 AuraError::permission_denied("approved manifest lacks exact active root inventory")
             })?;
@@ -4481,15 +4477,16 @@ impl<'tree, 'custody, 'owner, 'runtime>
                 "coordinator is not the original approved initiating device",
             ));
         }
-        approval
-            .transport()
-            .require_manifest(approval.manifest())
-            .map_err(|source| {
-                AuraError::crypto_with_source(
-                    "bind original coordinator transport intent",
-                    Arc::new(source),
-                )
-            })?;
+        aura_invitation::shareable::require_transport_manifest(
+            approval.transport(),
+            approval.manifest(),
+        )
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "bind original coordinator transport intent",
+                Arc::new(source),
+            )
+        })?;
         let participants = self
             .ordered_devices
             .iter()
@@ -4591,15 +4588,16 @@ impl<'tree, 'custody, 'owner, 'runtime>
                     Arc::new(source),
                 )
             })?;
-        approval
-            .transport()
-            .require_manifest(approval.manifest())
-            .map_err(|source| {
-                AuraError::crypto_with_source(
-                    "bind originally approved transport to manifest",
-                    Arc::new(source),
-                )
-            })?;
+        aura_invitation::shareable::require_transport_manifest(
+            approval.transport(),
+            approval.manifest(),
+        )
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "bind originally approved transport to manifest",
+                Arc::new(source),
+            )
+        })?;
         let transport_message =
             approval
                 .transport()

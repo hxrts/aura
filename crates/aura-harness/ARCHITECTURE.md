@@ -32,6 +32,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - `executor.rs` — Semantic and compatibility scenario execution with deterministic budgets.
 - `replay.rs` — Replay bundle validation and typed response conformance.
 - `preflight.rs` — Capability, binary, storage, port, and SSH baseline checks plus semantic-lane admission.
+- `scripts/harness/lan/` — External process tooling: one kernel lifecycle owner serializes driver start/stop/finish and exact-token batch finalization. Launch identities bind the token, PID birth, executable and checkout; unknown ownership retains evidence without signalling. Batch interruption drains its owned command before independently finalizing both hosts. This infrastructure ownership never authors semantic business completion.
 - `backend/` — Local PTY and SSH backend adapters.
 
 ## Invariants
@@ -56,6 +57,11 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Config-first execution: invalid run or scenario configs fail before instance startup.
 - Scenario list counts use `u32` on the wire; comparison with a local snapshot
   uses a checked index conversion, including the quarantined compatibility IR.
+- Semantic wait lowering retains the exact typed expectation as private,
+  nonserialized metadata. List membership and confirmation do not require
+  selection; selection requires an explicit matching selection and listed item.
+  Ordinary control visibility requires an authoritative visibility observation;
+  focus alone cannot satisfy it. Unsupported visibility fails explicitly.
 - Instance isolation: each action is scoped by `instance_id` with unique `data_dir`.
 - Deterministic seeds: identical run config and seed produce identical seed bundles.
 - API compatibility: negotiation selects the highest shared tool API version or fails closed.

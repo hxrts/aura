@@ -16,9 +16,7 @@
 
 use std::collections::HashMap;
 
-use super::state::{
-    ConsensusPhase, ConsensusState, ConsensusThreshold, PureCommitFact, ShareData, ShareProposal,
-};
+use super::state::{ConsensusState, ConsensusThreshold, PureCommitFact, ShareData, ShareProposal};
 use crate::facts::{ConsensusFact, EquivocationProof};
 use crate::types::ConsensusId;
 use aura_core::time::PhysicalTime;
@@ -204,51 +202,35 @@ pub fn shares_consistent(
 /// - Equivocators subset of witnesses
 /// - Commit fact valid if present
 pub fn check_invariants(state: &ConsensusState) -> Result<(), ValidationError> {
-    // Quint: inst.threshold >= 1
-    if state.threshold.get() < 1 {
-        return Err(malformed_instance("threshold must be >= 1"));
-    }
-
-    // Quint: inst.witnesses.size() >= inst.threshold
-    if state.witnesses.len() < state.threshold.as_usize() {
-        return Err(malformed_instance(format!(
+    use super::decision::InvariantViolation;
+    let violation = super::decision::invariant_violation(
+        state.phase,
+        state.threshold.as_usize(),
+        state.proposals.iter().map(|p| (p.witness, p.result_id)),
+        state.witnesses.iter().copied(),
+        state.equivocators.iter().copied(),
+        state.commit_fact.is_some(),
+    );
+    match violation {
+        None => Ok(()),
+        Some(InvariantViolation::ZeroThreshold) => {
+            Err(malformed_instance("threshold must be >= 1"))
+        }
+        Some(InvariantViolation::InsufficientWitnesses) => Err(malformed_instance(format!(
             "insufficient witnesses: {} < {}",
             state.witnesses.len(),
             state.threshold.get()
-        )));
-    }
-
-    // Quint: inst.proposals.forall(p => inst.witnesses.contains(p.witness))
-    for proposal in &state.proposals {
-        if !state.witnesses.contains(&proposal.witness) {
-            return Err(malformed_instance(format!(
-                "proposal from non-witness: {}",
-                proposal.witness
-            )));
+        ))),
+        Some(InvariantViolation::NonWitnessProposal(witness)) => Err(malformed_instance(format!(
+            "proposal from non-witness: {witness}"
+        ))),
+        Some(InvariantViolation::NonWitnessEquivocator(witness)) => Err(malformed_instance(
+            format!("equivocator not in witness set: {witness}"),
+        )),
+        Some(InvariantViolation::MissingCommit) => {
+            Err(malformed_instance("committed phase but no commit fact"))
         }
     }
-
-    // Quint: inst.equivocators.subseteq(inst.witnesses)
-    for equivocator in &state.equivocators {
-        if !state.witnesses.contains(equivocator) {
-            return Err(malformed_instance(format!(
-                "equivocator not in witness set: {equivocator}"
-            )));
-        }
-    }
-
-    // Phase-specific invariants
-    if state.phase == ConsensusPhase::Committed {
-        // Quint: isCommitted implies hasCommit
-        if state.commit_fact.is_none() {
-            return Err(malformed_instance("committed phase but no commit fact"));
-        }
-
-        // Quint: equivocators excluded from attestation
-        // (would check commit_fact.attesters here in full model)
-    }
-
-    Ok(())
 }
 
 /// Check agreement invariant: at most one result per consensus.
@@ -298,13 +280,10 @@ pub fn check_equivocators_excluded(state: &ConsensusState) -> bool {
         Some(_cf) => {
             // In the pure model, attesters are derived from proposals
             // so we verify no equivocator is in the proposals set
-            let proposal_witnesses: std::collections::BTreeSet<_> =
-                state.proposals.iter().map(|p| p.witness).collect();
-            // No equivocator should be in proposals (they are filtered in apply_share)
-            state
-                .equivocators
-                .iter()
-                .all(|eq| !proposal_witnesses.contains(eq))
+            super::decision::equivocators_excluded(
+                state.proposals.iter().map(|p| (p.witness, p.result_id)),
+                state.equivocators.iter().copied(),
+            )
         }
         None => true, // No commit to check
     }

@@ -32,7 +32,9 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 The Nix shell dispatches Cargo and Clippy from its pinned Rust toolchain. Keep
 this scoped dispatch: Cargo otherwise prefers installed Cargo-home plugins,
 which can select an older Clippy even when the Nix toolchain leads PATH.
-`just ci-build-cache-policy` verifies argument and exit-status forwarding.
+`just ci-build-cache-policy` verifies argument and exit-status forwarding,
+including the aggregate `toolkit-clippy` entry point. That entry point must
+use Aura's scoped dispatcher rather than the shared toolkit's raw Cargo command.
 
 The Cargo development profile disables incremental compilation by default,
 including ordinary Cargo and editor checks. `CARGO_INCREMENTAL=1` remains an

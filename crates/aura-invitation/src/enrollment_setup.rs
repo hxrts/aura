@@ -30,14 +30,7 @@ pub struct DeviceEnrollmentSetupStatement {
     pub public_key_package: Vec<u8>,
 }
 
-/// Untrusted invitation wire binding. Runtime authorization requires matching
-/// this binding to an exact locally retained, signed setup request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeviceEnrollmentSetupBinding {
-    pub nonce: [u8; 32],
-    pub digest: [u8; 32],
-}
+pub use aura_core::invitation::DeviceEnrollmentSetupBinding;
 
 #[cfg(test)]
 mod tests {

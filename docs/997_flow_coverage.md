@@ -40,6 +40,21 @@ Aura tracks three different coverage classes in this document:
 
 This report is a traceability document for those classes. It is not a proof of protocol correctness, and it does not replace conformance or verification lanes.
 
+## Exact semantic expectation coverage
+
+The harness library regressions distinguish list membership, item confirmation
+and explicit selection through the canonical scenario lowering and matcher.
+They cover missing and unrelated selections, absent members, changed confirmation,
+and exclusion of private lowering metadata from serialized compatibility fixtures.
+Focused control identity cannot establish control visibility.
+
+Typed snapshots currently establish screen, list and modal presence. Ordinary
+`ControlVisible` expectations fail explicitly until render-bound observations
+exist. This includes the `onboarding_root` expectations in semantic-observation
+and frontend-conformance smoke scenarios; the matcher tests do not establish
+those flows. Actual native and browser render producers, source-revision binding,
+and paired-client execution remain required before claiming visibility coverage.
+
 ## Reactive observation health
 
 Both frontends export per-owner, per-signal `UiSnapshot.subscription_health` with
@@ -70,6 +85,25 @@ quiescent on one runtime, their entity sets and source revisions should agree.
 The Task 4 transaction and mirror tests cover stale publication and delayed
 view-copy races; the Task 14 PR smoke must exercise this through both frontend
 observers after a forced stale projection and recovery.
+
+## Canonical home mode observations
+
+Observation surface version 2 requires `UiSnapshot.home_modes` on both
+frontends. The shared app projection helper exports each materialized home's
+channel, context, and mode flags from the same app snapshot as its homes source
+revision. Missing contexts are withheld; unavailable browser app reads publish
+loading/busy rather than authoritative absence. Shared parity comparison checks
+these bindings and mode flags independently of list order.
+
+Focused app, native terminal, and shared UI tests cover canonical projection,
+required wire fields, parity differences, matching homes provenance, and
+unavailable reads. The shared UI's real HOMES subscription-to-render-to-sink
+regression changes only mode flags while display values remain equal, verifies
+a newer homes revision in the pushed snapshot, and fails with the old
+render-equality gate. Subscription attachment is acknowledged before healthy
+publication; immediate-update and repeated-mount cancellation tests cover that
+ownership boundary. These are in-process observations: paired LAN mode-change
+publication and convergence through both frontends remain unproven.
 
 ## Canonical UX Scenario Set
 

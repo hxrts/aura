@@ -82,8 +82,8 @@ impl EnrollmentSigningIntent {
     pub fn validate(&self) -> Result<(), AuraError> {
         if self.version != 2
             || self.domains != Self::DOMAINS
-            || self.manifest.version != 2
-            || self.manifest.final_inventory.is_none()
+            || self.manifest.version != 3
+            || self.manifest.final_inventory.is_empty()
         {
             return Err(AuraError::permission_denied(
                 "signing intent does not explicitly approve current initiation domains",
@@ -95,14 +95,14 @@ impl EnrollmentSigningIntent {
                 Arc::new(source),
             )
         })?;
-        self.transport
-            .require_manifest(&self.manifest)
-            .map_err(|source| {
+        crate::shareable::require_transport_manifest(&self.transport, &self.manifest).map_err(
+            |source| {
                 AuraError::crypto_with_source(
                     "validate declared public transport intent",
                     Arc::new(source),
                 )
-            })?;
+            },
+        )?;
         let expected = EnrollmentInitialRequestTranscript::from_manifest(&self.manifest).map_err(
             |source| {
                 AuraError::crypto_with_source("derive declared initial request", Arc::new(source))

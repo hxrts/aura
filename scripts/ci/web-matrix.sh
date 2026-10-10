@@ -2,8 +2,13 @@
 # Build web assets and run the browser harness matrix for a given suite.
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$repo_root"
+
+# Hold the canonical checkout admission before preparing assets or tools.
+if [[ "${AURA_BUILD_BUDGET_HELD:-}" != "$repo_root" ]]; then
+  exec bash "$repo_root/scripts/dev/build-budget.sh" --lane browser-ci -- bash "${BASH_SOURCE[0]}" "$@"
+fi
 
 mkdir -p artifacts/harness/browser
 log_file="$repo_root/artifacts/harness/browser/ci-matrix-web.log"
@@ -48,7 +53,6 @@ prepare_browser_web_assets() {
   )
 }
 
-rm -rf "$web_tools_cache_root"
 mkdir -p "$web_tools_cache_root"
 
 (

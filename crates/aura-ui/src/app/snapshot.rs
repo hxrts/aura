@@ -286,13 +286,15 @@ mod projection_source_tests {
                 .await
                 .expect("register app signals");
             let home_id = ChannelId::from_bytes([80u8; 32]);
-            let home = HomeState::new(
+            let mut home = HomeState::new(
                 home_id,
                 Some("Revision home".to_string()),
                 AuthorityId::new_from_entropy([81u8; 32]),
                 1,
                 ContextId::new_from_entropy([82u8; 32]),
             );
+            home.mode_flags = Some("mi".into());
+            let context_id = home.context_id.unwrap().to_string();
             // Build a detached query-style fixture without exposing raw home
             // insertion to production callers.
             let mut serialized = serde_json::to_value(HomesState::new()).unwrap();
@@ -331,7 +333,7 @@ mod projection_source_tests {
             );
 
             let controller = Arc::new(UiController::new(
-                app_core,
+                app_core.clone(),
                 Arc::new(MemoryClipboard::default()),
             ));
             let published = Arc::new(OnceLock::new());
@@ -353,6 +355,15 @@ mod projection_source_tests {
             );
             controller.publish_ui_snapshot(snapshot);
             let exported = published.get().expect("published snapshot");
+            assert_eq!(
+                exported.home_modes,
+                vec![aura_app::ui::contract::HomeModeSnapshot {
+                    channel_id: home_id.to_string(),
+                    context_id,
+                    mode_flags: Some("mi".into())
+                }]
+            );
+            assert_eq!(controller.ui_snapshot().home_modes, exported.home_modes);
             let homes = exported
                 .lists
                 .iter()
@@ -370,6 +381,35 @@ mod projection_source_tests {
                 controller.ui_snapshot().projection_source_revisions.homes,
                 Some(graph_revision)
             );
+            owner
+                .update(ProjectionSlot::homes(), move |homes| {
+                    homes
+                        .home_mut(&home_id)
+                        .expect("materialized home")
+                        .mode_flags = Some("m".into());
+                    Ok::<_, ()>(())
+                })
+                .await
+                .expect("publish changed home modes")
+                .expect("infallible fixture");
+            context::move_position(&app_core, &home_id.to_string(), "full")
+                .await
+                .expect("refresh authoritative app snapshot");
+            let refreshed = controller.ui_snapshot();
+            assert_eq!(refreshed.home_modes[0].mode_flags.as_deref(), Some("m"));
+            assert!(refreshed.projection_source_revisions.homes > Some(graph_revision));
+            let _blocked_app = app_core.write().await;
+            let unavailable = controller.ui_snapshot();
+            assert_eq!(
+                unavailable.readiness,
+                aura_app::ui::contract::UiReadiness::Loading
+            );
+            assert_eq!(
+                unavailable.quiescence.state,
+                aura_app::ui_contract::QuiescenceState::Busy
+            );
+            assert!(unavailable.home_modes.is_empty());
+            assert_eq!(unavailable.projection_source_revisions.homes, None);
         });
     }
 }

@@ -401,6 +401,13 @@ The wrapper and trait abstraction enables algorithm migration and HSM integratio
 
 ## Independently transferred enrollment manifest
 
+The current version-three manifest requires an explicit final active verifier
+inventory. Enrollment transfer version four requires the original setup binding
+and invitee authority. Acceptance requires the exact manifest digest; persisted
+activation version three requires its signed epoch fence, original baseline and
+that digest. Omitted or null required evidence fails decoding. Obsolete
+enrollment transport, manifest and activation representations are not admitted.
+
 Enrollment baseline admission requires a signed `EnrollmentTrustManifest` and an independently transferred initiator verifier statement. The verifier statement binds the subject authority, physical initiator device, and confirmation key. A key embedded in an invitation or manifest cannot establish this pin. Decoding a transfer statement does not authorize admission; the explicit app transfer owner selects it.
 
 The signed manifest binds the exact setup nonce and digest, reserved invitation and ceremony identifiers, actual provisional invitee authority and physical device, pending epoch, encrypted participant share, public package, canonical provisional threshold policy, and complete ordered baseline digest. Every attested baseline operation requires an exact parent epoch, commitment, signing node, group verifier, ordered participant inventory, threshold, signing mode, and agreement policy from that independently authenticated inventory. Replay checks each signature and reduction before any baseline/key mutation, rejects unused or missing inventory, and requires the exact final commitment. An epoch root key is not proof of an arbitrary node verifier.
@@ -616,6 +623,22 @@ the existing domain/schema/payload wire envelope; encoding failure occurs before
 signing or verification. Invalid signature results remain distinct from a failed
 cryptographic provider invocation.
 
+Required invitation import validity uses the selected physical-time provider and
+the canonical expiration boundary: an invitation is expired when `now >= expiry`.
+A failed required observation preserves its original provider cause and cannot
+produce a validated import, persist an invitation, or authorize subsequent
+issuance or publication. An observational clock fallback cannot satisfy this
+required validity check. Physical expiration remains local validity evidence,
+never distributed ordering or renewed ceremony time.
+
+Native authentication challenge issuance and signed-response verification require
+the selected physical-time provider. Provider failures retain their native
+causes. An issuance clock failure cannot create a pending challenge; failed
+required verification cannot publish an authenticated result or fact. The
+original signed expiry is excluded from the validity interval, consistently
+with authentication guards and views; retries cannot replace that endpoint
+with a newly constructed window.
+
 Guardian recovery key reads require the original private and public pair. A
 missing half or a mismatched pair cannot authorize replacement. Fresh allocation
 and required reads share the actual runtime's exclusive keypair lease, and fresh
@@ -657,7 +680,7 @@ Possession of retained dealer shares does not authorize a runtime to manufacture
 ### Explicit enrollment transcript quorum
 
 Enrollment signing consent identifies one versioned canonical intent containing
-exactly the trust manifest, public version 3 invitation transport, and initial
+exactly the trust manifest, public version 4 invitation transport, and initial
 version 2 enrollment Request control transcript. Initial Request fields derive
 from that manifest and its transcript digest; consent grants no arbitrary control
 signing authority. Committed and Failed control transcripts require separate

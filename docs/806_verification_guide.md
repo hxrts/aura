@@ -541,3 +541,71 @@ The Quint-Lean correspondence mapping is maintained in [Formal Verification Refe
 ## Related Documentation
 
 See [Formal Verification Reference](120_verification.md) for architecture details. See [Simulation Guide](805_simulation_guide.md) for trace replay. See [Testing Guide](804_testing_guide.md) for conformance testing. See [Project Structure](999_project_structure.md#invariant-traceability) for the invariant index and traceability matrix.
+
+## Consensus Kani verification
+
+Run `nix develop --command just ci-kani` from the checkout. The tracked
+`_run-kani` entry bootstraps Kani into the checkout-local tool root and supplies
+its bundled verifier toolchain; the development shell itself remains the
+required default pinned shell. For a focused property use:
+
+```sh
+nix develop --command just _run-kani cargo kani \
+  --package hxrts-aura-consensus --harness threshold_met_matches_reference \
+  --output-format terse
+```
+
+The fourteen original properties run the same allocation-free decision kernel
+as production. Fixed storage bounds remain 2–4 witnesses, at most three existing
+proposals plus one incoming proposal, and three equality-distinct results.
+Share payloads are opaque to admission/counting. The additional actual-wrapper
+refinement executes the production storage and signature path and checks
+original payload preservation, append order, phase/timer changes and commit
+identity/prestate binding. It is required alongside all fourteen properties;
+passing a detached model or only a filtered proof does not complete this lane.
+
+Production selects a maximal-count qualifying result and retains first proposal
+occurrence for ties. The threshold-checking contract permits a qualifying
+winner and does not specify map iteration order. Independent reference counting
+therefore requires the exact unique maximum, and qualification plus maximal
+count for ties; wrapper/kernel refinement always requires the exact result.
+
+When changing this seam, retain actual Kani harness discovery and completed
+results, then measure the entire `just ci-kani` invocation (target under ten
+minutes). Demonstrate sensitivity by temporarily changing the shared threshold
+comparison from `>=` to `>` and by admitting shares in a terminal phase: the
+reference/agreement and terminal-state properties respectively must fail.
+Restore the production code and rerun the complete lane. A passing bounded
+kernel cannot excuse an unexecuted or intractable production-wrapper refinement.
+
+The canonical `ci-kani` entry owns build-budget admission (including tool setup
+and actual Cargo/Kani), pins four Cargo jobs and runs all discovered proofs.
+`workflow.sh kani` delegates to it; its four isolated status/log fixtures run via
+`bash scripts/verify/test-workflow-kani.sh`. Those mocks verify forwarding only,
+never proof discovery or verification. Linux CI remains the supported actual
+Kani execution environment; macOS refusal/tool failure is not proof success.
+
+| Evidence | Required execution |
+|---|---|
+| Independent native decision/storage equivalence | `cargo test -p hxrts-aura-consensus --lib exhaustive_native_storage_refines_independent_decisions` under the normal build budget |
+| Real allocation-backed wrapper, including bounded independent identity/prestate fields | Focused `production_wrappers_refine_bounded_decisions`, retain actual verifier result and elapsed time |
+| Fourteen original properties plus real wrapper | Complete canonical `just ci-kani`, retain all fifteen results and whole-gate elapsed time under ten minutes |
+| Required-property mutation sensitivity | On a clean committed Linux candidate, `AURA_KANI_SENSITIVITY_ARTIFACTS=/absolute/artifacts bash scripts/verify/test-kani-sensitivity.sh` |
+
+The native fixture independently counts three results over every bounded unique
+witness proposal assignment, admissible equivocator set, threshold and phase,
+including valid stored commits, and checks actual wrapper guards/payloads. It
+also varies independent identity/prestate bindings. The wrapper Kani proof uses
+two symbolic representatives independently for consensus identity, operation and
+prestate; this is bounded binding-discriminator coverage, not a claim of universal
+256-bit cryptographic injectivity. Signature production remains the actual
+production implementation.
+
+The mutation script verifies a stricter threshold and terminal-share admission
+against the actual named Kani properties in disposable committed source copies.
+A nonzero tool exit alone does not pass: each artifact must contain verifier
+failure and the required assertion. Review the actual counterexample; compilation,
+installer, missing tool, timeout and unwind errors cannot replace it. Re-run the
+unchanged full canonical gate after sensitivity evidence. No timeout is widened.
+
+The real-wrapper refinement selects a transition nondeterministically and executes that actual production wrapper, so verification still quantifies all apply/fallback/failure outcomes. Its independent identity/operation/prestate boolean choices preserve the exact previous representative domains. The signature producer uses fixed buffers but still executes the canonical hash and original byte format. Run native signature-format/domain regressions before supported-Linux fifteenth-proof timing, then the complete fifteen-proof gate and both required mutation counterexamples. Allocation reductions are not proof success or a cryptographic injectivity claim.

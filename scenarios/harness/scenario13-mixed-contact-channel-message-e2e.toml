@@ -26,9 +26,8 @@
 #
 # Success criteria: contact established, shared channel reachable,
 # bidirectional shared-channel delivery reaches both frontend bindings.
-# In the current parity surface, both actors observe inbound shared-channel
-# messages on this mixed TUI/browser harness path as sealed authoritative
-# placeholders.
+# Both actors must observe the actual decrypted payload sent by the peer;
+# sealed placeholders do not establish successful message delivery.
 #
 # Canonical shared-flow coverage anchor:
 # - navigate contacts
@@ -260,7 +259,7 @@ timeout_ms = 6000
 id = "bob-receives-alice-message"
 action = "message_contains"
 actor = "bob"
-value = "[sealed:"
+value = "hello-from-tu1"
 timeout_ms = 180000
 
 [[steps]]
@@ -295,7 +294,7 @@ timeout_ms = 6000
 id = "alice-receives-bob-message"
 action = "message_contains"
 actor = "alice"
-value = "[sealed:"
+value = "hello-from-web"
 timeout_ms = 180000
 
 [[steps]]

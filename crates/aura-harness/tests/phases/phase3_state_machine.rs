@@ -187,8 +187,16 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
     }
 }
 
+fn compatibility_step(
+    configure: impl FnOnce(&mut aura_harness::config::CompatibilityStep),
+) -> aura_harness::config::CompatibilityStep {
+    let mut step = aura_harness::config::CompatibilityStep::default();
+    configure(&mut step);
+    step
+}
+
 fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{CompatibilityAction, CompatibilityStep, ScenarioConfig};
+    use aura_harness::config::{CompatibilityAction, ScenarioConfig};
 
     ScenarioConfig {
         schema_version: 1,
@@ -198,42 +206,38 @@ fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
         classification: None,
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         compatibility_steps: vec![
-            CompatibilityStep {
-                id: "launch".to_string(),
-                action: CompatibilityAction::LaunchInstances,
-                timeout_ms: Some(5000),
-                ..Default::default()
-            },
-            CompatibilityStep {
-                id: "fault-delay".to_string(),
-                action: CompatibilityAction::FaultDelay,
-                instance: Some("bob".to_string()),
-                timeout_ms: Some(50),
-                ..Default::default()
-            },
-            CompatibilityStep {
-                id: "local-send".to_string(),
-                action: CompatibilityAction::SendKeys,
-                instance: Some("alice".to_string()),
-                keys: Some("mixed-topology-msg\n".to_string()),
-                timeout_ms: Some(2000),
-                ..Default::default()
-            },
-            CompatibilityStep {
-                id: "local-wait".to_string(),
-                action: CompatibilityAction::WaitFor,
-                instance: Some("alice".to_string()),
-                pattern: Some("mixed-topology-msg".to_string()),
-                timeout_ms: Some(2000),
-                ..Default::default()
-            },
+            compatibility_step(|step| {
+                step.id = "launch".to_string();
+                step.action = CompatibilityAction::LaunchInstances;
+                step.timeout_ms = Some(5000);
+            }),
+            compatibility_step(|step| {
+                step.id = "fault-delay".to_string();
+                step.action = CompatibilityAction::FaultDelay;
+                step.instance = Some("bob".to_string());
+                step.timeout_ms = Some(50);
+            }),
+            compatibility_step(|step| {
+                step.id = "local-send".to_string();
+                step.action = CompatibilityAction::SendKeys;
+                step.instance = Some("alice".to_string());
+                step.keys = Some("mixed-topology-msg\n".to_string());
+                step.timeout_ms = Some(2000);
+            }),
+            compatibility_step(|step| {
+                step.id = "local-wait".to_string();
+                step.action = CompatibilityAction::WaitFor;
+                step.instance = Some("alice".to_string());
+                step.pattern = Some("mixed-topology-msg".to_string());
+                step.timeout_ms = Some(2000);
+            }),
         ],
         semantic_steps: Vec::new(),
     }
 }
 
 fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{CompatibilityAction, CompatibilityStep, ScenarioConfig};
+    use aura_harness::config::{CompatibilityAction, ScenarioConfig};
 
     ScenarioConfig {
         schema_version: 1,
@@ -243,35 +247,31 @@ fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
         classification: None,
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         compatibility_steps: vec![
-            CompatibilityStep {
-                id: "launch".to_string(),
-                action: CompatibilityAction::LaunchInstances,
-                timeout_ms: Some(5000),
-                ..Default::default()
-            },
-            CompatibilityStep {
-                id: "fault-delay".to_string(),
-                action: CompatibilityAction::FaultDelay,
-                instance: Some("bob".to_string()),
-                timeout_ms: Some(50),
-                ..Default::default()
-            },
-            CompatibilityStep {
-                id: "local-send".to_string(),
-                action: CompatibilityAction::SendKeys,
-                instance: Some("alice".to_string()),
-                keys: Some("agent-mode-msg\n".to_string()),
-                timeout_ms: Some(2000),
-                ..Default::default()
-            },
-            CompatibilityStep {
-                id: "local-wait".to_string(),
-                action: CompatibilityAction::WaitFor,
-                instance: Some("alice".to_string()),
-                pattern: Some("agent-mode-msg".to_string()),
-                timeout_ms: Some(2000),
-                ..Default::default()
-            },
+            compatibility_step(|step| {
+                step.id = "launch".to_string();
+                step.action = CompatibilityAction::LaunchInstances;
+                step.timeout_ms = Some(5000);
+            }),
+            compatibility_step(|step| {
+                step.id = "fault-delay".to_string();
+                step.action = CompatibilityAction::FaultDelay;
+                step.instance = Some("bob".to_string());
+                step.timeout_ms = Some(50);
+            }),
+            compatibility_step(|step| {
+                step.id = "local-send".to_string();
+                step.action = CompatibilityAction::SendKeys;
+                step.instance = Some("alice".to_string());
+                step.keys = Some("agent-mode-msg\n".to_string());
+                step.timeout_ms = Some(2000);
+            }),
+            compatibility_step(|step| {
+                step.id = "local-wait".to_string();
+                step.action = CompatibilityAction::WaitFor;
+                step.instance = Some("alice".to_string());
+                step.pattern = Some("agent-mode-msg".to_string());
+                step.timeout_ms = Some(2000);
+            }),
         ],
         semantic_steps: Vec::new(),
     }

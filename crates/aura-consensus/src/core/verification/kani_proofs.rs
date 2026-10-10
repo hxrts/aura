@@ -1,514 +1,510 @@
-//! Kani Bounded Model Checking Proofs for Consensus Core
+//! Bounded proofs of the production consensus decision kernel and its storage adapter.
 //!
-//! This module contains Kani proof harnesses that verify key properties of the
-//! consensus state machine using bounded model checking.
-//!
-//! ## Running Kani
-//!
-//! From nightly shell:
-//! ```bash
-//! nix develop .#nightly
-//! cargo install --locked kani-verifier  # First time only
-//! cargo kani setup                       # First time only
-//! cargo kani --package aura-protocol    # Run all proofs
-//! cargo kani --harness apply_share_preserves_invariants  # Run specific proof
-//! ```
-//!
-//! ## Proof Categories
-//!
-//! 1. **Invariant Preservation**: Transitions preserve well-formedness
-//! 2. **Monotonicity**: State growth properties (proposals never shrink)
-//! 3. **Panic Freedom**: No panics on valid inputs
-//! 4. **Agreement**: Two commits for same CID have same result
-//! 5. **Reference Equivalence**: Production matches reference implementation
-//!
-//! ## Bounds
-//!
-//! To keep verification tractable, we bound:
-//! - Witness set size: 3-5 witnesses
-//! - Proposal count: 0-5 proposals
-//! - String lengths: 1-8 characters
-//!
-//! These bounds are sufficient to find most bugs while keeping
-//! verification times reasonable (< 5 minutes per harness).
-//!
-//! ## Platform Notes
-//!
-//! On macOS, Kani cannot model `CCRandomGenerateBytes` (Apple's secure RNG).
-//! We now use BTreeSet throughout for deterministic behavior.
-//! The harnesses use BTreeSet (deterministic ordering) to avoid this issue.
-//! CI runs on Linux where this is not a problem.
-
-// Only compile this module when Kani is running
+//! Run from the default pinned shell: `nix develop --command just ci-kani`.
+//! Bounds retain 2..=4 witnesses, 0..=3 existing proposals, three result
+//! identities, and one incoming share. Identity representatives preserve every
+//! equality/distinctness relation these decisions inspect; opaque share payloads
+//! do not affect decisions. The additional refinement harness executes the real
+//! heap-backed production wrappers and checks payload/commit custody separately.
 #![cfg(kani)]
 
-use std::collections::BTreeSet;
-
-use super::super::state::{
-    ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, ShareData, ShareProposal,
+use super::super::{
+    decision,
+    state::{
+        ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, PureCommitFact,
+        ShareData, ShareProposal,
+    },
+    transitions::{self, TransitionResult},
 };
-use super::super::transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult};
-use super::super::validation::check_invariants;
 use crate::types::ConsensusId;
 use aura_core::{AuthorityId, Hash32, OperationId};
 
-// =============================================================================
-// Helper Functions for Symbolic State Generation
-// =============================================================================
+#[derive(Clone, Copy, Debug)]
+struct BoundedState {
+    witness_count: u8,
+    threshold: u8,
+    equivocator_mask: u8,
+    proposals: [(u8, u8); 4],
+    len: usize,
+    phase: ConsensusPhase,
+    commit_result: Option<u8>,
+    fallback_timer_active: bool,
+}
 
-/// Generate a bounded symbolic string
-fn any_bounded_string(max_len: usize) -> String {
-    let len: usize = kani::any();
-    kani::assume(len >= 1 && len <= max_len);
-
-    let mut s = String::with_capacity(len);
-    for _ in 0..len {
-        let c: u8 = kani::any();
-        // Limit to alphanumeric ASCII for tractability
-        kani::assume((c >= b'a' && c <= b'z') || (c >= b'0' && c <= b'9'));
-        s.push(c as char);
+impl BoundedState {
+    fn proposals(&self) -> impl Clone + Iterator<Item = (u8, u8)> + '_ {
+        self.proposals[..self.len].iter().copied()
     }
-    s
-}
-
-fn any_entropy() -> [u8; 32] {
-    kani::any::<[u8; 32]>()
-}
-
-fn authority_from_index(idx: u8) -> AuthorityId {
-    AuthorityId::new_from_entropy([idx; 32])
-}
-
-/// Generate a symbolic witness ID (w1, w2, w3, w4, w5)
-fn any_witness_id() -> AuthorityId {
-    let idx: u8 = kani::any();
-    kani::assume(idx >= 1 && idx <= 5);
-    authority_from_index(idx)
-}
-
-/// Generate a symbolic result ID (rid1, rid2, rid3)
-fn any_result_id() -> Hash32 {
-    let idx: u8 = kani::any();
-    kani::assume(idx >= 1 && idx <= 3);
-    Hash32::new([idx; 32])
-}
-
-fn any_consensus_id() -> ConsensusId {
-    ConsensusId(Hash32::new(any_entropy()))
-}
-
-fn any_operation_id() -> OperationId {
-    OperationId::new_from_entropy(any_entropy())
-}
-
-fn any_prestate_hash() -> Hash32 {
-    Hash32::new(any_entropy())
-}
-
-/// Generate a symbolic ShareData
-fn any_share_data() -> ShareData {
-    ShareData {
-        share_value: any_bounded_string(8),
-        nonce_binding: any_bounded_string(8),
-        data_binding: any_bounded_string(8),
+    fn equivocators(&self) -> impl Iterator<Item = u8> + '_ {
+        (1..=self.witness_count).filter(|witness| self.equivocator_mask & (1 << witness) != 0)
+    }
+    fn has_proposal(&self, witness: u8) -> bool {
+        decision::has_proposal(self.proposals(), witness)
+    }
+    fn threshold_met(&self) -> bool {
+        decision::threshold_met(self.proposals(), usize::from(self.threshold))
+    }
+    fn invariants(&self) -> bool {
+        decision::invariant_violation(
+            self.phase,
+            usize::from(self.threshold),
+            self.proposals(),
+            1..=self.witness_count,
+            self.equivocators(),
+            self.commit_result.is_some(),
+        )
+        .is_none()
+            && (self.commit_result.is_none()
+                || (self.threshold_met()
+                    && decision::equivocators_excluded(self.proposals(), self.equivocators())))
+    }
+    fn apply_share(&self, proposal: (u8, u8)) -> Option<Self> {
+        let update = decision::apply_share(
+            self.phase,
+            usize::from(self.threshold),
+            self.proposals(),
+            (1..=self.witness_count).contains(&proposal.0),
+            self.equivocator_mask & (1 << proposal.0) != 0,
+            proposal,
+        )
+        .ok()?;
+        let mut next = *self;
+        next.proposals[next.len] = proposal;
+        next.len += 1;
+        next.phase = update.phase;
+        if update.commit_result.is_some() {
+            next.commit_result = update.commit_result;
+        }
+        Some(next)
+    }
+    fn trigger_fallback(&self) -> Option<Self> {
+        let mut next = *self;
+        next.phase = decision::trigger_fallback(self.phase)?;
+        next.fallback_timer_active = true;
+        Some(next)
+    }
+    fn fail_consensus(&self) -> Option<Self> {
+        let mut next = *self;
+        next.phase = decision::fail_consensus(self.phase)?;
+        Some(next)
     }
 }
 
-/// Generate a symbolic ShareProposal
-fn any_share_proposal() -> ShareProposal {
-    ShareProposal {
-        witness: any_witness_id(),
-        result_id: any_result_id(),
-        share: any_share_data(),
-    }
+fn any_proposal() -> (u8, u8) {
+    let witness: u8 = kani::any();
+    let result: u8 = kani::any();
+    kani::assume((1..=5).contains(&witness));
+    kani::assume((1..=3).contains(&result));
+    (witness, result)
 }
 
-/// Generate a symbolic witness set of bounded size
-fn any_witness_set(min_size: usize, max_size: usize) -> BTreeSet<AuthorityId> {
-    let size: usize = kani::any();
-    kani::assume(size >= min_size && size <= max_size);
-
-    let mut witnesses = BTreeSet::new();
-    // Add specific witnesses based on size
-    if size >= 1 {
-        witnesses.insert(authority_from_index(1));
-    }
-    if size >= 2 {
-        witnesses.insert(authority_from_index(2));
-    }
-    if size >= 3 {
-        witnesses.insert(authority_from_index(3));
-    }
-    if size >= 4 {
-        witnesses.insert(authority_from_index(4));
-    }
-    if size >= 5 {
-        witnesses.insert(authority_from_index(5));
-    }
-
-    witnesses
-}
-
-/// Generate a well-formed ConsensusState for testing
-fn any_valid_consensus_state() -> ConsensusState {
-    let witnesses = any_witness_set(2, 4);
-    let threshold_value: u16 = kani::any();
-    kani::assume(threshold_value >= 1);
-    kani::assume((threshold_value as usize) <= witnesses.len());
-    let threshold = ConsensusThreshold::new(threshold_value).expect("threshold");
-
-    let initiator = any_witness_id();
-    kani::assume(witnesses.contains(&initiator));
-
-    let path_idx: u8 = kani::any();
-    let path = if path_idx % 2 == 0 {
-        PathSelection::FastPath
-    } else {
-        PathSelection::SlowPath
-    };
-
-    let mut state = ConsensusState::new(
-        any_consensus_id(),
-        any_operation_id(),
-        any_prestate_hash(),
+fn any_state() -> BoundedState {
+    let witness_count: u8 = kani::any();
+    kani::assume((2..=4).contains(&witness_count));
+    let threshold: u8 = kani::any();
+    kani::assume(threshold >= 1 && threshold <= witness_count);
+    let mut state = BoundedState {
+        witness_count,
         threshold,
-        witnesses.clone(),
-        initiator,
-        path,
-    );
-
-    // Optionally add some proposals
-    let num_proposals: usize = kani::any();
-    kani::assume(num_proposals <= 3);
-
-    for _ in 0..num_proposals {
-        let proposal = any_share_proposal();
-        // Only add if valid (witness in set, not duplicate)
-        if witnesses.contains(&proposal.witness) && !state.has_proposal(&proposal.witness) {
-            state.proposals.push(proposal);
+        equivocator_mask: 0,
+        proposals: [(0, 0); 4],
+        len: 0,
+        phase: if kani::any() {
+            ConsensusPhase::FastPathActive
+        } else {
+            ConsensusPhase::FallbackActive
+        },
+        commit_result: None,
+        fallback_timer_active: false,
+    };
+    let count: usize = kani::any();
+    kani::assume(count <= 3);
+    for _ in 0..count {
+        let proposal = any_proposal();
+        if proposal.0 <= witness_count && !state.has_proposal(proposal.0) {
+            state.proposals[state.len] = proposal;
+            state.len += 1;
         }
     }
-
+    let mask: u8 = kani::any();
+    state.equivocator_mask = mask & ((1 << (witness_count + 1)) - 2);
+    for index in 0..state.len {
+        state.equivocator_mask &= !(1 << state.proposals[index].0);
+    }
     state
 }
 
-// Macros, not functions: Kani requires `kani::assert` messages to be literals.
-macro_rules! assert_invariants_if_transition_succeeds {
-    ($result:expr, $message:literal $(,)?) => {
-        match $result {
-            TransitionResult::Ok(new_state) => {
-                kani::assert(check_invariants(&new_state).is_ok(), $message);
-            }
-            TransitionResult::NotEnabled(_) => {}
-        }
-    };
+fn reference_counts(state: &BoundedState) -> [usize; 3] {
+    let mut counts = [0; 3];
+    for (_, result) in state.proposals() {
+        counts[usize::from(result - 1)] += 1;
+    }
+    counts
 }
 
-macro_rules! assert_transition_rejected {
-    ($result:expr, $message:literal $(,)?) => {
-        match $result {
-            TransitionResult::Ok(_) => kani::assert(false, $message),
-            TransitionResult::NotEnabled(_) => {}
-        }
-    };
-}
-
-// =============================================================================
-// Proof Harnesses: Invariant Preservation
-// =============================================================================
-
-/// Verify that apply_share preserves state invariants.
-///
-/// Property: If check_invariants(state) passes before apply_share,
-/// then check_invariants(new_state) passes after (when transition succeeds).
-///
-/// Quint: ValidTransition implies WellFormedState'
 #[kani::proof]
-#[kani::unwind(10)]
+#[kani::unwind(6)]
 fn apply_share_preserves_invariants() {
-    let state = any_valid_consensus_state();
-
-    // Precondition: state is well-formed
-    kani::assume(check_invariants(&state).is_ok());
-
-    let proposal = any_share_proposal();
-
-    assert_invariants_if_transition_succeeds!(
-        apply_share(&state, proposal),
-        "apply_share must preserve invariants",
-    );
+    let state = any_state();
+    kani::assume(state.invariants());
+    if let Some(next) = state.apply_share(any_proposal()) {
+        kani::assert(next.invariants(), "share preserves invariants");
+    }
 }
-
-/// Verify that trigger_fallback preserves state invariants.
 #[kani::proof]
-#[kani::unwind(10)]
+#[kani::unwind(6)]
 fn trigger_fallback_preserves_invariants() {
-    let state = any_valid_consensus_state();
-
-    kani::assume(check_invariants(&state).is_ok());
-
-    assert_invariants_if_transition_succeeds!(
-        trigger_fallback(&state),
-        "trigger_fallback must preserve invariants",
-    );
+    let state = any_state();
+    kani::assume(state.invariants());
+    if let Some(next) = state.trigger_fallback() {
+        kani::assert(next.invariants(), "fallback preserves invariants");
+    }
 }
-
-/// Verify that fail_consensus preserves state invariants.
 #[kani::proof]
-#[kani::unwind(10)]
+#[kani::unwind(6)]
 fn fail_consensus_preserves_invariants() {
-    let state = any_valid_consensus_state();
-
-    kani::assume(check_invariants(&state).is_ok());
-
-    assert_invariants_if_transition_succeeds!(
-        fail_consensus(&state),
-        "fail_consensus must preserve invariants",
+    let state = any_state();
+    kani::assume(state.invariants());
+    if let Some(next) = state.fail_consensus() {
+        kani::assert(next.invariants(), "failure preserves invariants");
+    }
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn apply_share_monotonic_proposals() {
+    let state = any_state();
+    if let Some(next) = state.apply_share(any_proposal()) {
+        kani::assert(next.len >= state.len, "proposals never shrink");
+    }
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn apply_share_monotonic_equivocators() {
+    let state = any_state();
+    // The production duplicate guard forbids admitting a second proposal from
+    // a witness. Successful share admission never removes an equivocator.
+    if let Some(next) = state.apply_share(any_proposal()) {
+        kani::assert(
+            next.equivocator_mask == state.equivocator_mask,
+            "equivocators retained",
+        );
+    }
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn apply_share_no_panic() {
+    let state = any_state();
+    kani::assume(state.invariants());
+    let _ = state.apply_share(any_proposal());
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn trigger_fallback_no_panic() {
+    let state = any_state();
+    kani::assume(state.invariants());
+    let _ = state.trigger_fallback();
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn fail_consensus_no_panic() {
+    let state = any_state();
+    kani::assume(state.invariants());
+    let _ = state.fail_consensus();
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn committed_state_is_terminal() {
+    let mut state = any_state();
+    state.phase = ConsensusPhase::Committed;
+    kani::assert(
+        state.apply_share(any_proposal()).is_none(),
+        "committed rejects shares",
+    );
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn failed_state_is_terminal() {
+    let mut state = any_state();
+    state.phase = ConsensusPhase::Failed;
+    kani::assert(
+        state.apply_share(any_proposal()).is_none(),
+        "failed rejects shares",
+    );
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn phase_advances_forward() {
+    let state = any_state();
+    if let Some(next) = state.apply_share(any_proposal()) {
+        kani::assert(
+            next.phase == state.phase || next.phase == ConsensusPhase::Committed,
+            "phase moves forward",
+        );
+    }
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn commit_matches_threshold_result() {
+    let state = any_state();
+    kani::assume(state.invariants());
+    kani::assume(!state.threshold_met());
+    if let Some(next) = state.apply_share(any_proposal()) {
+        if next.phase == ConsensusPhase::Committed {
+            kani::assert(next.commit_result.is_some(), "commit has result");
+            if let Some(result) = next.commit_result {
+                kani::assert(
+                    decision::count_result(next.proposals(), result) >= usize::from(next.threshold),
+                    "commit has threshold",
+                );
+            }
+        }
+    }
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn threshold_met_matches_reference() {
+    let state = any_state();
+    let counts = reference_counts(&state);
+    kani::assert(
+        state.threshold_met()
+            == counts
+                .iter()
+                .any(|count| *count >= usize::from(state.threshold)),
+        "threshold matches independent reference",
+    );
+    let winner = decision::majority_result(state.proposals(), usize::from(state.threshold));
+    if let Some(result) = winner {
+        let count = counts[usize::from(result - 1)];
+        kani::assert(count >= usize::from(state.threshold), "winner qualifies");
+        kani::assert(
+            counts.iter().all(|other| *other <= count),
+            "winner has maximal count",
+        );
+        // A unique maximal result must match exactly. Ties permit any maximal
+        // qualifying result under the spec; production retains first encounter.
+        for index in 0..3 {
+            if counts[index] > 0
+                && counts
+                    .iter()
+                    .filter(|other| **other == counts[index])
+                    .count()
+                    == 1
+                && counts.iter().all(|other| *other <= counts[index])
+            {
+                kani::assert(
+                    usize::from(result - 1) == index,
+                    "unique winner matches reference exactly",
+                );
+            }
+        }
+    }
+}
+#[kani::proof]
+#[kani::unwind(6)]
+fn has_proposal_matches_reference() {
+    let state = any_state();
+    let witness: u8 = kani::any();
+    kani::assume((1..=5).contains(&witness));
+    let mut reference = false;
+    for index in 0..state.len {
+        reference |= state.proposals[index].0 == witness;
+    }
+    kani::assert(
+        state.has_proposal(witness) == reference,
+        "proposal membership matches reference",
     );
 }
 
-// =============================================================================
-// Proof Harnesses: Monotonicity Properties
-// =============================================================================
-
-/// Verify that apply_share is monotonic: proposals never shrink.
-///
-/// Property: new_state.proposals.len() >= state.proposals.len()
-///
-/// This is a key property for CRDT-like convergence.
-#[kani::proof]
-#[kani::unwind(10)]
-fn apply_share_monotonic_proposals() {
-    let state = any_valid_consensus_state();
-    let initial_count = state.proposals.len();
-
-    let proposal = any_share_proposal();
-
-    match apply_share(&state, proposal) {
-        TransitionResult::Ok(new_state) => {
+fn authority(index: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([index; 32])
+}
+fn result(index: u8) -> Hash32 {
+    Hash32::new([index; 32])
+}
+fn share(proposal: (u8, u8)) -> ShareProposal {
+    ShareProposal {
+        witness: authority(proposal.0),
+        result_id: result(proposal.1),
+        share: ShareData {
+            share_value: "share".into(),
+            nonce_binding: "nonce".into(),
+            data_binding: "binding".into(),
+        },
+    }
+}
+fn materialize(state: &BoundedState, identity: u8, operation: u8, prestate: u8) -> ConsensusState {
+    let mut full = ConsensusState::new(
+        ConsensusId(Hash32::new([identity; 32])),
+        OperationId::new_from_entropy([operation; 32]),
+        Hash32::new([prestate; 32]),
+        ConsensusThreshold::new(u16::from(state.threshold)).expect("positive threshold"),
+        (1..=state.witness_count).map(authority).collect(),
+        authority(1),
+        PathSelection::FastPath,
+    );
+    full.phase = state.phase;
+    full.fallback_timer_active = state.fallback_timer_active;
+    full.proposals = state.proposals().map(share).collect();
+    full.equivocators = state.equivocators().map(authority).collect();
+    full.commit_fact = state.commit_result.map(|winner| PureCommitFact {
+        cid: full.cid,
+        result_id: result(winner),
+        prestate_hash: full.prestate_hash,
+        signature: transitions::abstract_commit_signature(
+            full.cid,
+            result(winner),
+            full.prestate_hash,
+        ),
+    });
+    full
+}
+fn assert_storage_parity(
+    full: &ConsensusState,
+    bounded: &BoundedState,
+    original: &ConsensusState,
+    incoming: Option<&ShareProposal>,
+) {
+    kani::assert(full.phase == bounded.phase, "wrapper phase matches kernel");
+    kani::assert(
+        full.proposals.len() == bounded.len,
+        "wrapper append matches kernel",
+    );
+    kani::assert(
+        full.fallback_timer_active == bounded.fallback_timer_active,
+        "wrapper timer matches kernel",
+    );
+    kani::assert(
+        full.equivocators == original.equivocators,
+        "wrapper preserves original equivocator set",
+    );
+    kani::assert(
+        full.cid == original.cid
+            && full.operation == original.operation
+            && full.prestate_hash == original.prestate_hash,
+        "wrapper preserves identity and prestate",
+    );
+    for index in 0..bounded.len {
+        let expected = if index < original.proposals.len() {
+            &original.proposals[index]
+        } else {
+            incoming.expect("appended proposal retains original input")
+        };
+        let actual = &full.proposals[index];
+        kani::assert(
+            actual.witness == expected.witness && actual.result_id == expected.result_id,
+            "wrapper preserves proposal identity/order",
+        );
+        kani::assert(
+            actual.share.share_value == expected.share.share_value
+                && actual.share.nonce_binding == expected.share.nonce_binding
+                && actual.share.data_binding == expected.share.data_binding,
+            "wrapper preserves original payload",
+        );
+    }
+    match (&full.commit_fact, bounded.commit_result) {
+        (None, None) => {}
+        (Some(commit), Some(expected)) => {
             kani::assert(
-                new_state.proposals.len() >= initial_count,
-                "apply_share must not shrink proposals",
+                commit.result_id == result(expected),
+                "wrapper exact commit result matches kernel",
+            );
+            kani::assert(
+                commit.cid == full.cid && commit.prestate_hash == full.prestate_hash,
+                "commit retains original identity",
+            );
+            kani::assert(
+                !commit.signature.is_empty(),
+                "real signature producer emits nonempty binding",
             );
         }
-        TransitionResult::NotEnabled(_) => {}
+        _ => kani::assert(false, "wrapper commit presence matches kernel"),
     }
 }
-
-/// Verify that equivocators set is monotonic: never shrinks.
+/// This extra proof deliberately executes the real public wrappers, including
+/// allocation, rejection formatting and the actual abstract signature producer.
+/// It cannot be replaced with a stub or waived when kernel-only proofs pass.
 #[kani::proof]
-#[kani::unwind(10)]
-fn apply_share_monotonic_equivocators() {
-    let state = any_valid_consensus_state();
-
-    let proposal = any_share_proposal();
-
-    match apply_share(&state, proposal) {
-        TransitionResult::Ok(new_state) => {
-            // Every equivocator in old state remains in new state
-            for eq in &state.equivocators {
-                kani::assert(
-                    new_state.equivocators.contains(eq),
-                    "equivocators must not be removed",
-                );
-            }
-        }
-        TransitionResult::NotEnabled(_) => {}
+#[kani::unwind(130)]
+fn production_wrappers_refine_bounded_decisions() {
+    let mut state = any_state();
+    let phase: u8 = kani::any();
+    kani::assume(phase < 5);
+    state.phase = match phase {
+        0 => ConsensusPhase::Pending,
+        1 => ConsensusPhase::FastPathActive,
+        2 => ConsensusPhase::FallbackActive,
+        3 => ConsensusPhase::Committed,
+        _ => ConsensusPhase::Failed,
+    };
+    let proposal = any_proposal();
+    if state.phase == ConsensusPhase::Committed {
+        state.commit_result =
+            decision::majority_result(state.proposals(), usize::from(state.threshold));
+        kani::assume(state.commit_result.is_some());
     }
-}
-
-// =============================================================================
-// Proof Harnesses: Panic Freedom
-// =============================================================================
-
-/// Verify apply_share never panics on valid states.
-///
-/// Property: Given any well-formed state and any proposal,
-/// apply_share either succeeds or returns NotEnabled (no panic).
-#[kani::proof]
-#[kani::unwind(10)]
-fn apply_share_no_panic() {
-    let state = any_valid_consensus_state();
-    kani::assume(check_invariants(&state).is_ok());
-
-    let proposal = any_share_proposal();
-
-    // This should not panic
-    let _result = apply_share(&state, proposal);
-}
-
-/// Verify trigger_fallback never panics.
-#[kani::proof]
-#[kani::unwind(10)]
-fn trigger_fallback_no_panic() {
-    let state = any_valid_consensus_state();
-    kani::assume(check_invariants(&state).is_ok());
-
-    let _result = trigger_fallback(&state);
-}
-
-/// Verify fail_consensus never panics.
-#[kani::proof]
-#[kani::unwind(10)]
-fn fail_consensus_no_panic() {
-    let state = any_valid_consensus_state();
-    kani::assume(check_invariants(&state).is_ok());
-
-    let _result = fail_consensus(&state);
-}
-
-// =============================================================================
-// Proof Harnesses: Phase Transition Properties
-// =============================================================================
-
-/// Verify terminal states are stable: once committed, stays committed.
-#[kani::proof]
-#[kani::unwind(10)]
-fn committed_state_is_terminal() {
-    let mut state = any_valid_consensus_state();
-
-    // Force state to Committed
-    state.phase = ConsensusPhase::Committed;
-
-    let proposal = any_share_proposal();
-
-    assert_transition_rejected!(
-        apply_share(&state, proposal),
-        "committed state should not accept new shares",
-    );
-}
-
-/// Verify failed states are terminal.
-#[kani::proof]
-#[kani::unwind(10)]
-fn failed_state_is_terminal() {
-    let mut state = any_valid_consensus_state();
-
-    state.phase = ConsensusPhase::Failed;
-
-    let proposal = any_share_proposal();
-
-    assert_transition_rejected!(
-        apply_share(&state, proposal),
-        "failed state should not accept new shares",
-    );
-}
-
-/// Verify phase only advances forward (Pending -> Active -> Terminal).
-#[kani::proof]
-#[kani::unwind(10)]
-fn phase_advances_forward() {
-    let state = any_valid_consensus_state();
-    kani::assume(check_invariants(&state).is_ok());
-
-    let proposal = any_share_proposal();
-
-    match apply_share(&state, proposal) {
-        TransitionResult::Ok(new_state) => {
-            // Check phase progression is valid
-            match (state.phase, new_state.phase) {
-                // Valid progressions
-                (ConsensusPhase::FastPathActive, ConsensusPhase::FastPathActive) => {}
-                (ConsensusPhase::FastPathActive, ConsensusPhase::Committed) => {}
-                (ConsensusPhase::FallbackActive, ConsensusPhase::FallbackActive) => {}
-                (ConsensusPhase::FallbackActive, ConsensusPhase::Committed) => {}
-
-                // Invalid: going backward
-                (ConsensusPhase::Committed, _) => {
-                    kani::assert(false, "cannot transition from Committed");
-                }
-                (ConsensusPhase::Failed, _) => {
-                    kani::assert(false, "cannot transition from Failed");
-                }
-
-                // Other transitions not allowed via apply_share
-                _ => {}
-            }
-        }
-        TransitionResult::NotEnabled(_) => {}
-    }
-}
-
-// =============================================================================
-// Proof Harnesses: Agreement Property
-// =============================================================================
-
-/// Verify agreement: if threshold reached for result R, commit has R.
-///
-/// Property: When apply_share causes a commit, the commit_fact.result_id
-/// matches the result_id that reached threshold.
-#[kani::proof]
-#[kani::unwind(10)]
-fn commit_matches_threshold_result() {
-    let state = any_valid_consensus_state();
-    kani::assume(check_invariants(&state).is_ok());
-    kani::assume(!state.threshold_met()); // Not yet at threshold
-
-    let proposal = any_share_proposal();
-
-    match apply_share(&state, proposal.clone()) {
-        TransitionResult::Ok(new_state) => {
-            if new_state.phase == ConsensusPhase::Committed {
-                // If we committed, commit_fact must exist
-                kani::assert(
-                    new_state.commit_fact.is_some(),
-                    "committed state must have commit_fact",
-                );
-
-                if let Some(cf) = &new_state.commit_fact {
-                    // Count proposals for the committed result
-                    let count = new_state.count_proposals_for_result(&cf.result_id);
-                    kani::assert(
-                        count >= new_state.threshold.as_usize(),
-                        "committed result must have threshold proposals",
-                    );
-                }
-            }
-        }
-        TransitionResult::NotEnabled(_) => {}
-    }
-}
-
-// =============================================================================
-// Proof Harnesses: Reference Equivalence
-// =============================================================================
-
-/// Verify production threshold_met matches reference implementation.
-///
-/// This ensures the production code matches the simpler reference specification.
-#[kani::proof]
-#[kani::unwind(10)]
-fn threshold_met_matches_reference() {
-    let state = any_valid_consensus_state();
-
-    // Reference implementation: explicit counting
-    let mut counts = std::collections::HashMap::new();
-    for p in &state.proposals {
-        *counts.entry(&p.result_id).or_insert(0usize) += 1;
-    }
-    let ref_threshold_met = counts.values().any(|&c| c >= state.threshold.as_usize());
-
-    // Production implementation
-    let prod_threshold_met = state.threshold_met();
-
+    state.fallback_timer_active = kani::any();
+    // Boolean choices preserve the exact independent two-value domains while
+    // exposing concrete representatives to constant propagation.
+    let (identity, operation, prestate) =
+        super::refinement_domain::bindings(kani::any(), kani::any(), kani::any());
+    let full = materialize(&state, identity, operation, prestate);
     kani::assert(
-        ref_threshold_met == prod_threshold_met,
-        "threshold_met must match reference",
+        super::super::validation::check_all_invariants(&full),
+        "refinement starts from actual well-formed stored state",
     );
-}
-
-/// Verify has_proposal matches reference implementation.
-#[kani::proof]
-#[kani::unwind(10)]
-fn has_proposal_matches_reference() {
-    let state = any_valid_consensus_state();
-    let witness = any_witness_id();
-
-    // Reference: linear search
-    let ref_has = state.proposals.iter().any(|p| p.witness == witness);
-
-    // Production
-    let prod_has = state.has_proposal(&witness);
-
-    kani::assert(ref_has == prod_has, "has_proposal must match reference");
+    let retained_commit = full.commit_fact.clone();
+    let mut incoming = share(proposal);
+    incoming.share.share_value = if kani::any() { "a" } else { "b" }.into();
+    incoming.share.nonce_binding = if kani::any() { "c" } else { "d" }.into();
+    incoming.share.data_binding = if kani::any() { "e" } else { "f" }.into();
+    // Universal nondeterminism covers every transition without executing
+    // three independent heap-backed wrappers on each symbolic path.
+    let choice: u8 = kani::any();
+    kani::assume(choice < 3);
+    match super::refinement_domain::transition(choice).expect("validated transition domain") {
+        super::refinement_domain::Transition::ApplyShare => {
+            match (
+                transitions::apply_share(&full, incoming.clone()),
+                state.apply_share(proposal),
+            ) {
+                (TransitionResult::Ok(actual), Some(expected)) => {
+                    assert_storage_parity(&actual, &expected, &full, Some(&incoming))
+                }
+                (TransitionResult::NotEnabled(_), None) => {}
+                _ => kani::assert(false, "wrapper admission matches kernel"),
+            }
+        }
+        super::refinement_domain::Transition::TriggerFallback => {
+            match (
+                transitions::trigger_fallback(&full),
+                state.trigger_fallback(),
+            ) {
+                (TransitionResult::Ok(actual), Some(expected)) => {
+                    assert_storage_parity(&actual, &expected, &full, None)
+                }
+                (TransitionResult::NotEnabled(_), None) => {}
+                _ => kani::assert(false, "wrapper fallback matches kernel"),
+            }
+        }
+        super::refinement_domain::Transition::FailConsensus => {
+            match (transitions::fail_consensus(&full), state.fail_consensus()) {
+                (TransitionResult::Ok(actual), Some(expected)) => {
+                    assert_storage_parity(&actual, &expected, &full, None)
+                }
+                (TransitionResult::NotEnabled(_), None) => {}
+                _ => kani::assert(false, "wrapper failure matches kernel"),
+            }
+        }
+    }
+    match (&full.commit_fact, &retained_commit) {
+        (Some(actual), Some(original)) => kani::assert(
+            actual.cid == original.cid
+                && actual.result_id == original.result_id
+                && actual.prestate_hash == original.prestate_hash
+                && actual.signature == original.signature,
+            "terminal rejections preserve the original stored commit payload",
+        ),
+        (None, None) => {}
+        _ => kani::assert(false, "original stored commit presence retained"),
+    }
 }

@@ -33,17 +33,45 @@ cat > "$test_root/configs/lan.toml" <<'EOF'
 name = "test"
 artifact_dir = ".tmp/e2e/run/host-a/artifacts"
 EOF
+lock_owner=''
 cleanup() {
-  bash "$driver" stop >/dev/null 2>&1 || true
-  rm -rf "$test_root"
+  if [[ -n "$lock_owner" ]]; then
+    printf 'release\n' >&6 || true
+    wait "$lock_owner" 2>/dev/null || true
+  fi
+  if bash "$driver" stop >/dev/null 2>&1; then
+    rm -rf "$test_root"
+  else
+    echo "retaining fixture state with unresolved lifecycle ownership: $test_root" >&2
+  fi
 }
 trap cleanup EXIT
 
+# Missing pinned tool must refuse before creating the run or lock inode.
+mkdir -p "$test_root/missing-tool-bin"
+ln -s "$(command -v dirname)" "$test_root/missing-tool-bin/dirname"
+ln -s "$(command -v jq)" "$test_root/missing-tool-bin/jq"
+fixture_bash="$(command -v bash)"
+for command in start stop finish finalize; do
+  if PATH="$test_root/missing-tool-bin" "$fixture_bash" "$driver" "$command" unused > "$test_root/missing-tool-out" 2>&1; then
+    echo "LAN driver admitted $command without pinned flock" >&2; exit 1
+  else
+    [[ "$?" -eq 127 ]]
+  fi
+  grep -q 'requires portable flock' "$test_root/missing-tool-out"
+  [[ ! -e "$AURA_E2E_RUN_DIR" && ! -e "$AURA_E2E_RUN_DIR.lifecycle.lock" ]]
+done
 bash "$driver" start "$test_root/configs/lan.toml" >/dev/null
 read -r ready <&9
 [[ "$ready" == ready ]]
 [[ "$(cat "$AURA_LAN_FIXTURE_PROVIDER_REPORT")" == filesystem-fallback ]]
 kill -0 "$(cat "$AURA_E2E_RUN_DIR/repl.pid")"
+# The long-lived service must not inherit the lifecycle descriptor. An
+# independent contender can acquire it immediately while that service runs.
+(
+  exec 8>>"$AURA_E2E_RUN_DIR.lifecycle.lock"
+  flock -n 8
+)
 runs="$test_root/.tmp/e2e/run/host-a/artifacts/runs"
 manifest="$runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json"
 [[ "$(jq -r .state "$manifest")" == active ]]
@@ -65,7 +93,7 @@ bash "$driver" start "$test_root/configs/lan.toml" >/dev/null
 read -r ready <&9
 owned_pid=$(cat "$AURA_E2E_RUN_DIR/repl.pid")
 cp "$AURA_E2E_RUN_DIR/repl.identity.json" "$test_root/valid-identity"
-for field in birth executable; do
+for field in birth executable run_token; do
   jq --arg field "$field" '.[$field]="mismatched-value"' "$test_root/valid-identity" > "$AURA_E2E_RUN_DIR/repl.identity.json"
   if bash "$driver" stop >/dev/null 2>&1; then
     echo "LAN driver ignored mismatched $field" >&2; exit 1
@@ -141,6 +169,85 @@ bash "$driver" stop >/dev/null
 export PATH="$original_path"
 mv "$test_root/preserved-run" "$AURA_E2E_RUN_DIR"
 
+# Hold an actual driver inside its owned process inspection, after its flock
+# helper has exited. A competing driver must fail closed for every lifecycle
+# command. The fixture inspection child closes FD9 so forced owner death tests
+# the driver's inherited open-description custody directly.
+mkdir -p "$test_root/lock-bin"
+mkfifo "$test_root/lock-ready" "$test_root/lock-release" "$test_root/lock-done"
+exec 7<>"$test_root/lock-ready" 6<>"$test_root/lock-release" 5<>"$test_root/lock-done"
+cat > "$test_root/lock-bin/ps" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${AURA_LAN_FIXTURE_LOCK_BARRIER:-}" == yes && "$*" == '-axo pid=,comm=' ]]; then
+  exec 9>&-
+  printf '%s\n' "$$" > "$AURA_LAN_FIXTURE_LOCK_READY"
+  read -r release < "$AURA_LAN_FIXTURE_LOCK_RELEASE"
+  printf 'done\n' > "$AURA_LAN_FIXTURE_LOCK_DONE"
+fi
+exec "$AURA_LAN_FIXTURE_REAL_PS" "$@"
+EOF
+chmod +x "$test_root/lock-bin/ps"
+export PATH="$test_root/lock-bin:$original_path"
+AURA_LAN_FIXTURE_LOCK_BARRIER=yes \
+  AURA_LAN_FIXTURE_LOCK_READY="$test_root/lock-ready" \
+  AURA_LAN_FIXTURE_LOCK_RELEASE="$test_root/lock-release" \
+  AURA_LAN_FIXTURE_LOCK_DONE="$test_root/lock-done" \
+  bash "$driver" stop > "$test_root/lock-owner-out" 2> "$test_root/lock-owner-err" &
+lock_owner=$!
+read -r inspection_pid <&7
+kill -0 "$lock_owner"
+for lifecycle in stop 'finish success' "finalize $AURA_E2E_RUN_TOKEN success" "start $test_root/configs/lan.toml"; do
+  read -r -a lifecycle_args <<< "$lifecycle"
+  if bash "$driver" "${lifecycle_args[@]}" > "$test_root/lock-contender-out" 2>&1; then
+    echo "LAN lifecycle command bypassed live kernel owner: $lifecycle" >&2; exit 1
+  fi
+  grep -q 'another LAN lifecycle owner holds the lock' "$test_root/lock-contender-out"
+done
+kill -KILL "$lock_owner"
+wait "$lock_owner" 2>/dev/null || true
+lock_owner=''
+# Kernel release permits the next driver despite the persistent lock inode.
+bash "$driver" stop >/dev/null
+[[ -f "$AURA_E2E_RUN_DIR.lifecycle.lock" ]]
+printf 'release\n' >&6
+read -r done <&5
+[[ "$done" == done ]]
+export PATH="$original_path"
+
+# Simulate a replacement during pinned Nix bootstrap. The old outer marker
+# was valid, but the driver must validate the expected token after bootstrap
+# and leave the replacement process and every launch-identity byte untouched.
+export AURA_E2E_RUN_TOKEN=lan-retention-replaced-run
+bash "$driver" start "$test_root/configs/lan.toml" >/dev/null
+read -r ready <&9
+replacement_pid=$(cat "$AURA_E2E_RUN_DIR/repl.pid")
+cp "$AURA_E2E_RUN_DIR/repl.identity.json" "$test_root/replacement-identity"
+cp "$AURA_E2E_RUN_DIR/retention-run-id" "$test_root/replacement-token"
+outer_token=lan-retention-outer-batch
+printf '%s\n' "$outer_token" > "$AURA_E2E_RUN_DIR/retention-run-id"
+[[ $(cat "$AURA_E2E_RUN_DIR/retention-run-id") == "$outer_token" ]]
+cat > "$test_root/replacement-nix" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == develop && "$3" == --command ]]
+cp "$AURA_LAN_FIXTURE_REPLACEMENT_TOKEN" "$AURA_E2E_RUN_DIR/retention-run-id"
+export IN_NIX_SHELL=fixture
+shift 3
+exec "$@"
+EOF
+chmod +x "$test_root/replacement-nix"
+if IN_NIX_SHELL= AURA_NIX_BIN="$test_root/replacement-nix" \
+  AURA_LAN_FIXTURE_REPLACEMENT_TOKEN="$test_root/replacement-token" \
+  bash "$driver" finalize "$outer_token" success > "$test_root/replacement-out" 2>&1; then
+  echo 'LAN finalization signalled a replacement run after bootstrap' >&2; exit 1
+fi
+kill -0 "$replacement_pid"
+cmp "$test_root/replacement-identity" "$AURA_E2E_RUN_DIR/repl.identity.json"
+[[ $(jq -r .state "$runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json") == active ]]
+bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed >/dev/null
+[[ $(jq -r .outcome "$runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json") == failed ]]
+
 export AURA_E2E_RUN_TOKEN=short
 if bash "$driver" start "$test_root/configs/lan.toml" >/dev/null 2>&1; then
   echo 'LAN driver accepted a token too short for the native harness' >&2; exit 1
@@ -148,4 +255,5 @@ fi
 [[ ! -e "$runs/short" ]]
 bash "$repo_root/scripts/harness/lan/test-driver-environment.sh"
 bash "$repo_root/scripts/harness/lan/test-fresh.sh"
+bash "$repo_root/scripts/harness/lan/test-batch.sh"
 echo 'LAN retention lifecycle tests passed'

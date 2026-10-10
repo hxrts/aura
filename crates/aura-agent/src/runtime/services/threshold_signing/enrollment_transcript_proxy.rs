@@ -79,15 +79,16 @@ impl<'tree, 'custody, 'owner, 'runtime>
                 "public remote proxy is not the original approved coordinator",
             ));
         }
-        approval
-            .transport()
-            .require_manifest(approval.manifest())
-            .map_err(|source| {
-                AuraError::crypto_with_source(
-                    "retain original proxy transport intent",
-                    Arc::new(source),
-                )
-            })?;
+        aura_invitation::shareable::require_transport_manifest(
+            approval.transport(),
+            approval.manifest(),
+        )
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "retain original proxy transport intent",
+                Arc::new(source),
+            )
+        })?;
         let expected = self.expected_participant_verifier(peer)?;
         let index = self
             .ordered_devices

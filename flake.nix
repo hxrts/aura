@@ -32,16 +32,16 @@
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      nixpkgs-cargo-deny,
-      flake-utils,
-      rust-overlay,
-      crate2nix,
-      toolkit,
-      aeneas,
-      patchbay,
+    { self
+    , nixpkgs
+    , nixpkgs-cargo-deny
+    , flake-utils
+    , rust-overlay
+    , crate2nix
+    , toolkit
+    , aeneas
+    , patchbay
+    ,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -54,6 +54,12 @@
           inherit system;
         };
         cargoDeny = cargoDenyPkgs.cargo-deny;
+        # Lifecycle custody needs the portable binary, not optional Ruby-generated manuals.
+        lifecycleFlock = pkgs.flock.overrideAttrs (old: {
+          nativeBuildInputs = builtins.filter (input: input != pkgs.ronn) old.nativeBuildInputs;
+          buildFlags = [ "flock" ];
+          installTargets = [ "install-binPROGRAMS" ];
+        });
         toolkitSupport = toolkit.lib.${system}.consumerShellSupport;
         toolkitCommands = with toolkit.packages.${system}; [
           toolkit-clippy
@@ -164,12 +170,13 @@
             # Override for cc crate - fix Apple target detection on macOS
             cc =
               attrs:
-              pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-                # Fix CC crate Apple target detection: it expects "darwin" but Nix reports "macos"
-                preBuild = ''
-                  export CARGO_CFG_TARGET_OS="darwin"
-                '';
-              }
+              pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin
+                {
+                  # Fix CC crate Apple target detection: it expects "darwin" but Nix reports "macos"
+                  preBuild = ''
+                    export CARGO_CFG_TARGET_OS="darwin"
+                  '';
+                }
               // attrs;
 
             # Override for ring (crypto library)
@@ -278,6 +285,7 @@
 
             # Documentation tools
             markdown-link-check
+            lifecycleFlock # portable inherited-FD kernel custody for LAN lifecycle
 
             # Nix tools and formatting
             nixpkgs-fmt
@@ -288,9 +296,9 @@
           ++ toolkitSupport.buildInputs
           # Linux-only: patchbay network simulation dependencies
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            iproute2  # tc command for traffic control
-            nftables  # nft command for NAT rules
-            iptables  # iptables-legacy for some nftables compat
+            iproute2 # tc command for traffic control
+            nftables # nft command for NAT rules
+            iptables # iptables-legacy for some nftables compat
           ];
 
           shellHook = ''
@@ -410,12 +418,17 @@
             # Browser/build tooling used by harness and web checks
             nodejs_20
 
+            # Documentation link checking without the verification toolchain
+            markdown-link-check
+            lifecycleFlock # portable inherited-FD kernel custody for LAN lifecycle
+
             # Conformance ITF generation
             quint
           ]
           ++ toolkitSupport.packages
           ++ toolkitCommands
-          ++ toolkitSupport.buildInputs;
+          ++ toolkitSupport.buildInputs
+          ;
 
           shellHook = ''
             ${toolkitSupport.shellHook}

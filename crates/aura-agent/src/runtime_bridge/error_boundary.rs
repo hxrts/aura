@@ -145,14 +145,25 @@ pub(super) fn native_cause_kind(
         {
             use aura_invitation::enrollment_manifest::EnrollmentManifestError as Manifest;
             let kind = match manifest {
-                Manifest::MissingPin | Manifest::MissingFinalInventory | Manifest::Pin => {
-                    Some(Kind::Unauthorized)
-                }
+                Manifest::MissingPin
+                | Manifest::MissingFinalInventory
+                | Manifest::Pin
+                | Manifest::PinEncoding(_) => Some(Kind::Unauthorized),
                 Manifest::Unavailable | Manifest::Time(_) => Some(Kind::Service),
-                Manifest::Expired | Manifest::Shape | Manifest::SetupValidity => {
-                    Some(Kind::Validation)
+                Manifest::Expired
+                | Manifest::Shape
+                | Manifest::SetupValidity
+                | Manifest::Baseline(_) => Some(Kind::Validation),
+                Manifest::Signature | Manifest::Transcript(_) | Manifest::NativeProof(_) => {
+                    Some(Kind::Crypto)
                 }
-                Manifest::Signature | Manifest::Transcript(_) => Some(Kind::Crypto),
+                Manifest::Codec(_) => Some(Kind::Serialization),
+                Manifest::RequiredTranscript(aura_signature::TranscriptCryptoError::Encoding(
+                    _,
+                )) => Some(Kind::Serialization),
+                Manifest::RequiredTranscript(aura_signature::TranscriptCryptoError::Provider(
+                    _,
+                )) => None,
                 Manifest::Runtime(_) | Manifest::Boundary(_) | Manifest::Crypto(_) => None,
             };
             if let Some(kind) = kind {
@@ -277,6 +288,45 @@ pub(super) fn bridge_runtime_service_unavailable_with_cause(
 mod native_tests {
     use super::*;
     use std::error::Error;
+
+    #[test]
+    fn required_manifest_transcript_keeps_codec_and_provider_categories() {
+        use aura_app::runtime_bridge::RuntimeBridgeErrorKind as Kind;
+        use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+        use aura_signature::{RequiredTranscriptEncodingError, TranscriptCryptoError};
+        let encoding = EnrollmentManifestError::RequiredTranscript(
+            TranscriptCryptoError::Encoding(RequiredTranscriptEncodingError::EmptyDomain),
+        );
+        assert_eq!(native_cause_kind(&encoding), Kind::Serialization);
+        assert!(encoding
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<RequiredTranscriptEncodingError>());
+        let provider = EnrollmentManifestError::RequiredTranscript(
+            TranscriptCryptoError::Provider(aura_core::AuraError::storage("provider failure")),
+        );
+        assert_eq!(native_cause_kind(&provider), Kind::Storage);
+        assert!(provider
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<aura_core::AuraError>());
+        let codec = aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest::decode(
+            "aura-enrollment-manifest:v3:!",
+        )
+        .unwrap_err();
+        assert_eq!(native_cause_kind(&codec), Kind::Serialization);
+        assert!(codec.source().unwrap().is::<base64::DecodeError>());
+        let pin = aura_invitation::enrollment_manifest::decode_initiator_verifier_transfer(
+            "aura-initiator-verifier:v1:!",
+        )
+        .unwrap_err();
+        assert_eq!(native_cause_kind(&pin), Kind::Unauthorized);
+        assert!(pin.source().unwrap().is::<base64::DecodeError>());
+    }
 
     #[test]
     fn native_required_categories_survive_wrappers_without_diagnostic_inference() {

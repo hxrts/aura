@@ -4,15 +4,15 @@ use crate::handlers::rendezvous_identity::{
     require_active_identity_signing_context, require_identity_keys,
     require_issued_identity_signing_context,
 };
-use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::AuraError;
-use aura_signature::SecurityTranscript;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum IssuedInvitationIdentityError {
     #[error("original invitation issuer identity binding is invalid")]
     Binding,
+    #[error("enrollment transfer requires its retained original enrollment owner")]
+    EnrollmentOwnerRequired,
     #[error("original invitation issuer identity is absent")]
     Missing,
     #[error("original invitation issuer identity exceeds its 4096-byte record bound")]
@@ -21,7 +21,9 @@ pub(crate) enum IssuedInvitationIdentityError {
 fn invalid(cause: IssuedInvitationIdentityError) -> AgentError {
     let storage = match &cause {
         IssuedInvitationIdentityError::Missing => true,
-        IssuedInvitationIdentityError::Binding | IssuedInvitationIdentityError::Oversized => false,
+        IssuedInvitationIdentityError::Binding
+        | IssuedInvitationIdentityError::Oversized
+        | IssuedInvitationIdentityError::EnrollmentOwnerRequired => false,
     };
     let message = cause.to_string();
     let source = Some(Arc::new(cause) as Arc<dyn std::error::Error + Send + Sync>);
@@ -305,24 +307,13 @@ pub(crate) async fn export_owned_invitation_code(
         .map_err(AgentError::EnrollmentManifest)?;
     let private = zeroize::Zeroizing::new(private);
     let shareable = ShareableInvitation::from(issued.invitation());
-    let transcript = shareable
-        .signing_transcript_with_transport(transport)
-        .required_transcript_bytes()
-        .map_err(|source| {
-            AgentError::Aura(AuraError::Serialization {
-                message: "encode original invitation signing transcript".into(),
-                source: Some(Arc::new(source)),
-            })
-        })?;
-    let signature = effects
-        .ed25519_sign(&transcript, private.as_ref())
-        .await
-        .map_err(|source| {
-            AgentError::Aura(AuraError::Crypto {
-                message: "sign original invitation transfer".into(),
-                source: Some(Arc::new(source)),
-            })
-        })?;
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects,
+        &shareable.signing_transcript_with_transport(transport),
+        private.as_ref(),
+    )
+    .await
+    .map_err(AgentError::from)?;
     shareable
         .to_signed_code_with_transport(
             ShareableInvitationSenderProof {

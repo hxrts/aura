@@ -357,3 +357,7 @@ cargo check -p aura-web
 Device enrollment import uses the shared three-field contract and transfers submission ownership to the app before awaiting pin/import/acceptance. The shell does not derive an initiator verifier from the received payload or adopt its authority/device identifiers before acceptance. Issuer output preserves actual signed manifest and independent verifier transfer material. Browser account persistence requires an app-issued completed result; legacy pending-code-only replay fails closed.
 
 See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+Browser semantic observation surface version 2 includes required `UiSnapshot.home_modes`. The shared UI controller derives it from canonical app `HomesState` and the same `StateSnapshot` as the homes source revision, through `aura-app` projection observations. Browser caches, DOM text and neighborhood labels do not supply mode flags or context bindings. Loading explicitly exports an empty vector.
+
+If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.

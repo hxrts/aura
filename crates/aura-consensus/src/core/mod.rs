@@ -19,6 +19,7 @@
 //! 4. **Invariant-checked**: Every transition maintains well-formedness
 
 // Production modules
+mod decision;
 pub mod state;
 pub mod transitions;
 pub mod validation;

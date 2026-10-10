@@ -63,7 +63,7 @@ package_file() {
   mkdir -p "$repo/$path/$(dirname "$file")"
   printf '[package]\nname = "%s"\nversion = "0.1.0"\n' "$package" > "$repo/$path/Cargo.toml"
   printf 'fn fixture() {}\n' > "$repo/$path/$file"
-  git -C "$repo" add -- "$path/$file"
+  git -C "$repo" add -- "$path/$file" "$path/Cargo.toml"
 }
 run_case() {
   status=0
@@ -139,4 +139,68 @@ printf fixture > "$repo/"$'ab\ncd'
 git -C "$repo" add -f -- $'ab\ncd'
 run_case
 [[ "$status" == 1 && ! -s "$CASE_LOG" && ! -s "$CASE_BUDGET" ]]
-echo 'staged Rust package fixtures passed (15 cases, no compiler)'
+new_case ignored-deletion
+package_file crates/aura-app hxrts-aura-app src/ignored.rs
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+printf 'crates/aura-app/src/ignored.rs\n' > "$repo/.gitignore"
+git -C "$repo" add .gitignore
+git -C "$repo" rm -q crates/aura-app/src/ignored.rs
+run_case; expect_checks 1
+new_case ignored-non-rust-deletion
+printf fixture > "$repo/ignored.txt"
+git -C "$repo" add ignored.txt
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+printf 'ignored.txt\n' > "$repo/.gitignore"
+git -C "$repo" add .gitignore
+git -C "$repo" rm -q ignored.txt
+run_case; expect_checks 0
+new_case whole-package-removal
+package_file 'crates/space crate' hxrts-aura-app $'src/line\nbreak.rs'
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+git -C "$repo" rm -rq 'crates/space crate'
+run_case
+[[ "$status" == 0 && ! -s "$CASE_BUDGET" ]]
+jq -es 'length==1 and .[0].phase=="metadata" and .[0].package=="hxrts-aura-app" and (.[0].manifest|contains("aura-staged-head."))' "$CASE_LOG" >/dev/null
+new_case partial-package-removal
+package_file crates/aura-app hxrts-aura-app src/deleted.rs
+package_file crates/aura-app hxrts-aura-app src/retained.rs
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+git -C "$repo" rm -q crates/aura-app/Cargo.toml crates/aura-app/src/deleted.rs
+run_case
+[[ "$status" != 0 && ! -s "$CASE_BUDGET" ]]
+grep -q 'still owns indexed file' "$fixture/output"
+new_case removed-package-new-unowned
+package_file crates/aura-app hxrts-aura-app src/deleted.rs
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+git -C "$repo" rm -rq crates/aura-app
+mkdir -p "$repo/crates/aura-app/src"
+printf 'fn new_file() {}\n' > "$repo/crates/aura-app/src/new.rs"
+git -C "$repo" add crates/aura-app/src/new.rs
+run_case
+[[ "$status" != 0 && ! -s "$CASE_BUDGET" ]]
+new_case removed-package-retained-nested-owner
+package_file crates/outer original-package src/deleted.rs
+package_file crates/outer/nested nested-package src/lib.rs
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+git -C "$repo" rm -rq crates/outer/Cargo.toml crates/outer/src
+run_case
+[[ "$status" == 0 ]]
+jq -es 'length==4 and ([.[]|select(.phase=="check")]|length)==1 and all(.[]|select(.phase=="check");.package=="nested-package")' "$CASE_LOG" >/dev/null
+[[ $(wc -l < "$CASE_BUDGET" | tr -d ' ') == 1 ]]
+new_case historical-metadata-failure
+package_file crates/aura-app hxrts-aura-app src/lib.rs
+git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm baseline
+git -C "$repo" rm -rq crates/aura-app
+FAIL_PHASE=metadata FAIL_STATUS=37
+run_case
+[[ "$status" == 37 && ! -s "$CASE_BUDGET" ]]
+new_case unindexed-manifest
+package_file crates/aura-app hxrts-aura-app src/lib.rs
+git -C "$repo" rm --cached -q crates/aura-app/Cargo.toml
+run_case
+[[ "$status" != 0 && ! -s "$CASE_LOG" && ! -s "$CASE_BUDGET" ]]
+new_case newline-directory
+package_file $'crates/trailing\n' newline-package src/lib.rs
+run_case; expect_checks 1
+
+echo 'staged Rust package fixtures passed (24 cases, no compiler)'

@@ -534,3 +534,9 @@ same original endpoint and provider. The absolute bridge returns the provider's
 post-deadline clock read. Required peer transport establishment retains native
 handler/provider causes; an established transport does not establish AMP,
 membership, recipient, or journal readiness.
+
+The shared `UiSnapshot.home_modes` observation is required on observation surface version 2. `observed_home_modes` projects canonical `HomesState` entries with channel/context bindings and mode flags; entries without a canonical context are omitted. It does not establish readiness or authorize mutations. Loading snapshots explicitly carry an empty vector, and no legacy wire decoder supplies the field.
+
+Frontend signal observers await `AppCore::subscribe_attached` before their initial snapshot and healthy publication. The existing reactive owner installs the graph receiver before returning, so an immediate update cannot fall between reported attachment and actual admission.
+
+Native integration tests may opt into app `test-support` fixture publication, which delegates existing observed-projection owners to publish a detached HomesState or mutate only the mode of an exact materialized home. The feature is absent from default/wasm production frontends and does not add a production mutation bypass.

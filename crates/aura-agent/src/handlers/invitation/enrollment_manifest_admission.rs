@@ -262,7 +262,7 @@ async fn validate(
     };
     if *subject_authority != manifest.subject
         || shareable.sender_id != manifest.subject
-        || *invitee_authority != Some(record.provisional)
+        || *invitee_authority != record.provisional
         || manifest.invitee_authority != record.provisional
         || *device_id != record.device
         || manifest.invitee_device != record.device
@@ -271,7 +271,7 @@ async fn validate(
         || shareable.invitation_id != manifest.invitation
         || shareable.invitation_id != record.invitation
         || *pending_epoch != manifest.pending_epoch
-        || setup_binding.as_ref() != Some(&manifest.setup)
+        || setup_binding != &manifest.setup
         || aura_core::hash::hash(key_package) != manifest.pending_share_digest
         || aura_core::hash::hash(public_key_package) != manifest.pending_public_key_package_digest
         || aura_core::hash::hash(threshold_config)
