@@ -990,6 +990,14 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 
 ### Build and Caching
 
+Workspace Clippy, including `just ci-clippy` and `toolkit-clippy-strict`, uses
+Aura's pinned shell Cargo dispatcher. `scripts/toolkit-shell.sh` routes the
+aggregate Clippy command through that dispatcher and enters Aura's Nix shell
+when needed. The shared toolkit's raw Cargo Clippy command can select installed
+Cargo-home plugins; it must not bypass the Aura dispatcher. The isolated
+`ci-build-cache-policy` fixtures verify arguments and exit status for both entry
+paths.
+
 `just ci-harness-browser` and `just ci-harness-matrix-web` acquire the same
 checkout build budget before preparing browser tools, web assets or harness
 binaries. Nested invocations reuse the held admission. These lanes preserve

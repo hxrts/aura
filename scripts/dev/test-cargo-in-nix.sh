@@ -45,3 +45,41 @@ CARGO_INCREMENTAL=1 RUSTC_WRAPPER=sccache bash "$repo_root/scripts/dev/cargo-in-
 AURA_NO_SCCACHE=1 RUSTC_WRAPPER=other-wrapper bash "$repo_root/scripts/dev/cargo-in-nix.sh" build
 [[ "$(cat "$DISPATCH_CAPTURE")" == other-wrapper ]] || { echo 'unrelated wrapper removed' >&2; exit 1; }
 echo 'cargo-in-nix: pinned Clippy dispatch, argument boundaries, exit status and sccache opt-out passed'
+# Aggregate toolkit entry point must use the same dispatcher, even when an
+# installed toolkit command is present. The non-Nix path must enter Aura first.
+mkdir -p "$fixture_root/project/scripts" "$fixture_root/bin" "$fixture_root/toolkit/xtask"
+cp "$repo_root/scripts/toolkit-shell.sh" "$fixture_root/project/scripts/toolkit-shell.sh"
+cat > "$fixture_root/bin/cargo" <<'TOOL'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$DISPATCH_CAPTURE"
+exit 23
+TOOL
+cat > "$fixture_root/bin/toolkit-clippy" <<'TOOL'
+#!/usr/bin/env bash
+exit 79
+TOOL
+cat > "$fixture_root/bin/nix" <<'TOOL'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$DISPATCH_CAPTURE"
+exit 31
+TOOL
+chmod +x "$fixture_root/bin/cargo" "$fixture_root/bin/toolkit-clippy" "$fixture_root/bin/nix"
+for shell_state in inside outside; do
+  if [[ "$shell_state" == inside ]]; then
+    expected_status=23
+    printf '%s\n' clippy --manifest-path 'path with spaces/Cargo.toml' -- -D warnings > "$fixture_root/expected"
+    nix_state=impure
+  else
+    expected_status=31
+    printf '%s\n' develop "$fixture_root/project" --command cargo clippy --manifest-path 'path with spaces/Cargo.toml' -- -D warnings > "$fixture_root/expected"
+    nix_state=''
+  fi
+  if IN_NIX_SHELL="$nix_state" PATH="$fixture_root/bin:$PATH" bash "$fixture_root/project/scripts/toolkit-shell.sh" toolkit-clippy --manifest-path 'path with spaces/Cargo.toml' -- -D warnings; then
+    echo 'toolkit Clippy exit status was lost' >&2; exit 1
+  else
+    status=$?
+    [[ "$status" == "$expected_status" ]] || { echo "unexpected toolkit dispatch status $status" >&2; exit 1; }
+  fi
+  cmp "$fixture_root/expected" "$DISPATCH_CAPTURE"
+done
+echo 'toolkit-clippy: pinned shell dispatch, Nix fallback, argument boundaries and exit status passed'

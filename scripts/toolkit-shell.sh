@@ -11,6 +11,16 @@ fi
 
 requested_command="${1:-}"
 
+# Workspace Clippy uses Aura's shell-scoped pinned Cargo dispatcher.
+# The shared toolkit executable invokes raw Cargo and can select home plugins.
+if [ "${requested_command}" = "toolkit-clippy" ]; then
+  shift
+  if [ -n "${IN_NIX_SHELL:-}" ]; then
+    exec cargo clippy "$@"
+  fi
+  exec nix develop "${repo_root}" --command cargo clippy "$@"
+fi
+
 setup_toolkit_dylint_tmpdir() {
   local current_tmpdir="${TMPDIR:-}"
   if [ -z "${current_tmpdir}" ]; then
