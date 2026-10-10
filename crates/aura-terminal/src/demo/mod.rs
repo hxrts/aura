@@ -26,12 +26,10 @@
 
 pub mod hints;
 mod identities;
-pub mod signal_coordinator;
 pub mod simulator;
 
 pub use crate::demo_invitation::generate_demo_contact_invite_code;
 pub use hints::DemoHints;
-pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::spawn_amp_inbox_listener;
 pub use simulator::DemoSimulator;
 pub use simulator::EchoPeer;
@@ -1250,25 +1248,6 @@ impl SimulatedBridge {
     pub async fn reset_recovery_state(&self) {
         let mut state = self.recovery_state.lock().await;
         state.approved_guardians.clear();
-    }
-
-    /// Take the response receiver for external consumption
-    ///
-    /// This is used by DemoSignalCoordinator to receive agent responses
-    /// directly instead of going through process_responses().
-    /// Can only be called once - returns None after first call.
-    pub async fn take_response_receiver(
-        &self,
-    ) -> Option<mpsc::Receiver<(AuthorityId, AgentResponse)>> {
-        // We need to swap out the receiver with a dummy one
-        // This is a one-time operation
-        let mut rx_guard = self.response_rx.lock().await;
-
-        // Create a new dummy channel just to get a receiver
-        let (_, dummy_rx) = mpsc::channel(1);
-
-        // Swap the receivers
-        Some(std::mem::replace(&mut *rx_guard, dummy_rx))
     }
 
     /// Notify agents of phase change

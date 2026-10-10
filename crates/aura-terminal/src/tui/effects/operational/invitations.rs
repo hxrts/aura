@@ -332,10 +332,7 @@ pub async fn handle_invitations(
                             | InvitationBridgeType::Guardian { .. }
                     ) {
                         if let Err(e) =
-                            aura_app::ui::workflows::invitation::accept_imported_invitation(
-                                app_core, invitation,
-                            )
-                            .await
+                            aura_app::ui::workflows::invitation::accept_invitation_with_terminal_status(app_core, aura_app::ui::workflows::invitation::InvitationAcceptanceRequest::RetainedHandle { invitation: Box::new(invitation), operation_instance_id: None }).await.result.map(|_| ())
                         {
                             return Some(Err(OpError::typed(
                                 OpFailureCode::AcceptInvitation,
@@ -361,11 +358,15 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::AcceptInvitation { invitation_id } => {
-            match aura_app::ui::workflows::invitation::accept_invitation_by_str(
+            match aura_app::ui::workflows::invitation::accept_invitation_with_terminal_status(
                 app_core,
-                invitation_id,
+                aura_app::ui::workflows::invitation::InvitationAcceptanceRequest::UnsubmittedId {
+                    invitation_id: (invitation_id).to_owned(),
+                },
             )
             .await
+            .result
+            .map(|invitation| invitation.info().clone())
             {
                 Ok(accepted) => Some(Ok(OpResponse::InvitationAccepted {
                     invitation_id: accepted.invitation_id.as_str().to_string(),

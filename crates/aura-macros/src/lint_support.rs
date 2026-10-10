@@ -34,6 +34,24 @@ pub(crate) fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
+/// Cargo's conventional integration-test/benchmark trees belong to the nearest
+/// package manifest. A production `src/tests` directory is not a test target.
+pub(crate) fn is_cargo_test_target_path(file: &Path) -> bool {
+    let Some(package_root) = file
+        .ancestors()
+        .skip(1)
+        .find(|ancestor| ancestor.join("Cargo.toml").is_file())
+    else {
+        return false;
+    };
+    file.strip_prefix(package_root)
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .is_some_and(|component| {
+            component.as_os_str() == "tests" || component.as_os_str() == "benches"
+        })
+}
+
 pub(crate) struct ParsedRustFile {
     pub(crate) path: PathBuf,
     pub(crate) source: String,

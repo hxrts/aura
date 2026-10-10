@@ -55,3 +55,23 @@ fn main() {
 }
 
 struct DemoProof(String);
+
+mod original_custody {
+    pub struct Original<T>(pub T);
+    pub struct Nested;
+    pub struct Root<T>(pub T);
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "original-generic-root",
+    capability_type = crate::original_custody::Root<crate::original_custody::Original<crate::original_custody::Nested>>,
+    family = "runtime_helper"
+)]
+fn formatted_original_root(
+    original: &crate::original_custody::Root<
+        crate::original_custody::Original<crate::original_custody::Nested>,
+    >,
+) {
+    let _ = original;
+}

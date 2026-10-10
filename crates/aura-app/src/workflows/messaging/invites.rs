@@ -132,6 +132,8 @@ pub async fn invite_authority_to_channel_with_context_terminal_status(
         owner
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
+        let runtime = require_runtime(app_core).await?;
+        let deadline = workflow_timeout_budget(&runtime, Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS)).await?;
         let result = invite_authority_to_channel_with_context(
             app_core,
             receiver,
@@ -140,7 +142,7 @@ pub async fn invite_authority_to_channel_with_context_terminal_status(
             channel_name_hint,
             &owner,
             None,
-            None,
+            &deadline,
             None,
             message,
             ttl_ms,
@@ -216,7 +218,7 @@ async fn invite_user_to_channel_with_context_owned(
             &runtime,
             "invite_user_to_channel",
             "resolve_target_authority",
-            Some(deadline.clone()),
+            &deadline,
             resolve_target_authority_for_invite(app_core, target_user_id),
         )
         .await?;
@@ -225,8 +227,8 @@ async fn invite_user_to_channel_with_context_owned(
             &runtime,
             "invite_user_to_channel",
             "resolve_channel_id",
-            Some(deadline.clone()),
-            resolve_chat_channel_id_from_state_or_input(app_core, channel_name_or_id),
+            &deadline,
+            resolve_chat_channel_id_from_state_or_input(app_core, channel_name_or_id, &deadline),
         )
         .await?;
         let channel_name_hint =
@@ -242,7 +244,7 @@ async fn invite_user_to_channel_with_context_owned(
             Some(channel_name_hint),
             owner,
             None,
-            Some(deadline.clone()),
+            &deadline,
             stage_tracker.clone(),
             message,
             ttl_ms,
@@ -307,8 +309,14 @@ pub async fn invite_authority_to_channel(
         None,
         SemanticOperationKind::InviteActorToChannel,
     );
+    let runtime = require_runtime(app_core).await?;
+    let deadline = workflow_timeout_budget(
+        &runtime,
+        Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS),
+    )
+    .await?;
     invite_authority_to_channel_with_context(
-        app_core, receiver, channel_id, None, None, &owner, None, None, None, message, ttl_ms,
+        app_core, receiver, channel_id, None, None, &owner, None, &deadline, None, message, ttl_ms,
     )
     .await
 }
@@ -324,7 +332,7 @@ pub(super) async fn invite_authority_to_channel_with_context(
     channel_name_hint: Option<String>,
     owner: &SemanticWorkflowOwner,
     _operation_instance_id: Option<OperationInstanceId>,
-    deadline: Option<TimeoutBudget>,
+    deadline: &TimeoutBudget,
     stage_tracker: Option<WorkflowStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
@@ -366,12 +374,13 @@ pub(super) async fn invite_authority_to_channel_with_context(
                 &runtime,
                 "invite_authority_to_channel",
                 "require_authoritative_context",
-                deadline.clone(),
+                deadline,
                 require_authoritative_channel_ref(
                     app_core,
                     &runtime,
                     channel_id,
                     "channel invitation creation",
+                    deadline,
                 ),
             )
             .await?
@@ -381,7 +390,8 @@ pub(super) async fn invite_authority_to_channel_with_context(
     let local_projection_name_hint = channel_name_hint.clone();
     emit_stage("warm_invited_peer_connectivity");
     update_workflow_stage(&stage_tracker, "warm_invited_peer_connectivity");
-    let _ = warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver).await;
+    let _ =
+        warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver, deadline).await?;
     emit_stage("create_channel_invitation");
     update_workflow_stage(&stage_tracker, "create_channel_invitation");
     let invitation = crate::workflows::invitation::create_channel_invitation_owned(
@@ -392,7 +402,7 @@ pub(super) async fn invite_authority_to_channel_with_context(
         channel_name_hint,
         None,
         owner,
-        deadline.clone(),
+        Some(deadline.clone()),
         stage_tracker.clone(),
         message,
         ttl_ms,
@@ -406,14 +416,15 @@ pub(super) async fn invite_authority_to_channel_with_context(
         &runtime,
         "invite_authority_to_channel",
         "local_projection",
-        None,
+        deadline,
         async {
-            apply_authoritative_membership_projection(
+            apply_authoritative_membership_projection_with_budget(
                 app_core,
                 channel_id,
                 context_id,
                 true,
                 local_projection_name_hint.as_deref(),
+                deadline,
             )
             .await?;
             Ok(())

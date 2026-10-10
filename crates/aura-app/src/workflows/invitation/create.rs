@@ -348,6 +348,7 @@ pub(super) enum ChannelInvitationBootstrapError {
     },
     #[error("InviteActorToChannel requires a canonical channel id, got {raw}")]
     InvalidCanonicalChannelId { raw: String },
+    #[cfg(not(feature = "signals"))]
     #[error("InviteActorToChannel requires an authoritative context for channel {channel_id}")]
     MissingAuthoritativeContext { channel_id: ChannelId },
     #[error(
@@ -394,6 +395,7 @@ impl ChannelInvitationBootstrapError {
                 SemanticFailureCode::MissingAuthoritativeContext,
             )
             .with_detail(format!("invalid_channel_id={raw}")),
+            #[cfg(not(feature = "signals"))]
             Self::MissingAuthoritativeContext { channel_id } => SemanticOperationError::new(
                 SemanticFailureDomain::ChannelContext,
                 SemanticFailureCode::MissingAuthoritativeContext,
@@ -494,6 +496,15 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     stage_tracker: &Option<WorkflowStageTracker>,
     deadline: Option<TimeoutBudget>,
 ) -> Result<(ContextId, Option<ChannelBootstrapPackage>), ChannelInvitationBootstrapError> {
+    let original_budget =
+        deadline
+            .as_ref()
+            .ok_or_else(|| ChannelInvitationBootstrapError::BudgetFailure {
+                channel_id,
+                source: TimeoutBudgetError::InvalidPolicy {
+                    detail: "channel bootstrap requires its original operation endpoint".into(),
+                },
+            })?;
     let requested_context = context_id;
     #[allow(unused_mut)]
     let mut resolved_context = match context_id {
@@ -506,10 +517,15 @@ async fn ensure_channel_invitation_context_and_bootstrap(
                     app_core,
                     channel_id,
                     Some(runtime.authority_id()),
+                    original_budget,
                 )
                 .await
-                .map_err(|_| {
-                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id }
+                .map_err(|error| {
+                    ChannelInvitationBootstrapError::BootstrapTransport {
+                        channel_id,
+                        detail: error.to_string(),
+                        source: error,
+                    }
                 })?
             }
             #[cfg(not(feature = "signals"))]
@@ -533,8 +549,9 @@ async fn ensure_channel_invitation_context_and_bootstrap(
         "resolve_runtime_channel_context",
 deadline.clone(),
         async {
-            timeout_runtime_call(
+            timeout_runtime_call_with_budget(
                 runtime,
+                original_budget,
                 "ensure_channel_invitation_context_and_bootstrap",
                 "resolve_amp_channel_context",
                 INVITATION_RUNTIME_QUERY_TIMEOUT,
@@ -594,14 +611,29 @@ deadline.clone(),
                 if !attempts.can_attempt() {
                     break;
                 }
-                converge_runtime(runtime).await;
-                runtime
-                    .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
+                converge_runtime(runtime, original_budget)
                     .await
-                    .map_err(|error| ChannelInvitationBootstrapError::BudgetFailure {
+                    .map_err(
+                        |error| ChannelInvitationBootstrapError::BootstrapTransport {
+                            channel_id,
+                            detail: error.to_string(),
+                            source: error,
+                        },
+                    )?;
+                execute_with_runtime_timeout_budget(runtime, original_budget, || {
+                    runtime.sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
+                })
+                .await
+                .map_err(|error| {
+                    ChannelInvitationBootstrapError::BootstrapTransport {
                         channel_id,
-                        source: TimeoutBudgetError::time_source_failure(error),
-                    })?;
+                        detail: error.to_string(),
+                        source: match error {
+                            TimeoutRunError::Timeout(error) => error.into(),
+                            TimeoutRunError::Operation(error) => error.into(),
+                        },
+                    }
+                })?;
                 update_channel_invitation_stage(stage_tracker, "amp_channel_state_exists");
                 let exists_budget =
                     channel_invitation_bootstrap_budget(runtime, deadline.as_ref(), channel_id)
@@ -638,24 +670,6 @@ deadline.clone(),
                         });
                     }
                 };
-                #[cfg(feature = "signals")]
-                {
-                    if !state_exists {
-                        if let Ok(authoritative_context) =
-                            crate::workflows::messaging::context_id_for_channel(
-                                app_core,
-                                channel_id,
-                                Some(runtime.authority_id()),
-                            )
-                            .await
-                        {
-                            if authoritative_context != resolved_context {
-                                resolved_context = authoritative_context;
-                                continue;
-                            }
-                        }
-                    }
-                }
                 if !state_exists {
                     continue;
                 }

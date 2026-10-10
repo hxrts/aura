@@ -666,15 +666,15 @@ impl StorageExtendedEffects for TestEffectSystem {
 impl FlowBudgetEffects for TestEffectSystem {
     async fn charge_flow(
         &self,
-        _context: &ContextId,
-        _authority: &AuthorityId,
+        context: &ContextId,
+        peer: &AuthorityId,
         cost: FlowCost,
     ) -> AuraResult<Receipt> {
         use aura_core::types::Epoch;
         Ok(Receipt {
-            ctx: ContextId::from_uuid(Uuid::nil()),
+            ctx: *context,
             src: self.authority_id,
-            dst: self.authority_id,
+            dst: *peer,
             epoch: Epoch(0),
             cost,
             nonce: aura_core::FlowNonce::new(0),
@@ -846,6 +846,36 @@ mod tests {
         let mut bytes = [0u8; 16];
         bytes[15] = index;
         DeviceId::from_uuid(uuid::Uuid::from_bytes(bytes))
+    }
+
+    #[tokio::test]
+    async fn flow_receipt_preserves_actual_context_sender_and_receiving_peer() {
+        let source = AuthorityId::new_from_entropy([3; 32]);
+        let peer = AuthorityId::new_from_entropy([4; 32]);
+        let other_peer = AuthorityId::new_from_entropy([5; 32]);
+        let first_context = ContextId::new_from_entropy([6; 32]);
+        let second_context = ContextId::new_from_entropy([7; 32]);
+        assert_ne!(source, peer);
+        assert_ne!(first_context, second_context);
+        let effects =
+            TestEffectSystem::new(Arc::new(SimulatedMessageBus::new()), make_device_id(1), 0)
+                .unwrap()
+                .with_authority(source);
+        for (context, recipient) in [
+            (first_context, peer),
+            (second_context, peer),
+            (first_context, other_peer),
+        ] {
+            let cost = FlowCost::new(13);
+            let receipt = effects
+                .charge_flow(&context, &recipient, cost)
+                .await
+                .unwrap();
+            assert_eq!(receipt.ctx, context);
+            assert_eq!(receipt.src, source);
+            assert_eq!(receipt.dst, recipient);
+            assert_eq!(receipt.cost, cost);
+        }
     }
 
     #[tokio::test]

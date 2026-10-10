@@ -1,5 +1,18 @@
 use super::*;
 
+fn validate_readiness_runtime(
+    runtime: Option<Arc<dyn RuntimeBridge>>,
+    required: bool,
+) -> Result<Option<Arc<dyn RuntimeBridge>>, AuraError> {
+    if required && runtime.is_none() {
+        return Err(AuraError::from(super::super::error::runtime_call(
+            "required channel readiness",
+            IntentError::no_agent("required channel readiness runtime was detached"),
+        )));
+    }
+    Ok(runtime)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) struct MessageSendReadiness {
     pub(super) recipient_resolution_ready: bool,
@@ -134,9 +147,20 @@ impl ChannelReadinessSeed {
 }
 
 impl ChannelReadinessCoordinator {
+    #[cfg(test)]
     pub(super) async fn load(
         app_core: &Arc<RwLock<AppCore>>,
         resolve_recipients: bool,
+        parent: Option<&TimeoutBudget>,
+    ) -> Result<Self, AuraError> {
+        Self::load_retaining_channel(app_core, resolve_recipients, parent, None).await
+    }
+
+    async fn load_retaining_channel(
+        app_core: &Arc<RwLock<AppCore>>,
+        resolve_recipients: bool,
+        parent: Option<&TimeoutBudget>,
+        retained_channel: Option<AuthoritativeChannelRef>,
     ) -> Result<Self, AuraError> {
         // OWNERSHIP: fact-backed - authoritative semantic facts drive readiness;
         // observed chat only enriches already-materialized channel metadata.
@@ -146,6 +170,8 @@ impl ChannelReadinessCoordinator {
             let core = app_core.read().await;
             (core.runtime().cloned(), core.authority().copied())
         };
+        let runtime =
+            validate_readiness_runtime(runtime, parent.is_some() || retained_channel.is_some())?;
         let self_authority =
             self_authority.or_else(|| runtime.as_ref().map(|runtime| runtime.authority_id()));
         let mut seeds = BTreeMap::<ChannelId, ChannelReadinessSeed>::new();
@@ -204,19 +230,42 @@ impl ChannelReadinessCoordinator {
 
         let mut states = Vec::new();
         for (channel_id, seed) in seeds {
-            let authoritative_channel = if runtime.is_some() {
-                resolve_authoritative_context_id_for_channel(app_core, channel_id)
-                    .await
-                    .or(seed.authoritative_context)
-                    .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
+            if retained_channel.is_some_and(|channel| channel.channel_id() != channel_id) {
+                continue;
+            }
+            let authoritative_channel = if let Some(channel) = retained_channel {
+                Some(channel)
+            } else if let Some(runtime) = runtime.as_ref() {
+                let parent = parent.ok_or_else(|| {
+                    AuraError::invalid("runtime readiness requires original timeout budget")
+                })?;
+                timeout_runtime_call_with_budget(
+                    runtime,
+                    parent,
+                    "channel_readiness",
+                    "resolve_amp_channel_context",
+                    MESSAGING_RUNTIME_QUERY_TIMEOUT,
+                    || runtime.resolve_amp_channel_context(channel_id),
+                )
+                .await?
+                .map_err(|error| {
+                    super::super::error::runtime_call("resolve readiness channel context", error)
+                })?
+                .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
             } else {
                 seed.authoritative_context
                     .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
             };
             let authoritative_participants = match (&runtime, authoritative_channel) {
                 (Some(runtime), Some(channel)) if resolve_recipients => Some(
-                    super::channel_refs::authoritative_channel_participants(runtime, channel)
-                        .await?,
+                    super::channel_refs::authoritative_channel_participants(
+                        runtime,
+                        channel,
+                        parent.ok_or_else(|| {
+                            AuraError::invalid("runtime readiness requires original timeout budget")
+                        })?,
+                    )
+                    .await?,
                 ),
                 _ => None,
             };
@@ -383,6 +432,7 @@ pub(crate) async fn require_send_message_readiness(
         .await
         .map_err(|error| SendMessageError::ReadinessFactsUnavailable {
             detail: error.to_string(),
+            source: error,
         })?;
     let channel_id = channel.channel_id();
     let readiness = authoritative_send_readiness_for_channel(&facts, channel);
@@ -404,12 +454,14 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
     runtime: &Arc<dyn RuntimeBridge>,
     authority_id: AuthorityId,
     timestamp_ms: u64,
+    parent: &TimeoutBudget,
 ) -> Result<ChannelId, AuraError> {
     let context_id = note_to_self_context_id(authority_id);
     let channel_id = note_to_self_channel_id(authority_id);
 
-    let create_result = timeout_runtime_call(
+    let create_result = timeout_runtime_call_with_budget(
         runtime,
+        parent,
         "ensure_runtime_note_to_self_channel",
         "amp_create_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -427,7 +479,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
     let created_now = match create_result {
         Ok(_) => true,
         Err(error) => {
-            if runtime_amp_duplicate_is_reconciled(runtime, &error, context_id, channel_id).await? {
+            if runtime_amp_duplicate_is_reconciled(runtime, &error, context_id, channel_id, parent)
+                .await?
+            {
                 false
             } else {
                 return Err(super::super::error::runtime_call(
@@ -439,8 +493,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
         }
     };
 
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         runtime,
+        parent,
         "ensure_runtime_note_to_self_channel",
         "amp_join_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -468,8 +523,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
         );
         let fact = chat_fact.to_generic();
 
-        timeout_runtime_call(
+        timeout_runtime_call_with_budget(
             runtime,
+            parent,
             "ensure_runtime_note_to_self_channel",
             "commit_relational_facts",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -490,21 +546,63 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
 pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let coordinator = ChannelReadinessCoordinator::load(app_core, false).await?;
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime().cloned()
+    let runtime = { app_core.read().await.runtime().cloned() };
+    let budget = match runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
     };
+    refresh_authoritative_channel_membership_readiness_impl(app_core, budget.as_ref(), None).await
+}
+
+pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readiness_with_budget(
+    app_core: &Arc<RwLock<AppCore>>,
+    parent: &TimeoutBudget,
+) -> Result<(), AuraError> {
+    refresh_authoritative_channel_membership_readiness_impl(app_core, Some(parent), None).await
+}
+
+async fn refresh_authoritative_channel_membership_readiness_impl(
+    app_core: &Arc<RwLock<AppCore>>,
+    parent: Option<&TimeoutBudget>,
+    retained_channel: Option<AuthoritativeChannelRef>,
+) -> Result<(), AuraError> {
+    let coordinator = ChannelReadinessCoordinator::load_retaining_channel(
+        app_core,
+        false,
+        parent,
+        retained_channel,
+    )
+    .await?;
+    let runtime = validate_readiness_runtime(
+        app_core.read().await.runtime().cloned(),
+        parent.is_some() || retained_channel.is_some(),
+    )?;
     let mut replacements = Vec::new();
     for state in coordinator.states() {
         let mut actual_member_count = None;
         let membership_ready = if let Some(runtime) = runtime.as_ref() {
             if let Some(channel) = state.authoritative_channel {
-                match runtime_channel_state_exists(runtime, channel).await {
+                match runtime_channel_state_exists(
+                    runtime,
+                    channel,
+                    parent.ok_or_else(|| {
+                        AuraError::invalid("runtime readiness requires original timeout budget")
+                    })?,
+                )
+                .await
+                {
                     Ok(true) => {
                         actual_member_count = Some(
                             super::channel_refs::authoritative_channel_participants(
-                                runtime, channel,
+                                runtime,
+                                channel,
+                                parent.ok_or_else(|| {
+                                    AuraError::invalid(
+                                        "runtime readiness requires original timeout budget",
+                                    )
+                                })?,
                             )
                             .await?
                             .len() as u32,
@@ -519,14 +617,6 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
                         true
                     }
                     Ok(false) => false,
-                    Err(error) if state.had_membership_fact => {
-                        tracing::warn!(
-                            "Retaining ChannelMembershipReady for {} after runtime-state probe error ({}); authoritative leave/close owns revocation",
-                            state.channel_id,
-                            error
-                        );
-                        true
-                    }
                     Err(error) => return Err(error),
                 }
             } else {
@@ -571,7 +661,28 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
 pub(in crate::workflows) async fn refresh_authoritative_recipient_resolution_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let coordinator = ChannelReadinessCoordinator::load(app_core, true).await?;
+    let runtime = { app_core.read().await.runtime().cloned() };
+    let budget = match runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
+    };
+    refresh_authoritative_recipient_resolution_readiness_impl(app_core, budget.as_ref(), None).await
+}
+
+async fn refresh_authoritative_recipient_resolution_readiness_impl(
+    app_core: &Arc<RwLock<AppCore>>,
+    parent: Option<&TimeoutBudget>,
+    retained_channel: Option<AuthoritativeChannelRef>,
+) -> Result<(), AuraError> {
+    let coordinator = ChannelReadinessCoordinator::load_retaining_channel(
+        app_core,
+        true,
+        parent,
+        retained_channel,
+    )
+    .await?;
     let replacements = coordinator
         .states()
         .iter()
@@ -592,6 +703,18 @@ pub(in crate::workflows) async fn refresh_authoritative_recipient_resolution_rea
         facts.extend(merged.values().cloned());
     })
     .await
+}
+
+/// Refresh readiness using the original authoritative binding and workflow endpoint.
+pub(in crate::workflows) async fn refresh_authoritative_channel_readiness_for_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: AuthoritativeChannelRef,
+    parent: &TimeoutBudget,
+) -> Result<(), AuraError> {
+    refresh_authoritative_channel_membership_readiness_impl(app_core, Some(parent), Some(channel))
+        .await?;
+    refresh_authoritative_recipient_resolution_readiness_impl(app_core, Some(parent), Some(channel))
+        .await
 }
 
 pub(crate) fn fact_matches_channel(
@@ -620,8 +743,15 @@ pub(crate) async fn refresh_authoritative_delivery_readiness_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
-    let coordinator = ChannelReadinessCoordinator::load(app_core, true).await?;
+    let coordinator = ChannelReadinessCoordinator::load_retaining_channel(
+        app_core,
+        true,
+        Some(parent),
+        Some(channel),
+    )
+    .await?;
     let channel_id = channel.channel_id();
     let Some(channel_state) = coordinator.state_for_channel(channel_id).cloned() else {
         return update_authoritative_semantic_facts(app_core, |facts| {
@@ -639,18 +769,22 @@ pub(crate) async fn refresh_authoritative_delivery_readiness_for_channel(
     let mut ready_peers = Vec::new();
     if channel_state.delivery_supported {
         for peer in channel_state.recipients.iter().copied() {
-            if timeout_runtime_call(
+            timeout_runtime_call_with_budget(
                 runtime,
+                parent,
                 "refresh_authoritative_delivery_readiness_for_channel",
                 "ensure_peer_channel",
                 MESSAGING_RUNTIME_OPERATION_TIMEOUT,
                 || runtime.ensure_peer_channel(channel.context_id(), peer),
             )
-            .await
-            .is_ok()
-            {
-                ready_peers.push(peer);
-            }
+            .await?
+            .map_err(|error| {
+                AuraError::from(super::super::error::runtime_call(
+                    "establish required delivery peer channel",
+                    error,
+                ))
+            })?;
+            ready_peers.push(peer);
         }
     }
     let (peer_facts, delivery_fact) =
@@ -709,10 +843,12 @@ pub(super) fn select_pending_channel_invitation(
 pub(crate) async fn try_join_via_pending_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     requested_channel_id: ChannelId,
+    parent: &TimeoutBudget,
 ) -> Result<bool, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let pending = timeout_runtime_call(
+    let pending = timeout_runtime_call_with_budget(
         &runtime,
+        parent,
         "try_join_via_pending_channel_invitation",
         "try_list_pending_invitations",
         MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -741,8 +877,9 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
             AuraError::invalid("pending channel invitation missing invited channel id")
         })?;
 
-    if let Err(error) = timeout_runtime_call(
+    if let Err(error) = timeout_runtime_call_with_budget(
         &runtime,
+        parent,
         "try_join_via_pending_channel_invitation",
         "accept_invitation",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -761,17 +898,16 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
         }
     }
 
-    for _ in 0..4 {
-        converge_runtime(&runtime).await;
-        if ensure_runtime_peer_connectivity(&runtime, "accept_pending_channel_invitation")
-            .await
-            .is_ok()
-        {
-            break;
-        }
-    }
-
-    if let Err(_e) = crate::workflows::system::refresh_account(app_core).await {
+    if let Err(_e) = timeout_runtime_call_with_budget(
+        &runtime,
+        parent,
+        "try_join_via_pending_channel_invitation",
+        "refresh_account",
+        MESSAGING_RUNTIME_QUERY_TIMEOUT,
+        || crate::workflows::system::refresh_account(app_core),
+    )
+    .await?
+    {
         #[cfg(feature = "instrumented")]
         tracing::debug!(error = %_e, "refresh_account after invitation accept failed");
     }
@@ -785,28 +921,31 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
         _ => None,
     };
 
-    if let Ok(authoritative_channel) =
-        require_authoritative_context_id_for_channel(app_core, local_channel_id)
-            .await
-            .map(|context_id| authoritative_channel_ref(local_channel_id, context_id))
-    {
-        let _ = apply_authoritative_membership_projection(
-            app_core,
-            local_channel_id,
-            authoritative_channel.context_id(),
-            true,
-            channel_name_hint,
-        )
-        .await;
-        if let Err(_e) = super::join_channel(app_core, authoritative_channel).await {
-            #[cfg(feature = "instrumented")]
-            tracing::debug!(
-                error = %_e,
-                channel_id = %local_channel_id,
-                "best-effort join_channel after invitation accept failed"
-            );
-        }
-        super::warm_channel_connectivity(app_core, &runtime, authoritative_channel).await;
-    }
+    let authoritative_channel = require_authoritative_channel_ref(
+        app_core,
+        &runtime,
+        local_channel_id,
+        "accept pending channel invitation",
+        parent,
+    )
+    .await?;
+    wait_for_runtime_channel_state(app_core, &runtime, authoritative_channel, parent).await?;
+    apply_authoritative_membership_projection_with_budget(
+        app_core,
+        local_channel_id,
+        authoritative_channel.context_id(),
+        true,
+        channel_name_hint,
+        parent,
+    )
+    .await?;
+    super::channels::join_channel_with_name_hint(
+        app_core,
+        authoritative_channel,
+        channel_name_hint,
+        parent,
+    )
+    .await?;
+    super::warm_channel_connectivity(app_core, &runtime, authoritative_channel, parent).await?;
     Ok(true)
 }

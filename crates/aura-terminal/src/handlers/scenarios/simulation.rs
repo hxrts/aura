@@ -8,11 +8,11 @@ use aura_agent::handlers::RecoveryServiceApi;
 use aura_agent::SharedTransport;
 use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
+use aura_effects::RandomExtendedEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 use futures::{future::join_all, TryFutureExt};
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::handlers::HandlerContext;
 
@@ -45,7 +45,7 @@ pub async fn simulate_cli_recovery_demo(
         .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?;
 
     // Run guardian setup choreography via execute_as runtime wiring
-    run_guardian_setup_choreography(&mut steps).await?;
+    run_guardian_setup_choreography(seed, &mut steps).await?;
 
     // Phase 1: Alice & Carol pre-setup (log only)
     steps.push(SimStep {
@@ -222,7 +222,10 @@ pub async fn simulate_cli_recovery_demo(
 }
 
 /// Run the guardian setup choreography
-async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalResult<()> {
+async fn run_guardian_setup_choreography(
+    seed: u64,
+    steps: &mut Vec<SimStep>,
+) -> TerminalResult<()> {
     let shared_transport = SharedTransport::new();
     let config = AgentConfig::default();
 
@@ -240,11 +243,12 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
     let initiator_effects = Arc::new(
         AuraEffectSystem::simulation_with_shared_transport_for_authority(
             &config,
-            42,
+            seed,
             initiator_id,
             shared_transport.clone(),
         )?,
     );
+    let setup_id = guardian_setup_identity(account_id, &initiator_effects).await;
     let initiator_service = RecoveryServiceApi::new(
         initiator_effects,
         AuthorityContext::new_with_device(initiator_id, initiator_device),
@@ -270,8 +274,6 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         guardian_services.push(service);
     }
 
-    // Use deterministic UUID for simulation reproducibility
-    let setup_id = format!("setup_{}_{}", account_id, Uuid::nil());
     let invitation = aura_recovery::guardian_setup::GuardianInvitation {
         setup_id: setup_id.clone(),
         account_id,
@@ -315,4 +317,74 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
     });
 
     Ok(())
+}
+
+async fn guardian_setup_identity(
+    account_id: aura_core::AuthorityId,
+    effects: &AuraEffectSystem,
+) -> String {
+    format!("setup_{}_{}", account_id, effects.random_uuid().await)
+}
+
+#[cfg(test)]
+mod setup_identity_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn setup_identity_child() -> TerminalResult<()> {
+        let Ok(salt) = std::env::var("AURA_SETUP_IDENTITY_TEST_SALT") else {
+            return Ok(());
+        };
+        let salt: u64 = salt.parse().unwrap();
+        let account = crate::ids::authority_id("scenario:guardian-setup:account");
+        let config = AgentConfig::default();
+        let identity = concat!(module_path!(), "::setup_identity_child");
+        let selected =
+            AuraEffectSystem::simulation_for_named_test_with_salt(&config, identity, salt)?;
+        println!(
+            "\nSETUP_IDENTITY_FIRST={}\n",
+            guardian_setup_identity(account, &selected).await
+        );
+        println!(
+            "SETUP_IDENTITY_NEXT={}",
+            guardian_setup_identity(account, &selected).await
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn setup_identity_replays_selected_seed_without_reusing_next_draw() {
+        let execute = |salt: u64| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "handlers::scenarios::simulation::setup_identity_tests::setup_identity_child",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("AURA_SETUP_IDENTITY_TEST_SALT", salt.to_string())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let read = |prefix: &str| {
+                stdout
+                    .lines()
+                    .find_map(|line| line.strip_prefix(prefix))
+                    .unwrap()
+                    .to_owned()
+            };
+            (read("SETUP_IDENTITY_FIRST="), read("SETUP_IDENTITY_NEXT="))
+        };
+        let selected = execute(42);
+        let replay = execute(42);
+        let distinct = execute(43);
+        assert_eq!(selected, replay);
+        assert_ne!(selected.0, selected.1);
+        assert_ne!(selected.0, distinct.0);
+    }
 }

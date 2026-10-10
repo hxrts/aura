@@ -126,11 +126,12 @@ async fn fail_device_enrollment_accept<T>(
 }
 
 async fn prime_device_enrollment_accept_connectivity(
-    app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-) {
-    trigger_runtime_discovery_with_timeout(runtime).await;
-    let _ = drive_invitation_accept_convergence(app_core, runtime, None).await;
+    budget: &TimeoutBudget,
+) -> Result<(), AuraError> {
+    drive_invitation_accept_convergence(runtime, None, budget)
+        .await
+        .map_err(AuraError::from)
 }
 
 /// Observed result minted after authenticated enrollment acceptance.
@@ -343,27 +344,24 @@ async fn accept_device_enrollment_invitation_owned(
         invitation.invitation_id,
         runtime.authority_id()
     ));
-    prime_device_enrollment_accept_connectivity(app_core, &runtime).await;
+    let budget = match workflow_timeout_budget(&runtime, DEVICE_ENROLLMENT_ACCEPT_TIMEOUT).await {
+        Ok(budget) => budget,
+        Err(error) => return fail_device_enrollment_accept(owner, error.into()).await,
+    };
+    // This preflight only warms connectivity; the sealed runtime enrollment
+    // choreography remains the required admission and completion boundary.
+    if let Err(error) = prime_device_enrollment_accept_connectivity(&runtime, &budget).await {
+        tracing::debug!(%error, "device enrollment connectivity preflight unavailable");
+    }
     log_device_enrollment_accept_progress(format!(
         "connectivity preflight complete invitation_id={}",
         invitation.invitation_id
     ));
-    let accept_result = timeout_runtime_call(
-        &runtime,
-        "accept_device_enrollment_invitation",
-        "accept_invitation",
-        DEVICE_ENROLLMENT_ACCEPT_TIMEOUT,
-        || runtime.accept_invitation(invitation.invitation_id.as_str()),
-    )
+    let accept_result = execute_with_runtime_timeout_budget(&runtime, &budget, || {
+        runtime.accept_invitation(invitation.invitation_id.as_str())
+    })
     .await;
     if let Err(error) = accept_result {
-        return fail_device_enrollment_accept(
-            owner,
-            crate::workflows::error::runtime_call("accept invitation failed", error).into(),
-        )
-        .await;
-    }
-    if let Ok(Err(error)) = accept_result {
         return fail_device_enrollment_accept(
             owner,
             crate::workflows::error::runtime_call("accept invitation failed", error).into(),
@@ -374,11 +372,6 @@ async fn accept_device_enrollment_invitation_owned(
         "accept_invitation returned invitation_id={}",
         invitation.invitation_id
     ));
-    converge_runtime(&runtime).await;
-    log_device_enrollment_accept_progress(format!(
-        "initial converge_runtime complete invitation_id={}",
-        invitation.invitation_id
-    ));
 
     // The accept above is authoritative: the runtime returns success only after
     // the signed enrollment choreography completed and this device adopted the
@@ -387,31 +380,40 @@ async fn accept_device_enrollment_invitation_owned(
     // the tree does), so they no longer decide the outcome.
     let invitation_id = invitation.invitation_id.clone();
     let enrollment_result: Result<(), DeviceEnrollmentAcceptConvergenceError> = async {
-        timeout_runtime_call(
-            &runtime,
-            "accept_device_enrollment_invitation",
-            "process_ceremony_messages",
-            INVITATION_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.process_ceremony_messages(),
-        )
+        execute_with_runtime_timeout_budget(&runtime, &budget, || {
+            runtime.process_ceremony_messages()
+        })
         .await
-        .map_err(DeviceEnrollmentAcceptConvergenceError::Workflow)?
-        .map_err(|error| {
-            DeviceEnrollmentAcceptConvergenceError::Terminal(
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(error) => {
+                DeviceEnrollmentAcceptConvergenceError::Workflow(error.into())
+            }
+            TimeoutRunError::Operation(error) => DeviceEnrollmentAcceptConvergenceError::Terminal(
                 crate::workflows::error::runtime_call(
                     "device enrollment ceremony processing failed",
                     error,
                 )
                 .into(),
-            )
+            ),
         })?;
-        converge_runtime(&runtime).await;
-        settings::refresh_settings_from_runtime(app_core)
+        crate::workflows::runtime::converge_runtime(&runtime, &budget)
             .await
             .map_err(DeviceEnrollmentAcceptConvergenceError::Workflow)?;
+        execute_with_runtime_timeout_budget(&runtime, &budget, || {
+            settings::refresh_settings_from_runtime(app_core)
+        })
+        .await
+        .map_err(|error| {
+            DeviceEnrollmentAcceptConvergenceError::Workflow(match error {
+                TimeoutRunError::Timeout(error) => error.into(),
+                TimeoutRunError::Operation(error) => error,
+            })
+        })?;
         log_device_enrollment_accept_progress(format!("settled invitation_id={invitation_id}"));
-        if let Err(_error) =
-            ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
+        if let Err(_error) = execute_with_runtime_timeout_budget(&runtime, &budget, || {
+            ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept")
+        })
+        .await
         {
             #[cfg(feature = "instrumented")]
             tracing::warn!(

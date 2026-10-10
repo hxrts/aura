@@ -142,9 +142,10 @@ pub mod types {
         AppError, AuthFailure, ErrorCategory, NetworkErrorCode, SyncStage, ToastLevel,
     };
     pub use crate::runtime_bridge::{
-        BootstrapCandidateInfo, BootstrapCandidateOrigin, BoxedRuntimeBridge, CeremonyKind,
-        InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, KeyRotationCeremonyStatus,
-        RendezvousStatus, RuntimeBridge, RuntimeStatus, SyncStatus as RuntimeSyncStatus,
+        BootstrapCandidateInfo, BootstrapCandidateOrigin, BoxedRuntimeBridge, CausalStampKey,
+        CeremonyKind, DeviceSigningConsent, InvitationBridgeStatus, InvitationBridgeType,
+        InvitationInfo, KeyRotationCeremonyStatus, RendezvousStatus, RuntimeBridge, RuntimeStatus,
+        SyncStatus as RuntimeSyncStatus,
     };
     pub use crate::thresholds::{
         default_channel_threshold, default_guardian_threshold, normalize_channel_threshold,

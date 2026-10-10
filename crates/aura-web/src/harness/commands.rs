@@ -1002,12 +1002,6 @@ async fn execute_semantic_intent(
                 SemanticOperationKind::AcceptContactInvitation,
                 UiOperationTransferScope::AcceptInvitation,
             )?;
-            update_semantic_debug("accept_contact_invitation_import_start", None);
-            web_sys::console::log_1(&"[web-harness] accept_contact_invitation import_start".into());
-            let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let invitation_info = invitation.info().clone();
             let instance_id = handle.instance_id().clone();
             let transfer_instance_id = transfer.instance_id().clone();
             let transfer_operation_id = transfer.operation_id().clone();
@@ -1033,10 +1027,12 @@ async fn execute_semantic_intent(
                     .run_workflow(
                         controller.clone(),
                         "accept_contact_invitation callback",
-                        invitation_workflows::accept_imported_invitation_with_terminal_status(
+                        invitation_workflows::handoff::accept_contact_invitation_from_code(
                             &app_core,
-                            invitation,
-                            Some(instance_id),
+                            invitation_workflows::handoff::AcceptContactInvitationFromCodeRequest {
+                                code,
+                                operation_instance_id: instance_id,
+                            },
                         ),
                     )
                     .await;
@@ -1062,13 +1058,13 @@ async fn execute_semantic_intent(
                     .into(),
                 );
                 let accepted_contact = match &result {
-                    Ok(()) => match &invitation_info.invitation_type {
+                    Ok(invitation) => match &invitation.info().invitation_type {
                         InvitationBridgeType::Contact { nickname } => {
                             let display_name = nickname
                                 .clone()
                                 .filter(|value| !value.trim().is_empty())
-                                .unwrap_or_else(|| invitation_info.sender_id.to_string());
-                            Some((invitation_info.sender_id, display_name))
+                                .unwrap_or_else(|| invitation.info().sender_id.to_string());
+                            Some((invitation.info().sender_id, display_name))
                         }
                         _ => None,
                     },
@@ -1135,7 +1131,9 @@ async fn execute_semantic_intent(
                 update_semantic_debug("accept_contact_invitation_done", None);
                 controller.push_log("debug:accept_contact:done");
                 web_sys::console::log_1(&"[web-harness] accept_contact_invitation done".into());
-                result.map_err(|error| JsValue::from_str(&error.to_string()))
+                result
+                    .map(|_| ())
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
             });
             declared_handle_unit_response(&contract, handle)
         }

@@ -7,14 +7,17 @@ use crate::views::PendingAccountBootstrap;
 use crate::workflows::{
     runtime::{
         execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
-        warn_workflow_timeout, workflow_timeout_budget,
+        timeout_runtime_call_with_budget, warn_workflow_timeout, workflow_child_timeout_budget,
+        workflow_timeout_budget,
     },
     semantic_facts::SemanticWorkflowOwner,
     settings, system,
 };
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::{AuraError, OperationContext, TimeoutBudgetError, TimeoutRunError, TraceContext};
+use aura_core::{
+    AuraError, OperationContext, TimeoutBudget, TimeoutBudgetError, TimeoutRunError, TraceContext,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,19 +26,21 @@ const ACCOUNT_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000
 
 async fn run_account_bootstrap_stage<T, F, Fut>(
     app_core: &Arc<RwLock<AppCore>>,
+    parent: &TimeoutBudget,
     stage: &'static str,
     duration: Duration,
     operation: F,
 ) -> Result<T, AuraError>
 where
-    F: FnOnce() -> Fut,
+    F: FnOnce(TimeoutBudget) -> Fut,
     Fut: std::future::Future<Output = Result<T, AuraError>>,
 {
     let runtime = require_runtime(app_core).await?;
-    let budget = workflow_timeout_budget(&runtime, duration)
+    let budget = workflow_child_timeout_budget(&runtime, parent, duration)
         .await
         .map_err(AuraError::from)?;
-    match execute_with_runtime_timeout_budget(&runtime, &budget, operation).await {
+    match execute_with_runtime_timeout_budget(&runtime, &budget, || operation(budget.clone())).await
+    {
         Ok(value) => Ok(value),
         Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout(
@@ -195,10 +200,26 @@ async fn initialize_runtime_account_owned(
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
 
-    let pending_bootstrap = prepare_pending_account_bootstrap(&nickname_suggestion)?;
-    let runtime = require_runtime(app_core).await?;
-    let init_result = timeout_runtime_call(
+    let pending_bootstrap = match prepare_pending_account_bootstrap(&nickname_suggestion) {
+        Ok(pending) => pending,
+        Err(error) => return fail_initialize_runtime_account(owner, error).await,
+    };
+    let runtime = match require_runtime(app_core).await {
+        Ok(runtime) => runtime,
+        Err(error) => return fail_initialize_runtime_account(owner, error).await,
+    };
+    let budget = match workflow_timeout_budget(
         &runtime,
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT * 4 + ACCOUNT_RUNTIME_QUERY_TIMEOUT,
+    )
+    .await
+    {
+        Ok(budget) => budget,
+        Err(error) => return fail_initialize_runtime_account(owner, error.into()).await,
+    };
+    let init_result = timeout_runtime_call_with_budget(
+        &runtime,
+        &budget,
         "initialize_runtime_account",
         "initialize_account",
         ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
@@ -218,9 +239,12 @@ async fn initialize_runtime_account_owned(
         return fail_initialize_runtime_account(owner, error).await;
     }
 
-    if let Err(error) =
-        finalize_runtime_account_bootstrap_inner(app_core, pending_bootstrap.nickname_suggestion)
-            .await
+    if let Err(error) = finalize_runtime_account_bootstrap_inner(
+        app_core,
+        pending_bootstrap.nickname_suggestion,
+        &budget,
+    )
+    .await
     {
         return fail_initialize_runtime_account(owner, error).await;
     }
@@ -280,18 +304,27 @@ pub async fn reconcile_pending_runtime_account_bootstrap(
 async fn ensure_note_to_self_on_login(app_core: &Arc<RwLock<AppCore>>) {
     let result: Result<(), AuraError> = async {
         let runtime = require_runtime(app_core).await?;
-        let authority_id = runtime.authority_id();
-        let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
-            .await
-            .map_err(AuraError::from)?;
-        super::super::messaging::ensure_runtime_note_to_self_channel(
-            app_core,
-            &runtime,
-            authority_id,
-            timestamp_ms,
-        )
-        .await?;
-        Ok(())
+        let budget = workflow_timeout_budget(&runtime, ACCOUNT_RUNTIME_OPERATION_TIMEOUT).await?;
+        execute_with_runtime_timeout_budget(&runtime, &budget, || async {
+            let authority_id = runtime.authority_id();
+            let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
+                .await
+                .map_err(AuraError::from)?;
+            super::super::messaging::ensure_runtime_note_to_self_channel(
+                app_core,
+                &runtime,
+                authority_id,
+                timestamp_ms,
+                &budget,
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(error) => error.into(),
+            TimeoutRunError::Operation(error) => error,
+        })
     }
     .await;
     let _ = result;
@@ -302,12 +335,19 @@ pub async fn finalize_runtime_account_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
-    finalize_runtime_account_bootstrap_inner(app_core, nickname_suggestion).await
+    let runtime = require_runtime(app_core).await?;
+    let budget = workflow_timeout_budget(
+        &runtime,
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT * 3 + ACCOUNT_RUNTIME_QUERY_TIMEOUT,
+    )
+    .await?;
+    finalize_runtime_account_bootstrap_inner(app_core, nickname_suggestion, &budget).await
 }
 
 async fn finalize_runtime_account_bootstrap_inner(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
+    budget: &TimeoutBudget,
 ) -> Result<(), AuraError> {
     let _nickname_suggestion =
         validate_nickname_suggestion(&nickname_suggestion).map_err(|error| AuraError::Invalid {
@@ -325,8 +365,9 @@ async fn finalize_runtime_account_bootstrap_inner(
     // Initialization is an owned required operation on both native and browser.
     // A storage/codec/clock failure is not evidence of transient signing readiness.
     let runtime = require_runtime(app_core).await?;
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         &runtime,
+        budget,
         "finalize_runtime_account_bootstrap",
         "bootstrap_signing_keys",
         ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
@@ -349,9 +390,10 @@ async fn finalize_runtime_account_bootstrap_inner(
     #[cfg(feature = "signals")]
     run_account_bootstrap_stage(
         app_core,
+        budget,
         "ensure_note_to_self_channel",
         ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
-        || async {
+        |stage_budget| async move {
             let runtime = require_runtime(app_core).await?;
             let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
                 .await
@@ -361,6 +403,7 @@ async fn finalize_runtime_account_bootstrap_inner(
                 &runtime,
                 _authority_id,
                 timestamp_ms,
+                &stage_budget,
             )
             .await?;
             Ok(())
@@ -370,16 +413,18 @@ async fn finalize_runtime_account_bootstrap_inner(
 
     run_account_bootstrap_stage(
         app_core,
+        budget,
         "refresh_settings_from_runtime",
         ACCOUNT_RUNTIME_QUERY_TIMEOUT,
-        || async { settings::refresh_settings_from_runtime(app_core).await },
+        |_stage_budget| async { settings::refresh_settings_from_runtime(app_core).await },
     )
     .await?;
     run_account_bootstrap_stage(
         app_core,
+        budget,
         "refresh_account",
         ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
-        || async { system::refresh_account(app_core).await },
+        |_stage_budget| async { system::refresh_account(app_core).await },
     )
     .await?;
     Ok(())
@@ -388,6 +433,58 @@ async fn finalize_runtime_account_bootstrap_inner(
 #[cfg(test)]
 mod native_bootstrap_failure_tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_stage_keeps_original_endpoint_on_a_frozen_clock() {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let mut runtime = crate::runtime_bridge::OfflineRuntimeBridge::new(
+            aura_core::AuthorityId::new_from_entropy([198; 32]),
+        );
+        runtime.use_time_provider(clock.clone());
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = Arc::new(runtime);
+        let app = Arc::new(RwLock::new(
+            AppCore::with_runtime(crate::AppConfig::default(), runtime).unwrap(),
+        ));
+        let parent = TimeoutBudget::from_start_and_timeout(
+            &aura_core::time::PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        clock.advance(50);
+        let stage = run_account_bootstrap_stage(
+            &app,
+            &parent,
+            "ensure_note_to_self_channel",
+            ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+            |child| {
+                assert_eq!(child.deadline_at_ms(), 200);
+                std::future::pending::<Result<(), AuraError>>()
+            },
+        );
+        futures::pin_mut!(stage);
+        assert!(futures::poll!(stage.as_mut()).is_pending());
+        clock.advance(49);
+        assert!(futures::poll!(stage.as_mut()).is_pending());
+        clock.advance(1);
+        let error = stage.await.unwrap_err();
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut original_endpoint = false;
+        while let Some(error) = source {
+            original_endpoint |= matches!(
+                error.downcast_ref::<TimeoutBudgetError>(),
+                Some(TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 200,
+                    observed_at_ms: 200
+                })
+            );
+            source = error.source();
+        }
+        assert!(
+            original_endpoint,
+            "original deadline must survive the stage: {error}"
+        );
+        assert_eq!(clock.now_ms(), 200);
+    }
     #[test]
     fn account_failure_uses_native_evidence_and_keeps_original_codec_source() {
         use crate::{

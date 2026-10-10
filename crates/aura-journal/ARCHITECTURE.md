@@ -223,3 +223,5 @@ cargo test -p aura-journal --lib               # inline unit tests
 Required journal persistence and flow-budget reads preserve selected storage
 failures and codec causes. Runtime handler injection reaches the actual journal
 owner; contextual serialization diagnostics retain the original error source.
+
+The convenience `Journal::add_fact` consumes the caller-selected `OrderClockEffects` and delegates to the explicit-domain insertion owner. Layer 2 does not implement a RandomEffects-to-order-clock adapter. All three selected time-domain reads use the canonical source-preserving TimeError-to-AuraError conversion. Selected order-clock failure inserts no fact. Deterministic tests inject the exact token and failure, checking one provider call and actual journal output. `FactJournal::add_fact` is the distinct pure insertion API and is unchanged.

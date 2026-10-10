@@ -585,17 +585,17 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
         }
         Request::InviteAccept { invitation_id } => {
             let (info, operation) = settle(
-                invitation::accept_invitation_by_str_with_terminal_status(
+                invitation::accept_invitation_with_terminal_status(
                     app,
-                    &invitation_id,
-                    None,
+                    invitation::InvitationAcceptanceRequest::UnsubmittedId { invitation_id },
                 )
                 .await,
             )?;
             Ok(done(
                 format!(
                     "Accepted invitation {} from {}",
-                    info.invitation_id, info.sender_id
+                    info.invitation_id(),
+                    info.info().sender_id
                 ),
                 operation,
             ))
@@ -656,9 +656,15 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
             if !accept {
                 return Ok(Response::Invitation(view));
             }
-            let ((), operation) = settle(
-                invitation::accept_imported_invitation_with_terminal_status(app, handle, None)
-                    .await,
+            let (_, operation) = settle(
+                invitation::accept_invitation_with_terminal_status(
+                    app,
+                    invitation::InvitationAcceptanceRequest::RetainedHandle {
+                        invitation: Box::new(handle),
+                        operation_instance_id: None,
+                    },
+                )
+                .await,
             )?;
             Ok(done(
                 format!(

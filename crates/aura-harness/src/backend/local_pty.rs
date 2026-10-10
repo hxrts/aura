@@ -2055,7 +2055,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
 
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
         let handle = require_ui_operation_handle(
-            self.send_harness_command(&HarnessUiCommand::ImportInvitation {
+            self.send_harness_command(&HarnessUiCommand::AcceptContactInvitation {
                 code: code.to_string(),
             })?,
             "accept_contact_invitation",

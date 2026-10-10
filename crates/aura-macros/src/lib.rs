@@ -1777,6 +1777,113 @@ fn validate_capability_boundary_impl_signature(
     )
 }
 
+/// Canonicalize optional trailing commas in parsed generic argument lists only.
+/// Every path segment, origin type, lifetime, const and argument order remains
+/// part of the exact AST comparison; this does not resolve aliases.
+fn normalized_capability_arguments(arguments: &PathArguments) -> PathArguments {
+    fn normalize_path(path: &mut syn::Path) {
+        for segment in &mut path.segments {
+            segment.arguments = normalized_capability_arguments(&segment.arguments);
+        }
+    }
+    fn normalize_bounds(bounds: &mut syn::punctuated::Punctuated<syn::TypeParamBound, Token![+]>) {
+        for bound in bounds {
+            if let syn::TypeParamBound::Trait(bound) = bound {
+                normalize_path(&mut bound.path);
+            }
+        }
+    }
+    fn normalize_type(ty: &mut Type) {
+        match ty {
+            Type::Path(path) => {
+                if let Some(qself) = &mut path.qself {
+                    normalize_type(&mut qself.ty);
+                }
+                normalize_path(&mut path.path);
+            }
+            Type::Reference(value) => normalize_type(&mut value.elem),
+            Type::Ptr(value) => normalize_type(&mut value.elem),
+            Type::Array(value) => normalize_type(&mut value.elem),
+            Type::Slice(value) => normalize_type(&mut value.elem),
+            Type::Paren(value) => normalize_type(&mut value.elem),
+            Type::Group(value) => normalize_type(&mut value.elem),
+            Type::Tuple(value) => {
+                for ty in &mut value.elems {
+                    normalize_type(ty);
+                }
+            }
+            Type::BareFn(value) => {
+                for input in &mut value.inputs {
+                    normalize_type(&mut input.ty);
+                }
+                if let syn::ReturnType::Type(_, output) = &mut value.output {
+                    normalize_type(output);
+                }
+            }
+            Type::TraitObject(value) => normalize_bounds(&mut value.bounds),
+            Type::ImplTrait(value) => normalize_bounds(&mut value.bounds),
+            _ => {}
+        }
+    }
+    let mut normalized = arguments.clone();
+    match &mut normalized {
+        PathArguments::AngleBracketed(arguments) => {
+            for argument in &mut arguments.args {
+                match argument {
+                    GenericArgument::Type(ty) => normalize_type(ty),
+                    GenericArgument::AssocType(binding) => {
+                        normalize_type(&mut binding.ty);
+                        if let Some(generics) = &mut binding.generics {
+                            if let PathArguments::AngleBracketed(value) =
+                                normalized_capability_arguments(&PathArguments::AngleBracketed(
+                                    generics.clone(),
+                                ))
+                            {
+                                *generics = value;
+                            }
+                        }
+                    }
+                    GenericArgument::AssocConst(binding) => {
+                        if let Some(generics) = &mut binding.generics {
+                            if let PathArguments::AngleBracketed(value) =
+                                normalized_capability_arguments(&PathArguments::AngleBracketed(
+                                    generics.clone(),
+                                ))
+                            {
+                                *generics = value;
+                            }
+                        }
+                    }
+                    GenericArgument::Constraint(binding) => {
+                        normalize_bounds(&mut binding.bounds);
+                        if let Some(generics) = &mut binding.generics {
+                            if let PathArguments::AngleBracketed(value) =
+                                normalized_capability_arguments(&PathArguments::AngleBracketed(
+                                    generics.clone(),
+                                ))
+                            {
+                                *generics = value;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            arguments.args = arguments.args.clone().into_iter().collect();
+        }
+        PathArguments::Parenthesized(arguments) => {
+            for input in &mut arguments.inputs {
+                normalize_type(input);
+            }
+            if let syn::ReturnType::Type(_, output) = &mut arguments.output {
+                normalize_type(output);
+            }
+        }
+        PathArguments::None => {}
+    }
+    normalized
+}
+
 /// Match actual parsed type names, including borrowed capabilities and nested
 /// Result outputs. Annotation text and parameter names are not type evidence.
 /// This is declaration validation; actual opaque fields/owner checks establish
@@ -1797,7 +1904,10 @@ fn signature_names_declared_capability(
                         .all(|arg| matches!(arg, GenericArgument::Lifetime(_))),
                     PathArguments::Parenthesized(_) => false,
                 },
-                (actual, expected) => actual == expected,
+                (actual, expected) => {
+                    normalized_capability_arguments(actual)
+                        == normalized_capability_arguments(expected)
+                }
             }
     }
     fn carries(ty: &Type, declared: &str) -> bool {
@@ -2591,6 +2701,54 @@ fn type_path_contains_operation_context(type_path: &TypePath) -> bool {
 #[cfg(test)]
 mod declared_capability_signature_tests {
     use super::*;
+    #[test]
+    fn generic_capability_commas_preserve_exact_nested_origins() {
+        let actual: ItemFn = parse_quote! {
+            fn gate(owner: &crate::custody::Root<crate::origin::Original<crate::origin::Nested,>,>) {}
+        };
+        assert!(recognized(
+            actual.clone(),
+            "crate::custody::Root<crate::origin::Original<crate::origin::Nested>>"
+        ));
+        for foreign in [
+            "crate::custody::Root<crate::origin::Foreign<crate::origin::Nested>>",
+            "crate::foreign::Root<crate::origin::Original<crate::origin::Nested>>",
+            "crate::custody::Root<foreign::Original<crate::origin::Nested>>",
+            "crate::custody::Root<crate::origin::Original<crate::origin::Other>>",
+            "crate::custody::Root<crate::origin::Original<crate::origin::Nested>, crate::origin::Nested>",
+            "crate::custody::Root<crate::origin::Original<crate::origin::Nested>, 7>",
+            "::crate::custody::Root<crate::origin::Original<crate::origin::Nested>>",
+        ] {
+            assert!(!recognized(actual.clone(), foreign), "accepted {foreign}");
+        }
+        let unformatted: ItemFn = parse_quote! {
+            fn gate(owner: &crate::custody::Root<crate::origin::Original<crate::origin::Nested>>) {}
+        };
+        assert!(recognized(
+            unformatted,
+            "crate::custody::Root<crate::origin::Original<crate::origin::Nested,>,>"
+        ));
+    }
+
+    #[test]
+    fn generic_capability_arguments_keep_count_order_lifetime_and_const_identity() {
+        let actual: ItemFn = parse_quote! {
+            fn gate(owner: &crate::custody::Root<'static, crate::origin::Original, 7,>) {}
+        };
+        assert!(recognized(
+            actual.clone(),
+            "crate::custody::Root<'static, crate::origin::Original, 7>"
+        ));
+        for foreign in [
+            "crate::custody::Root<'other, crate::origin::Original, 7>",
+            "crate::custody::Root<'static, crate::origin::Original, 8>",
+            "crate::custody::Root<'static, crate::origin::Original>",
+            "crate::custody::Root<'static, 7, crate::origin::Original>",
+        ] {
+            assert!(!recognized(actual.clone(), foreign), "accepted {foreign}");
+        }
+    }
+
     fn recognized(function: ItemFn, name: &str) -> bool {
         signature_names_declared_capability(&function.sig.inputs, &function.sig.output, name)
     }

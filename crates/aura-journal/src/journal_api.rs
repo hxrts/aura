@@ -108,27 +108,19 @@ impl Journal {
         Ok(())
     }
 
-    /// Add a fact to the journal using the default order-clock domain
+    /// Add a fact using the caller's selected order-clock provider.
+    ///
+    /// Layer 2 consumes the existing effect; it does not implement an adapter or
+    /// infer a different clock from random bytes.
     pub async fn add_fact(
         &mut self,
         journal_fact: JournalFact,
-        random: &dyn RandomEffects,
+        order_clock: &dyn OrderClockEffects,
     ) -> Result<(), AuraError> {
-        // Bridge RandomEffects into an order-clock generator for the default path.
-        struct RandomOrder<'a> {
-            rand: &'a dyn RandomEffects,
-        }
-        #[async_trait::async_trait]
-        impl<'a> OrderClockEffects for RandomOrder<'a> {
-            async fn order_time(&self) -> Result<OrderTime, aura_core::effects::time::TimeError> {
-                Ok(OrderTime(self.rand.random_bytes_32().await))
-            }
-        }
-
         self.add_fact_with_domain(
             journal_fact,
             TimeDomain::OrderClock,
-            &RandomOrder { rand: random },
+            order_clock,
             None,
             None,
         )
@@ -147,33 +139,20 @@ impl Journal {
         // Thread through effect context using the fact's source authority
         let ts = match domain {
             TimeDomain::OrderClock => {
-                let id = order_clock
-                    .order_time()
-                    .await
-                    .map_err(|e| AuraError::internal(e.to_string()))?;
+                let id = order_clock.order_time().await.map_err(AuraError::from)?;
                 TimeStamp::OrderClock(id)
             }
             TimeDomain::PhysicalClock => {
                 let clock = physical_clock.ok_or_else(|| {
                     AuraError::invalid("Physical clock requested but no provider supplied")
                 })?;
-                TimeStamp::PhysicalClock(
-                    clock
-                        .physical_time()
-                        .await
-                        .map_err(|e| AuraError::internal(e.to_string()))?,
-                )
+                TimeStamp::PhysicalClock(clock.physical_time().await.map_err(AuraError::from)?)
             }
             TimeDomain::LogicalClock => {
                 let clock = logical_clock.ok_or_else(|| {
                     AuraError::invalid("Logical clock requested but no provider supplied")
                 })?;
-                TimeStamp::LogicalClock(
-                    clock
-                        .logical_now()
-                        .await
-                        .map_err(|e| AuraError::internal(e.to_string()))?,
-                )
+                TimeStamp::LogicalClock(clock.logical_now().await.map_err(AuraError::from)?)
             }
             TimeDomain::Range => {
                 return Err(AuraError::invalid(
@@ -481,5 +460,73 @@ impl AccountSummary {
             guardian_count: 0,
             last_epoch: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod selected_order_clock_tests {
+    use super::*;
+    use aura_core::effects::time::TimeError;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct SelectedOrder {
+        fail: bool,
+        calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl OrderClockEffects for SelectedOrder {
+        async fn order_time(&self) -> Result<OrderTime, TimeError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail {
+                Err(TimeError::ServiceUnavailable)
+            } else {
+                Ok(OrderTime([7; 32]))
+            }
+        }
+    }
+    fn journal() -> Journal {
+        // Canonical compressed Ed25519 basepoint; no runtime key generation.
+        let mut public_key = [0x66; 32];
+        public_key[0] = 0x58;
+        Journal::new_with_group_key_bytes(AccountId::from_bytes([1; 32]), public_key).unwrap()
+    }
+    fn fact() -> JournalFact {
+        JournalFact {
+            content: "selected-order-fact".into(),
+            timestamp: TimeStamp::OrderClock(OrderTime([9; 32])),
+            source_authority: AuthorityId::new_from_entropy([2; 32]),
+        }
+    }
+    #[tokio::test]
+    async fn add_fact_uses_exact_selected_order_clock_token() {
+        let mut journal = journal();
+        let selected = SelectedOrder {
+            fail: false,
+            calls: AtomicUsize::new(0),
+        };
+        journal.add_fact(fact(), &selected).await.unwrap();
+        assert_eq!(selected.calls.load(Ordering::SeqCst), 1);
+        let facts = journal.committed_facts();
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].order, OrderTime([7; 32]));
+        assert_eq!(
+            facts[0].timestamp,
+            TimeStamp::OrderClock(OrderTime([7; 32]))
+        );
+    }
+    #[tokio::test]
+    async fn selected_order_clock_failure_retains_source_and_inserts_nothing() {
+        let mut journal = journal();
+        let selected = SelectedOrder {
+            fail: true,
+            calls: AtomicUsize::new(0),
+        };
+        let error = journal.add_fact(fact(), &selected).await.unwrap_err();
+        assert!(matches!(
+            std::error::Error::source(&error).and_then(|source| source.downcast_ref::<TimeError>()),
+            Some(TimeError::ServiceUnavailable)
+        ));
+        assert_eq!(selected.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.committed_fact_count(), 0);
     }
 }

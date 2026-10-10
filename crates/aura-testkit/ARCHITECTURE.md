@@ -199,3 +199,9 @@ source-bearing clock fault to a waiting original timer. Mock entity IDs and app
 message IDs use separate sequence owners. Required listener startup uses actual
 supervised acknowledgment under the frozen original window; polling its timeout
 cannot advance shared time or consume another task's startup budget.
+
+MockRuntimeBridge registers absolute physical endpoints against its existing controlled clock without advancing it. Relative sleeps delegate to that same endpoint waiter; clock rollback remains a concrete provider failure.
+
+The mock retains one `ManualPhysicalClock` for reads, explicit advances, setters,
+and absolute waits. Its runtime provider accessor returns that same original
+clock, sharing state and native failure semantics with workflow timeout owners.

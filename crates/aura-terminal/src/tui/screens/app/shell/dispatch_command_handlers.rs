@@ -1537,6 +1537,21 @@ pub(super) fn handle_dispatch_command_match(
                 operation,
             );
         }
+        DispatchCommand::AcceptContactInvitation { code } => {
+            let Some(update_tx) = update_tx_for_events else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_workflow_handoff_operation(
+                app_core_for_events,
+                tasks_for_events,
+                update_tx,
+                OperationId::invitation_accept_contact(),
+                SemanticOperationKind::AcceptContactInvitation,
+            );
+            new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
+            (cb.invitations.on_accept_contact_code)(code, operation);
+        }
         DispatchCommand::ImportInvitation { code } => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
@@ -1631,7 +1646,7 @@ pub(super) fn handle_dispatch_command_match(
             let app_core = app_core_for_events;
             let update_tx = update_tx_for_events;
             tasks_for_events.spawn(async move {
-                use aura_app::runtime_bridge::DeviceSigningConsent;
+                use aura_app::ui::types::DeviceSigningConsent;
                 use aura_app::ui::workflows::settings::{
                     decide_pending_signing_request, update_device_signing_consent,
                 };

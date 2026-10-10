@@ -11,6 +11,7 @@ pub struct InvitationsCallbacks {
     pub(crate) on_create: CreateInvitationCallback,
     pub on_export: ExportInvitationCallback,
     pub(crate) on_import: ImportInvitationOwnedCallback,
+    pub(crate) on_accept_contact_code: IdHandoffCallback,
 }
 
 impl InvitationsCallbacks {
@@ -24,89 +25,58 @@ impl InvitationsCallbacks {
             on_revoke: Self::make_revoke(ctx.clone(), tx.clone()),
             on_create: Self::make_create(ctx.clone(), tx.clone()),
             on_export: Self::make_export(ctx.clone(), tx.clone()),
-            on_import: Self::make_import(ctx, tx),
+            on_import: Self::make_import(ctx.clone(), tx.clone()),
+            on_accept_contact_code: Self::make_accept_contact_code(ctx, tx),
         }
     }
 
     fn make_accept(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdHandoffCallback {
-        Arc::new(
-            move |invitation_id: String, operation: WorkflowHandoffOperationOwner| {
-                let inv_id = invitation_id.clone();
-                let ctx = ctx.clone();
-                let tx = tx.clone();
-                spawn_ctx(ctx.clone(), async move {
-                    let app_core = ctx.app_core_raw().clone();
-                    let operation_instance_id = operation.harness_handle().instance_id().clone();
-                    let transfer = operation
-                        .handoff_to_app_workflow(SemanticOperationTransferScope::AcceptInvitation);
-                    match aura_app::ui::workflows::invitation::accept_invitation_by_str_with_instance(
-                    &app_core,
-                    &invitation_id,
-                    Some(operation_instance_id.clone()),
-                )
-                .await
-                {
-                    Ok(_accepted) => {
-                        // Terminal settlement first.
-                        let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
-                            causality: None,
-                            status: SemanticOperationStatus::new(
-                                transfer.kind(),
-                                SemanticOperationPhase::Succeeded,
-                            ),
-                        };
-                        let _ = apply_handed_off_terminal_status(
-                            &app_core,
-                            &tx,
-                            transfer.operation_id().clone(),
-                            operation_instance_id,
-                            transfer.kind(),
-                            Some(terminal),
-                        )
-                        .await;
-
-                        // Best-effort UI enrichment after terminal settlement.
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::InvitationAccepted {
-                                invitation_id: inv_id.clone(),
-                            },
-                        )
-                        .await;
-                    }
-                    Err(error) => {
-                        // Terminal failure settlement.
-                        let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
-                            causality: None,
-                            status: SemanticOperationStatus::failed(
-                                transfer.kind(),
-                                SemanticOperationError::new(
-                                    SemanticFailureDomain::Command,
-                                    SemanticFailureCode::InternalError,
-                                )
-                                .with_detail(error.to_string()),
-                            ),
-                        };
-                        let _ = apply_handed_off_terminal_status(
-                            &app_core,
-                            &tx,
-                            transfer.operation_id().clone(),
-                            operation_instance_id,
-                            transfer.kind(),
-                            Some(terminal),
-                        )
-                        .await;
-                        emit_error_toast(
-                            &tx,
-                            "invitation",
-                            format!("Accept invitation failed: {error}"),
+        Arc::new(move |invitation_id, operation| {
+            let instance_id = operation.harness_handle().instance_id().clone();
+            let kind = operation.kind();
+            let followup_app_core = ctx.app_core_raw().clone();
+            spawn_handoff_workflow_callback_with_success(
+                ctx.clone(),
+                tx.clone(),
+                operation,
+                WorkflowHandoffSpec::new(
+                    SemanticOperationTransferScope::AcceptInvitation,
+                    "invitation",
+                    "Accept invitation failed",
+                    "accept_invitation_by_id",
+                ),
+                move |app_core, _| async move {
+                    aura_app::ui::workflows::invitation::handoff::accept_invitation_by_id(
+                        &app_core,
+                        aura_app::ui::workflows::invitation::handoff::AcceptInvitationByIdRequest {
+                            invitation_id,
+                            operation_instance_id: instance_id,
+                            operation_kind: kind,
+                        },
+                    )
+                    .await
+                },
+                move |tx, invitation| async move {
+                    send_ui_update_reliable(
+                        &tx,
+                        UiUpdate::InvitationAccepted {
+                            invitation_id: invitation.invitation_id().to_string(),
+                        },
+                    )
+                    .await;
+                    if matches!(
+                        invitation.info().invitation_type,
+                        aura_app::ui::types::InvitationBridgeType::Contact { .. }
+                    ) {
+                        aura_app::ui::workflows::invitation::run_post_contact_accept_followups(
+                            &followup_app_core,
+                            invitation.info().sender_id,
                         )
                         .await;
                     }
-                }
-                });
-            },
-        )
+                },
+            );
+        })
     }
 
     fn make_decline(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
@@ -265,6 +235,47 @@ impl InvitationsCallbacks {
                         &tx,
                         "invitation",
                         format!("Export invitation failed: {error}"),
+                    )
+                    .await;
+                },
+            );
+        })
+    }
+
+    fn make_accept_contact_code(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdHandoffCallback {
+        Arc::new(move |code, operation| {
+            let instance_id = operation.harness_handle().instance_id().clone();
+            let followup_app_core = ctx.app_core_raw().clone();
+            spawn_handoff_workflow_callback_with_success(
+                ctx.clone(),
+                tx.clone(),
+                operation,
+                WorkflowHandoffSpec::new(
+                    SemanticOperationTransferScope::AcceptInvitation,
+                    "invitation",
+                    "Accept Contact invitation failed",
+                    "accept_contact_invitation_from_code",
+                ),
+                move |app_core, _| async move {
+                    aura_app::ui::workflows::invitation::handoff::accept_contact_invitation_from_code(
+                        &app_core,
+                        aura_app::ui::workflows::invitation::handoff::AcceptContactInvitationFromCodeRequest {
+                            code,
+                            operation_instance_id: instance_id,
+                        },
+                    ).await
+                },
+                move |tx, invitation| async move {
+                    send_ui_update_reliable(
+                        &tx,
+                        UiUpdate::InvitationAccepted {
+                            invitation_id: invitation.invitation_id().to_string(),
+                        },
+                    )
+                    .await;
+                    aura_app::ui::workflows::invitation::run_post_contact_accept_followups(
+                        &followup_app_core,
+                        invitation.info().sender_id,
                     )
                     .await;
                 },

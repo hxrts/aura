@@ -245,7 +245,7 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
     workflow: F,
     on_success: Success,
 ) where
-    T: Clone + Send + 'static,
+    T: Send + 'static,
     Fut: Future<Output = WorkflowTerminalOutcome<T>> + Send + 'static,
     F: FnOnce(
             Arc<RwLock<aura_app::ui::types::AppCore>>,
@@ -343,7 +343,15 @@ async fn run_invitation_import_flow(
     };
 
     let (accept_operation_id, accept_kind) =
-        aura_app::ui::workflows::invitation::accept_operation_for_imported_invitation(&invitation);
+        match aura_app::ui::workflows::invitation::accept_operation_for_imported_invitation(
+            &invitation,
+        ) {
+            Ok(identity) => identity,
+            Err(error) => {
+                emit_error_toast(&tx, "invitation", error.to_string()).await;
+                return;
+            }
+        };
     for update in invitation_import_success_updates(&code) {
         send_ui_update_required(&tx, update).await;
     }

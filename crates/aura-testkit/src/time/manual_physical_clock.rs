@@ -48,7 +48,12 @@ impl ManualPhysicalClock {
     }
     /// Move time forward by `by_ms`, waking sleeps whose deadline it reaches.
     pub fn advance(&self, by_ms: u64) {
-        self.state.now.fetch_add(by_ms, Ordering::SeqCst);
+        self.state
+            .now
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
+                now.checked_add(by_ms)
+            })
+            .expect("explicit manual physical advance overflow");
         self.state.changed.notify_waiters();
     }
     /// Publish an actual physical observation, including deliberate rollback.

@@ -396,29 +396,42 @@ impl Subscriptions {
         let failed = |e: aura_core::effects::reactive::ReactiveError| {
             CommandError::new(super::super::command::ErrorCode::Unavailable, e.to_string())
         };
-        // Subscribe before reading, so no update falls between the two.
+        // Await each receiver attachment before reading the baseline, so the
+        // subscribe response guarantees that the first subsequent update is observed.
         let streams = vec![
-            changes(core.subscribe(&*CHAT_SIGNAL).map_err(failed)?, |chat| {
-                Change::Chat(Box::new(chat))
-            }),
             changes(
-                core.subscribe(&*INVITATIONS_SIGNAL).map_err(failed)?,
+                core.subscribe_attached(&*CHAT_SIGNAL)
+                    .await
+                    .map_err(failed)?,
+                |chat| Change::Chat(Box::new(chat)),
+            ),
+            changes(
+                core.subscribe_attached(&*INVITATIONS_SIGNAL)
+                    .await
+                    .map_err(failed)?,
                 Change::Invitations,
             ),
             changes(
-                core.subscribe(&*CONTACTS_SIGNAL).map_err(failed)?,
+                core.subscribe_attached(&*CONTACTS_SIGNAL)
+                    .await
+                    .map_err(failed)?,
                 Change::Contacts,
             ),
             changes(
-                core.subscribe(&*SYNC_STATUS_SIGNAL).map_err(failed)?,
+                core.subscribe_attached(&*SYNC_STATUS_SIGNAL)
+                    .await
+                    .map_err(failed)?,
                 Change::Sync,
             ),
             changes(
-                core.subscribe(&*CONNECTION_STATUS_SIGNAL).map_err(failed)?,
+                core.subscribe_attached(&*CONNECTION_STATUS_SIGNAL)
+                    .await
+                    .map_err(failed)?,
                 Change::Connection,
             ),
             changes(
-                core.subscribe(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+                core.subscribe_attached(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+                    .await
                     .map_err(failed)?,
                 |facts| Change::Facts(facts.facts),
             ),
@@ -573,6 +586,56 @@ impl Subscriptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn subscribe_attaches_before_the_first_immediate_update() {
+        let core = Arc::new(RwLock::new(
+            AppCore::new(aura_app::AppConfig::default()).unwrap(),
+        ));
+        AppCore::init_signals_with_hooks(&core).await.unwrap();
+        let mut subscriptions = Subscriptions::new(core.clone());
+        let (id, _) = subscriptions.subscribe(vec![Topic::Sync]).await.unwrap();
+        {
+            let core = core.read().await;
+            for signal in [
+                CHAT_SIGNAL.id(),
+                INVITATIONS_SIGNAL.id(),
+                CONTACTS_SIGNAL.id(),
+                SYNC_STATUS_SIGNAL.id(),
+                CONNECTION_STATUS_SIGNAL.id(),
+                AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL.id(),
+            ] {
+                assert_eq!(core.reactive().graph().subscriber_count(signal).await, 1);
+            }
+            core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced)
+                .await
+                .unwrap();
+        }
+        let event = subscriptions.next_event().await.unwrap();
+        assert_eq!(event["subscription"], id);
+        assert_eq!(event["topic"], "sync");
+        assert_eq!(event["data"]["status"], "synced");
+    }
+
+    #[tokio::test]
+    async fn subscribe_rejects_unregistered_signals_without_accepting_a_subscription() {
+        let core = Arc::new(RwLock::new(
+            AppCore::new(aura_app::AppConfig::default()).unwrap(),
+        ));
+        let mut subscriptions = Subscriptions::new(core.clone());
+        assert!(subscriptions.subscribe(vec![Topic::Sync]).await.is_err());
+        assert!(subscriptions.subscriptions.is_empty());
+        assert!(subscriptions.changes.is_none());
+        assert_eq!(
+            core.read()
+                .await
+                .reactive()
+                .graph()
+                .subscriber_count(CHAT_SIGNAL.id())
+                .await,
+            0
+        );
+    }
 
     #[test]
     fn topics_parse_by_name_and_default_to_all() {

@@ -17,7 +17,8 @@ use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
 use aura_core::effects::{
-    FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportError, TransportReceipt,
+    FlowBudgetEffects, PhysicalTimeEffects, TransportEffects, TransportEnvelope, TransportError,
+    TransportReceipt,
 };
 use aura_core::hash::hash;
 use aura_core::service::{EstablishPath, ServiceFamily};
@@ -374,6 +375,14 @@ impl RendezvousHandler {
     ) -> AgentResult<ChannelResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
+        // Descriptor validity and pending routes use physical milliseconds
+        // from the same selected provider as the enclosing runtime owner.
+        let current_time = effects
+            .physical_time()
+            .await
+            .map_err(aura_core::AuraError::from)?
+            .ts_ms;
+
         // Enforce guard chain
         let guard = create_send_guard(
             RendezvousCapability::Connect.as_name(),
@@ -381,17 +390,15 @@ impl RendezvousHandler {
             self.context.authority.authority_id(),
             FlowCost::new(2), // Handshake cost
         );
-        let result = guard
-            .evaluate(effects)
-            .await
-            .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
+        let result = guard.evaluate(effects).await.map_err(AgentError::from)?;
         if !result.authorized {
-            return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
-                || "channel initiation not authorized".to_string(),
-            )));
+            return Err(aura_core::AuraError::permission_denied(
+                result
+                    .denial_reason
+                    .unwrap_or_else(|| "channel initiation not authorized".to_string()),
+            )
+            .into());
         }
-
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         // Create snapshot for guard evaluation
         let snapshot = self.create_snapshot(effects, context_id).await?;
@@ -439,7 +446,7 @@ impl RendezvousHandler {
                 effects,
             )
             .await
-            .map_err(|e| AgentError::effects(format!("prepare channel failed: {e}")))?;
+            .map_err(AgentError::from)?;
 
         // Check guard outcome
         if !outcome.decision.is_allowed() {
@@ -580,7 +587,11 @@ impl RendezvousHandler {
         effects: &AuraEffectSystem,
         context_id: ContextId,
     ) -> AgentResult<GuardSnapshot> {
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(aura_core::AuraError::from)?
+            .ts_ms;
         Ok(GuardSnapshot {
             authority_id: self.context.authority.authority_id(),
             context_id,
@@ -1473,9 +1484,14 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = crate::testing::simulation_effect_system_for_authority_arc(
-            &config,
-            authority_context.authority_id(),
+        let effects = Arc::new(
+            crate::testing::simulation_effect_system_for_authority(
+                &config,
+                authority_context.authority_id(),
+            )
+            .with_physical_time_provider(Arc::new(
+                aura_testkit::time::ManualPhysicalClock::new(100_007),
+            )),
         );
         let peer_public_key =
             install_identity_key(&effects, authority_context.authority_id()).await;
@@ -1507,6 +1523,45 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.peer, peer);
         assert!(result.transport.is_some());
+        let projection = handler
+            .registry
+            .projection(Some(context_id), aura_rendezvous::DescriptorValidity::Any)
+            .await;
+        assert_eq!(projection.pending_routes.len(), 1);
+        assert_eq!(projection.pending_routes[0].initiated_at_ms, 100_007);
+    }
+
+    #[tokio::test]
+    async fn test_initiate_channel_preserves_selected_clock_failure_without_pending_route() {
+        use std::error::Error;
+        let authority = create_test_authority(58);
+        let handler = RendezvousHandler::new(authority.clone()).unwrap();
+        let clock = Arc::new(crate::testing::NativeReadFaultClock::new(100_007));
+        let effects = crate::testing::simulation_effect_system_for_authority(
+            &AgentConfig::default(),
+            authority.authority_id(),
+        )
+        .with_physical_time_provider(clock.clone());
+        clock.fail_reads();
+        let context = ContextId::new_from_entropy([158; 32]);
+        let peer = AuthorityId::new_from_entropy([59; 32]);
+        let error = handler
+            .initiate_channel(&effects, context, peer)
+            .await
+            .expect_err("required selected clock failure");
+        let mut cause: &(dyn Error + 'static) = &error;
+        while !cause.is::<crate::testing::NativePhysicalReadFault>() {
+            cause = cause
+                .source()
+                .expect("actual selected provider cause remains native");
+        }
+        assert!(handler
+            .registry
+            .projection(Some(context), aura_rendezvous::DescriptorValidity::Any)
+            .await
+            .pending_routes
+            .is_empty());
+        assert!(!effects.is_channel_established(context, peer).await);
     }
 
     #[tokio::test]

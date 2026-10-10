@@ -41,6 +41,36 @@ pub struct ContactSelectModalProps {
 /// Modal for selecting a contact
 #[component]
 pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyElement<'static>> {
+    element! { SelectionModal(
+        visible: props.visible, title: props.title.clone(), empty_message: "No contacts available".to_string(),
+        rows: props.contacts.iter().map(|contact| SelectionModalRow {
+            id: contact.id.clone(), label: contact.display_name(),
+        }).collect::<Vec<_>>(),
+        selected_index: props.selected_index, selected_ids: props.selected_ids.clone(),
+        multi_select: props.multi_select, error: props.error.clone(),
+    )}.into_any()
+}
+
+/// Observed row shape shared by actual selection renderers; never a canonical
+/// Contact or Authority constructor and never authorization evidence.
+#[derive(Clone, Debug)]
+pub(crate) struct SelectionModalRow {
+    pub id: String,
+    pub label: String,
+}
+#[derive(Default, Props)]
+pub(crate) struct SelectionModalProps {
+    pub visible: bool,
+    pub title: String,
+    pub rows: Vec<SelectionModalRow>,
+    pub empty_message: String,
+    pub selected_index: usize,
+    pub selected_ids: Vec<String>,
+    pub multi_select: bool,
+    pub error: String,
+}
+#[component]
+pub(crate) fn SelectionModal(props: &SelectionModalProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
         return element! {
             View {}
@@ -49,7 +79,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     }
 
     let title = props.title.clone();
-    let contacts = props.contacts.clone();
+    let rows = props.rows.clone();
     let selected_index = props.selected_index;
     let selected_ids = props.selected_ids.clone();
     let multi_select = props.multi_select;
@@ -94,17 +124,17 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
             border_color: Some(border_color),
             body_overflow: Overflow::Scroll,
         ) {
-            #(if contacts.is_empty() {
+            #(if rows.is_empty() {
                 vec![element! {
                     View {
-                        Text(content: "No contacts available", color: Theme::TEXT_MUTED)
+                        Text(content: props.empty_message.clone(), color: Theme::TEXT_MUTED)
                     }
                 }]
             } else {
-                contacts.iter().enumerate().map(|(idx, contact)| {
+                rows.iter().enumerate().map(|(idx, row)| {
                     let is_selected = idx == selected_index;
                     let is_checked =
-                        multi_select && selected_ids.iter().any(|selected_id| selected_id == &contact.id);
+                        multi_select && selected_ids.iter().any(|selected_id| selected_id == &row.id);
 
                     let bg = if is_selected {
                         Theme::LIST_BG_SELECTED
@@ -122,10 +152,8 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                         Theme::PRIMARY
                     };
 
-                    // The nickname is the local override and often empty; show what
-                    // every other list shows (work/8.md Task 10, F15/F16 run 147).
-                    let name = contact.display_name();
-                    let id = contact.id.clone();
+                    let name = row.label.clone();
+                    let id = row.id.clone();
                     let pointer = if is_selected { "➤ " } else { "  " };
                     let checkbox = if multi_select {
                         if is_checked { "[x] " } else { "[ ] " }

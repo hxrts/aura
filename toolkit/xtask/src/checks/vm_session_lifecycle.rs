@@ -52,19 +52,58 @@ const CORE_SUITES: &[LifecycleSuite] = &[
         filter: "time::timeout::tests::required_timeout_drops_cancelled_query_before_reacquiring_observation_owner",
     },
 ];
-const TERMINAL_OBSERVATION_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
-    source: "crates/aura-core/src/time/timeout.rs",
+const TERMINAL_OBSERVATION_SUITES: &[LifecycleSuite] = &[
+    LifecycleSuite {
+        source: "crates/aura-core/src/time/timeout.rs",
+        functions: &[
+            "required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease",
+            "required_terminal_ack_bounds_contended_observation_gate",
+            "required_terminal_ack_bounds_checkpoint_and_rejects_late_completion",
+            "required_terminal_ack_preserves_native_timer_failure_without_publication",
+            "required_terminal_ack_rejects_native_checkpoint_failure",
+            "required_terminal_ack_publishes_once_with_original_guard_after_checkpoint",
+            "required_terminal_ack_rejects_unsupported_provider_before_publication",
+        ],
+        harness_prefix: "time::timeout::tests::",
+        filter: "time::timeout::tests::required_terminal_ack_",
+    },
+    LifecycleSuite {
+        source: "crates/aura-core/src/time/timeout.rs",
+        functions: &[
+            "required_plain_timeout_bounds_hung_initial_clock_read",
+            "required_plain_timeout_bounds_hung_success_clock_read",
+            "required_plain_timeout_bounds_observation_gate_before_clock_or_operation",
+        ],
+        harness_prefix: "time::timeout::tests::",
+        filter: "time::timeout::tests::required_plain_timeout_",
+    },
+    LifecycleSuite {
+        source: "crates/aura-core/src/time/timeout.rs",
+        functions: &[
+            "initial_publication_ack_precedes_clock_observation_and_retains_result",
+            "initial_publication_bounds_write_readback_and_post_ack_clock",
+            "initial_publication_deadline_wins_same_turn_and_bounds_gate",
+            "initial_publication_preserves_native_failure_without_clock_read",
+            "initial_publication_preserves_clock_failure_and_refuses_expired_ack",
+        ],
+        harness_prefix: "time::timeout::tests::",
+        filter: "time::timeout::tests::initial_publication_",
+    },
+];
+const APP_OBSERVATION_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
+    source: "crates/aura-app/src/workflows/runtime.rs",
     functions: &[
-        "required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease",
-        "required_terminal_ack_bounds_contended_observation_gate",
-        "required_terminal_ack_bounds_checkpoint_and_rejects_late_completion",
-        "required_terminal_ack_preserves_native_timer_failure_without_publication",
-        "required_terminal_ack_rejects_native_checkpoint_failure",
-        "required_terminal_ack_publishes_once_with_original_guard_after_checkpoint",
-        "required_terminal_ack_rejects_unsupported_provider_before_publication",
+        "runtime_required_clock_reads_are_bounded_for_executor_child_and_retry",
+        "runtime_observation_retains_original_selected_provider_and_uncertainty",
     ],
-    harness_prefix: "time::timeout::tests::",
-    filter: "time::timeout::tests::required_terminal_ack_",
+    harness_prefix: "workflows::runtime::clock_owner_regressions::",
+    filter: "workflows::runtime::clock_owner_regressions::runtime_",
+}];
+const NATIVE_RUNTIME_OBSERVATION_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
+    source: "crates/aura-agent/src/runtime_bridge/tests.rs",
+    functions: &["required_native_absolute_deadline_retains_selected_provider_witness"],
+    harness_prefix: "runtime_bridge::tests::",
+    filter: "runtime_bridge::tests::required_native_absolute_deadline_",
 }];
 const ABSOLUTE_PROVIDER_SUITES: &[LifecycleSuite] = &[
     LifecycleSuite {
@@ -942,6 +981,7 @@ pub fn run_absolute_time_observation() -> Result<()> {
     for (package, suites) in [
         ("hxrts-aura-core", TERMINAL_OBSERVATION_SUITES),
         ("hxrts-aura-effects", NATIVE_ABSOLUTE_PROVIDER_SUITES),
+        ("hxrts-aura-agent", NATIVE_RUNTIME_OBSERVATION_SUITES),
         ("aura-testkit", ABSOLUTE_PROVIDER_SUITES),
     ] {
         let args = vec![
@@ -954,6 +994,17 @@ pub fn run_absolute_time_observation() -> Result<()> {
         ];
         run_suites(&root, &args, suites)?;
     }
+    let app = vec![
+        "test".into(),
+        "--lib".into(),
+        "--target-dir".into(),
+        target.to_string_lossy().into_owned(),
+        "-p".into(),
+        "hxrts-aura-app".into(),
+        "--features".into(),
+        "native,app-internals,web-js".into(),
+    ];
+    run_suites(&root, &app, APP_OBSERVATION_SUITES)?;
     run_absolute_deadline_domain_doctest(&target)?;
     println!("absolute-time-observation: required original observation evidence clean");
     Ok(())
@@ -1052,6 +1103,14 @@ mod tests {
         }
         for suite in TERMINAL_OBSERVATION_SUITES {
             assert!(suite.source.starts_with("crates/aura-core/"));
+        }
+        assert!(!NATIVE_RUNTIME_OBSERVATION_SUITES.is_empty());
+        for suite in NATIVE_RUNTIME_OBSERVATION_SUITES {
+            assert!(suite.source.starts_with("crates/aura-agent/"));
+        }
+        assert!(!APP_OBSERVATION_SUITES.is_empty());
+        for suite in APP_OBSERVATION_SUITES {
+            assert!(suite.source.starts_with("crates/aura-app/"));
         }
         for suite in ABSOLUTE_PROVIDER_SUITES {
             assert!(suite.source.starts_with("crates/aura-testkit/"));

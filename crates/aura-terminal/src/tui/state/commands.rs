@@ -273,6 +273,9 @@ pub enum DispatchCommand {
     ImportInvitation {
         code: String,
     },
+    AcceptContactInvitation {
+        code: String,
+    },
     ExportInvitation,
     RevokeInvitation {
         invitation_id: InvitationId,

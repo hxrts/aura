@@ -106,6 +106,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`; this includes the explicit `stage_runtime_identity` bootstrap handoff and the page-owned semantic queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`)
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
+- **Required timeout observations**: `just _policy-check check absolute-time-observation` requires source declarations, actual discovery and execution for stalled reads and observation-gate contention. Plain bounded observations preserve the selected provider endpoint and witness; they do not replace durable enrollment checkpoint acknowledgment.
 - **Authoritative fact syntax scope**: frontend authoritative-fact restrictions
   inspect real Rust paths, including macro tokens, with lexical `cfg(test)`
   classification. Comments, strings, or an earlier test module cannot exempt
@@ -139,7 +140,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   tests, and Rust-native lints for syntactic or boundary-shape rules;
   `just check-arch` should stay focused on workspace topology, governance, and
   integration checks that are not realistically provable at compile time
-- **Test-scope enforcement**: classify Rust test exclusions by parsed lexical
+- **Test-scope enforcement**: annotation ratchets and syntax checks classify Rust test exclusions by parsed lexical
   scope and positive cfg predicates. Mixed test/production predicates and
   production declarations following test items retain production enforcement.
 - **Harness move ownership syntax**: operation-handle constructors, accepted
@@ -180,6 +181,10 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   unchanged diff context is accepted through syntax inspection. An attribute
   on another function or an identically named unannotated boundary does not
   authorize the change.
+  When removing a duplicate owner, remove its obsolete required-inventory entry
+  in the same change and retain the canonical annotated owner. Invitation
+  acceptance uses `accept_imported_invitation_owned` through the declared
+  `accept_invitation_with_terminal_status` wrapper.
 - **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
   and `WorkflowHandoffOperationOwner::submit` allocation stays inside the
   sanctioned terminal/browser submission boundaries; callback factories and
@@ -729,3 +734,15 @@ actor publication alone does not promise UI readiness: preserve the distinct
 `InvitationAccepted` and `ContactLinkReady` contracts. Comments, marker words,
 and unrelated await helpers cannot establish owner completion. Required
 `just ci-policy-toolkit-clippy` executes the AST regressions before strict lint.
+
+Parsed architecture syntax ownership: `just lint-arch-syntax` owns executable
+placeholder UUID calls, incomplete implementation macros/panic messages, and
+terminal app-facade/journal/domain syntax boundaries. It uses lexical positive
+test predicates; mixed production/test predicates remain enforced. Ordinary
+identifiers and diagnostic string contents are not placeholder evidence.
+`just check-arch` retains topology/governance/integration checks; the obsolete
+`--todos` text sweep is removed. Keep contributor guidance synchronized when
+changing these policy owners.
+Retained `check-arch-lane` dispatch supports only parser-backed lanes and
+propagates policy failures. Removed `todos` and unsupported `completeness` lane
+names fail explicitly; use `lint-arch-syntax` for executable placeholder checks.

@@ -100,7 +100,7 @@ pub fn SettingsScreen(
     let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
     let reactive_signing = hooks.use_state(|| {
         (
-            aura_app::runtime_bridge::DeviceSigningConsent::default(),
+            aura_app::ui::types::DeviceSigningConsent::default(),
             Vec::<(String, String)>::new(),
         )
     });
@@ -466,8 +466,8 @@ pub fn SettingsScreen(
             // Device-local consent for co-signing another device's request.
             lines.push((String::new(), Theme::TEXT));
             let consent_label = match signing_consent {
-                aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser => "ask me",
-                aura_app::runtime_bridge::DeviceSigningConsent::AutoSignVerified => "automatic",
+                aura_app::ui::types::DeviceSigningConsent::EscalateToUser => "ask me",
+                aura_app::ui::types::DeviceSigningConsent::AutoSignVerified => "automatic",
             };
             lines.push((
                 format!("Co-signing (this device): {consent_label}"),

@@ -2,7 +2,7 @@ use super::*;
 use crate::views::chat::{is_note_to_self_channel_name, note_to_self_channel_id};
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::error::{self, WorkflowError};
-use crate::workflows::runtime::timeout_runtime_call;
+use crate::workflows::runtime::timeout_runtime_call_with_budget;
 use std::time::Duration;
 
 const ROUTING_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
@@ -19,6 +19,7 @@ pub(super) fn channel_id_from_input(channel: &str) -> Result<ChannelId, AuraErro
 pub(super) async fn resolve_chat_channel_id_from_state_or_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
+    parent: &TimeoutBudget,
 ) -> Result<ChannelId, AuraError> {
     let selector = parse_channel_ref(channel_input)?;
     if let ChannelSelector::Id(channel_id) = &selector {
@@ -37,8 +38,9 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
     }
 
     let runtime = require_runtime(app_core).await?;
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         &runtime,
+        parent,
         "resolve_chat_channel_id_from_state_or_input",
         "identify_materialized_channel_ids_by_name",
         ROUTING_RUNTIME_TIMEOUT,
@@ -129,11 +131,13 @@ pub(super) async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     local_authority: Option<AuthorityId>,
+    parent: &TimeoutBudget,
 ) -> Result<ContextId, AuraError> {
     let _ = local_authority;
     let runtime = require_runtime(app_core).await?;
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         &runtime,
+        parent,
         "context_id_for_channel",
         "resolve_amp_channel_context",
         ROUTING_RUNTIME_TIMEOUT,
@@ -158,14 +162,24 @@ mod tests {
     #[tokio::test]
     async fn resolve_chat_channel_id_uses_authoritative_runtime_lookup() {
         let authority = AuthorityId::new_from_entropy([9u8; 32]);
-        let bridge = Arc::new(OfflineRuntimeBridge::new(authority));
+        let mut bridge = OfflineRuntimeBridge::new(authority);
+        bridge.use_time_provider(Arc::new(aura_testkit::time::ManualPhysicalClock::new(0)));
+        let bridge = Arc::new(bridge);
         let canonical_id = ChannelId::from_bytes(hash(b"routing-canonical"));
         bridge.set_materialized_channel_name_matches("shared-parity-lab", vec![canonical_id]);
         let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), bridge);
 
-        let resolved = resolve_chat_channel_id_from_state_or_input(&app_core, "#shared-parity-lab")
-            .await
-            .expect("matching channel");
+        let resolved = resolve_chat_channel_id_from_state_or_input(
+            &app_core,
+            "#shared-parity-lab",
+            &TimeoutBudget::from_start_and_timeout(
+                &aura_core::time::PhysicalTime::exact(0),
+                ROUTING_RUNTIME_TIMEOUT,
+            )
+            .unwrap(),
+        )
+        .await
+        .expect("matching channel");
 
         assert_eq!(resolved, canonical_id);
     }
@@ -179,9 +193,14 @@ mod tests {
         bridge.set_amp_channel_context(channel_id, context_id);
         let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), bridge);
 
-        let resolved = context_id_for_channel(&app_core, channel_id, Some(authority))
-            .await
-            .expect("authoritative context");
+        let resolved = context_id_for_channel(
+            &app_core,
+            channel_id,
+            Some(authority),
+            &test_messaging_budget(&app_core).await,
+        )
+        .await
+        .expect("authoritative context");
 
         assert_eq!(resolved, context_id);
     }
@@ -190,9 +209,17 @@ mod tests {
     async fn authoritative_channel_resolution_requires_runtime() {
         let app_core = crate::testing::default_test_app_core();
 
-        let error = resolve_chat_channel_id_from_state_or_input(&app_core, "#shared-parity-lab")
-            .await
-            .expect_err("authoritative resolution must require runtime");
+        let error = resolve_chat_channel_id_from_state_or_input(
+            &app_core,
+            "#shared-parity-lab",
+            &TimeoutBudget::from_start_and_timeout(
+                &aura_core::time::PhysicalTime::exact(0),
+                ROUTING_RUNTIME_TIMEOUT,
+            )
+            .unwrap(),
+        )
+        .await
+        .expect_err("authoritative resolution must require runtime");
 
         assert!(
             !error.to_string().is_empty(),

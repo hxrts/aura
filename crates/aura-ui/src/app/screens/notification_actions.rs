@@ -79,18 +79,19 @@ pub(in crate::app) fn accept_invitation_action(
             )
         };
         let operation = UiWorkflowHandoffOwner::submit(controller.clone(), operation_id, kind);
-        let instance_id = operation.workflow_instance_id();
         let transfer =
             operation.handoff_to_app_workflow(UiOperationTransferScope::AcceptInvitation);
+        let instance_id = transfer.instance_id().clone();
         match transfer
             .run_workflow(
                 controller.clone(),
                 "accept_invitation_by_id",
                 invitation_workflows::handoff::accept_invitation_by_id(
                     &app_core,
-                    invitation_workflows::handoff::InvitationByIdRequest {
+                    invitation_workflows::handoff::AcceptInvitationByIdRequest {
                         invitation_id,
                         operation_instance_id: instance_id,
+                        operation_kind: kind,
                     },
                 ),
             )

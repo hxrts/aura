@@ -1908,3 +1908,18 @@ channel metadata cannot reintroduce members or unhide local departure. Historica
 invitation visibility cannot admit an observed departed sender. No membership
 observation materializes canonical entities; certified transition identifiers or
 commitment hashes alone do not establish successor inclusion.
+
+The app bridge forwards required absolute physical deadlines directly to the runtime effect provider. Relative sleep is reserved for duration policies; unsupported absolute waits remain typed failures without a clock fallback.
+
+`RuntimeBridge::physical_time_provider` retains the actual assembled runtime
+effect system for app-owned deadlines. Its complete physical witness and native
+errors pass directly to the shared timeout kernel, without a timestamp-only
+adapter or a second clock owner.
+
+Required peer transport establishment observes the selected `TransportEffects`
+channel directly and otherwise invokes the canonical rendezvous handler once.
+Sibling-device sync and harness-only rounds do not gate an already established
+cross-authority transport. AMP, journal, and membership readiness remain with
+their shared owners. Required initiation and snapshot validity use fallible
+selected physical milliseconds; native guard, service, and clock causes survive
+the runtime bridge with their peer/context binding.

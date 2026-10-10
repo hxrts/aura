@@ -429,6 +429,15 @@ Enrollment acceptance terminal publication belongs to the annotated acceptance o
 
 Required timeout checkpoint storage/codec failures retain their actual lower-owner category through semantic projection. The shared budget classifier walks retained sources; actual clock failures remain unavailable and actual elapsed deadlines remain timed out. Diagnostic wording and unclassified IO do not identify a service category.
 
+Required workflow convergence retains the original runtime and operation endpoint
+through child stages, retries, and backoff. A nested clock or timer failure cannot
+be hidden by a later successful attempt. One sync and ceremony cycle has identical
+semantics across frontend modes; semantic completion still requires the workflow's
+authoritative proof. Standalone upkeep and postterminal diagnostics own separate
+bounded windows. Channel acceptance requires actual AMP state under its retained
+authoritative channel reference before materialization and readiness publication;
+a matching raw context lookup cannot substitute for that state.
+
 ### Required refresh attachment health
 
 One hook group owns its attached signal streams, bounded first failure, and shared cancellation. Required signal receipt or interval failure cancels the entire group and returns the original native error to the fallible runtime spawner. A failed signal-driven refresh belongs to that update only: the listener retains it as a typed per-update failure (`AppCore::refresh_hook_update_failures`, stage `Refresh`, original cause) and keeps serving later updates, which re-read current state. `AppCore::refresh_hook_failure` exposes the typed stage and original cause of a terminal failure even without tracing. Failed groups are inactive; explicit reattachment replaces attachment health but does not clear the runtime supervisor's retained failure. Cancellation alone remains successful task completion.
@@ -503,3 +512,25 @@ Channel readiness uses the exact full participant count from a successful strong
 native channel read. Observed row counts and prior readiness facts cannot widen
 that count; recipient resolution derives from the same participant read. Required
 participant lookup errors retain their native cause through the workflow boundary.
+
+Required app timeout execution retains the actual selected provider through
+`RuntimeBridge::physical_time_provider`. Root budgets, bounded observations and
+execution use that same provider's complete `PhysicalTime` witness, including
+uncertainty, and original typed endpoint. The app implements no infrastructure
+time handler. Unsupported absolute waits retain their concrete source.
+
+Invitation acceptance admits one `InvitationAcceptanceRequest` through
+`accept_invitation_with_terminal_status`. Submitted ids retain the original
+operation kind and instance before lookup; canonical metadata must match before
+mutation. Retained handles and Contact codes use the same owner. Standalone id
+lookup retains its original runtime deadline into acceptance. Observed accepted
+history cannot authorize runtime acceptance or manufacture completion evidence.
+Guardian acknowledgment retries use that same endpoint and stop on provider faults.
+
+Runtime timeout workflows delegate plain execution and bounded clock observations
+to `aura-core::time::timeout`. Child allocation and retry observations retain the
+same original endpoint and provider. The absolute bridge returns the provider's
+`PhysicalTime` witness unchanged, so expiration never requires an unbounded
+post-deadline clock read. Required peer transport establishment retains native
+handler/provider causes; an established transport does not establish AMP,
+membership, recipient, or journal readiness.

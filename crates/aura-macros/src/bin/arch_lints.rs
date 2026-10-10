@@ -1,6 +1,8 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+#[path = "arch_lints/architecture_placeholders.rs"]
+mod architecture_placeholders;
 #[allow(dead_code)]
 #[path = "../lint_support.rs"]
 mod lint_support;
@@ -193,54 +195,87 @@ fn scan_effect_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
     let ignored_lines = ignored_test_lines(syntax);
 
     let is_test_like = is_test_like_path(&path);
-    let in_aura_core = path.starts_with("crates/aura-core/");
+
     let in_aura_effects = path.starts_with("crates/aura-effects/");
-    if !in_aura_core {
-        for item in &syntax.items {
-            if let Item::Trait(item_trait) = item {
-                let name = item_trait.ident.to_string();
-                if INFRA_EFFECT_TRAITS.contains(&name.as_str()) {
-                    violations.push(format_violation(
-                        file,
-                        item_trait.ident.span(),
-                        format!(
-                            "infrastructure effect trait `{name}` must be defined in aura-core"
-                        ),
-                    ));
+    struct EffectDeclarations<'a> {
+        file: &'a Path,
+        path: &'a str,
+        violations: &'a mut Vec<String>,
+    }
+    impl<'ast> syn::visit::Visit<'ast> for EffectDeclarations<'_> {
+        fn visit_item(&mut self, item: &'ast Item) {
+            if !architecture_placeholders::test_attrs(architecture_placeholders::item_attrs(item)) {
+                syn::visit::visit_item(self, item);
+            }
+        }
+        fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+            if !architecture_placeholders::test_attrs(architecture_placeholders::impl_item_attrs(
+                item,
+            )) {
+                syn::visit::visit_impl_item(self, item);
+            }
+        }
+        fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+            if !architecture_placeholders::test_attrs(architecture_placeholders::trait_item_attrs(
+                item,
+            )) {
+                syn::visit::visit_trait_item(self, item);
+            }
+        }
+        fn visit_local(&mut self, local: &'ast syn::Local) {
+            if !architecture_placeholders::test_attrs(&local.attrs) {
+                syn::visit::visit_local(self, local);
+            }
+        }
+        fn visit_expr_block(&mut self, block: &'ast syn::ExprBlock) {
+            if !architecture_placeholders::test_attrs(&block.attrs) {
+                syn::visit::visit_expr_block(self, block);
+            }
+        }
+        fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+            let name = item.ident.to_string();
+            if INFRA_EFFECT_TRAITS.contains(&name.as_str())
+                && !self.path.starts_with("crates/aura-core/")
+            {
+                self.violations.push(format_violation(
+                    self.file,
+                    item.ident.span(),
+                    format!("infrastructure effect trait `{name}` must be defined in aura-core"),
+                ));
+            }
+            syn::visit::visit_item_trait(self, item);
+        }
+        fn visit_item_impl(&mut self, item: &'ast ItemImpl) {
+            if let Some(name) = impl_trait_name(item) {
+                let infrastructure = INFRA_EFFECT_TRAITS.contains(&name.as_str())
+                    && !self.path.starts_with("crates/aura-core/")
+                    && !infra_impl_allowed(self.path);
+                let application = APP_EFFECT_TRAITS.contains(&name.as_str())
+                    && self.path.starts_with("crates/aura-effects/");
+                if infrastructure || application {
+                    let reason = if infrastructure {
+                        format!("infrastructure effect impl `{name}` must live in aura-effects or testkit")
+                    } else {
+                        format!("application effect impl `{name}` must not live in aura-effects")
+                    };
+                    self.violations
+                        .push(format_violation(self.file, item.impl_token.span, reason));
                 }
             }
+            syn::visit::visit_item_impl(self, item);
         }
     }
-
-    for item in &syntax.items {
-        if let Item::Impl(item_impl) = item {
-            if let Some(trait_name) = impl_trait_name(item_impl) {
-                if INFRA_EFFECT_TRAITS.contains(&trait_name.as_str())
-                    && !in_aura_core
-                    && !infra_impl_allowed(&path)
-                    && !is_test_like
-                {
-                    violations.push(format_violation(
-                        file,
-                        item_impl.impl_token.span,
-                        format!("infrastructure effect impl `{trait_name}` must live in aura-effects or testkit"),
-                    ));
-                }
-
-                if APP_EFFECT_TRAITS.contains(&trait_name.as_str())
-                    && in_aura_effects
-                    && !is_test_like
-                {
-                    violations.push(format_violation(
-                        file,
-                        item_impl.impl_token.span,
-                        format!(
-                            "application effect impl `{trait_name}` must not live in aura-effects"
-                        ),
-                    ));
-                }
-            }
-        }
+    if !lint_support::is_cargo_test_target_path(file)
+        && !architecture_placeholders::test_attrs(&syntax.attrs)
+    {
+        syn::visit::Visit::visit_file(
+            &mut EffectDeclarations {
+                file,
+                path: &path,
+                violations: &mut violations,
+            },
+            syntax,
+        );
     }
 
     if in_aura_effects
@@ -783,7 +818,7 @@ fn scan_crypto_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
 
 fn scan_style(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     let path = display_path(file);
-    let mut violations = Vec::new();
+    let mut violations = architecture_placeholders::scan(file, syntax);
 
     if !is_test_like_path(&path) && !path.starts_with("crates/aura-macros/") {
         scan_line_patterns(
@@ -1579,8 +1614,9 @@ fn is_mock_handler_name(name: &str) -> bool {
 mod tests {
     use super::{
         is_frontend_portability_path, is_frontend_task_owner_adapter_path,
-        is_semantic_bridge_contract_path,
+        is_semantic_bridge_contract_path, scan_effect_boundaries,
     };
+    use std::path::Path;
 
     fn wire_violations(source: &str) -> Vec<String> {
         let syntax = syn::parse_file(source).unwrap();
@@ -1707,5 +1743,53 @@ mod tests {
         assert!(!is_semantic_bridge_contract_path(
             "crates/aura-web/src/task_owner.rs"
         ));
+    }
+    #[test]
+    fn effect_declarations_use_positive_lexical_test_scope() {
+        let source = r#"
+            #[cfg(test)] impl PhysicalTimeEffects for Fixture {}
+            #[cfg(all(test, feature = "fixture"))]
+            mod nested_fixture { impl PhysicalTimeEffects for Nested {} }
+            mod tests { impl PhysicalTimeEffects for NamedProduction {} }
+            #[cfg(any(test, feature = "runtime"))]
+            impl PhysicalTimeEffects for MixedProduction {}
+            mod nested_production { impl PhysicalTimeEffects for NestedProduction {} }
+            impl PhysicalTimeEffects for FollowingProduction {}
+            impl Owner {
+                #[cfg(test)] fn fixture() { impl PhysicalTimeEffects for MethodFixture {} }
+                #[cfg(any(test, feature = "runtime"))]
+                fn mixed() { impl PhysicalTimeEffects for MixedMethod {} }
+            }
+            trait OwnerTrait {
+                #[cfg(test)] fn fixture() { impl PhysicalTimeEffects for TraitMethodFixture {} }
+                fn production() { impl PhysicalTimeEffects for TraitMethodProduction {} }
+            }
+            fn nested() {
+                #[cfg(test)] { impl PhysicalTimeEffects for BlockFixture {} }
+                #[cfg(test)] let _fixture = { impl PhysicalTimeEffects for LocalFixture {} };
+                #[cfg(any(test, feature = "runtime"))]
+                { impl PhysicalTimeEffects for MixedBlock {} }
+            }
+        "#;
+        let syntax = syn::parse_file(source).unwrap();
+        let errors =
+            scan_effect_boundaries(Path::new("crates/aura-app/src/owner.rs"), source, &syntax);
+        assert_eq!(errors.len(), 7, "{errors:#?}");
+        assert!(errors
+            .iter()
+            .all(|error| error.contains("infrastructure effect impl")));
+    }
+
+    #[test]
+    fn nested_effect_traits_remain_production_checked() {
+        let source = r#"
+            #[cfg(test)] mod fixture { trait PhysicalTimeEffects {} }
+            mod nested { trait PhysicalTimeEffects {} }
+            #[cfg(any(test, feature = "runtime"))] trait PhysicalTimeEffects {}
+        "#;
+        let syntax = syn::parse_file(source).unwrap();
+        let errors =
+            scan_effect_boundaries(Path::new("crates/aura-app/src/owner.rs"), source, &syntax);
+        assert_eq!(errors.len(), 2, "{errors:#?}");
     }
 }

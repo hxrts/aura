@@ -28,15 +28,25 @@ pub(super) async fn execute_membership(
             channel,
         } => match channel {
             super::ChannelResolveOutcome::Existing(channel) => {
+                let context_id = match channel.context_id() {
+                    Some(context) => context.0,
+                    None => {
+                        let runtime = crate::workflows::runtime::require_runtime(app_core).await?;
+                        let budget = crate::workflows::runtime::workflow_timeout_budget(
+                            &runtime,
+                            std::time::Duration::from_secs(5),
+                        )
+                        .await?;
+                        messaging::require_authoritative_context_id_for_channel(
+                            app_core,
+                            channel.channel_id().0,
+                            &budget,
+                        )
+                        .await?
+                    }
+                };
                 let authoritative_channel =
-                    messaging::require_authoritative_context_id_for_channel(
-                        app_core,
-                        channel.channel_id().0,
-                    )
-                    .await
-                    .map(|context_id| {
-                        messaging::authoritative_channel_ref(channel.channel_id().0, context_id)
-                    })?;
+                    messaging::authoritative_channel_ref(channel.channel_id().0, context_id);
                 messaging::join_channel(app_core, authoritative_channel).await?;
                 Ok::<(), AuraError>(())
             }

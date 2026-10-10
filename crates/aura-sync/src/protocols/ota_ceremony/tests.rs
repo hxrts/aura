@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use async_trait::async_trait;
 use aura_core::crypto::SingleSignerPublicKeyPackage;

@@ -574,6 +574,10 @@ impl WorkflowHandoffOperationOwner {
         ))
     }
 
+    pub(crate) fn kind(&self) -> SemanticOperationKind {
+        self.0 .0.kind()
+    }
+
     pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
         self.0.harness_handle()
     }

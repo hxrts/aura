@@ -26,9 +26,9 @@ use crate::workflows::observed_snapshot::{observed_chat_snapshot, observed_conta
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
-    execute_with_runtime_timeout_budget, require_runtime, send_committed_fact,
-    timeout_runtime_call, warn_workflow_timeout, workflow_best_effort, workflow_retry_policy,
-    workflow_timeout_budget,
+    execute_with_runtime_timeout_budget, require_runtime, send_committed_fact_with_budget,
+    timeout_runtime_call_with_budget, warn_workflow_timeout, workflow_best_effort,
+    workflow_child_timeout_budget, workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -96,11 +96,13 @@ mod send;
 mod validation;
 
 #[cfg(test)]
+pub(in crate::workflows) use channel_refs::apply_authoritative_membership_projection;
+#[cfg(test)]
 use channel_refs::ensure_channel_visible_after_join;
 pub(in crate::workflows) use channel_refs::{
-    apply_authoritative_membership_projection, authoritative_join_member_count_if_joined,
-    authoritative_recipient_peers_for_channel, context_id_for_channel,
-    runtime_amp_duplicate_is_reconciled, runtime_channel_state_exists,
+    apply_authoritative_membership_projection_with_budget,
+    authoritative_join_member_count_if_joined, authoritative_recipient_peers_for_channel,
+    context_id_for_channel, runtime_amp_duplicate_is_reconciled, runtime_channel_state_exists,
     wait_for_runtime_channel_state,
 };
 pub use channel_refs::{
@@ -147,6 +149,8 @@ use readiness::{
 pub(in crate::workflows) use readiness::{
     ensure_runtime_note_to_self_channel, publish_authoritative_channel_membership_ready,
     refresh_authoritative_channel_membership_readiness,
+    refresh_authoritative_channel_membership_readiness_with_budget,
+    refresh_authoritative_channel_readiness_for_channel,
     refresh_authoritative_recipient_resolution_readiness,
 };
 #[cfg(test)]
@@ -166,23 +170,11 @@ async fn timeout_workflow_stage_with_deadline<T>(
     runtime: &Arc<dyn RuntimeBridge>,
     operation: &'static str,
     stage: &'static str,
-    deadline: Option<TimeoutBudget>,
+    deadline: &TimeoutBudget,
     future: impl Future<Output = Result<T, AuraError>>,
 ) -> Result<T, AuraError> {
     let requested = Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS);
-    let budget = match deadline.as_ref() {
-        Some(parent) => {
-            let now = runtime
-                .current_time_ms()
-                .await
-                .map_err(TimeoutBudgetError::time_source_failure)?;
-            parent.child_budget(
-                &aura_core::time::PhysicalTime::exact(now),
-                crate::workflows::runtime::scaled_workflow_duration(requested)?,
-            )?
-        }
-        None => workflow_timeout_budget(runtime, requested).await?,
-    };
+    let budget = workflow_child_timeout_budget(runtime, deadline, requested).await?;
     match execute_with_runtime_timeout_budget(runtime, &budget, || future).await {
         Ok(value) => Ok(value),
         Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
@@ -258,8 +250,9 @@ fn channel_id_from_input(channel: &str) -> Result<ChannelId, AuraError> {
 async fn resolve_chat_channel_id_from_state_or_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
+    parent: &TimeoutBudget,
 ) -> Result<ChannelId, AuraError> {
-    routing::resolve_chat_channel_id_from_state_or_input(app_core, channel_input).await
+    routing::resolve_chat_channel_id_from_state_or_input(app_core, channel_input, parent).await
 }
 
 async fn resolve_local_chat_channel_id_from_observed_state_or_input(
@@ -339,6 +332,7 @@ async fn enforce_home_moderation_for_sender(
     channel_id: ChannelId,
     sender_id: AuthorityId,
     timestamp_ms: u64,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
     validation::enforce_home_moderation_for_sender(
         app_core,
@@ -346,6 +340,7 @@ async fn enforce_home_moderation_for_sender(
         channel_id,
         sender_id,
         timestamp_ms,
+        parent,
     )
     .await
 }
@@ -355,8 +350,10 @@ async fn enforce_home_join_allowed(
     context_id: ContextId,
     channel_id: ChannelId,
     authority_id: AuthorityId,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
-    validation::enforce_home_join_allowed(app_core, context_id, channel_id, authority_id).await
+    validation::enforce_home_join_allowed(app_core, context_id, channel_id, authority_id, parent)
+        .await
 }
 
 async fn warm_invited_peer_connectivity(
@@ -364,77 +361,120 @@ async fn warm_invited_peer_connectivity(
     runtime: &Arc<dyn RuntimeBridge>,
     context_id: ContextId,
     receiver: AuthorityId,
-) -> bool {
+    parent: &TimeoutBudget,
+) -> Result<bool, AuraError> {
     let authority_context = authority_default_relational_context(receiver);
-    for _ in 0..8 {
-        let receiver_peer_id = receiver.to_string();
-        let _ = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "trigger_discovery",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.trigger_discovery(),
-        )
-        .await;
-        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
-        let _ = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "ensure_authority_peer_channel",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.ensure_peer_channel(authority_context, receiver),
-        )
-        .await;
-        let _ = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "ensure_peer_channel",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.ensure_peer_channel(context_id, receiver),
-        )
-        .await;
-        let _ = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "sync_with_peer",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.sync_with_peer(&receiver_peer_id),
-        )
-        .await;
-        let _ = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "process_ceremony_messages",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.process_ceremony_messages(),
-        )
-        .await;
-        let _ = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "trigger_sync",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.trigger_sync(),
-        )
-        .await;
-        converge_runtime(runtime).await;
-        let _ = crate::workflows::system::refresh_account(app_core).await;
-        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
-        let peer_online = timeout_runtime_call(
-            runtime,
-            "invite_authority_to_channel",
-            "is_peer_online",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.is_peer_online(receiver),
-        )
-        .await
-        .unwrap_or(false);
-        if peer_online {
-            return true;
-        }
+    let policy = workflow_retry_policy(8, Duration::from_millis(150), Duration::from_millis(750))?;
+    match execute_with_runtime_retry_budget(
+        runtime,
+        parent,
+        &policy,
+        |_attempt, child| async move {
+            let receiver_peer_id = receiver.to_string();
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "trigger_discovery",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.trigger_discovery(),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "warm_invited_peer_connectivity",
+                "refresh_discovered_peers",
+                MESSAGING_RUNTIME_QUERY_TIMEOUT,
+                || crate::workflows::network::refresh_discovered_peers(app_core),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "ensure_authority_peer_channel",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.ensure_peer_channel(authority_context, receiver),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "ensure_peer_channel",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.ensure_peer_channel(context_id, receiver),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "sync_with_peer",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.sync_with_peer(&receiver_peer_id),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "process_ceremony_messages",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.process_ceremony_messages(),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "trigger_sync",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.trigger_sync(),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "warm_invited_peer_connectivity",
+                "refresh_account",
+                MESSAGING_RUNTIME_QUERY_TIMEOUT,
+                || crate::workflows::system::refresh_account(app_core),
+            )
+            .await?;
+            let _ = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "warm_invited_peer_connectivity",
+                "refresh_discovered_peers",
+                MESSAGING_RUNTIME_QUERY_TIMEOUT,
+                || crate::workflows::network::refresh_discovered_peers(app_core),
+            )
+            .await?;
+            let peer_online = timeout_runtime_call_with_budget(
+                runtime,
+                &child,
+                "invite_authority_to_channel",
+                "is_peer_online",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.is_peer_online(receiver),
+            )
+            .await?;
+            if peer_online {
+                return Ok(true);
+            }
+            Err(AuraError::from(super::error::WorkflowError::Precondition(
+                "invited peer connectivity not yet warmed",
+            )))
+        },
+    )
+    .await
+    {
+        Ok(warmed) => Ok(warmed),
+        Err(RetryRunError::Timeout(error)) => Err(error.into()),
+        Err(RetryRunError::AttemptsExhausted { .. }) => Ok(false),
     }
-
-    false
 }
 
 /// Send a direct message to a contact
@@ -668,12 +708,26 @@ pub mod handoff {
                             authoritative_channel,
                         )
                         .await;
-                        let _ = crate::workflows::system::refresh_account(&app_core).await;
                     });
                 }
             }
         }
         outcome
+    }
+}
+
+#[cfg(test)]
+async fn test_messaging_budget(app_core: &Arc<RwLock<AppCore>>) -> TimeoutBudget {
+    let runtime = { app_core.read().await.runtime().cloned() };
+    match runtime {
+        Some(runtime) => workflow_timeout_budget(&runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+            .await
+            .expect("fixture's original runtime clock"),
+        None => TimeoutBudget::from_start_and_timeout(
+            &aura_core::time::PhysicalTime::exact(0),
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+        )
+        .expect("runtime-free fixture policy"),
     }
 }
 

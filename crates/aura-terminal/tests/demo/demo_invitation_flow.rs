@@ -578,7 +578,7 @@ async fn test_invalid_invitation_code_rejection_body() {
 ///
 /// This test ensures the guardian display bug is fixed:
 /// - Contacts imported from invitations have the same AuthorityId as SimulatedAgents
-/// - When signal_coordinator sets is_guardian=true, the lookup succeeds
+/// - Guardian-binding projection updates resolve the same contact identity
 #[test]
 fn test_guardian_authority_id_matching() {
     support::run_with_terminal_stack(test_guardian_authority_id_matching_body);
@@ -619,7 +619,7 @@ async fn test_guardian_authority_id_matching_body() {
     assert_eq!(
         alice_invitation_authority, alice_simulator_authority,
         "CRITICAL: Alice's invitation AuthorityId must match SimulatedAgent AuthorityId.\n\
-         This is required for signal_coordinator to find the contact when setting is_guardian=true.\n\
+         Guardian-binding projection updates must resolve the same contact identity.\n\
          Invitation: {alice_invitation_authority}\n\
          Simulator:  {alice_simulator_authority}"
     );
@@ -627,7 +627,7 @@ async fn test_guardian_authority_id_matching_body() {
     assert_eq!(
         carol_invitation_authority, carol_simulator_authority,
         "CRITICAL: Carol's invitation AuthorityId must match SimulatedAgent AuthorityId.\n\
-         This is required for signal_coordinator to find the contact when setting is_guardian=true.\n\
+         Guardian-binding projection updates must resolve the same contact identity.\n\
          Invitation: {carol_invitation_authority}\n\
          Simulator:  {carol_simulator_authority}"
     );

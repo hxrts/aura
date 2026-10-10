@@ -545,9 +545,17 @@ impl FullTestEnv {
             let imported = invitation::import_invitation_details(&self.app_core, code)
                 .await
                 .expect("import demo contact code");
-            invitation::accept_invitation(&self.app_core, imported)
-                .await
-                .expect("accept demo contact code");
+            invitation::accept_invitation_with_terminal_status(
+                &self.app_core,
+                invitation::InvitationAcceptanceRequest::RetainedHandle {
+                    invitation: Box::new(imported),
+                    operation_instance_id: None,
+                },
+            )
+            .await
+            .result
+            .map(|_| ())
+            .expect("accept demo contact code");
         }
         let ids = [peers.alice_authority(), peers.carol_authority()];
         let start = tokio::time::Instant::now();

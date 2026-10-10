@@ -169,6 +169,39 @@ Parity-critical shared semantic flows must use one explicit ownership category. 
 
 Terminal convenience modals stay in that observed-only category. Opening or editing a local TUI modal such as the contact invitation sheet may prefill or reshape local display state, but it must not become an alternate semantic ingress path or carry authoritative receiver ownership. Tests should prove the real semantic boundary remains the typed dispatch command and upstream `aura-app` workflow submission path rather than modal-local state.
 
+Contact-code acceptance uses one app-owned acceptance handoff for import,
+verification, Contact-kind validation, acceptance, and terminal publication.
+Native and browser submissions retain the original `invitation_accept_contact`
+operation and instance before the first awaited workflow step. Required child
+stages share its original deadline. Explicit invitation import remains a
+distinct operation; its receipt cannot stand in for Contact acceptance. Test
+the actual ingress receipt, pending import, invalid invitation kinds, failures,
+and cancellation through this handoff. Browser completion display metadata
+comes from the verified handle returned by the completed app workflow.
+The canonical `InvitationAcceptanceRequest` covers retained handles, submitted
+ids, standalone ids, and Contact codes. Submitted-id tests must reject canonical
+kind mismatches and required lookup faults before mutation while retaining the
+original instance. Initial clock faults must settle the retained-handle owner,
+and accepted signal history alone must not authorize acceptance. Guardian
+acknowledgment tests advance the selected virtual clock under the original
+endpoint and prove required provider faults stop retries.
+Contact acceptance settles from the actual accepted-invitation outcome before
+optional link propagation. Both frontends run the same bounded app followup
+after settlement; warmup completion cannot publish ContactLinkReady. Channel
+acceptance retains its strong channel/context reference through required AMP
+state and scoped membership/recipient readiness checks.
+
+Required convergence performs one shared sync and ceremony cycle in every
+frontend mode. The workflow must still obtain its authoritative readiness or
+terminal proof; a completed convergence cycle is not that proof. Nested calls,
+attempts, and backoff receive the original typed endpoint and retained runtime.
+A child may shorten that window but cannot renew it. Clock and timer failures
+remain typed failures, including when a domain error retains them as a source.
+Harness rounds and backoff belong to standalone maintenance; optional discovery
+belongs to a separate bounded postterminal followup. Exercise these boundaries
+with a frozen injected clock, explicit provider completion, and an exhausted
+original endpoint rather than elapsed sleeps.
+
 Clipboard copy affordances in TUI modals follow the same rule. Copy buttons and local clipboard helpers are convenience-only observed behavior, not shared semantic evidence. Headless CI and rustdoc builds must not rely on the host system clipboard being available. When a test or harness run needs to assert copied content, use `AURA_CLIPBOARD_MODE=file_only` together with `AURA_CLIPBOARD_FILE` and treat that capture file as diagnostic output rather than as proof of semantic success.
 
 If a migrated parity-critical flow needs both actor and move semantics, the split must stay explicit. The actor owns mutable lifecycle state. Move-owned handles and tokens define which caller may advance or transfer it. If that split is not explicit, the flow is not considered correct by construction.
@@ -2028,6 +2061,19 @@ endpoints after delayed registration, rollback, native failure custody and real
 native timer wake observations. A focused pass does not prove the broader
 runtime shutdown, command admission, browser execution or enrollment lifecycle.
 
+Initial-publication coverage executes the actual generic owner seam with a
+move-owned acknowledgment. It requires publication before any physical read,
+bounds hung writes, readbacks, postpublication reads and gate acquisition, and
+checks deadline-first arbitration, losing acknowledgment disposal, concrete
+provider and publication errors, rollback refusal and exact-endpoint expiry.
+This local race does not itself prove durable enrollment birth or settlement;
+the sealed enrollment owner supplies and validates that actual acknowledgment.
+
+The inventory also verifies provider identity and uncertainty preservation
+through the runtime facade.
+Required workflows retain the selected `PhysicalTimeEffects` provider directly;
+timestamp-only adapters cannot substitute for its actual witness.
+
 The fixed-endpoint inventory also discovers and executes the exact physical-
 deadline trait compile-fail doctest. It rejects receipt-generation coordinates;
 positive provider tests simultaneously require the physical coordinate API.
@@ -2200,3 +2246,15 @@ actual future destruction. Keep the native error/destruction, explicit timer
 progress/rollback, and genuine listener-startup regressions in ordinary test
 coverage. A timeout poll must not spend a listener's entire startup window before
 that listener can acknowledge readiness.
+
+Required app budget waits retain their typed physical endpoint through the runtime bridge and selected provider. Tests advance virtual time between operation polling and timer registration to prove the endpoint cannot move; relative-only providers must fail explicitly instead of choosing another clock.
+
+For plain timeout and app adapter tests, stall the selected provider's initial or
+success clock read and contend the original observation gate. Release the actual
+absolute endpoint, then assert that losing reads/operations were dropped, no
+pre-observation operation ran, and the original typed deadline or native cause
+survived. Child and retry observations use that same bounded core primitive.
+These observations prove local window handling, not domain completion or durable
+enrollment checkpoint acknowledgment. Exercise native transport separately from
+AMP/member/journal readiness; absence of sibling devices must not invalidate an
+already established cross-authority transport.

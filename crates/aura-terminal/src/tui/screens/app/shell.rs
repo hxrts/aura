@@ -6,14 +6,14 @@
 use self::dispatch::submit_ceremony_operation;
 use super::modal_overlays::{
     render_access_override_modal, render_account_setup_modal, render_add_device_modal,
-    render_capability_config_modal, render_channel_info_modal, render_chat_create_modal,
-    render_confirm_modal, render_contact_modal, render_contacts_code_modal,
-    render_contacts_create_modal, render_contacts_import_modal, render_device_enrollment_modal,
-    render_device_import_modal, render_device_select_modal, render_guardian_modal,
-    render_guardian_setup_modal, render_help_modal, render_home_create_modal,
-    render_mfa_setup_modal, render_moderator_assignment_modal, render_nickname_modal,
-    render_nickname_suggestion_modal, render_remove_device_modal, render_topic_modal,
-    GlobalModalProps,
+    render_authority_picker_modal, render_capability_config_modal, render_channel_info_modal,
+    render_chat_create_modal, render_confirm_modal, render_contact_modal,
+    render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
+    render_device_enrollment_modal, render_device_import_modal, render_device_select_modal,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
+    render_home_create_modal, render_mfa_setup_modal, render_moderator_assignment_modal,
+    render_nickname_modal, render_nickname_suggestion_modal, render_remove_device_modal,
+    render_topic_modal, GlobalModalProps,
 };
 
 use aura_app::ui_contract::{OperationId, SemanticOperationKind};
@@ -1474,6 +1474,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // === SETTINGS SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
             // Note: Threshold changes now use OpenGuardianSetup (see contacts screen modals)
+            #(render_authority_picker_modal(&settings_props))
             #(render_nickname_suggestion_modal(&settings_props))
             #(render_add_device_modal(&settings_props))
             #(render_device_import_modal(&settings_props))

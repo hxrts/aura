@@ -40,7 +40,7 @@ pub async fn execute_planned(
         PlannedCommand::General(plan) => execute_general(app_core, plan).await?,
     };
 
-    let completion_outcome = wait_for_consistency(app_core, &plan, requirement).await;
+    let completion_outcome = wait_for_consistency(app_core, &plan, requirement).await?;
 
     Ok(CommandExecutionResult {
         consistency_requirement: requirement,

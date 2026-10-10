@@ -134,6 +134,8 @@ Contract alignment:
 
 Deterministic replay and protocol simulation fidelity are the primary concerns. Integration tests verify each simulated protocol produces correct outcomes. Property tests verify consensus and choreography invariants under fault injection. ITF trace replay verifies conformance with Quint formal models.
 
+Choreography simulation flow receipts retain the actual caller-supplied context and receiving peer, with the selected test authority as sender. Deterministic tests distinguish two contexts and two peers from that sender. The simulation handler does not replace scope or recipient with a nil identifier or self-addressed receipt.
+
 ### Commands
 
 The AMP lifecycle target requires the checked-in 24-step

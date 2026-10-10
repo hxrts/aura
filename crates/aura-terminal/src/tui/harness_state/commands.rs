@@ -402,6 +402,9 @@ pub(crate) fn apply_harness_command(
         HarnessUiCommand::ImportInvitation { code } => Ok(vec![TuiCommand::Dispatch(
             DispatchCommand::ImportInvitation { code },
         )]),
+        HarnessUiCommand::AcceptContactInvitation { code } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::AcceptContactInvitation { code },
+        )]),
         HarnessUiCommand::InviteActorToChannel {
             authority_id,
             channel_id,

@@ -12,14 +12,16 @@ pub(super) enum SendMessageError {
     },
     #[error("Failed to resolve channel {channel}: {detail}")]
     ChannelResolution { channel: String, detail: String },
-    #[error("Missing authoritative context for channel {channel_id}")]
-    MissingAuthoritativeContext { channel_id: ChannelId },
     #[error("Recipient peers are not resolved for channel {channel_id}")]
     RecipientResolutionNotReady { channel_id: ChannelId },
     #[error("Peer channel establishment is not complete for channel {channel_id}")]
     DeliveryNotReady { channel_id: ChannelId },
     #[error("Authoritative readiness facts are unavailable: {detail}")]
-    ReadinessFactsUnavailable { detail: String },
+    ReadinessFactsUnavailable {
+        detail: String,
+        #[source]
+        source: AuraError,
+    },
     #[error(
         "AMP channel bootstrap is unavailable for channel {channel_id} in context {context_id}"
     )]
@@ -51,11 +53,6 @@ impl SendMessageError {
                 SemanticFailureCode::InternalError,
             )
             .with_detail(format!("channel={channel}; detail={detail}")),
-            Self::MissingAuthoritativeContext { channel_id } => SemanticOperationError::new(
-                SemanticFailureDomain::ChannelContext,
-                SemanticFailureCode::MissingAuthoritativeContext,
-            )
-            .with_detail(format!("channel_id={channel_id}")),
             Self::RecipientResolutionNotReady { channel_id } => SemanticOperationError::new(
                 SemanticFailureDomain::Delivery,
                 SemanticFailureCode::DeliveryReadinessNotReached,
@@ -68,9 +65,9 @@ impl SendMessageError {
                 SemanticFailureCode::PeerChannelNotEstablished,
             )
             .with_detail(format!("channel_id={channel_id}")),
-            Self::ReadinessFactsUnavailable { detail } => SemanticOperationError::new(
+            Self::ReadinessFactsUnavailable { detail, source } => SemanticOperationError::new(
                 SemanticFailureDomain::Internal,
-                SemanticFailureCode::InternalError,
+                send_transport_failure_code(source),
             )
             .with_detail(format!("semantic_readiness_unavailable: {detail}")),
             Self::ChannelBootstrapUnavailable {
@@ -193,12 +190,39 @@ async fn fail_send_message<T>(
     Err(error.into())
 }
 
+#[cfg(test)]
 pub(super) async fn mark_message_delivery_failed(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: ContextId,
     channel_id: ChannelId,
     message_id: &str,
     actor_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let runtime = { app_core.read().await.runtime().cloned() };
+    let budget = match runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
+    };
+    mark_message_delivery_failed_with_budget(
+        app_core,
+        context_id,
+        channel_id,
+        message_id,
+        actor_id,
+        budget.as_ref(),
+    )
+    .await
+}
+
+async fn mark_message_delivery_failed_with_budget(
+    app_core: &Arc<RwLock<AppCore>>,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    message_id: &str,
+    actor_id: AuthorityId,
+    parent: Option<&TimeoutBudget>,
 ) -> Result<(), AuraError> {
     let failed = ChatFact::message_delivery_updated_ms(
         context_id,
@@ -212,27 +236,20 @@ pub(super) async fn mark_message_delivery_failed(
     // update would be replaced on its next emission.
     if let Ok(runtime) = require_runtime(app_core).await {
         let generic = failed.to_generic();
-        let committed = timeout_runtime_call(
+        let committed = timeout_runtime_call_with_budget(
             &runtime,
+            parent.ok_or_else(|| {
+                AuraError::invalid("runtime delivery persistence requires original timeout budget")
+            })?,
             "mark_message_delivery_failed",
             "commit_relational_facts",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
             || runtime.commit_relational_facts(std::slice::from_ref(&generic)),
         )
-        .await;
-        match committed {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => tracing::warn!(
-                message_id,
-                error = %error,
-                "failed delivery status not committed; it may not survive the next chat emission"
-            ),
-            Err(error) => tracing::warn!(
-                message_id,
-                error = %error,
-                "failed delivery status commit timed out; it may not survive the next chat emission"
-            ),
-        }
+        .await?;
+        committed.map_err(|error| {
+            super::super::error::runtime_call("persist failed delivery status", error)
+        })?;
     }
     reduce_chat_fact_observed(app_core, &failed).await?;
 
@@ -311,56 +328,71 @@ async fn deliver_message_fact_remotely(
     channel: AuthoritativeChannelRef,
     sender_id: AuthorityId,
     fact: &RelationalFact,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
-    let context_id = channel.context_id();
-    let channel_id = channel.channel_id();
-    let recipients = authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
-    if recipients.is_empty() {
-        return Err(
-            super::super::error::WorkflowError::DeliveryRecipientsUnresolved {
-                channel: channel_id.to_string(),
-                attempts: 1,
+    timeout_runtime_call_with_budget(
+        runtime,
+        parent,
+        "deliver_message_fact_remotely",
+        "delivery_followup",
+        MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+        || async {
+            let context_id = channel.context_id();
+            let channel_id = channel.channel_id();
+            let recipients =
+                authoritative_recipient_peers_for_channel(runtime, channel, sender_id, parent)
+                    .await?;
+            if recipients.is_empty() {
+                return Err(
+                    super::super::error::WorkflowError::DeliveryRecipientsUnresolved {
+                        channel: channel_id.to_string(),
+                        attempts: 1,
+                    }
+                    .into(),
+                );
             }
-            .into(),
-        );
-    }
-    for peer in recipients.iter().copied() {
-        // Route warmup; a failure surfaces as the send's own error.
-        let _ = timeout_runtime_call(
-            runtime,
-            "deliver_message_fact_remotely",
-            "ensure_peer_channel",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.ensure_peer_channel(context_id, peer),
-        )
-        .await;
-    }
-    let mut failed_fanout = Vec::new();
-    for peer in recipients {
-        if let Err(error) = send_committed_fact(
-            runtime,
-            "deliver_message_fact_remotely",
-            peer,
-            context_id,
-            fact,
-        )
-        .await
-        {
-            failed_fanout.push((peer, error.to_string()));
-        }
-    }
-    if failed_fanout.is_empty() {
-        Ok(())
-    } else {
-        Err(
-            super::super::error::WorkflowError::DeliveryFanoutUnavailable {
-                peer: channel_id.to_string(),
-                attempts: 1,
-                recipients: failed_fanout,
+            for peer in recipients.iter().copied() {
+                // Route warmup; a failure surfaces as the send's own error.
+                let _ = timeout_runtime_call_with_budget(
+                    runtime,
+                    parent,
+                    "deliver_message_fact_remotely",
+                    "ensure_peer_channel",
+                    MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                    || runtime.ensure_peer_channel(context_id, peer),
+                )
+                .await?;
             }
-            .into(),
-        )
-    }
+            let mut failed_fanout = Vec::new();
+            for peer in recipients {
+                if let Err(error) = send_committed_fact_with_budget(
+                    runtime,
+                    parent,
+                    "deliver_message_fact_remotely",
+                    peer,
+                    context_id,
+                    fact,
+                )
+                .await
+                {
+                    failed_fanout.push((peer, error.to_string()));
+                }
+            }
+            if failed_fanout.is_empty() {
+                Ok(())
+            } else {
+                Err(
+                    super::super::error::WorkflowError::DeliveryFanoutUnavailable {
+                        peer: channel_id.to_string(),
+                        attempts: 1,
+                        recipients: failed_fanout,
+                    }
+                    .into(),
+                )
+            }
+        },
+    )
+    .await?
 }
 
 /// Record a remote delivery that failed or never started: typed per-recipient
@@ -374,6 +406,7 @@ async fn record_remote_delivery_failure(
     channel_id: ChannelId,
     message_id: &str,
     sender_id: AuthorityId,
+    parent: &TimeoutBudget,
 ) {
     tracing::warn!(
         error = %error,
@@ -384,8 +417,15 @@ async fn record_remote_delivery_failure(
     for failure in outbound_delivery_failures(error, context_id, channel_id, message_id) {
         runtime.record_outbound_message_delivery_failure(failure);
     }
-    if let Err(mark_error) =
-        mark_message_delivery_failed(app_core, context_id, channel_id, message_id, sender_id).await
+    if let Err(mark_error) = mark_message_delivery_failed_with_budget(
+        app_core,
+        context_id,
+        channel_id,
+        message_id,
+        sender_id,
+        Some(parent),
+    )
+    .await
     {
         tracing::warn!(
             delivery_error = %error,
@@ -640,6 +680,13 @@ async fn send_message_ref_owned(
         .await?;
 
     let backend = messaging_backend(app_core).await;
+    let owner_runtime = { app_core.read().await.runtime().cloned() };
+    let owner_budget = match owner_runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
+    };
     let mut post_terminal_delivery: Option<PostTerminalDelivery> = None;
     let (channel_id, channel_label) = match &channel {
         ChannelRef::Id(id) => (*id, id.to_string()),
@@ -647,7 +694,16 @@ async fn send_message_ref_owned(
             let resolution = if backend == MessagingBackend::LocalOnly {
                 resolve_local_chat_channel_id_from_observed_state_or_input(app_core, name).await
             } else {
-                resolve_chat_channel_id_from_state_or_input(app_core, name).await
+                resolve_chat_channel_id_from_state_or_input(
+                    app_core,
+                    name,
+                    owner_budget.as_ref().ok_or_else(|| {
+                        AuraError::invalid(
+                            "runtime channel lookup requires original timeout budget",
+                        )
+                    })?,
+                )
+                .await
             };
             match resolution {
                 Ok(channel_id) => (channel_id, name.clone()),
@@ -668,6 +724,9 @@ async fn send_message_ref_owned(
     let mut epoch_hint: Option<u32> = None;
     let (sender_id, message_id) = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
+        let parent = owner_budget
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("runtime send requires original timeout budget"))?;
         let sender_id = runtime.authority_id();
         let is_note_to_self = channel_id == note_to_self_channel_id(sender_id)
             || matches!(&channel, ChannelRef::Name(name) if is_note_to_self_channel_name(name));
@@ -686,8 +745,9 @@ async fn send_message_ref_owned(
                 None,
             )
             .to_generic();
-            timeout_runtime_call(
+            timeout_runtime_call_with_budget(
                 &runtime,
+                parent,
                 "send_message_ref_owned",
                 "commit_relational_facts",
                 MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -699,20 +759,28 @@ async fn send_message_ref_owned(
             (sender_id, message_id)
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
-            let authoritative_channel =
-                match require_authoritative_context_id_for_channel(app_core, channel_id)
-                    .await
-                    .map(|context_id| authoritative_channel_ref(channel_id, context_id))
-                {
-                    Ok(channel) => channel,
-                    Err(_) => {
-                        return fail_send_message(
-                            owner,
-                            SendMessageError::MissingAuthoritativeContext { channel_id },
-                        )
-                        .await;
-                    }
-                };
+            let authoritative_channel = match require_authoritative_channel_ref(
+                app_core,
+                &runtime,
+                channel_id,
+                "send message context",
+                parent,
+            )
+            .await
+            {
+                Ok(channel) => channel,
+                Err(error) => {
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::Transport {
+                            channel_id,
+                            detail: error.to_string(),
+                            source: error,
+                        },
+                    )
+                    .await;
+                }
+            };
             let context_id = authoritative_channel.context_id();
             owner
                 .publish_phase(SemanticOperationPhase::AuthoritativeContextReady)
@@ -729,8 +797,12 @@ async fn send_message_ref_owned(
                         SendMessageError::RecipientResolutionNotReady { .. }
                         | SendMessageError::DeliveryNotReady { .. },
                     ) => {
-                        if let Err(error) =
-                            refresh_authoritative_recipient_resolution_readiness(app_core).await
+                        if let Err(error) = refresh_authoritative_channel_readiness_for_channel(
+                            app_core,
+                            authoritative_channel,
+                            parent,
+                        )
+                        .await
                         {
                             return fail_send_message(
                                 owner,
@@ -738,6 +810,7 @@ async fn send_message_ref_owned(
                                     detail: format!(
                                         "recipient resolution refresh failed for {channel_id}: {error}"
                                     ),
+                                    source: error,
                                 },
                             )
                             .await;
@@ -746,6 +819,7 @@ async fn send_message_ref_owned(
                             app_core,
                             &runtime,
                             authoritative_channel,
+                            parent,
                         )
                         .await
                         {
@@ -755,20 +829,22 @@ async fn send_message_ref_owned(
                                     detail: format!(
                                         "delivery readiness refresh failed for {channel_id}: {error}"
                                     ),
+                                    source: error,
                                 },
                             )
                             .await;
                         }
-                        if !warm_channel_connectivity(app_core, &runtime, authoritative_channel)
-                            .await
+                        if !warm_channel_connectivity(
+                            app_core,
+                            &runtime,
+                            authoritative_channel,
+                            parent,
+                        )
+                        .await?
                         {
                             return fail_send_message(
                                 owner,
-                                SendMessageError::ReadinessFactsUnavailable {
-                                    detail: format!(
-                                        "channel connectivity warmup failed for {channel_id}"
-                                    ),
-                                },
+                                SendMessageError::DeliveryNotReady { channel_id },
                             )
                             .await;
                         }
@@ -797,6 +873,7 @@ async fn send_message_ref_owned(
                 channel_id,
                 sender_id,
                 timestamp_ms,
+                parent,
             )
             .await
             {
@@ -814,6 +891,7 @@ async fn send_message_ref_owned(
                 &runtime,
                 authoritative_channel,
                 sender_id,
+                parent,
             )
             .await
             {
@@ -832,6 +910,7 @@ async fn send_message_ref_owned(
                             detail: format!(
                                 "recipient resolution failed for {channel_id}: {error}"
                             ),
+                            source: error,
                         },
                     )
                     .await;
@@ -845,8 +924,9 @@ async fn send_message_ref_owned(
                 plaintext: content.as_bytes().to_vec(),
                 reply_to: None,
             };
-            let initial = match timeout_runtime_call(
+            let initial = match timeout_runtime_call_with_budget(
                 &runtime,
+                parent,
                 "send_message_ref_owned",
                 "amp_send_message",
                 MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -892,37 +972,46 @@ async fn send_message_ref_owned(
                         AMP_SEND_RETRY_BACKOFF_MS * AMP_SEND_RETRY_ATTEMPTS as u64,
                     ),
                 )?;
-                match execute_with_runtime_retry_budget(&runtime, &retry_policy, |attempt| {
-                    let runtime = Arc::clone(&runtime);
-                    let send_params = send_params.clone();
-                    async move {
-                        if attempt > 0 {
-                            converge_runtime(&runtime).await;
-                        }
-                        match timeout_runtime_call(
-                            &runtime,
-                            "send_message_ref_owned",
-                            "amp_send_message_retry",
-                            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-                            || runtime.amp_send_message(send_params),
-                        )
-                        .await
-                        .map_err(AmpSendRetryError::Transport)?
-                        {
-                            Ok(cipher) => Ok(cipher),
-                            Err(error)
-                                if is_amp_channel_state_unavailable(
-                                    &error, context_id, channel_id,
-                                ) =>
-                            {
-                                Err(AmpSendRetryError::ChannelStateUnavailable(error))
+                match execute_with_runtime_retry_budget(
+                    &runtime,
+                    parent,
+                    &retry_policy,
+                    |attempt, child| {
+                        let runtime = Arc::clone(&runtime);
+                        let send_params = send_params.clone();
+                        async move {
+                            if attempt > 0 {
+                                converge_runtime(&runtime, &child)
+                                    .await
+                                    .map_err(AmpSendRetryError::Transport)?;
                             }
-                            Err(error) => Err(AmpSendRetryError::Transport(
-                                super::super::error::runtime_call("AMP send retry", error).into(),
-                            )),
+                            match timeout_runtime_call_with_budget(
+                                &runtime,
+                                &child,
+                                "send_message_ref_owned",
+                                "amp_send_message_retry",
+                                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                                || runtime.amp_send_message(send_params),
+                            )
+                            .await
+                            .map_err(AmpSendRetryError::Transport)?
+                            {
+                                Ok(cipher) => Ok(cipher),
+                                Err(error)
+                                    if is_amp_channel_state_unavailable(
+                                        &error, context_id, channel_id,
+                                    ) =>
+                                {
+                                    Err(AmpSendRetryError::ChannelStateUnavailable(error))
+                                }
+                                Err(error) => Err(AmpSendRetryError::Transport(
+                                    super::super::error::runtime_call("AMP send retry", error)
+                                        .into(),
+                                )),
+                            }
                         }
-                    }
-                })
+                    },
+                )
                 .await
                 {
                     Ok(cipher) => cipher_result = Ok(cipher),
@@ -1001,8 +1090,9 @@ async fn send_message_ref_owned(
             };
 
             {
-                timeout_runtime_call(
+                timeout_runtime_call_with_budget(
                     &runtime,
+                    parent,
                     "send_message_ref_owned",
                     "commit_relational_facts_with_options",
                     MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -1078,15 +1168,39 @@ async fn send_message_ref_owned(
         followup_message_id,
     )) = post_terminal_delivery
     {
+        let delivery_budget = match workflow_timeout_budget(
+            &runtime,
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+        )
+        .await
+        {
+            Ok(budget) => budget,
+            Err(error) => {
+                let error = AuraError::from(error);
+                for failure in
+                    outbound_delivery_failures(&error, context_id, channel_id, &followup_message_id)
+                {
+                    runtime.record_outbound_message_delivery_failure(failure);
+                }
+                tracing::warn!(error = %error, "postterminal delivery owner could not establish its clock window");
+                return Ok(message_id);
+            }
+        };
         let spawner = runtime.task_spawner();
         let delivery = {
             let app_core = app_core.clone();
             let runtime = runtime.clone();
             let followup_message_id = followup_message_id.clone();
+            let delivery_budget = delivery_budget.clone();
             async move {
-                if let Err(error) =
-                    deliver_message_fact_remotely(&runtime, authoritative_channel, sender_id, &fact)
-                        .await
+                if let Err(error) = deliver_message_fact_remotely(
+                    &runtime,
+                    authoritative_channel,
+                    sender_id,
+                    &fact,
+                    &delivery_budget,
+                )
+                .await
                 {
                     record_remote_delivery_failure(
                         &app_core,
@@ -1096,6 +1210,7 @@ async fn send_message_ref_owned(
                         channel_id,
                         &followup_message_id,
                         sender_id,
+                        &delivery_budget,
                     )
                     .await;
                 }
@@ -1115,6 +1230,7 @@ async fn send_message_ref_owned(
                 channel_id,
                 &followup_message_id,
                 sender_id,
+                &delivery_budget,
             )
             .await;
         }
@@ -1164,6 +1280,8 @@ pub async fn start_direct_chat_with_authority(
 
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
+        let budget = workflow_timeout_budget(&runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?;
+        let parent = &budget;
         let context_id = pair_dm_context_id(runtime.authority_id(), contact_authority);
         let channel_name = if contact_name.trim().is_empty() {
             format!("dm-{}", &contact_id[..8.min(contact_id.len())])
@@ -1172,8 +1290,9 @@ pub async fn start_direct_chat_with_authority(
         };
         let channel_id = pair_dm_channel_id(runtime.authority_id(), contact_authority);
 
-        let create_result = timeout_runtime_call(
+        let create_result = timeout_runtime_call_with_budget(
             &runtime,
+            parent,
             "start_direct_chat_with_authority",
             "amp_create_channel",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -1188,8 +1307,10 @@ pub async fn start_direct_chat_with_authority(
         )
         .await?;
         if let Err(error) = create_result {
-            if !runtime_amp_duplicate_is_reconciled(&runtime, &error, context_id, channel_id)
-                .await?
+            if !runtime_amp_duplicate_is_reconciled(
+                &runtime, &error, context_id, channel_id, parent,
+            )
+            .await?
             {
                 return Err(
                     super::super::error::runtime_call("create direct channel", error).into(),
@@ -1197,8 +1318,9 @@ pub async fn start_direct_chat_with_authority(
             }
         }
 
-        timeout_runtime_call(
+        timeout_runtime_call_with_budget(
             &runtime,
+            parent,
             "start_direct_chat_with_authority",
             "amp_join_channel_self",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -1214,8 +1336,9 @@ pub async fn start_direct_chat_with_authority(
         .map_err(|error| super::super::error::runtime_call("join direct channel", error))?
         .map_err(|error| super::super::error::runtime_call("join direct channel", error))?;
 
-        timeout_runtime_call(
+        timeout_runtime_call_with_budget(
             &runtime,
+            parent,
             "start_direct_chat_with_authority",
             "amp_join_channel_contact",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -1244,8 +1367,9 @@ pub async fn start_direct_chat_with_authority(
         );
         let fact = chat_fact.to_generic();
 
-        timeout_runtime_call(
+        timeout_runtime_call_with_budget(
             &runtime,
+            parent,
             "start_direct_chat_with_authority",
             "commit_relational_facts",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -1258,8 +1382,9 @@ pub async fn start_direct_chat_with_authority(
         reduce_chat_fact_observed(app_core, &chat_fact).await?;
         // Latency only; the contact receives the creation fact through
         // relational-context sync if this send is lost.
-        let _ = send_committed_fact(
+        let _ = send_committed_fact_with_budget(
             &runtime,
+            parent,
             "start_direct_chat_with_authority",
             contact_authority,
             context_id,
@@ -1269,8 +1394,9 @@ pub async fn start_direct_chat_with_authority(
         // Direct chats need epoch-0 key material on both sides; deliver it to the
         // contact as a channel invitation, which the receiving runtime installs
         // without a manual accept (it recognises the pair DM channel).
-        let bootstrap = timeout_runtime_call(
+        let bootstrap = timeout_runtime_call_with_budget(
             &runtime,
+            parent,
             "start_direct_chat_with_authority",
             "amp_create_channel_bootstrap",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
@@ -1293,7 +1419,7 @@ pub async fn start_direct_chat_with_authority(
             Some(channel_name.clone()),
             bootstrap,
             None,
-            None,
+            Some(parent.clone()),
             None,
             Some("Direct message".to_string()),
             None,
@@ -1303,6 +1429,7 @@ pub async fn start_direct_chat_with_authority(
             app_core,
             &runtime,
             AuthoritativeChannelRef::new(channel_id, context_id),
+            parent,
         )
         .await?;
         publish_authoritative_channel_membership_ready(
@@ -1312,12 +1439,17 @@ pub async fn start_direct_chat_with_authority(
             2,
         )
         .await?;
-        refresh_authoritative_channel_membership_readiness(app_core).await?;
-        refresh_authoritative_recipient_resolution_readiness(app_core).await?;
+        refresh_authoritative_channel_readiness_for_channel(
+            app_core,
+            AuthoritativeChannelRef::new(channel_id, context_id),
+            parent,
+        )
+        .await?;
         refresh_authoritative_delivery_readiness_for_channel(
             app_core,
             &runtime,
             AuthoritativeChannelRef::new(channel_id, context_id),
+            parent,
         )
         .await?;
 
