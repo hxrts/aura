@@ -70,7 +70,7 @@ fi
 # (tool_repl and aura are build consumers), and the build waits its turn.
 first_build="$(grep -n 'build-budget.sh --lane lan-ship' "$ship" | head -1 | cut -d: -f1)"
 local_stop="$(grep -n 'bash "$here/drv.sh" stop' "$ship" | head -1 | cut -d: -f1)"
-remote_stop="$(grep -n 'scripts/harness/lan/drv.sh stop' "$ship" | head -1 | cut -d: -f1)"
+remote_stop="$(grep -n 'remote_stop_cmd" <' "$ship" | head -1 | cut -d: -f1)"
 [[ -n "$local_stop" && -n "$remote_stop" && -n "$first_build" ]] || {
   echo 'ship.sh must stop the local and remote harness' >&2; exit 1;
 }
@@ -103,3 +103,6 @@ grep -q '^inherits = "release"' "$test_root/lan-profile"
 grep -q '^lto = false' "$test_root/lan-profile"
 
 echo 'LAN ship checks passed'
+
+bash "$repo_root/scripts/dev/test-lan-ship-bootstrap.sh"
+bash "$repo_root/scripts/dev/test-lan-ship-bootstrap.sh" relative

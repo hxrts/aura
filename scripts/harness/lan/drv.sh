@@ -24,6 +24,14 @@ command -v jq >/dev/null 2>&1 || {
   echo 'LAN driver requires jq in the pinned Nix environment; no state changed' >&2
   exit 127
 }
+case "${1:-}" in
+  start|stop|finish|finalize)
+    command -v flock >/dev/null 2>&1 || {
+      echo 'LAN driver requires portable flock in the pinned Nix environment; no state changed' >&2
+      exit 127
+    }
+    ;;
+esac
 D=$AURA_E2E_RUN_DIR
 FIFO=$D/repl.in OUT=$D/repl.out PIDF=$D/repl.pid SEQ=$D/repl.seq
 IDENTITY=$D/repl.identity.json
@@ -41,11 +49,7 @@ case "${1:-}" in
     lifecycle_lock="$D.lifecycle.lock"
     [[ ! -L "$lifecycle_lock" ]] || { echo 'LAN lifecycle lock is a symlink; refusing mutation' >&2; exit 1; }
     exec 9>>"$lifecycle_lock"
-    case "$(uname -s)" in
-      Darwin) /usr/bin/lockf -t 0 9 ;;
-      Linux) flock -n 9 ;;
-      *) echo 'unsupported LAN lifecycle lock platform; refusing mutation' >&2; exit 1 ;;
-    esac || { echo 'another LAN lifecycle owner holds the lock; refusing mutation' >&2; exit 1; }
+    flock -n 9 || { echo 'another LAN lifecycle owner holds the lock; refusing mutation' >&2; exit 1; }
     ;;
 esac
 

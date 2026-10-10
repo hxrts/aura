@@ -15,7 +15,8 @@
 // The pure consensus core uses BTreeSet for deterministic, reproducible state.
 // This matches Quint's Set semantics (deterministic iteration order) and ensures
 // consensus execution is fully reproducible across replicas and test runs.
-// HashMap is only used for local counting operations within single functions.
+// Global instance indexes retain HashMap; per-instance decisions and counting
+// use allocation-free borrowed iterators.
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU16;
 
@@ -246,43 +247,40 @@ impl ConsensusState {
     ///
     /// Quint: hasProposal(proposals, witness)
     pub fn has_proposal(&self, witness: &AuthorityId) -> bool {
-        self.proposals.iter().any(|p| p.witness == *witness)
+        super::decision::has_proposal(
+            self.proposals.iter().map(|p| (p.witness, p.result_id)),
+            *witness,
+        )
     }
 
     /// Count proposals for a specific result ID.
     ///
     /// Quint: countProposalsForResult(proposals, rid)
     pub fn count_proposals_for_result(&self, result_id: &Hash32) -> usize {
-        self.proposals
-            .iter()
-            .filter(|p| p.result_id == *result_id)
-            .count()
+        super::decision::count_result(
+            self.proposals.iter().map(|p| (p.witness, p.result_id)),
+            *result_id,
+        )
     }
 
     /// Check if threshold is met for any result.
     ///
     /// Quint: part of canCommit predicate
     pub fn threshold_met(&self) -> bool {
-        let mut result_counts: HashMap<&Hash32, usize> = HashMap::new();
-        for proposal in &self.proposals {
-            *result_counts.entry(&proposal.result_id).or_insert(0) += 1;
-        }
-        result_counts
-            .values()
-            .any(|&count| count >= self.threshold.as_usize())
+        super::decision::threshold_met(
+            self.proposals.iter().map(|p| (p.witness, p.result_id)),
+            self.threshold.as_usize(),
+        )
     }
 
-    /// Get the result ID with the most proposals.
+    /// Get a threshold-qualified result with the most proposals.
+    /// Equal counts retain the first proposal occurrence; this deterministic
+    /// refinement selects an admissible winner without clock or hash-map order.
     pub fn majority_result(&self) -> Option<Hash32> {
-        let mut result_counts: HashMap<&Hash32, usize> = HashMap::new();
-        for proposal in &self.proposals {
-            *result_counts.entry(&proposal.result_id).or_insert(0) += 1;
-        }
-        result_counts
-            .into_iter()
-            .filter(|&(_, count)| count >= self.threshold.as_usize())
-            .max_by_key(|&(_, count)| count)
-            .map(|(rid, _)| *rid)
+        super::decision::majority_result(
+            self.proposals.iter().map(|p| (p.witness, p.result_id)),
+            self.threshold.as_usize(),
+        )
     }
 
     /// Check if consensus is in a terminal state.

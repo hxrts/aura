@@ -2234,3 +2234,18 @@ Both frontend observation surfaces use version 2 and require `UiSnapshot.home_mo
 If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
 
 Completed owned runtime refreshes schedule semantic publication even when rendered view values compare equal: mode-only canonical changes must wake pushed snapshot observers. Display signals remain updated only when their values change, and the existing snapshot sink deduplicates identical observations.
+
+LAN lifecycle locking uses the pinned cross-platform `flock` tool in both the
+normal and CI Nix shells. The driver takes a nonblocking lock on its persistent
+lifecycle-file descriptor; process death releases custody, and long-lived
+children close that descriptor. A missing tool refuses lifecycle mutation before
+creating run state. Platform-provided `lockf` is not a dependency.
+
+`ship.sh` enters the candidate's pinned shell first. It copies and roots the
+portable lock tool's Nix closure on the remote host before stopping an older
+checkout, then streams the exact clean candidate driver into that host's existing
+pinned environment with its real script path. Existing remote configuration,
+helper paths and exact process/run identity checks remain in force. The remote
+does not build a binary. Run the retention lifecycle and ship fixtures to verify
+contention, dead-holder release, descriptor noninheritance, missing-tool refusal
+and old-checkout bootstrap before another LAN confirmation batch.

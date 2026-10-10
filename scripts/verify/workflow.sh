@@ -322,120 +322,16 @@ cmd_quint_types() {
 # ============================================================================
 
 cmd_kani() {
-    local PACKAGE="hxrts-aura-protocol"
-    local UNWIND="10"
-    local LOG_DIR="logs/kani"
-    local LOG_FILE="${LOG_DIR}/kani-suite-$(date +%Y%m%d-%H%M%S).log"
-
-    local HARNESSES=(
-        "apply_share_preserves_invariants"
-        "trigger_fallback_preserves_invariants"
-        "fail_consensus_preserves_invariants"
-        "apply_share_monotonic_proposals"
-        "apply_share_monotonic_equivocators"
-        "apply_share_no_panic"
-        "trigger_fallback_no_panic"
-        "fail_consensus_no_panic"
-        "committed_state_is_terminal"
-        "failed_state_is_terminal"
-        "phase_advances_forward"
-        "commit_matches_threshold_result"
-        "threshold_met_matches_reference"
-        "has_proposal_matches_reference"
-    )
-
-    mkdir -p "$LOG_DIR"
-
-    local PASSED=0 FAILED=0 TOTAL=${#HARNESSES[@]}
-    local FAILED_HARNESSES=()
-
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  Kani Bounded Model Checking Suite${NC}"
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "  Package:     ${PACKAGE}"
-    echo -e "  Unwind:      ${UNWIND}"
-    echo -e "  Harnesses:   ${TOTAL}"
-    echo -e "  Log file:    ${LOG_FILE}"
-    echo ""
-    echo -e "${YELLOW}► Starting suite...${NC}"
-    echo ""
-
-    {
-        echo "Kani Suite Run: $(date)"
-        echo "Package: ${PACKAGE}"
-        echo "Unwind bound: ${UNWIND}"
-        echo "Harnesses: ${TOTAL}"
-        echo ""
-        echo "════════════════════════════════════════════════════════════════"
-        echo ""
-    } >> "$LOG_FILE"
-
-    for harness in "${HARNESSES[@]}"; do
-        echo -ne "  ${YELLOW}○${NC} ${harness}... "
-
-        {
-            echo "────────────────────────────────────────────────────────────────"
-            echo "Harness: ${harness}"
-            echo "Started: $(date)"
-            echo ""
-        } >> "$LOG_FILE"
-
-        START_TIME=$(date +%s)
-        if nix develop .#nightly --command cargo kani \
-            --package "$PACKAGE" \
-            --harness "$harness" \
-            --default-unwind "$UNWIND" \
-            >> "$LOG_FILE" 2>&1; then
-            END_TIME=$(date +%s)
-            DURATION=$((END_TIME - START_TIME))
-            echo -e "\r  ${GREEN}✓${NC} ${harness} ${GREEN}[PASS]${NC} (${DURATION}s)"
-            ((PASSED++))
-            { echo ""; echo "Result: PASS"; echo "Duration: ${DURATION}s"; echo ""; } >> "$LOG_FILE"
-        else
-            END_TIME=$(date +%s)
-            DURATION=$((END_TIME - START_TIME))
-            echo -e "\r  ${RED}✗${NC} ${harness} ${RED}[FAIL]${NC} (${DURATION}s)"
-            ((FAILED++))
-            FAILED_HARNESSES+=("$harness")
-            { echo ""; echo "Result: FAIL"; echo "Duration: ${DURATION}s"; echo ""; } >> "$LOG_FILE"
-        fi
-    done
-
-    echo ""
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  Suite Complete${NC}"
-    echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
-    echo ""
-    echo -e "  Passed:  ${GREEN}${PASSED}${NC} / ${TOTAL}"
-    echo -e "  Failed:  ${RED}${FAILED}${NC} / ${TOTAL}"
-    echo ""
-
-    {
-        echo "════════════════════════════════════════════════════════════════"
-        echo "SUITE SUMMARY"
-        echo "Passed: ${PASSED} / ${TOTAL}"
-        echo "Failed: ${FAILED} / ${TOTAL}"
-        if [ ${#FAILED_HARNESSES[@]} -gt 0 ]; then
-            echo "Failed harnesses:"
-            for h in "${FAILED_HARNESSES[@]}"; do echo "  - ${h}"; done
-        fi
-        echo "Completed: $(date)"
-    } >> "$LOG_FILE"
-
-    if [ "$FAILED" -eq 0 ]; then
-        echo -e "  ${GREEN}SUCCESS${NC} - All harnesses verified"
-        echo -e "  Full log: ${LOG_FILE}"
-        echo ""
-        exit 0
-    else
-        echo -e "  ${RED}FAILURE${NC} - Some harnesses failed verification"
-        echo -e "  Failed harnesses:"
-        for h in "${FAILED_HARNESSES[@]}"; do echo -e "    - ${h}"; done
-        echo -e "  See ${LOG_FILE} for details"
-        echo ""
-        exit 1
+    local log_dir="$PROJECT_ROOT/logs/kani"
+    local log_file="$log_dir/kani-suite-$(date +%Y%m%d-%H%M%S).log"
+    mkdir -p "$log_dir" || return $?
+    cd "$PROJECT_ROOT" || return $?
+    just ci-kani 2>&1 | tee "$log_file"
+    local -a statuses=("${PIPESTATUS[@]}")
+    if [[ "${statuses[0]}" != 0 ]]; then
+        return "${statuses[0]}"
     fi
+    return "${statuses[1]}"
 }
 
 # ============================================================================

@@ -47,6 +47,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Missing pinned tool must refuse before creating the run or lock inode.
+mkdir -p "$test_root/missing-tool-bin"
+ln -s "$(command -v dirname)" "$test_root/missing-tool-bin/dirname"
+ln -s "$(command -v jq)" "$test_root/missing-tool-bin/jq"
+fixture_bash="$(command -v bash)"
+for command in start stop finish finalize; do
+  if PATH="$test_root/missing-tool-bin" "$fixture_bash" "$driver" "$command" unused > "$test_root/missing-tool-out" 2>&1; then
+    echo "LAN driver admitted $command without pinned flock" >&2; exit 1
+  else
+    [[ "$?" -eq 127 ]]
+  fi
+  grep -q 'requires portable flock' "$test_root/missing-tool-out"
+  [[ ! -e "$AURA_E2E_RUN_DIR" && ! -e "$AURA_E2E_RUN_DIR.lifecycle.lock" ]]
+done
 bash "$driver" start "$test_root/configs/lan.toml" >/dev/null
 read -r ready <&9
 [[ "$ready" == ready ]]
@@ -56,7 +70,7 @@ kill -0 "$(cat "$AURA_E2E_RUN_DIR/repl.pid")"
 # independent contender can acquire it immediately while that service runs.
 (
   exec 8>>"$AURA_E2E_RUN_DIR.lifecycle.lock"
-  case "$(uname -s)" in Darwin) /usr/bin/lockf -t 0 8 ;; Linux) flock -n 8 ;; *) exit 1 ;; esac
+  flock -n 8
 )
 runs="$test_root/.tmp/e2e/run/host-a/artifacts/runs"
 manifest="$runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json"
@@ -155,7 +169,7 @@ bash "$driver" stop >/dev/null
 export PATH="$original_path"
 mv "$test_root/preserved-run" "$AURA_E2E_RUN_DIR"
 
-# Hold an actual driver inside its owned process inspection, after its lockf
+# Hold an actual driver inside its owned process inspection, after its flock
 # helper has exited. A competing driver must fail closed for every lifecycle
 # command. The fixture inspection child closes FD9 so forced owner death tests
 # the driver's inherited open-description custody directly.
