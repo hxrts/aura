@@ -565,11 +565,15 @@ async fn accept_pending_channel_invitation(
                         if home_id.parse::<ChannelId>().ok() == Some(channel_id)
                 )
             }) {
-                let _accepted = invitation_workflow::accept_invitation_by_str(
+                let _accepted = invitation_workflow::accept_invitation_with_terminal_status(
                     app,
-                    invitation.invitation_id.as_str(),
+                    invitation_workflow::InvitationAcceptanceRequest::UnsubmittedId {
+                        invitation_id: (invitation.invitation_id.as_str()).to_owned(),
+                    },
                 )
-                .await?;
+                .await
+                .result
+                .map(|invitation| invitation.info().clone())?;
                 return Ok(true);
             }
 
@@ -627,7 +631,16 @@ async fn setup_lan_group_channel_pair(
     let invite_code =
         invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
     let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, imported).await?;
+    invitation_workflow::accept_invitation_with_terminal_status(
+        &app_b,
+        invitation_workflow::InvitationAcceptanceRequest::RetainedHandle {
+            invitation: Box::new(imported),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result
+    .map(|_| ())?;
 
     let effects_a = agent_a.runtime().effects();
     timeout(DESCRIPTOR_CACHE_TIMEOUT, async {
@@ -675,15 +688,33 @@ async fn setup_lan_group_channel_pair(
     })
     .await?;
     let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
+    let channel_a_query_budget = aura_app::ui::workflows::runtime::workflow_timeout_budget(
+        &agent_a.clone().as_runtime_bridge(),
+        Duration::from_secs(5),
+    )
+    .await?;
+    let channel_b_query_budget = aura_app::ui::workflows::runtime::workflow_timeout_budget(
+        &agent_b.clone().as_runtime_bridge(),
+        Duration::from_secs(5),
+    )
+    .await?;
     let channel_a = messaging_workflow::authoritative_channel_ref(
         channel_id,
-        messaging_workflow::require_authoritative_context_id_for_channel(&app_a, channel_id)
-            .await?,
+        messaging_workflow::require_authoritative_context_id_for_channel(
+            &app_a,
+            channel_id,
+            &channel_a_query_budget,
+        )
+        .await?,
     );
     let channel_b = messaging_workflow::authoritative_channel_ref(
         channel_id,
-        messaging_workflow::require_authoritative_context_id_for_channel(&app_b, channel_id)
-            .await?,
+        messaging_workflow::require_authoritative_context_id_for_channel(
+            &app_b,
+            channel_id,
+            &channel_b_query_budget,
+        )
+        .await?,
     );
     messaging_workflow::join_channel(&app_a, channel_a).await?;
     messaging_workflow::join_channel(&app_b, channel_b).await?;
@@ -903,7 +934,16 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
 
     // Bob imports and accepts the invite code.
     let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, imported).await?;
+    invitation_workflow::accept_invitation_with_terminal_status(
+        &app_b,
+        invitation_workflow::InvitationAcceptanceRequest::RetainedHandle {
+            invitation: Box::new(imported),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result
+    .map(|_| ())?;
 
     // Wait for Alice to receive Bob's acceptance and cache Bob's descriptor.
     let effects_a = agent_a.runtime().effects();
@@ -1075,7 +1115,16 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
         invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
 
     let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, imported).await?;
+    invitation_workflow::accept_invitation_with_terminal_status(
+        &app_b,
+        invitation_workflow::InvitationAcceptanceRequest::RetainedHandle {
+            invitation: Box::new(imported),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result
+    .map(|_| ())?;
 
     // Intentionally do not wait for sender-side descriptor cache.
     // The workflow should still bootstrap DM channel delivery robustly.

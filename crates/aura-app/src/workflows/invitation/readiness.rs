@@ -19,6 +19,42 @@ pub(super) async fn refresh_authoritative_invitation_readiness_for_mode(
     harness_mode: bool,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
+    let budget = workflow_timeout_budget(
+        &runtime,
+        Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
+    )
+    .await?;
+    refresh_authoritative_invitation_readiness_with_runtime_budget(
+        app_core,
+        &runtime,
+        &budget,
+        harness_mode,
+    )
+    .await
+}
+
+pub(super) async fn refresh_authoritative_invitation_readiness_with_budget(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    budget: &TimeoutBudget,
+) -> Result<(), AuraError> {
+    refresh_authoritative_invitation_readiness_with_runtime_budget(
+        app_core,
+        runtime,
+        budget,
+        crate::harness_mode_enabled(),
+    )
+    .await
+}
+
+// This refresh observes required state under the caller's endpoint and publishes
+// through the shared readiness capability; it owns no semantic operation terminal.
+async fn refresh_authoritative_invitation_readiness_with_runtime_budget(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    budget: &TimeoutBudget,
+    harness_mode: bool,
+) -> Result<(), AuraError> {
     #[cfg(feature = "signals")]
     let signal_has_pending =
         super::accept::invitations_signal_has_pending_home_or_channel_invitation(
@@ -32,7 +68,7 @@ pub(super) async fn refresh_authoritative_invitation_readiness_for_mode(
     } else if harness_mode && harness_invitation_accept_operation_in_flight(app_core).await {
         false
     } else {
-        authoritative_pending_home_or_channel_invitation(&runtime)
+        super::accept::authoritative_pending_home_or_channel_invitation(runtime, budget)
             .await?
             .is_some()
     };

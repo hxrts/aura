@@ -511,6 +511,25 @@ pub(super) fn execute_harness_followup_command(
             );
             Ok(Some(handle))
         }
+        TuiCommand::Dispatch(DispatchCommand::AcceptContactInvitation { code }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                return Err("Invitation callbacks are unavailable".to_string());
+            };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = submit_workflow_handoff_operation(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::invitation_accept_contact(),
+                SemanticOperationKind::AcceptContactInvitation,
+            );
+            let handle = operation.harness_handle();
+            state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
+            (cb.invitations.on_accept_contact_code)(code, operation);
+            Ok(Some(handle))
+        }
         TuiCommand::Dispatch(DispatchCommand::ImportInvitation { code }) => {
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Invitation callbacks are unavailable".to_string());
@@ -1229,6 +1248,124 @@ mod tests {
     use aura_app::ui_contract::SemanticOperationKind;
     use parking_lot::RwLock;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn contact_code_ingress_returns_original_acceptance_receipt_and_app_failure() {
+        use crate::handlers::tui::TuiMode;
+        use crate::tui::context::{InitializedAppCore, IoContext};
+        use crate::tui::harness_state::{apply_harness_command, TuiSemanticInputs};
+        use crate::tui::hooks::AppCoreContext;
+        use crate::tui::updates::ui_update_channel;
+        use aura_app::ui::signals::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
+        use aura_app::ui::types::StateSnapshot;
+        use aura_app::ui_contract::{
+            AuthoritativeSemanticFact, OperationId, SemanticOperationPhase,
+        };
+        let core = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::new(aura_app::AppConfig::default()).unwrap(),
+        ));
+        let initialized = InitializedAppCore::new(core.clone()).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let io = Arc::new(
+            IoContext::builder()
+                .with_app_core(initialized.clone())
+                .with_base_path(dir.path().to_path_buf())
+                .with_device_id("acceptance-ingress-fixture".into())
+                .with_mode(TuiMode::Production)
+                .build()
+                .unwrap(),
+        );
+        let app = AppCoreContext::new(initialized, io.clone());
+        let (updates, _received_updates) = ui_update_channel();
+        let callbacks = Some(crate::tui::callbacks::CallbackRegistry::new(
+            io.clone(),
+            updates.clone(),
+        ));
+        let mut facts = core
+            .read()
+            .await
+            .subscribe_attached(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+            .await
+            .unwrap();
+        let mut state = crate::tui::state::TuiState::new();
+        let snapshot = StateSnapshot::default();
+        let commands = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::AcceptContactInvitation {
+                code: "contact-code".into(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+                bootstrap_candidates: &[],
+            },
+        )
+        .unwrap();
+        assert_eq!(commands.len(), 1);
+        let handle = super::execute_harness_followup_command(
+            &mut state,
+            commands.into_iter().next().unwrap(),
+            super::HarnessDispatchContext {
+                callbacks: &callbacks,
+                app_ctx: &app,
+                update_tx: &Some(updates),
+                shared_invitations: &Arc::new(RwLock::new(Vec::new())),
+                shared_pending_requests: &Arc::new(RwLock::new(Vec::new())),
+                shared_contacts: &crate::tui::screens::app::subscriptions::SharedContacts::new(),
+                shared_channels: &Arc::new(RwLock::new(Vec::new())),
+                shared_devices: &crate::tui::screens::app::subscriptions::SharedDevices::new(),
+                shared_messages: &Arc::new(RwLock::new(Vec::new())),
+                last_exported_devices: &Arc::new(RwLock::new(Vec::new())),
+                selected_channel: &Arc::new(RwLock::new(None)),
+            },
+        )
+        .unwrap()
+        .expect("actual ingress must return its acceptance receipt");
+        assert_eq!(
+            handle.operation_id(),
+            &OperationId::invitation_accept_contact()
+        );
+        assert_eq!(
+            aura_app::scenario_contract::IntentAction::AcceptContactInvitation {
+                code: "contact-code".into()
+            }
+            .contract()
+            .submission,
+            aura_app::scenario_contract::SubmissionContract::OperationHandle {
+                operation_id: handle.operation_id().clone(),
+                value: aura_app::scenario_contract::SubmissionValueContract::None,
+            },
+        );
+        loop {
+            let publication = facts.recv().await.unwrap();
+            if let Some((causality, status)) = publication.iter().find_map(|fact| match fact {
+                AuthoritativeSemanticFact::OperationStatus {
+                    operation_id,
+                    instance_id,
+                    causality,
+                    status,
+                } if operation_id == handle.operation_id()
+                    && instance_id.as_ref() == Some(handle.instance_id())
+                    && status.phase == SemanticOperationPhase::Failed =>
+                {
+                    Some((causality, status))
+                }
+                _ => None,
+            }) {
+                assert_eq!(status.kind, SemanticOperationKind::AcceptContactInvitation);
+                assert!(
+                    causality.is_some(),
+                    "terminal result must come from the app owner"
+                );
+                break;
+            }
+        }
+        io.tasks().shutdown();
+        io.tasks().wait_drained().await;
+    }
 
     #[test]
     fn guardian_acceptance_uses_its_own_tracked_kind() {

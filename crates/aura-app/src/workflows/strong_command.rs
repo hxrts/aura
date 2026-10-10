@@ -663,7 +663,9 @@ mod tests {
             },
         });
 
-        let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
+        let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced)
+            .await
+            .expect("consistency query should retain its documented outcome");
         assert_eq!(
             state,
             CommandCompletionOutcome::Degraded {
@@ -720,8 +722,9 @@ mod tests {
             },
         });
 
-        let state =
-            wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated).await;
+        let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated)
+            .await
+            .expect("consistency query should retain its documented outcome");
         assert_eq!(
             state,
             CommandCompletionOutcome::Satisfied(ConsistencyWitness::Replicated)
@@ -747,8 +750,9 @@ mod tests {
             },
         });
 
-        let state =
-            wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated).await;
+        let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated)
+            .await
+            .expect("consistency query should retain its documented outcome");
         assert_eq!(
             state,
             CommandCompletionOutcome::Satisfied(ConsistencyWitness::Replicated)
@@ -757,7 +761,7 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
-    async fn consistency_barrier_treats_missing_home_scope_as_timed_out_degraded_state() {
+    async fn consistency_barrier_preserves_unregistered_projection_failure() {
         let authority = AuthorityId::new_from_entropy([90u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
@@ -782,13 +786,20 @@ mod tests {
             },
         });
 
-        let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
-        assert_eq!(
-            state,
-            CommandCompletionOutcome::Degraded {
-                requirement: ConsistencyRequirement::Enforced,
-                reason: ConsistencyDegradedReason::OperationTimedOut,
-            }
+        let error = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced)
+            .await
+            .expect_err("missing required signal must preserve its registration failure");
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut reactive_failure = false;
+        while let Some(error) = source {
+            reactive_failure |= error
+                .downcast_ref::<aura_core::effects::reactive::ReactiveError>()
+                .is_some();
+            source = error.source();
+        }
+        assert!(
+            reactive_failure,
+            "required projection failure lost its concrete source"
         );
     }
 

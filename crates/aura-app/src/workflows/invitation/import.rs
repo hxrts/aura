@@ -34,21 +34,38 @@ pub async fn import_invitation_details(
     code: &str,
 ) -> Result<InvitationHandle, AuraError> {
     let runtime = require_runtime(app_core).await?;
-
-    timeout_runtime_call(
-        &runtime,
-        "import_invitation_details",
-        "import_invitation",
-        INVITATION_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.import_invitation(code),
-    )
-    .await
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("import invitation", e)))?
-    .map(InvitationHandle::new)
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("import invitation", e)))
+    let budget = workflow_timeout_budget(&runtime, INVITATION_RUNTIME_OPERATION_TIMEOUT).await?;
+    import_invitation_details_with_budget(&runtime, code, &budget).await
 }
 
-fn invitation_import_failure(error: &AuraError) -> crate::ui_contract::SemanticOperationError {
+/// Import within the original caller-owned window without starting a new one.
+pub(super) async fn import_invitation_details_with_budget(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    code: &str,
+    budget: &TimeoutBudget,
+) -> Result<InvitationHandle, AuraError> {
+    let child = crate::workflows::runtime::workflow_child_timeout_budget(
+        runtime,
+        budget,
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+    )
+    .await?;
+    execute_with_runtime_timeout_budget(runtime, &child, || runtime.import_invitation(code))
+        .await
+        .map(InvitationHandle::new)
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(error) => error.into(),
+            TimeoutRunError::Operation(error) => super::super::error::runtime_call(
+                "import invitation",
+                crate::runtime_bridge::RuntimeBridgeError::from(error),
+            )
+            .into(),
+        })
+}
+
+pub(super) fn invitation_import_failure(
+    error: &AuraError,
+) -> crate::ui_contract::SemanticOperationError {
     use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
     let code = super::super::runtime_error_classification::native_runtime_failure_code(error)
         .unwrap_or(match error {

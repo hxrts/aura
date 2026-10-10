@@ -1,3 +1,4 @@
+#![cfg(test)]
 #![allow(clippy::disallowed_methods)] // Test code uses monotonic clock for coordination
 
 use super::*;

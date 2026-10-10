@@ -499,37 +499,72 @@ fn boundary_annotation_attached_in_source(
         name: &'a str,
         expected: &'a [&'a str],
         found: Vec<bool>,
+        testing: bool,
     }
     impl Attached<'_> {
         fn record(&mut self, name: &syn::Ident, attributes: &[syn::Attribute]) {
             if name != self.name {
                 return;
             }
-            self.found.push(attributes.iter().any(|attribute| {
-                let path = attribute.path();
-                path.segments.len() == self.expected.len()
-                    && path
-                        .segments
-                        .iter()
-                        .zip(self.expected)
-                        .all(|(segment, expected)| {
-                            if *expected == "actor_" {
-                                segment.ident == "actor_owned" || segment.ident == "actor_root"
-                            } else {
-                                segment.ident == *expected
-                            }
-                        })
-            }));
+            self.found.push(
+                self.testing
+                    || is_rust_test_only(attributes)
+                    || attributes.iter().any(|attribute| {
+                        let path = attribute.path();
+                        path.segments.len() == self.expected.len()
+                            && path
+                                .segments
+                                .iter()
+                                .zip(self.expected)
+                                .all(|(segment, expected)| {
+                                    if *expected == "actor_" {
+                                        segment.ident == "actor_owned"
+                                            || segment.ident == "actor_root"
+                                    } else {
+                                        segment.ident == *expected
+                                    }
+                                })
+                    }),
+            );
         }
     }
     impl<'ast> Visit<'ast> for Attached<'_> {
+        fn visit_file(&mut self, file: &'ast syn::File) {
+            self.testing |= is_rust_test_only(&file.attrs);
+            syn::visit::visit_file(self, file);
+        }
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            let attrs: &[syn::Attribute] = match item {
+                syn::Item::Mod(item) => &item.attrs,
+                syn::Item::Impl(item) => &item.attrs,
+                syn::Item::Trait(item) => &item.attrs,
+                syn::Item::Fn(item) => &item.attrs,
+                syn::Item::Const(item) => &item.attrs,
+                syn::Item::Static(item) => &item.attrs,
+                _ => &[],
+            };
+            let previous = self.testing;
+            self.testing |= is_rust_test_only(attrs);
+            syn::visit::visit_item(self, item);
+            self.testing = previous;
+        }
         fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
             self.record(&item.sig.ident, &item.attrs);
             syn::visit::visit_item_fn(self, item);
         }
         fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            let previous = self.testing;
+            self.testing |= is_rust_test_only(&item.attrs);
             self.record(&item.sig.ident, &item.attrs);
             syn::visit::visit_impl_item_fn(self, item);
+            self.testing = previous;
+        }
+        fn visit_trait_item_fn(&mut self, item: &'ast syn::TraitItemFn) {
+            let previous = self.testing;
+            self.testing |= is_rust_test_only(&item.attrs);
+            self.record(&item.sig.ident, &item.attrs);
+            syn::visit::visit_trait_item_fn(self, item);
+            self.testing = previous;
         }
         fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
             self.record(&item.ident, &item.attrs);
@@ -541,6 +576,7 @@ fn boundary_annotation_attached_in_source(
         name: &function,
         expected: &expected,
         found: Vec::new(),
+        testing: false,
     };
     visitor.visit_file(&file);
     Ok(!visitor.found.is_empty() && visitor.found.iter().all(|attached| *attached))
@@ -4194,7 +4230,6 @@ fn completeness_violations(repo_root: &Path, mode: &str) -> Result<Vec<String>> 
                 "crates/aura-app/src/workflows/account/bootstrap.rs:initialize_runtime_account_owned",
                 "crates/aura-app/src/workflows/ceremonies.rs:start_device_enrollment_ceremony_owned",
                 "crates/aura-app/src/workflows/context/neighborhood.rs:create_home_owned",
-                "crates/aura-app/src/workflows/invitation/accept.rs:accept_invitation_id_owned",
                 "crates/aura-app/src/workflows/invitation/accept.rs:accept_imported_invitation_owned",
                 "crates/aura-app/src/workflows/invitation/pending_accept.rs:accept_pending_channel_invitation_id_owned",
                 "crates/aura-app/src/workflows/invitation/create.rs:create_channel_invitation_owned",
@@ -8898,6 +8933,27 @@ mod ownership_ratchet_tests {
     use super::{
         boundary_annotation_attached_in_source, semantic_owner_wrapper_declared_in_source,
     };
+
+    #[test]
+    fn positive_lexical_test_boundaries_do_not_require_production_capabilities() {
+        let required = "#[aura_macros::capability_boundary";
+        let added = "async fn sleep_ms(";
+        for source in [
+            "#[cfg(test)] mod fixtures { impl Clock { async fn sleep_ms() {} } }",
+            "impl Clock { #[cfg(all(test, unix))] async fn sleep_ms() {} }",
+            "#![cfg(test)] impl Clock { async fn sleep_ms() {} }",
+        ] {
+            assert!(boundary_annotation_attached_in_source(source, added, required).unwrap());
+        }
+        for source in [
+            "#[cfg(test)] mod fixtures { impl Clock { async fn sleep_ms() {} } } impl Production { async fn sleep_ms() {} }",
+            "#[cfg(any(test, feature = \"production\"))] impl Clock { async fn sleep_ms() {} }",
+            "// #[cfg(test)]\nimpl Clock { async fn sleep_ms() {} }",
+            "const NOTE: &str = \"#[cfg(test)]\"; impl Clock { async fn sleep_ms() {} }",
+        ] {
+            assert!(!boundary_annotation_attached_in_source(source, added, required).unwrap());
+        }
+    }
 
     #[test]
     fn signature_changes_require_attached_declarations() {

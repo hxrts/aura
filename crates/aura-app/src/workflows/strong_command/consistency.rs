@@ -67,9 +67,11 @@ pub(super) async fn wait_for_consistency(
     app_core: &Arc<RwLock<AppCore>>,
     plan: &PlannedCommand,
     requirement: ConsistencyRequirement,
-) -> CommandCompletionOutcome {
+) -> Result<CommandCompletionOutcome, AuraError> {
     if requirement == ConsistencyRequirement::Accepted {
-        return CommandCompletionOutcome::Satisfied(ConsistencyWitness::Accepted);
+        return Ok(CommandCompletionOutcome::Satisfied(
+            ConsistencyWitness::Accepted,
+        ));
     }
 
     let satisfied = CommandCompletionOutcome::Satisfied(match requirement {
@@ -82,35 +84,49 @@ pub(super) async fn wait_for_consistency(
         reason,
     };
 
+    let Ok(runtime) = require_runtime(app_core).await else {
+        // A local projection may already prove this observation requirement.
+        // Runtime absence only degrades an unsatisfied requirement.
+        return Ok(if consistency_invariant_holds(app_core, plan).await {
+            satisfied
+        } else {
+            degraded(ConsistencyDegradedReason::RuntimeUnavailable)
+        });
+    };
+    let budget = workflow_timeout_budget(&runtime, CONSISTENCY_WAIT).await?;
     // Subscribe before the first check so no projection update between the
     // check and the wait can be missed.
-    let updates = projection_updates(app_core, plan).await;
+    let updates = projection_updates(app_core, plan).await?;
     if consistency_invariant_holds(app_core, plan).await {
-        return satisfied;
+        return Ok(satisfied);
     }
-    let Ok(runtime) = require_runtime(app_core).await else {
-        #[cfg(feature = "instrumented")]
-        tracing::warn!("consistency wait: no runtime available, returning degraded outcome");
-        return degraded(ConsistencyDegradedReason::RuntimeUnavailable);
-    };
     // Without the projection signal the invariant can never be observed.
     let Some(mut updates) = updates else {
-        return degraded(ConsistencyDegradedReason::OperationTimedOut);
-    };
-    let Ok(budget) = workflow_timeout_budget(&runtime, CONSISTENCY_WAIT).await else {
-        return degraded(ConsistencyDegradedReason::OperationTimedOut);
+        return Ok(degraded(ConsistencyDegradedReason::OperationTimedOut));
     };
     // Pull peer state once; the reducer then publishes the projection the
     // invariant reads, and every publication re-checks it.
-    converge_runtime(&runtime).await;
+    converge_runtime(&runtime, &budget).await?;
     loop {
         if consistency_invariant_holds(app_core, plan).await {
-            return satisfied;
+            return Ok(satisfied);
         }
         let update =
             execute_with_runtime_timeout_budget(&runtime, &budget, || updates.next()).await;
-        if update.is_err() {
-            return degraded(ConsistencyDegradedReason::OperationTimedOut);
+        match update {
+            Ok(()) => {}
+            Err(aura_core::TimeoutRunError::Timeout(
+                aura_core::TimeoutBudgetError::DeadlineExceeded { .. },
+            )) => {
+                return Ok(degraded(ConsistencyDegradedReason::OperationTimedOut));
+            }
+            Err(aura_core::TimeoutRunError::Timeout(error)) => return Err(error.into()),
+            Err(aura_core::TimeoutRunError::Operation(error)) => {
+                return Err(AuraError::from(super::super::error::runtime_call(
+                    "observe command consistency",
+                    error,
+                )))
+            }
         }
     }
 }
@@ -140,19 +156,26 @@ impl ProjectionUpdates {
 async fn projection_updates(
     app_core: &Arc<RwLock<AppCore>>,
     plan: &PlannedCommand,
-) -> Option<ProjectionUpdates> {
-    use aura_core::effects::reactive::ReactiveEffects;
+) -> Result<Option<ProjectionUpdates>, AuraError> {
     let core = app_core.read().await;
     match plan {
         PlannedCommand::Membership(_) => core
-            .subscribe(&*CHAT_SIGNAL)
-            .ok()
-            .map(ProjectionUpdates::Chat),
+            .subscribe_attached(&*CHAT_SIGNAL)
+            .await
+            .map(|stream| Some(ProjectionUpdates::Chat(stream)))
+            .map_err(|error| {
+                super::super::error::runtime_call("attach command consistency projection", error)
+                    .into()
+            }),
         PlannedCommand::Moderation(_) | PlannedCommand::Moderator(_) => core
-            .subscribe(&*HOMES_SIGNAL)
-            .ok()
-            .map(ProjectionUpdates::Homes),
-        PlannedCommand::General(_) => None,
+            .subscribe_attached(&*HOMES_SIGNAL)
+            .await
+            .map(|stream| Some(ProjectionUpdates::Homes(stream)))
+            .map_err(|error| {
+                super::super::error::runtime_call("attach command consistency projection", error)
+                    .into()
+            }),
+        PlannedCommand::General(_) => Ok(None),
     }
 }
 

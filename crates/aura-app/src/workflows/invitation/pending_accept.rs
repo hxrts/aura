@@ -86,21 +86,6 @@ impl PendingChannelInvitationSelection {
         }
     }
 
-    #[cfg(feature = "signals")]
-    fn signal_is_accepted_history(&self) -> bool {
-        matches!(
-            self,
-            Self::Signal(invitation)
-                if invitation.status == crate::views::invitations::InvitationStatus::Accepted
-        )
-    }
-
-    #[cfg(not(feature = "signals"))]
-    fn signal_is_accepted_history(&self) -> bool {
-        let _ = self;
-        false
-    }
-
     fn is_channel(&self) -> bool {
         match self {
             Self::Runtime(invitation) => matches!(
@@ -231,12 +216,30 @@ fn select_accepted_home_or_channel_invitation_from_signal(
         })
 }
 
+async fn pending_channel_acceptance_budget(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) -> Result<TimeoutBudget, AuraError> {
+    // Preserve the existing lookup, runtime acceptance, and reconciliation
+    // policies under one endpoint, created before selecting the invitation.
+    workflow_timeout_budget(
+        runtime,
+        Duration::from_millis(
+            INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS
+                + CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS
+                + CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS,
+        ),
+    )
+    .await
+    .map_err(AuraError::from)
+}
+
 async fn pending_home_or_channel_invitation_for_accept(
     app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    budget: &TimeoutBudget,
 ) -> Result<Option<PendingChannelInvitationSelection>, AuraError> {
-    let runtime = require_runtime(app_core).await?;
     if let Some(selection) =
-        select_pending_home_or_channel_invitation_once(app_core, &runtime).await?
+        select_pending_home_or_channel_invitation_once(app_core, runtime, budget).await?
     {
         return Ok(Some(selection));
     }
@@ -248,24 +251,23 @@ async fn pending_home_or_channel_invitation_for_accept(
     )?;
     let app_core = app_core.clone();
     let runtime_for_retry = runtime.clone();
-    match execute_with_runtime_retry_budget(&runtime, &policy, |_attempt| {
+    match execute_with_runtime_retry_budget(runtime, budget, &policy, |_attempt, attempt_budget| {
         let app_core = app_core.clone();
         let runtime = runtime_for_retry.clone();
         async move {
             if let Some(selection) =
-                select_pending_home_or_channel_invitation_once(&app_core, &runtime).await?
+                select_pending_home_or_channel_invitation_once(&app_core, &runtime, &attempt_budget)
+                    .await?
             {
                 return Ok(selection);
             }
-            refresh_authoritative_invitation_readiness(&app_core).await?;
-            // Account-wide settings/recovery enrichment is secondary to this
-            // invitation's required readiness and authoritative lookup.
-            let mut best_effort = workflow_best_effort();
-            let _ = best_effort
-                .capture(crate::workflows::system::refresh_account(&app_core))
-                .await;
-            let _ = best_effort.finish();
-            converge_runtime(&runtime).await;
+            super::readiness::refresh_authoritative_invitation_readiness_with_budget(
+                &app_core,
+                &runtime,
+                &attempt_budget,
+            )
+            .await?;
+            converge_runtime(&runtime, &attempt_budget).await?;
             Err(AuraError::Internal {
                 message: PendingInvitationNotMaterialized.to_string(),
                 source: Some(Arc::new(PendingInvitationNotMaterialized)),
@@ -297,10 +299,11 @@ async fn pending_home_or_channel_invitation_for_accept(
 async fn select_pending_home_or_channel_invitation_once(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    budget: &TimeoutBudget,
 ) -> Result<Option<PendingChannelInvitationSelection>, AuraError> {
     select_pending_home_or_channel_invitation_from_query(
         app_core,
-        authoritative_pending_home_or_channel_invitation_for_accept(app_core, runtime),
+        authoritative_pending_home_or_channel_invitation_for_accept(app_core, runtime, budget),
     )
     .await
 }
@@ -356,7 +359,11 @@ async fn accept_pending_channel_invitation_id_owned(
         &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
     >,
 ) -> Result<InvitationId, AuraError> {
-    let Some(invitation) = pending_home_or_channel_invitation_for_accept(app_core).await? else {
+    let runtime = require_runtime(app_core).await?;
+    let budget = pending_channel_acceptance_budget(&runtime).await?;
+    let Some(invitation) =
+        pending_home_or_channel_invitation_for_accept(app_core, &runtime, &budget).await?
+    else {
         return fail_pending_invitation_accept_owned(
             owner,
             AcceptInvitationError::PendingInvitationNotFound,
@@ -366,11 +373,21 @@ async fn accept_pending_channel_invitation_id_owned(
 
     let invitation_id = invitation.invitation_id();
     if let Some(invitation_info) = invitation.runtime_invitation() {
-        super::accept::accept_imported_invitation_owned(app_core, invitation_info, owner, None)
-            .await?;
-    } else if invitation.signal_is_accepted_history() {
+        super::accept::accept_imported_invitation_owned(
+            app_core,
+            &runtime,
+            invitation_info,
+            owner,
+            &budget,
+            None,
+        )
+        .await?;
     } else {
-        super::accept::accept_invitation_id_owned(app_core, &invitation_id, owner, None).await?;
+        return fail_pending_invitation_accept_owned(
+            owner,
+            AcceptInvitationError::PendingInvitationNotFound,
+        )
+        .await;
     }
     owner
         .publish_success_with(issue_pending_invitation_consumed_proof(
@@ -438,6 +455,7 @@ pub async fn accept_pending_channel_invitation_with_terminal_status(
 async fn pending_channel_binding_witness(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &PendingChannelInvitationSelection,
+    budget: &TimeoutBudget,
 ) -> Result<crate::ui_contract::ChannelBindingWitness, AuraError> {
     let channel_id = invitation.channel_id()?;
     let authoritative_context = match invitation.context_id() {
@@ -446,13 +464,13 @@ async fn pending_channel_binding_witness(
             #[cfg(feature = "signals")]
             {
                 crate::workflows::messaging::resolve_authoritative_context_id_for_channel(
-                    app_core, channel_id,
+                    app_core, channel_id, budget,
                 )
-                .await
+                .await?
             }
             #[cfg(not(feature = "signals"))]
             {
-                let _ = app_core;
+                let _ = (app_core, budget);
                 None
             }
         }
@@ -471,26 +489,34 @@ pub(in crate::workflows) async fn run_post_channel_accept_followups(
     context_hint: Option<ContextId>,
     channel_name_hint: Option<String>,
 ) {
-    let authoritative_context = match context_hint {
-        Some(context_id) => Some(context_id),
-        None => {
-            crate::workflows::messaging::resolve_authoritative_context_id_for_channel(
-                app_core, channel_id,
-            )
-            .await
-        }
-    };
-    let Some(context_id) = authoritative_context else {
-        return;
-    };
-
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
-        .capture(crate::workflows::messaging::post_terminal_join_followups(
-            app_core,
-            crate::workflows::messaging::authoritative_channel_ref(channel_id, context_id),
-            channel_name_hint.as_deref(),
-        ))
+        .capture(async {
+            let authoritative_context = match context_hint {
+                Some(context_id) => Some(context_id),
+                None => {
+                    // This optional lookup ends before the independent postterminal
+                    // delivery owner starts. Neither can change primary acceptance.
+                    let runtime = require_runtime(app_core).await?;
+                    let budget =
+                        workflow_timeout_budget(&runtime, INVITATION_RUNTIME_QUERY_TIMEOUT).await?;
+                    crate::workflows::messaging::resolve_authoritative_context_id_for_channel(
+                        app_core, channel_id, &budget,
+                    )
+                    .await?
+                }
+            };
+            let Some(context_id) = authoritative_context else {
+                return Ok(());
+            };
+
+            crate::workflows::messaging::post_terminal_join_followups(
+                app_core,
+                crate::workflows::messaging::authoritative_channel_ref(channel_id, context_id),
+                channel_name_hint.as_deref(),
+            )
+            .await
+        })
         .await;
     let _ = best_effort.finish();
 }
@@ -510,8 +536,10 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
         publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
             .await?;
 
+        let runtime = require_runtime(app_core).await?;
+        let budget = pending_channel_acceptance_budget(&runtime).await?;
         let Some(pending_invitation) =
-            pending_home_or_channel_invitation_for_accept(app_core).await?
+            pending_home_or_channel_invitation_for_accept(app_core, &runtime, &budget).await?
         else {
             return fail_pending_invitation_accept_owned(
                 &owner,
@@ -532,29 +560,34 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
         if let Some(invitation_info) = pending_invitation.runtime_invitation() {
             super::accept::accept_imported_invitation_owned(
                 app_core,
+                &runtime,
                 invitation_info,
                 &owner,
+                &budget,
                 None,
             )
             .await?;
-        } else if pending_invitation.signal_is_accepted_history() {
         } else {
-            super::accept::accept_invitation_id_owned(app_core, &invitation_id, &owner, None)
-                .await?;
+            return fail_pending_invitation_accept_owned(
+                &owner,
+                AcceptInvitationError::PendingInvitationNotFound,
+            )
+            .await;
         }
-        let binding = match pending_channel_binding_witness(app_core, &pending_invitation).await {
-            Ok(binding) => binding,
-            Err(error) => {
-                return fail_invitation_accept(
-                    &owner,
-                    AcceptInvitationError::AcceptFailed {
-                        detail: error.to_string(),
-                        source: Some(error),
-                    },
-                )
-                .await;
-            }
-        };
+        let binding =
+            match pending_channel_binding_witness(app_core, &pending_invitation, &budget).await {
+                Ok(binding) => binding,
+                Err(error) => {
+                    return fail_invitation_accept(
+                        &owner,
+                        AcceptInvitationError::AcceptFailed {
+                            detail: error.to_string(),
+                            source: Some(error),
+                        },
+                    )
+                    .await;
+                }
+            };
 
         Ok(crate::ui_contract::AcceptedPendingChannelBinding {
             invitation_id: invitation_id.to_string(),
@@ -656,14 +689,23 @@ mod tests {
     async fn pending_selector_uses_accepted_signal_history_as_browser_recovery_fallback() {
         let our_authority = AuthorityId::new_from_entropy([171u8; 32]);
         let sender_id = AuthorityId::new_from_entropy([172u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
-            our_authority,
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let mut runtime = crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority);
+        runtime.use_time_provider(clock.clone());
+        runtime.queue_sync_answers(
+            (0..PENDING_ACCEPT_AUTHORITATIVE_ATTEMPTS)
+                .map(|_| Box::pin(async { Ok(()) }) as futures::future::BoxFuture<'static, _>)
+                .collect(),
+        );
+        runtime.set_process_ceremony_result(Ok(
+            crate::runtime_bridge::CeremonyProcessingOutcome::NoProgress,
         ));
+        let runtime = Arc::new(runtime);
         runtime.set_pending_invitations(Vec::new());
         let channel_id = ChannelId::from_bytes([173u8; 32]);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -699,9 +741,25 @@ mod tests {
         .await
         .unwrap();
 
-        let selected = pending_home_or_channel_invitation_for_accept(&app_core)
-            .await
-            .expect("selector should succeed");
+        let offline_runtime = runtime;
+        let runtime = require_runtime(&app_core).await.unwrap();
+        let budget = pending_channel_acceptance_budget(&runtime).await.unwrap();
+        let selection = pending_home_or_channel_invitation_for_accept(&app_core, &runtime, &budget);
+        futures::pin_mut!(selection);
+        let selected = futures::future::poll_fn(|cx| {
+            match std::future::Future::poll(selection.as_mut(), cx) {
+                std::task::Poll::Ready(result) => std::task::Poll::Ready(result),
+                std::task::Poll::Pending => {
+                    if let Some(delay) = offline_runtime.take_sleep_request() {
+                        clock.advance(delay);
+                        cx.waker().wake_by_ref();
+                    }
+                    std::task::Poll::Pending
+                }
+            }
+        })
+        .await
+        .unwrap();
 
         let Some(PendingChannelInvitationSelection::Signal(invitation)) = selected else {
             panic!("expected accepted signal history fallback");

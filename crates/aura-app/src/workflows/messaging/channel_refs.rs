@@ -72,8 +72,9 @@ pub(crate) async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     local_authority: Option<AuthorityId>,
+    parent: &TimeoutBudget,
 ) -> Result<ContextId, AuraError> {
-    routing::context_id_for_channel(app_core, channel_id, local_authority).await
+    routing::context_id_for_channel(app_core, channel_id, local_authority, parent).await
 }
 
 pub(crate) async fn next_observed_projection_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
@@ -99,11 +100,36 @@ pub(crate) async fn next_observed_projection_timestamp_ms(app_core: &Arc<RwLock<
         .saturating_add(1)
 }
 
+#[cfg(test)]
 pub(crate) async fn ensure_channel_visible_after_join(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     context_id: ContextId,
     _name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    let runtime = { app_core.read().await.runtime().cloned() };
+    let budget = match runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
+    };
+    ensure_channel_visible_after_join_impl(
+        app_core,
+        channel_id,
+        context_id,
+        _name_hint,
+        budget.as_ref(),
+    )
+    .await
+}
+
+async fn ensure_channel_visible_after_join_impl(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+    _name_hint: Option<&str>,
+    parent: Option<&TimeoutBudget>,
 ) -> Result<(), AuraError> {
     // A join and a display-name hint are not channel creation evidence. If
     // signal delivery trails the join, recover only the committed creation
@@ -123,8 +149,11 @@ pub(crate) async fn ensure_channel_visible_after_join(
             channel_id,
             context_id,
         };
-        let creation = timeout_runtime_call(
+        let creation = timeout_runtime_call_with_budget(
             &runtime,
+            parent.ok_or_else(|| {
+                AuraError::invalid("runtime projection requires original timeout budget")
+            })?,
             "ensure_channel_visible_after_join",
             "canonical_channel_creation",
             MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -174,13 +203,45 @@ pub async fn materialize_authoritative_channel_binding_observed(
             binding.channel_id
         ))
     })?;
+    let runtime = { app_core.read().await.runtime().cloned() };
+    let budget = match runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
+    };
     let context_id = match binding.context_id.as_deref() {
         Some(context_id) => parse_context_id(context_id)?,
-        None => require_authoritative_context_id_for_channel(app_core, channel_id).await?,
+        None => match (runtime.as_ref(), budget.as_ref()) {
+            (Some(runtime), Some(parent)) => require_authoritative_channel_ref(
+                app_core,
+                runtime,
+                channel_id,
+                "materialize observed channel binding",
+                parent,
+            )
+            .await?
+            .context_id(),
+            _ => observed_chat_snapshot(app_core)
+                .await
+                .channel(&channel_id)
+                .and_then(|channel| channel.context_id)
+                .ok_or_else(|| {
+                    JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
+                })?,
+        },
     };
-    ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await
+    ensure_channel_visible_after_join_impl(
+        app_core,
+        channel_id,
+        context_id,
+        name_hint,
+        budget.as_ref(),
+    )
+    .await
 }
 
+#[cfg(test)]
 pub(in crate::workflows) async fn apply_authoritative_membership_projection(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -188,10 +249,56 @@ pub(in crate::workflows) async fn apply_authoritative_membership_projection(
     joined: bool,
     name_hint: Option<&str>,
 ) -> Result<(), AuraError> {
+    let runtime = { app_core.read().await.runtime().cloned() };
+    let budget = match runtime.as_ref() {
+        Some(runtime) => {
+            Some(workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT).await?)
+        }
+        None => None,
+    };
+    apply_authoritative_membership_projection_impl(
+        app_core,
+        channel_id,
+        context_id,
+        joined,
+        name_hint,
+        budget.as_ref(),
+    )
+    .await
+}
+
+pub(in crate::workflows) async fn apply_authoritative_membership_projection_with_budget(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+    joined: bool,
+    name_hint: Option<&str>,
+    parent: &TimeoutBudget,
+) -> Result<(), AuraError> {
+    apply_authoritative_membership_projection_impl(
+        app_core,
+        channel_id,
+        context_id,
+        joined,
+        name_hint,
+        Some(parent),
+    )
+    .await
+}
+
+async fn apply_authoritative_membership_projection_impl(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+    joined: bool,
+    name_hint: Option<&str>,
+    parent: Option<&TimeoutBudget>,
+) -> Result<(), AuraError> {
     // OWNERSHIP: observed-display-update - this helper mutates only observed
     // chat projection state after authoritative membership outcomes are known.
     if joined {
-        ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await?;
+        ensure_channel_visible_after_join_impl(app_core, channel_id, context_id, name_hint, parent)
+            .await?;
         let chat = observed_chat_snapshot(app_core).await;
         if chat.channel(&channel_id).is_none() {
             return Err(super::super::error::WorkflowError::Precondition(
@@ -214,30 +321,21 @@ pub(in crate::workflows) async fn apply_authoritative_membership_projection(
 pub async fn resolve_authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
-) -> Option<ContextId> {
-    // OWNERSHIP: authoritative-source - prefer runtime authority; observed chat
-    // is a bounded fallback for pre-existing canonical context materialization.
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime().cloned()
-    };
-    if let Some(runtime) = runtime {
-        if let Ok(Ok(Some(context_id))) = timeout_runtime_call(
-            &runtime,
-            "resolve_authoritative_context_id_for_channel",
-            "resolve_amp_channel_context",
-            MESSAGING_RUNTIME_QUERY_TIMEOUT,
-            || runtime.resolve_amp_channel_context(channel_id),
-        )
-        .await
-        {
-            return Some(context_id);
-        }
-    }
-    observed_chat_snapshot(app_core)
-        .await
-        .channel(&channel_id)
-        .and_then(|channel| channel.context_id)
+    parent: &TimeoutBudget,
+) -> Result<Option<ContextId>, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call_with_budget(
+        &runtime,
+        parent,
+        "resolve_authoritative_context_id_for_channel",
+        "resolve_amp_channel_context",
+        MESSAGING_RUNTIME_QUERY_TIMEOUT,
+        || runtime.resolve_amp_channel_context(channel_id),
+    )
+    .await?
+    .map_err(|error| {
+        super::super::error::runtime_call("resolve authoritative channel context", error).into()
+    })
 }
 
 #[must_use]
@@ -252,9 +350,10 @@ pub fn authoritative_channel_ref(
 pub async fn require_authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
+    parent: &TimeoutBudget,
 ) -> Result<ContextId, AuraError> {
-    resolve_authoritative_context_id_for_channel(app_core, channel_id)
-        .await
+    resolve_authoritative_context_id_for_channel(app_core, channel_id, parent)
+        .await?
         .ok_or_else(|| {
             JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
         })
@@ -299,14 +398,29 @@ pub(crate) async fn canonical_channel_name_hint_for_invite(
 pub(crate) async fn resolve_authoritative_channel_binding_from_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
+    parent: &TimeoutBudget,
 ) -> Result<crate::runtime_bridge::AuthoritativeChannelBinding, AuraError> {
     // OWNERSHIP: authoritative-source - observed chat can disambiguate an
     // already materialized binding, but runtime remains the authoritative
     // source when the projection is ambiguous or incomplete.
     match routing::parse_channel_ref(channel_input)? {
         crate::workflows::channel_ref::ChannelSelector::Id(channel_id) => {
-            let context_id =
-                require_authoritative_context_id_for_channel(app_core, channel_id).await?;
+            let runtime = require_runtime(app_core).await?;
+            let context_id = timeout_runtime_call_with_budget(
+                &runtime,
+                parent,
+                "resolve_authoritative_channel_binding_from_input",
+                "resolve_amp_channel_context",
+                MESSAGING_RUNTIME_QUERY_TIMEOUT,
+                || runtime.resolve_amp_channel_context(channel_id),
+            )
+            .await?
+            .map_err(|error| {
+                super::super::error::runtime_call("resolve channel binding context", error)
+            })?
+            .ok_or_else(|| {
+                JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
+            })?;
             Ok(crate::runtime_bridge::AuthoritativeChannelBinding {
                 channel_id,
                 context_id,
@@ -333,8 +447,9 @@ pub(crate) async fn resolve_authoritative_channel_binding_from_input(
             }
 
             let runtime = require_runtime(app_core).await?;
-            timeout_runtime_call(
+            timeout_runtime_call_with_budget(
                 &runtime,
+                parent,
                 "resolve_authoritative_channel_binding_from_input",
                 "identify_materialized_channel_bindings_by_name",
                 MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -361,23 +476,32 @@ pub(crate) async fn resolve_authoritative_channel_binding_from_input(
 }
 
 pub(crate) async fn require_authoritative_channel_ref(
-    app_core: &Arc<RwLock<AppCore>>,
+    _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
     _operation: &str,
+    parent: &TimeoutBudget,
 ) -> Result<AuthoritativeChannelRef, AuraError> {
     let policy = workflow_retry_policy(
         CHANNEL_CONTEXT_RETRY_ATTEMPTS as u32,
         Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
         Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
     )?;
-    execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
-        if let Ok(context_id) =
-            require_authoritative_context_id_for_channel(app_core, channel_id).await
-        {
+    execute_with_runtime_retry_budget(runtime, parent, &policy, |_attempt, child| async move {
+        let context_id = timeout_runtime_call_with_budget(
+            runtime,
+            &child,
+            "require_authoritative_channel_ref",
+            "resolve_amp_channel_context",
+            MESSAGING_RUNTIME_QUERY_TIMEOUT,
+            || runtime.resolve_amp_channel_context(channel_id),
+        )
+        .await?
+        .map_err(|error| super::super::error::runtime_call("resolve channel context", error))?;
+        if let Some(context_id) = context_id {
             return Ok(authoritative_channel_ref(channel_id, context_id));
         }
-        converge_runtime(runtime).await;
+        converge_runtime(runtime, &child).await?;
         Err(AuraError::from(
             super::super::error::WorkflowError::Precondition(
                 "authoritative context required for channel",
@@ -387,11 +511,7 @@ pub(crate) async fn require_authoritative_channel_ref(
     .await
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { .. } => {
-            AuraError::from(super::super::error::WorkflowError::Precondition(
-                "authoritative context required for channel",
-            ))
-        }
+        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
     })
 }
 
@@ -400,6 +520,7 @@ pub(in crate::workflows) async fn runtime_amp_duplicate_is_reconciled(
     error: &(impl std::error::Error + 'static),
     context: ContextId,
     channel: ChannelId,
+    parent: &TimeoutBudget,
 ) -> Result<bool, AuraError> {
     if super::super::runtime_error_classification::classify_amp_channel_error(
         error, context, channel,
@@ -407,8 +528,9 @@ pub(in crate::workflows) async fn runtime_amp_duplicate_is_reconciled(
     {
         return Ok(false);
     }
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         runtime,
+        parent,
         "reconcile AMP duplicate",
         "amp_channel_state_exists",
         MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -422,9 +544,11 @@ pub(in crate::workflows) async fn runtime_amp_duplicate_is_reconciled(
 pub(in crate::workflows) async fn runtime_channel_state_exists(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
+    parent: &TimeoutBudget,
 ) -> Result<bool, AuraError> {
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         runtime,
+        parent,
         "runtime_channel_state_exists",
         "amp_channel_state_exists",
         MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -449,17 +573,18 @@ pub(in crate::workflows) async fn wait_for_runtime_channel_state(
     _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
     let policy = workflow_retry_policy(
         CHANNEL_CONTEXT_RETRY_ATTEMPTS as u32,
         Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
         Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
     )?;
-    execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
-        if runtime_channel_state_exists(runtime, channel).await? {
+    execute_with_runtime_retry_budget(runtime, parent, &policy, |_attempt, child| async move {
+        if runtime_channel_state_exists(runtime, channel, &child).await? {
             return Ok(());
         }
-        converge_runtime(runtime).await;
+        converge_runtime(runtime, &child).await?;
         Err(AuraError::from(
             super::super::error::WorkflowError::Precondition(
                 "canonical AMP channel state required",
@@ -469,11 +594,7 @@ pub(in crate::workflows) async fn wait_for_runtime_channel_state(
     .await
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { .. } => {
-            AuraError::from(super::super::error::WorkflowError::Precondition(
-                "canonical AMP channel state required",
-            ))
-        }
+        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
     })
 }
 
@@ -481,8 +602,9 @@ pub(in crate::workflows) async fn authoritative_recipient_peers_for_channel(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
     self_authority: AuthorityId,
+    parent: &TimeoutBudget,
 ) -> Result<Vec<AuthorityId>, AuraError> {
-    let mut participants = authoritative_channel_participants(runtime, channel).await?;
+    let mut participants = authoritative_channel_participants(runtime, channel, parent).await?;
     participants.retain(|authority| *authority != self_authority);
     Ok(participants)
 }
@@ -490,11 +612,13 @@ pub(in crate::workflows) async fn authoritative_recipient_peers_for_channel(
 pub(super) async fn authoritative_channel_participants(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
+    parent: &TimeoutBudget,
 ) -> Result<Vec<AuthorityId>, AuraError> {
     let context_id = channel.context_id();
     let channel_id = channel.channel_id();
-    let mut last = timeout_runtime_call(
+    let mut last = timeout_runtime_call_with_budget(
         runtime,
+        parent,
         "authoritative_channel_participants",
         "amp_list_channel_participants",
         MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -530,17 +654,10 @@ pub(super) async fn authoritative_channel_participants(
             return Ok(participants);
         }
 
-        let _ = timeout_runtime_call(
+        converge_runtime(runtime, parent).await?;
+        last = timeout_runtime_call_with_budget(
             runtime,
-            "authoritative_channel_participants",
-            "process_ceremony_messages",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.process_ceremony_messages(),
-        )
-        .await;
-        converge_runtime(runtime).await;
-        last = timeout_runtime_call(
-            runtime,
+            parent,
             "authoritative_channel_participants",
             "amp_list_channel_participants_after_convergence",
             MESSAGING_RUNTIME_QUERY_TIMEOUT,
@@ -578,11 +695,12 @@ pub(crate) async fn authoritative_join_member_count_if_joined(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
     self_authority: AuthorityId,
+    parent: &TimeoutBudget,
 ) -> Result<Option<u32>, AuraError> {
-    if !runtime_channel_state_exists(runtime, channel).await? {
+    if !runtime_channel_state_exists(runtime, channel, parent).await? {
         return Ok(None);
     }
-    let participants = authoritative_channel_participants(runtime, channel).await?;
+    let participants = authoritative_channel_participants(runtime, channel, parent).await?;
     if participants.contains(&self_authority) {
         return Ok(Some((participants.len() as u32).max(1)));
     }

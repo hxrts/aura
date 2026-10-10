@@ -71,9 +71,17 @@ async fn add_demo_peers_as_contacts(env: &FullTestEnv) -> [AuthorityId; 2] {
             aura_app::ui::workflows::invitation::import_invitation_details(&env.app_core, code)
                 .await
                 .expect("import_invitation_details should succeed");
-        aura_app::ui::workflows::invitation::accept_invitation(&env.app_core, invitation)
-            .await
-            .expect("accept_invitation should succeed");
+        aura_app::ui::workflows::invitation::accept_invitation_with_terminal_status(
+            &env.app_core,
+            aura_app::ui::workflows::invitation::InvitationAcceptanceRequest::RetainedHandle {
+                invitation: Box::new(invitation),
+                operation_instance_id: None,
+            },
+        )
+        .await
+        .result
+        .map(|_| ())
+        .expect("accept_invitation should succeed");
     }
     let ids = [peers.alice_authority(), peers.carol_authority()];
     wait_for_contacts(&env.app_core, &ids).await;

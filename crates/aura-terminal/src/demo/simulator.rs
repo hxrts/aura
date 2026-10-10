@@ -24,9 +24,8 @@ use aura_core::effects::{
 };
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::util::serialization::{from_slice, to_vec};
+use aura_core::util::serialization::from_slice;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_invitation::{DeviceEnrollmentAccept, DeviceEnrollmentRequest};
 use aura_journal::fact::{
     ChannelBootstrap, ChannelCheckpoint, ProtocolRelationalFact, RelationalFact,
 };
@@ -466,7 +465,7 @@ async fn establish_contact_exchange(
         let bridge = agent.clone().as_runtime_bridge();
         async move {
             bridge
-                .causal_stamp(aura_app::runtime_bridge::CausalStampKey::Contact(
+                .causal_stamp(aura_app::ui::types::CausalStampKey::Contact(
                     aura_relational::ContactCausalKey::Add { owner, contact },
                 ))
                 .await
@@ -896,74 +895,6 @@ async fn process_peer_transport_messages(
                         effects.requeue_envelope(envelope);
                         approve_guardian_proposals(name, agent).await;
                         continue;
-                    } else if let Ok(enrollment_request) =
-                        from_slice::<DeviceEnrollmentRequest>(&envelope.payload)
-                    {
-                        // Handle device enrollment choreography request
-                        tracing::info!(
-                            "{name} received device enrollment request for ceremony {}",
-                            enrollment_request.ceremony_id
-                        );
-
-                        // Create acceptance response
-                        let accept_response = DeviceEnrollmentAccept {
-                            invitation_id: enrollment_request.invitation_id,
-                            ceremony_id: enrollment_request.ceremony_id,
-                            device_id: enrollment_request.device_id,
-                            acceptor_id: agent.authority_id(),
-                            // Demo simulator only: production initiators reject
-                            // unsigned device-enrollment acceptances.
-                            signature: aura_core::threshold::ThresholdSignature::single_signer(
-                                Vec::new(),
-                                Vec::new(),
-                                0,
-                            ),
-                            // No admitted manifest: this acceptance cannot authorize enrollment.
-                            manifest_digest: None,
-                        };
-
-                        // Serialize response
-                        let payload = match to_vec(&accept_response) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "{name} failed to serialize device enrollment acceptance: {e}"
-                                );
-                                continue;
-                            }
-                        };
-
-                        // Include choreography metadata
-                        let mut response_metadata = std::collections::HashMap::new();
-                        response_metadata.insert(
-                            "content-type".to_string(),
-                            "application/aura-choreography".to_string(),
-                        );
-                        if let Some(session_id) = envelope.metadata.get("session-id") {
-                            response_metadata.insert("session-id".to_string(), session_id.clone());
-                        }
-
-                        let response = aura_core::effects::TransportEnvelope {
-                            destination: envelope.source,
-                            source: agent.authority_id(),
-                            context: envelope.context,
-                            payload,
-                            metadata: response_metadata,
-                            receipt: None,
-                        };
-
-                        if let Err(e) =
-                            send_demo_raw_envelope_for_simulation(effects.as_ref(), response).await
-                        {
-                            tracing::warn!(
-                                "{name} failed to send device enrollment acceptance: {e}"
-                            );
-                        } else {
-                            tracing::info!(
-                                "{name} sent device enrollment acceptance for ceremony {}",
-                                accept_response.ceremony_id
-                            );
-                        }
                     } else {
                         tracing::debug!(
                             "{name} received choreography message (not recognized), requeuing"

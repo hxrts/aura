@@ -1911,7 +1911,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         context: ContextId,
         peer: AuthorityId,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         sync::ensure_peer_channel(self, context, peer).await
     }
 
@@ -3885,6 +3885,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         identity::current_time_ms(self).await
     }
 
+    fn physical_time_provider(&self) -> Arc<dyn aura_core::effects::PhysicalTimeEffects> {
+        self.agent.runtime().effects()
+    }
+
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "runtime_bridge_required_sleep",
@@ -3894,6 +3898,21 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn sleep_ms(&self, ms: u64) -> Result<(), RuntimeBridgeError> {
         let _ = identity::RUNTIME_BRIDGE_IDENTITY_SLEEP_CAPABILITY;
         identity::sleep_ms(self, ms).await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "runtime_bridge_required_absolute_wait",
+        receiver_type = AgentRuntimeBridge,
+        family = "runtime_helper"
+    )]
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, RuntimeBridgeError> {
+        identity::wait_until_physical_deadline(self, deadline).await
     }
 
     // =========================================================================

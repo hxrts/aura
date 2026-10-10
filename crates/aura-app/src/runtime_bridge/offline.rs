@@ -56,13 +56,81 @@ type OfflineAmpJoinResults =
 #[cfg(test)]
 type OfflineClockAnswers = Arc<Mutex<std::collections::VecDeque<Result<u64, RuntimeBridgeError>>>>;
 #[cfg(test)]
-type OfflineSleepAnswers = Arc<Mutex<std::collections::VecDeque<Result<(), RuntimeBridgeError>>>>;
+type OfflineSleepAnswers = Arc<
+    Mutex<std::collections::VecDeque<Result<aura_core::time::PhysicalTime, RuntimeBridgeError>>>,
+>;
+#[cfg(test)]
+type OfflineCallAnswers<T, E = IntentError> =
+    Arc<Mutex<std::collections::VecDeque<futures::future::BoxFuture<'static, Result<T, E>>>>>;
+
+#[cfg(test)]
+struct OfflinePhysicalTimeFixture {
+    provider: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    clock_answers: OfflineClockAnswers,
+    deadline_answers: OfflineSleepAnswers,
+    sleep_requests: Arc<Mutex<std::collections::VecDeque<u64>>>,
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl aura_core::effects::PhysicalTimeEffects for OfflinePhysicalTimeFixture {
+    async fn physical_time(
+        &self,
+    ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        if let Some(answer) = self.clock_answers.lock().await.pop_front() {
+            return answer
+                .map(aura_core::time::PhysicalTime::exact)
+                .map_err(|source| aura_core::effects::TimeError::ProviderFailure {
+                    operation: aura_core::effects::time::TimeProviderOperation::ReadPhysicalClock,
+                    source: Some(Arc::new(source)),
+                });
+        }
+        self.provider.physical_time().await
+    }
+    async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::TimeError> {
+        self.sleep_requests.lock().await.push_back(ms);
+        self.provider.sleep_ms(ms).await
+    }
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        if let Some(answer) = self.deadline_answers.lock().await.pop_front() {
+            return answer.map_err(|source| aura_core::effects::TimeError::ProviderFailure {
+                operation: aura_core::effects::time::TimeProviderOperation::WaitTimer,
+                source: Some(Arc::new(source)),
+            });
+        }
+        self.provider.wait_until_physical_deadline(deadline).await
+    }
+}
 
 pub struct OfflineRuntimeBridge {
+    physical_time: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
     #[cfg(test)]
     clock_answers: OfflineClockAnswers,
     #[cfg(test)]
-    sleep_answers: OfflineSleepAnswers,
+    deadline_answers: OfflineSleepAnswers,
+    #[cfg(test)]
+    sync_answers: OfflineCallAnswers<()>,
+    #[cfg(test)]
+    import_answers: OfflineCallAnswers<InvitationInfo>,
+    #[cfg(test)]
+    sync_status_answers: OfflineCallAnswers<SyncStatus>,
+    #[cfg(test)]
+    accept_invitation_calls: Arc<Mutex<usize>>,
+    #[cfg(test)]
+    sleep_requests: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    #[cfg(test)]
+    guardian_outcome_answers: OfflineCallAnswers<Option<super::CeremonyTerminalOutcome>>,
+    #[cfg(test)]
+    guardian_outcome_calls: Arc<Mutex<usize>>,
+    #[cfg(test)]
+    amp_context_resolve_calls: Arc<Mutex<usize>>,
+    #[cfg(test)]
+    accept_answers: OfflineCallAnswers<InvitationMutationOutcome, RuntimeBridgeError>,
     #[cfg(test)]
     background_refresh_failure: Arc<Mutex<Option<RuntimeBridgeError>>>,
     authority_id: AuthorityId,
@@ -97,6 +165,106 @@ pub struct OfflineRuntimeBridge {
 
 impl OfflineRuntimeBridge {
     #[cfg(test)]
+    pub(crate) fn queue_guardian_outcome_answers(
+        &self,
+        answers: Vec<
+            futures::future::BoxFuture<
+                'static,
+                Result<Option<super::CeremonyTerminalOutcome>, IntentError>,
+            >,
+        >,
+    ) {
+        self.guardian_outcome_answers
+            .try_lock()
+            .expect("guardian fixture is idle")
+            .extend(answers);
+    }
+    #[cfg(test)]
+    pub(crate) fn guardian_outcome_call_count(&self) -> usize {
+        *self
+            .guardian_outcome_calls
+            .try_lock()
+            .expect("guardian fixture is idle")
+    }
+    #[cfg(test)]
+    pub(crate) fn queue_accept_answers(
+        &self,
+        answers: Vec<
+            futures::future::BoxFuture<
+                'static,
+                Result<InvitationMutationOutcome, RuntimeBridgeError>,
+            >,
+        >,
+    ) {
+        self.accept_answers
+            .try_lock()
+            .expect("accept fixture is idle")
+            .extend(answers);
+    }
+    #[cfg(test)]
+    pub(crate) fn queue_import_answers(
+        &self,
+        answers: Vec<futures::future::BoxFuture<'static, Result<InvitationInfo, IntentError>>>,
+    ) {
+        self.import_answers
+            .try_lock()
+            .expect("import fixture is idle")
+            .extend(answers);
+    }
+    #[cfg(test)]
+    pub(crate) fn queue_sync_status_answers(
+        &self,
+        answers: Vec<futures::future::BoxFuture<'static, Result<SyncStatus, IntentError>>>,
+    ) {
+        self.sync_status_answers
+            .try_lock()
+            .expect("sync status fixture is idle")
+            .extend(answers);
+    }
+    #[cfg(test)]
+    pub(crate) fn amp_context_resolve_call_count(&self) -> usize {
+        *self
+            .amp_context_resolve_calls
+            .try_lock()
+            .expect("context resolver fixture is idle")
+    }
+    #[cfg(test)]
+    pub(crate) fn take_sleep_request(&self) -> Option<u64> {
+        self.sleep_requests
+            .try_lock()
+            .expect("sleep fixture is idle")
+            .pop_front()
+    }
+    #[cfg(test)]
+    pub(crate) fn accept_invitation_call_count(&self) -> usize {
+        *self
+            .accept_invitation_calls
+            .try_lock()
+            .expect("accept fixture is idle")
+    }
+    #[cfg(test)]
+    pub(crate) fn use_time_provider(
+        &mut self,
+        provider: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) {
+        self.physical_time = Arc::new(OfflinePhysicalTimeFixture {
+            provider,
+            clock_answers: self.clock_answers.clone(),
+            deadline_answers: self.deadline_answers.clone(),
+            sleep_requests: self.sleep_requests.clone(),
+        });
+    }
+    #[cfg(test)]
+    pub(crate) fn queue_sync_answers(
+        &self,
+        answers: Vec<futures::future::BoxFuture<'static, Result<(), IntentError>>>,
+    ) {
+        self.sync_answers
+            .try_lock()
+            .expect("sync fixture is idle")
+            .extend(answers);
+    }
+    #[cfg(test)]
     pub(crate) fn queue_clock_answers(&self, answers: Vec<Result<u64, RuntimeBridgeError>>) {
         *self
             .clock_answers
@@ -104,9 +272,12 @@ impl OfflineRuntimeBridge {
             .expect("clock fixture not concurrently borrowed") = answers.into();
     }
     #[cfg(test)]
-    pub(crate) fn queue_sleep_answers(&self, answers: Vec<Result<(), RuntimeBridgeError>>) {
+    pub(crate) fn queue_deadline_answers(
+        &self,
+        answers: Vec<Result<aura_core::time::PhysicalTime, RuntimeBridgeError>>,
+    ) {
         *self
-            .sleep_answers
+            .deadline_answers
             .try_lock()
             .expect("sleep fixture not concurrently borrowed") = answers.into();
     }
@@ -189,11 +360,30 @@ impl OfflineRuntimeBridge {
 
     /// Create a new offline runtime bridge
     pub fn new(authority_id: AuthorityId) -> Self {
-        Self {
+        let bridge = Self {
+            physical_time: Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
             #[cfg(test)]
             clock_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             #[cfg(test)]
-            sleep_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            deadline_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            sync_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            import_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            sync_status_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            accept_invitation_calls: Arc::new(Mutex::new(0)),
+            #[cfg(test)]
+            sleep_requests: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            guardian_outcome_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            guardian_outcome_calls: Arc::new(Mutex::new(0)),
+            #[cfg(test)]
+            amp_context_resolve_calls: Arc::new(Mutex::new(0)),
+            #[cfg(test)]
+            accept_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             #[cfg(test)]
             background_refresh_failure: Arc::new(Mutex::new(None)),
             authority_id,
@@ -227,7 +417,16 @@ impl OfflineRuntimeBridge {
             enrollment_outcomes: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             recorded_relational_facts: Arc::new(Mutex::new(None)),
+        };
+        #[cfg(test)]
+        {
+            let mut bridge = bridge;
+            let provider = bridge.physical_time.clone();
+            bridge.use_time_provider(provider);
+            bridge
         }
+        #[cfg(not(test))]
+        bridge
     }
 
     #[cfg(test)]
@@ -614,6 +813,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         channel: ChannelId,
     ) -> Result<Option<ContextId>, RuntimeBridgeError> {
+        #[cfg(test)]
+        {
+            *self.amp_context_resolve_calls.lock().await += 1;
+        }
         self.amp_channel_contexts
             .lock()
             .await
@@ -823,6 +1026,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
+        #[cfg(test)]
+        {
+            let answer = self.sync_status_answers.lock().await.pop_front();
+            if let Some(answer) = answer {
+                return answer.await;
+            }
+        }
         Err(IntentError::no_agent(
             "Sync status not available in offline mode",
         ))
@@ -835,6 +1045,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
+        #[cfg(test)]
+        if let Some(answer) = {
+            let mut answers = self.sync_answers.lock().await;
+            answers.pop_front()
+        } {
+            return answer.await;
+        }
         Err(IntentError::no_agent("Sync not available in offline mode"))
     }
 
@@ -858,10 +1075,11 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         _context: ContextId,
         _peer: AuthorityId,
-    ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Peer channel establishment not available in offline mode",
-        ))
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(
+            IntentError::no_agent("Peer channel establishment not available in offline mode")
+                .into(),
+        )
     }
 
     async fn try_get_discovered_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
@@ -1104,10 +1322,38 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _invitation_id: &str,
     ) -> Result<InvitationMutationOutcome, super::RuntimeBridgeError> {
         #[cfg(test)]
+        {
+            *self.accept_invitation_calls.lock().await += 1;
+        }
+        #[cfg(test)]
+        {
+            let answer = self.accept_answers.lock().await.pop_front();
+            if let Some(answer) = answer {
+                return answer.await;
+            }
+        }
+        #[cfg(test)]
         if let Some(result) = self.accept_invitation_result.lock().await.clone() {
             return result;
         }
         Err(IntentError::no_agent("Invitation acceptance not available in offline mode").into())
+    }
+
+    async fn get_guardian_invitation_terminal_outcome(
+        &self,
+        _invitation_id: &aura_core::InvitationId,
+    ) -> Result<Option<super::CeremonyTerminalOutcome>, IntentError> {
+        #[cfg(test)]
+        {
+            *self.guardian_outcome_calls.lock().await += 1;
+            let answer = self.guardian_outcome_answers.lock().await.pop_front();
+            if let Some(answer) = answer {
+                return answer.await;
+            }
+        }
+        Err(IntentError::no_agent(
+            "guardian invitation completion evidence is unavailable from this runtime",
+        ))
     }
 
     async fn decline_invitation(
@@ -1144,6 +1390,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn import_invitation(&self, _code: &str) -> Result<InvitationInfo, IntentError> {
+        #[cfg(test)]
+        {
+            let answer = self.import_answers.lock().await.pop_front();
+            if let Some(answer) = answer {
+                return answer.await;
+            }
+        }
         Err(IntentError::no_agent(
             "Invitation import not available in offline mode",
         ))
@@ -1231,13 +1484,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Ok(AuthenticationStatus::Unauthenticated)
     }
 
+    fn physical_time_provider(&self) -> Arc<dyn aura_core::effects::PhysicalTimeEffects> {
+        self.physical_time.clone()
+    }
+
     async fn current_time_ms(&self) -> Result<u64, super::RuntimeBridgeError> {
-        #[cfg(test)]
-        if let Some(answer) = self.clock_answers.lock().await.pop_front() {
-            return answer;
-        }
-        use aura_core::effects::PhysicalTimeEffects;
-        aura_effects::time::PhysicalTimeHandler::new()
+        self.physical_time
             .physical_time()
             .await
             .map(|time| time.ts_ms)
@@ -1254,17 +1506,26 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), RuntimeBridgeError> {
-        #[cfg(test)]
-        if let Some(answer) = self.sleep_answers.lock().await.pop_front() {
-            return answer;
-        }
-        use aura_core::effects::PhysicalTimeEffects;
-        aura_effects::time::PhysicalTimeHandler::new()
-            .sleep_ms(ms)
+        self.physical_time.sleep_ms(ms).await.map_err(|error| {
+            RuntimeBridgeError::with_source(
+                IntentError::service_error("offline local timer failed"),
+                error,
+            )
+        })
+    }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, RuntimeBridgeError> {
+        self.physical_time
+            .wait_until_physical_deadline(deadline)
             .await
             .map_err(|error| {
                 RuntimeBridgeError::with_source(
-                    IntentError::service_error("offline local timer failed"),
+                    IntentError::service_error("offline absolute timer failed"),
                     error,
                 )
             })

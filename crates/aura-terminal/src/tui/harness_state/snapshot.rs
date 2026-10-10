@@ -11,11 +11,11 @@ use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
-use aura_app::runtime_bridge::RuntimeBridge;
 use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
 };
+use aura_app::ui::types::RuntimeBridge;
 use aura_app::ui::types::StateSnapshot;
 use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, OperationState, ProjectionRevision,

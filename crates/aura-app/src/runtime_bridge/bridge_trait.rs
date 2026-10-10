@@ -456,10 +456,11 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         _context: ContextId,
         _peer: AuthorityId,
-    ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Peer channel establishment not available in offline mode",
-        ))
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(
+            IntentError::no_agent("Peer channel establishment not available in offline mode")
+                .into(),
+        )
     }
 
     // =========================================================================
@@ -1010,6 +1011,10 @@ pub trait RuntimeBridge: Send + Sync {
     // Time Operations
     // =========================================================================
 
+    /// Retain this runtime's actual selected physical-time provider, including
+    /// native errors and uncertainty, for an original workflow deadline.
+    fn physical_time_provider(&self) -> Arc<dyn aura_core::effects::PhysicalTimeEffects>;
+
     /// Get current time in milliseconds since Unix epoch
     ///
     /// This provides a deterministic time source for simulation and testing.
@@ -1023,6 +1028,15 @@ pub trait RuntimeBridge: Send + Sync {
     /// delegate to the runtime's sleep primitive; simulation implementations can
     /// use virtual time.
     async fn sleep_ms(&self, ms: u64) -> Result<(), super::RuntimeBridgeError>;
+
+    /// Wait for an existing local physical endpoint on this runtime's selected
+    /// provider. Relative-only providers must preserve their typed failure.
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, super::RuntimeBridgeError>;
 
     /// Wait between long-lived app hook refreshes. Offline runtimes may park
     /// until cancellation because they have no external ceremony progress.

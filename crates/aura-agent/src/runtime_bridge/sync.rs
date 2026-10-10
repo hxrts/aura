@@ -1,7 +1,7 @@
 use super::{
-    error_boundary::{bridge_internal, bridge_network, bridge_network_message, bridge_validation},
+    error_boundary::{bridge_internal, bridge_network_message, bridge_validation},
     harness_mode_enabled, harness_sync_backoff_ms, harness_sync_rounds, require_rendezvous_service,
-    require_sync_service, service_unavailable, AgentRuntimeBridge,
+    require_sync_service, AgentRuntimeBridge,
 };
 use crate::core::default_context_id_for_authority;
 use aura_app::runtime_bridge::{
@@ -299,6 +299,15 @@ pub(super) async fn sync_with_peer(
         .map_err(|e| bridge_internal("Sync failed", e))
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("peer transport initiation for {peer} in {context}: {source}")]
+struct PeerChannelInitiationFailure {
+    context: ContextId,
+    peer: AuthorityId,
+    #[source]
+    source: crate::core::AgentError,
+}
+
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_peer_channel",
@@ -309,78 +318,56 @@ pub(super) async fn ensure_peer_channel(
     bridge: &AgentRuntimeBridge,
     context: ContextId,
     peer: AuthorityId,
-) -> Result<(), IntentError> {
+) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
     let _ = RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY;
     let effects = bridge.agent.runtime().effects();
-    let rendezvous_manager = require_rendezvous_service(bridge)
-        .map_err(|_| service_unavailable("rendezvous_manager"))?;
-
-    let authority = bridge.agent.context().clone();
-    let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
-        .map_err(|e| bridge_internal("Create rendezvous handler for peer channel setup failed", e))?
-        .with_rendezvous_manager((*rendezvous_manager).clone());
-
-    let rounds = if harness_mode_enabled() {
-        harness_sync_rounds()
-    } else {
-        1
-    };
-    let backoff_ms = if harness_mode_enabled() {
-        harness_sync_backoff_ms()
-    } else {
-        0
-    };
-
+    // This observation proves transport establishment only. AMP and journal
+    // readiness remain the responsibility of their shared workflow owners.
     if effects.is_channel_established(context, peer).await {
-        bridge.seed_sync_peers_from_rendezvous().await;
-        bridge.sync_seeded_peers().await?;
         return Ok(());
     }
-
-    let _ = super::rendezvous::trigger_discovery(bridge).await;
-    bridge.seed_sync_peers_from_rendezvous().await;
-    let _ = bridge.sync_seeded_peers().await;
-    let _ = process_ceremony_messages(bridge).await;
+    let rendezvous_manager = require_rendezvous_service(bridge)?;
+    let authority = bridge.agent.context().clone();
+    let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+        .map_err(|error| {
+            super::error_boundary::bridge_runtime_internal(
+                "Create rendezvous handler for peer channel setup",
+                error,
+            )
+        })?
+        .with_rendezvous_manager((*rendezvous_manager).clone());
 
     let result = handler
         .initiate_channel(&effects, context, peer)
         .await
-        .map_err(|e| {
-            bridge_network(
-                "Initiate peer channel failed",
-                format!("{peer} in {context}: {e}"),
+        .map_err(|error| {
+            super::error_boundary::bridge_runtime_internal(
+                "Initiate required peer transport channel",
+                PeerChannelInitiationFailure {
+                    context,
+                    peer,
+                    source: error,
+                },
             )
         })?;
 
     if !result.success {
-        return Err(bridge_network_message(result.error.unwrap_or_else(|| {
-            "peer channel initiation was denied".to_string()
-        })));
+        return Err(bridge_network_message(
+            result
+                .error
+                .unwrap_or_else(|| "peer channel initiation was denied".to_string()),
+        )
+        .into());
     }
 
-    for round in 0..rounds {
-        if effects.is_channel_established(context, peer).await {
-            bridge.seed_sync_peers_from_rendezvous().await;
-            bridge.sync_seeded_peers().await?;
-            return Ok(());
-        }
-
-        if harness_mode_enabled() {
-            let _ = super::rendezvous::trigger_discovery(bridge).await;
-        }
-        bridge.seed_sync_peers_from_rendezvous().await;
-        bridge.sync_seeded_peers().await?;
-        process_ceremony_messages(bridge).await?;
-
-        if round + 1 < rounds && backoff_ms > 0 {
-            let effects = bridge.agent.runtime().effects();
-            let _ = effects.sleep_ms(backoff_ms).await;
-        }
+    if effects.is_channel_established(context, peer).await {
+        return Ok(());
     }
 
     Err(bridge_network_message(format!(
-        "peer channel for {peer} in {context} did not establish after bounded convergence"
-    )))
+        "peer channel for {peer} in {context} has not established after initiation"
+    ))
+    .into())
 }
 
 /// Install the sync Biscuit authorization if needed, then sync with `peers`.

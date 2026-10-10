@@ -223,3 +223,17 @@ production enforcement; mixed predicates and later production items remain
 checked. Syn fixtures cover rejection, sanctioned handoff, and lexical scopes.
 Run `just ci-frontend-handoff-boundary` and the ownership aggregate when changing
 this boundary.
+
+### Parsed placeholder and terminal facade checks
+
+The `arch_lints style` lane owns executable placeholder UUID calls, incomplete
+implementation macros/explicit implementation markers, and protected terminal
+crate-root app paths. It inspects Rust items/uses/expressions and ordinary macro
+expression bodies, using the shared positive cfg classifier. Genuine test scopes
+are excluded; mixed cfg, unguarded modules named `tests`, and production items
+following fixtures remain checked. Ordinary identifiers such as `temporary` and
+`prototype` do not imply incomplete implementation. The retained topology checker
+has no duplicate line-regex placeholder/import sweep or `--todos` mode.
+Cargo test-path exclusion is relative to the nearest package manifest's
+`tests`/`benches` tree. A production `src/tests` module remains checked. The same
+positive cfg predicate applies to item, block, local and macro-statement scopes.

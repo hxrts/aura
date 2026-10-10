@@ -288,8 +288,7 @@ pub struct MockRuntimeBridge {
     /// Counter for generating unique IDs
     id_counter: AtomicU64,
     /// Simulated current time (ms since epoch)
-    current_time_ms: AtomicU64,
-    physical_time_changed: tokio::sync::Notify,
+    physical_time: Arc<crate::time::ManualPhysicalClock>,
     /// Devices registered with this authority
     devices: Arc<RwLock<Vec<BridgeDeviceInfo>>>,
     /// Whether canonical AMP channel state should be reported as available.
@@ -390,8 +389,7 @@ impl MockRuntimeBridge {
                 aura_app::runtime_bridge::DeviceSigningConsent::default(),
             )),
             id_counter: AtomicU64::new(1),
-            current_time_ms: AtomicU64::new(1700000000000), // Fixed original physical observation
-            physical_time_changed: tokio::sync::Notify::new(),
+            physical_time: Arc::new(crate::time::ManualPhysicalClock::new(1700000000000)),
             devices: Arc::new(RwLock::new(vec![BridgeDeviceInfo {
                 id: device_id,
                 name: "MockDevice".to_string(),
@@ -513,28 +511,12 @@ impl MockRuntimeBridge {
 
     /// Advance the mock time by the given milliseconds
     pub fn advance_time_ms(&self, ms: u64) {
-        let mut now = self.current_time_ms.load(Ordering::SeqCst);
-        loop {
-            let next = now
-                .checked_add(ms)
-                .expect("explicit mock physical advance overflow");
-            match self.current_time_ms.compare_exchange_weak(
-                now,
-                next,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
-                Ok(_) => break,
-                Err(actual) => now = actual,
-            }
-        }
-        self.physical_time_changed.notify_waiters();
+        self.physical_time.advance(ms);
     }
 
     /// Set the mock time to a specific value
     pub fn set_time_ms(&self, ms: u64) {
-        self.current_time_ms.store(ms, Ordering::SeqCst);
-        self.physical_time_changed.notify_waiters();
+        self.physical_time.set_time(ms);
     }
 
     /// Control whether canonical AMP channel state exists for readiness tests.
@@ -612,7 +594,7 @@ impl MockRuntimeBridge {
     }
 
     fn now_ms(&self) -> u64 {
-        self.current_time_ms.load(Ordering::SeqCst)
+        self.physical_time.now_ms()
     }
 }
 
@@ -1063,7 +1045,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         _context: ContextId,
         _peer: AuthorityId,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(())
     }
 
@@ -1818,15 +1800,26 @@ impl RuntimeBridge for MockRuntimeBridge {
         })
     }
 
+    fn physical_time_provider(&self) -> Arc<dyn aura_core::effects::PhysicalTimeEffects> {
+        self.physical_time.clone()
+    }
+
     async fn current_time_ms(&self) -> Result<u64, aura_app::runtime_bridge::RuntimeBridgeError> {
         // Observing physical time never advances it. Mock IDs have their own
         // sequence owner; message IDs also use the app's separate sequence.
-        Ok(self.now_ms())
+        aura_core::effects::PhysicalTimeEffects::physical_time(self.physical_time.as_ref())
+            .await
+            .map(|time| time.ts_ms)
+            .map_err(|source| {
+                aura_app::runtime_bridge::RuntimeBridgeError::with_source(
+                    IntentError::internal_error("mock physical observation failed"),
+                    source,
+                )
+            })
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
-        let mut previous = self.now_ms();
-        let target = previous.checked_add(ms).ok_or_else(|| {
+        let target = self.now_ms().checked_add(ms).ok_or_else(|| {
             aura_app::runtime_bridge::RuntimeBridgeError::with_source(
                 IntentError::internal_error("mock physical sleep target overflow"),
                 aura_core::effects::TimeError::OperationFailed {
@@ -1834,28 +1827,28 @@ impl RuntimeBridge for MockRuntimeBridge {
                 },
             )
         })?;
-        loop {
-            let changed = self.physical_time_changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-            let now = self.now_ms();
-            if now < previous {
-                return Err(aura_app::runtime_bridge::RuntimeBridgeError::with_source(
-                    IntentError::internal_error(
-                        "mock physical clock rolled back during original sleep",
-                    ),
-                    aura_core::effects::TimeError::PhysicalClockRollback {
-                        previous_ms: previous,
-                        observed_ms: now,
-                    },
-                ));
-            }
-            if now >= target {
-                return Ok(());
-            }
-            previous = now;
-            changed.await;
-        }
+        self.wait_until_physical_deadline(aura_core::types::window::WindowPosition::new(target))
+            .await
+            .map(|_| ())
+    }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, aura_app::runtime_bridge::RuntimeBridgeError> {
+        aura_core::effects::PhysicalTimeEffects::wait_until_physical_deadline(
+            self.physical_time.as_ref(),
+            deadline,
+        )
+        .await
+        .map_err(|source| {
+            aura_app::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::internal_error("mock physical deadline failed"),
+                source,
+            )
+        })
     }
 }
 

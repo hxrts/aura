@@ -44,6 +44,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   setup verifier pin or infer that the new device accepted enrollment.
 
 - Browser-only APIs stay in this crate.
+- Contact-code acceptance hands off its original acceptance instance before
+  import or verification. The app owns import, Contact-kind validation,
+  acceptance and terminal publication under one deadline; the browser observes
+  the returned verified invitation for display metadata after completion.
 - Shared runtime-event count observations use fixed-width integers. Enrollment
   code lengths are checked at browser publication rather than exporting a
   pointer-sized count.

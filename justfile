@@ -460,12 +460,12 @@ check-arch-lane lane:
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{ lane }}" in
-      layers|effects|deps|completeness|todos|concurrency|invariants|workflows)
-        just _policy-check check arch --{{ lane }} || true
+      layers|effects|deps|concurrency|invariants|workflows)
+        just _policy-check check arch --{{ lane }}
         ;;
       *)
         echo "Unknown lane: {{ lane }}"
-        echo "Valid lanes: layers, effects, deps, completeness, todos, concurrency, invariants, workflows"
+        echo "Valid lanes: layers, effects, deps, concurrency, invariants, workflows"
         exit 2
         ;;
     esac
@@ -499,6 +499,7 @@ ci-policy-toolkit-clippy:
 # Verify cache guards, evidence retention, and a tiny isolated compiler probe.
 ci-build-cache-policy:
     bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/runtime-refs.sh scripts/web/serve-static.sh
+    bash scripts/dev/test-arch-lane-dispatch.sh
     bash scripts/dev/test-cargo-in-nix.sh
     bash scripts/dev/test-cargo-incremental-default.sh
     bash scripts/dev/test-build-budget.sh

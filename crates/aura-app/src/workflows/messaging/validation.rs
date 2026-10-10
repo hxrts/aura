@@ -1,5 +1,5 @@
 use super::*;
-use crate::workflows::runtime::timeout_runtime_call;
+use crate::workflows::runtime::timeout_runtime_call_with_budget;
 use std::time::Duration;
 
 const VALIDATION_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
@@ -15,6 +15,7 @@ pub(super) async fn authoritative_home_moderation_status(
     channel_id: ChannelId,
     authority_id: AuthorityId,
     timestamp_ms: u64,
+    parent: &TimeoutBudget,
 ) -> Result<crate::runtime_bridge::AuthoritativeModerationStatus, AuraError> {
     let runtime = {
         let core = app_core.read().await;
@@ -24,8 +25,9 @@ pub(super) async fn authoritative_home_moderation_status(
         AuraError::permission_denied("authoritative moderation status requires runtime")
     })?;
 
-    timeout_runtime_call(
+    timeout_runtime_call_with_budget(
         &runtime,
+        parent,
         "authoritative_home_moderation_status",
         "moderation_status",
         VALIDATION_RUNTIME_TIMEOUT,
@@ -70,6 +72,7 @@ pub(super) async fn enforce_home_moderation_for_sender(
     channel_id: ChannelId,
     sender_id: AuthorityId,
     timestamp_ms: u64,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
     let status = authoritative_home_moderation_status(
         app_core,
@@ -77,6 +80,7 @@ pub(super) async fn enforce_home_moderation_for_sender(
         channel_id,
         sender_id,
         timestamp_ms,
+        parent,
     )
     .await?;
 
@@ -134,6 +138,7 @@ pub(super) async fn enforce_home_join_allowed(
     context_id: ContextId,
     channel_id: ChannelId,
     authority_id: AuthorityId,
+    parent: &TimeoutBudget,
 ) -> Result<(), AuraError> {
     let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
         .await
@@ -144,6 +149,7 @@ pub(super) async fn enforce_home_join_allowed(
         channel_id,
         authority_id,
         timestamp_ms,
+        parent,
     )
     .await?;
     if status.is_banned {
@@ -212,9 +218,16 @@ mod tests {
             ),
         ] {
             runtime.set_moderation_status(context, channel, target, status);
-            let error = enforce_home_moderation_for_sender(&core, context, channel, target, 1_000)
-                .await
-                .expect_err("owned authoritative status denies send");
+            let error = enforce_home_moderation_for_sender(
+                &core,
+                context,
+                channel,
+                target,
+                1_000,
+                &test_messaging_budget(&core).await,
+            )
+            .await
+            .expect_err("owned authoritative status denies send");
             let denial = crate::workflows::moderation::denial_from_error(&error)
                 .expect("typed denial source");
             match denial {
@@ -253,9 +266,15 @@ mod tests {
                 is_member: false,
             },
         );
-        let error = enforce_home_join_allowed(&core, context, channel, target)
-            .await
-            .expect_err("owned authoritative ban denies join");
+        let error = enforce_home_join_allowed(
+            &core,
+            context,
+            channel,
+            target,
+            &test_messaging_budget(&core).await,
+        )
+        .await
+        .expect_err("owned authoritative ban denies join");
         assert!(matches!(
             crate::workflows::moderation::denial_from_error(&error),
             Some(D::Banned { .. })
@@ -271,9 +290,16 @@ mod tests {
                 is_member: true,
             },
         );
-        enforce_home_moderation_for_sender(&core, context, channel, target, 1_000)
-            .await
-            .expect("member allowed");
+        enforce_home_moderation_for_sender(
+            &core,
+            context,
+            channel,
+            target,
+            1_000,
+            &test_messaging_budget(&core).await,
+        )
+        .await
+        .expect("member allowed");
 
         // Task 121: a Limited access override refuses the send with the typed
         // permission denial, not an internal error.
@@ -289,9 +315,16 @@ mod tests {
         )
         .await
         .unwrap();
-        let error = enforce_home_moderation_for_sender(&core, context, channel, target, 1_000)
-            .await
-            .expect_err("Limited access refuses send_message");
+        let error = enforce_home_moderation_for_sender(
+            &core,
+            context,
+            channel,
+            target,
+            1_000,
+            &test_messaging_budget(&core).await,
+        )
+        .await
+        .expect_err("Limited access refuses send_message");
         assert!(matches!(
             crate::workflows::moderation::denial_from_error(&error),
             Some(D::AccessRestricted { context: c, channel: h, authority: a, .. })
@@ -332,10 +365,16 @@ mod tests {
             AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
         ));
 
-        let status =
-            authoritative_home_moderation_status(&app_core, context_id, channel_id, target, 1_000)
-                .await
-                .expect("runtime-backed moderation status should resolve");
+        let status = authoritative_home_moderation_status(
+            &app_core,
+            context_id,
+            channel_id,
+            target,
+            1_000,
+            &test_messaging_budget(&app_core).await,
+        )
+        .await
+        .expect("runtime-backed moderation status should resolve");
 
         assert!(status.is_banned);
         assert!(status.is_muted);

@@ -123,6 +123,9 @@ pub enum HarnessUiCommand {
     ImportInvitation {
         code: String,
     },
+    AcceptContactInvitation {
+        code: String,
+    },
     InviteActorToChannel {
         authority_id: String,
         channel_id: String,

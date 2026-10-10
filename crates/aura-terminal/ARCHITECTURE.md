@@ -57,6 +57,9 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   from the reactive signals the TUI observes; each subscription has a bounded
   queue and a lagging subscriber receives one `resync` snapshot instead of
   the dropped events.
+  The subscribe response follows acknowledged attachment of every reactive
+  receiver and the initial baseline read, so an immediate update is observable
+  without a scheduler yield or a readiness delay.
 
 - Every CLI command ends in one outcome: its structured `CliOutput` (text,
   or one `{"ok":true,"result":..}` document under `--json`) with exit code 0,
@@ -182,6 +185,12 @@ For shared semantic flows, `aura-terminal` uses `Observed` for render state, pro
 - `just ci-ownership-policy`
 
 ## Testing
+
+The recovery scenario threads its input seed into the selected simulation effects
+and draws one setup identity from that provider. Initiator and guardian requests
+retain that same identity. The deterministic fixture checks same-seed replay in isolated test processes,
+different-seed distinction, and distinct consecutive draws from the actual runtime
+provider; it does not assert full ceremony completion.
 
 ### Strategy
 

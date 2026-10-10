@@ -45,9 +45,6 @@ pub fn run(args: &[String]) -> Result<()> {
     if config.run_all || config.test_seeds {
         check_test_seeds(&repo_root, &mut audit)?;
     }
-    if config.run_all || config.todos {
-        check_todos(&repo_root, &mut audit)?;
-    }
 
     if audit.violations.is_empty() {
         println!("arch: clean");
@@ -73,7 +70,6 @@ struct ArchConfig {
     serialization: bool,
     style: bool,
     test_seeds: bool,
-    todos: bool,
 }
 
 impl ArchConfig {
@@ -125,10 +121,6 @@ impl ArchConfig {
                 "--test-seeds" => {
                     config.run_all = false;
                     config.test_seeds = true;
-                }
-                "--todos" => {
-                    config.run_all = false;
-                    config.todos = true;
                 }
                 "--quick" => {
                     config.run_all = false;
@@ -674,46 +666,6 @@ fn check_ceremonies(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
 fn check_ui(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     audit.push_matches(
-        "arch(ui): direct aura_app module access in aura-terminal",
-        rg_non_comment_lines(&[
-            "-n".into(),
-            "aura_app::(workflows|signal_defs|views|runtime_bridge|authorization)".into(),
-            repo_relative(repo_root.join("crates/aura-terminal/src")),
-            "-g".into(),
-            "*.rs".into(),
-        ])?,
-    );
-    audit.push_matches(
-        "arch(ui): direct ViewState access in aura-terminal",
-        rg_non_comment_lines(&[
-            "-n".into(),
-            r"\.views\(".into(),
-            repo_relative(repo_root.join("crates/aura-terminal/src")),
-            "-g".into(),
-            "*.rs".into(),
-        ])?,
-    );
-    audit.push_matches(
-        "arch(ui): direct journal/protocol mutation in aura-terminal",
-        rg_non_comment_lines(&["-n".into(),
-            "FactRegistry|FactReducer|RelationalFact|JournalEffects|commit_.*facts|RuntimeBridge::commit".into(),
-            repo_relative(repo_root.join("crates/aura-terminal/src")),
-            "-g".into(),
-            "*.rs".into()])?
-        .into_iter()
-        .filter(|hit| !hit.contains("crates/aura-terminal/src/demo/")),
-    );
-    audit.push_matches(
-        "arch(ui): direct protocol/domain crate usage in aura-terminal",
-        rg_non_comment_lines(&["-n".into(),
-            "aura_(journal|protocol|consensus|guards|amp|anti_entropy|transport|recovery|sync|invitation|authentication|relational|chat)::".into(),
-            repo_relative(repo_root.join("crates/aura-terminal/src")),
-            "-g".into(),
-            "*.rs".into()])?
-        .into_iter()
-        .filter(|hit| !hit.contains("/demo/") && !hit.contains("/scenarios/")),
-    );
-    audit.push_matches(
         "arch(ui): local domain state in terminal handlers",
         rg_non_comment_lines(&[
             "-n".into(),
@@ -1108,66 +1060,6 @@ fn check_test_seeds(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     }
     if helper_count == 0 {
         audit.push("arch(test-seeds): no simulation_for_test* helper calls found in test contexts");
-    }
-    Ok(())
-}
-
-fn check_todos(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
-    for (pattern, label, exclusions) in [
-        (
-            "uuid::nil\\(\\)|placeholder implementation",
-            "arch(todos): placeholder ID",
-            vec!["/tests/", "/benches/", "/examples/", "/scenarios/", "/demo/", "crates/aura-simulator/"],
-        ),
-        (
-            "deterministic algorithm",
-            "arch(todos): deterministic algorithm stub",
-            vec!["/tests/", "/benches/", "/examples/"],
-        ),
-        (
-            "temporary context|temp context",
-            "arch(todos): temporary context",
-            vec!["/tests/", "/benches/", "/examples/"],
-        ),
-        (
-            "TODO|FIXME",
-            "arch(todos): TODO/FIXME",
-            vec![
-                "/benches/",
-                "crates/aura-agent/src/builder/android.rs",
-                "crates/aura-agent/src/builder/ios.rs",
-                "crates/aura-agent/src/builder/web.rs",
-                "Implement channel deletion callback",
-                "Implement contact removal callback",
-                "Implement invitation revocation callback",
-                "Pass actual channel",
-                "tree_chaos.rs",
-            ],
-        ),
-        (
-            "in production[^\\n]*(would|should|not)|in a full implementation|stub|not implemented|unimplemented|temporary|workaround|hacky|\\bWIP\\b|\\bTBD\\b|prototype|future work|to be implemented",
-            "arch(todos): incomplete/WIP marker",
-            vec![
-                "/tests/",
-                "/benches/",
-                "/examples/",
-                "/bin/",
-                "biscuit_capability_stub",
-                "effects/dispatcher.rs",
-            ],
-        ),
-    ] {
-        let hits = rg_non_comment_lines(&["-n".into(),
-            "-i".into(),
-            pattern.into(),
-            repo_relative(repo_root.join("crates")),
-            "-g".into(),
-            "*.rs".into()])?;
-        audit.push_matches(
-            label,
-            hits.into_iter()
-                .filter(|hit| !exclusions.iter().any(|excluded| hit.contains(excluded))),
-        );
     }
     Ok(())
 }

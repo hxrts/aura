@@ -251,7 +251,10 @@ Demo mode uses the same fact-based pipeline as production where possible:
 - **Chat messages**: Emitted directly to `CHAT_SIGNAL` via `ReactiveEffects::emit()`. Sealed message facts would require cryptographic infrastructure not available in demo.
 - **Recovery approvals**: Emitted directly to `RECOVERY_SIGNAL`. Production would use consensus-based `RecoveryGrant` facts.
 
-The `DemoSignalCoordinator` in `crates/aura-terminal/src/demo/signal_coordinator.rs` handles bidirectional event routing between the TUI and simulated agents (Alice and Carol).
+`SimulatedBridge` owns the simulated agents' response receiver and processes
+their responses through its existing demo execution loop. `DemoSimulator`
+owns the runtime-backed demo automation; there is no separate signal-watching
+coordinator that infers user actions from rendered projections.
 
 ### Demo shortcuts
 

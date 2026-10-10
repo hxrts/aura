@@ -105,7 +105,16 @@ async fn demo_echo_after_importing_contacts_via_invitation_body() {
         alice_info.invitation_id(),
         alice_info.info().sender_id
     );
-    let alice_accept = invitation::accept_invitation(&app_core, alice_info).await;
+    let alice_accept = invitation::accept_invitation_with_terminal_status(
+        &app_core,
+        invitation::InvitationAcceptanceRequest::RetainedHandle {
+            invitation: Box::new(alice_info),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result
+    .map(|_| ());
     eprintln!("[Test] Alice accept result: {alice_accept:?}");
 
     // Import and accept Carol as a contact
@@ -118,7 +127,16 @@ async fn demo_echo_after_importing_contacts_via_invitation_body() {
         carol_info.invitation_id(),
         carol_info.info().sender_id
     );
-    let carol_accept = invitation::accept_invitation(&app_core, carol_info).await;
+    let carol_accept = invitation::accept_invitation_with_terminal_status(
+        &app_core,
+        invitation::InvitationAcceptanceRequest::RetainedHandle {
+            invitation: Box::new(carol_info),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result
+    .map(|_| ());
     eprintln!("[Test] Carol accept result: {carol_accept:?}");
 
     // Allow time for contact imports to complete

@@ -846,3 +846,89 @@ mod tests {
         );
     }
 }
+
+/// Render the retained authority picker through the shared observed row scaffold.
+/// Highlighting selects a candidate; the original keyboard command owns switching.
+pub fn render_authority_picker_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    let modal = &settings.modals.authority_picker;
+    render_modal(modal.visible, element! {
+        crate::tui::components::SelectionModal(
+            visible: true, title: "Select Authority".to_string(), empty_message: "No authorities available".to_string(),
+            rows: modal.authorities.iter().map(|(id, label)| crate::tui::components::SelectionModalRow {
+                id: id.clone(), label: label.clone(),
+            }).collect::<Vec<_>>(),
+            selected_index: modal.selected_index,
+        )
+    }.into_any())
+}
+
+#[cfg(test)]
+mod authority_picker_tests {
+    use super::*;
+    use crate::tui::props::extract_settings_view_props;
+    use crate::tui::state::{
+        transition, ContactSelectModalState, DispatchCommand, QueuedModal, TuiCommand, TuiState,
+    };
+    use aura_core::effects::terminal::events;
+    use aura_core::types::identifiers::AuthorityId;
+
+    fn canvas(state: &TuiState) -> String {
+        let props = extract_settings_view_props(state);
+        let modal = render_authority_picker_modal(&props).expect("live picker renderer");
+        let mut element = element! { View(width: 80, height: 31) { #(Some(modal)) } };
+        element.render(None).to_string()
+    }
+    #[test]
+    fn retained_authority_picker_renders_rows_and_navigation_only_selects_candidate() {
+        let first = AuthorityId::new_from_entropy([71; 32]);
+        let second = AuthorityId::new_from_entropy([72; 32]);
+        let mut state = TuiState::new();
+        state.modal_queue.enqueue(QueuedModal::AuthorityPicker(
+            ContactSelectModalState::single(
+                "Select Authority",
+                vec![
+                    (first.to_string().into(), "First authority".into()),
+                    (second.to_string().into(), "Second authority".into()),
+                ],
+            ),
+        ));
+        let original_current = state.current_authority_index;
+        let initial = canvas(&state);
+        assert!(initial.contains("Select Authority"), "{initial}");
+        assert!(initial.contains("➤ First authority"), "{initial}");
+        assert!(initial.contains("Second authority"), "{initial}");
+        let (down, commands) = transition(&state, events::arrow_down());
+        assert!(commands.is_empty());
+        assert_eq!(down.current_authority_index, original_current);
+        let moved = canvas(&down);
+        assert!(moved.contains("➤ Second authority"), "{moved}");
+        let (up, commands) = transition(&down, events::arrow_up());
+        assert!(commands.is_empty());
+        assert!(canvas(&up).contains("➤ First authority"));
+        let (cancelled, cancelled_commands) = transition(&down, events::escape());
+        assert!(cancelled_commands.is_empty());
+        assert_eq!(cancelled.current_authority_index, original_current);
+        assert!(!cancelled.has_queued_modal());
+        assert!(render_authority_picker_modal(&extract_settings_view_props(&cancelled)).is_none());
+        let (selected, commands) = transition(&down, events::enter());
+        assert_eq!(selected.current_authority_index, original_current);
+        assert!(!selected.has_queued_modal());
+        assert!(
+            matches!(commands.as_slice(), [TuiCommand::Dispatch(DispatchCommand::SwitchAuthority { authority_id })] if *authority_id == second)
+        );
+        assert!(render_authority_picker_modal(&extract_settings_view_props(&selected)).is_none());
+    }
+    #[test]
+    fn empty_authority_picker_cannot_dispatch_a_target() {
+        let mut state = TuiState::new();
+        state.modal_queue.enqueue(QueuedModal::AuthorityPicker(
+            ContactSelectModalState::single("Select Authority", Vec::new()),
+        ));
+        let original_current = state.current_authority_index;
+        assert!(canvas(&state).contains("No authorities available"));
+        let (state, commands) = transition(&state, events::enter());
+        assert!(commands.is_empty());
+        assert_eq!(state.current_authority_index, original_current);
+        assert!(!state.has_queued_modal());
+    }
+}

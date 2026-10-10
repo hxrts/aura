@@ -5,42 +5,15 @@ use crate::AuraEffectSystem;
 use async_lock::Mutex;
 use aura_core::context::EffectContext;
 use aura_core::effects::storage::StorageCoreEffects;
-use aura_core::effects::{CryptoCoreEffects, ExecutionMode};
+use aura_core::effects::{CryptoCoreEffects, ExecutionMode, TransportEffects};
 use aura_core::hash::hash;
 use aura_journal::commitment_tree::storage::TREE_OPS_INDEX_KEY;
-use std::ffi::OsString;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
 
 fn env_lock() -> &'static Mutex<()> {
     crate::testing::harness_env_lock()
-}
-
-struct EnvRestore {
-    saved: Vec<(&'static str, Option<OsString>)>,
-}
-
-impl EnvRestore {
-    fn capture(keys: &[&'static str]) -> Self {
-        Self {
-            saved: keys
-                .iter()
-                .map(|key| (*key, std::env::var_os(key)))
-                .collect(),
-        }
-    }
-}
-
-impl Drop for EnvRestore {
-    fn drop(&mut self) {
-        for (key, value) in &self.saved {
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
-    }
 }
 
 fn unique_test_path(label: &str) -> PathBuf {
@@ -127,7 +100,7 @@ fn harness_sync_policy_honors_explicit_env_values() {
 }
 
 #[tokio::test]
-async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
+async fn ensure_peer_channel_accepts_established_transport_without_sibling_sync_peers() {
     let authority = AuthorityId::new_from_entropy([74u8; 32]);
     let peer = AuthorityId::new_from_entropy([75u8; 32]);
     let context = ContextId::new_from_entropy([76u8; 32]);
@@ -169,86 +142,113 @@ async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
         .await
         .expect("cache current-context descriptor");
 
+    assert!(
+        agent
+            .runtime()
+            .effects()
+            .is_channel_established(context, peer)
+            .await
+    );
+    assert!(manager.list_own_device_peers().await.is_empty());
     let bridge = AgentRuntimeBridge::new(agent);
-    let error = bridge
+    bridge
         .ensure_peer_channel(context, peer)
         .await
-        .expect_err("established peer channel should still fail when sync cannot run");
-    assert!(
-        error
-            .to_string()
-            .contains("No sync peers are available for synchronization"),
-        "expected no-peers sync validation error, got: {error}"
-    );
+        .expect("established cross-authority transport does not require sibling devices");
 }
 
 #[tokio::test]
-async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_fallback() {
-    let _guard = env_lock().lock().await;
-    let _env_restore = EnvRestore::capture(&[
-        HARNESS_MODE_ENV_VAR,
-        HARNESS_SYNC_ROUNDS_ENV_VAR,
-        HARNESS_SYNC_BACKOFF_MS_ENV_VAR,
-    ]);
-    std::env::set_var(HARNESS_MODE_ENV_VAR, "1");
-    std::env::set_var(HARNESS_SYNC_ROUNDS_ENV_VAR, "2");
-    std::env::set_var(HARNESS_SYNC_BACKOFF_MS_ENV_VAR, "50");
-
+async fn ensure_peer_channel_preserves_missing_transport_prerequisite() {
     let authority = AuthorityId::new_from_entropy([78u8; 32]);
     let peer = AuthorityId::new_from_entropy([79u8; 32]);
     let context = ContextId::new_from_entropy([80u8; 32]);
-    let fallback_context = default_context_id_for_authority(peer);
-    let build_context = EffectContext::new(
-        authority,
-        ContextId::new_from_entropy([81u8; 32]),
-        ExecutionMode::Testing,
-    );
+    let build_context = EffectContext::new(authority, context, ExecutionMode::Testing);
     let agent = Arc::new(
         AgentBuilder::new()
             .with_authority(authority)
-            .with_rendezvous()
             .build_testing_async(&build_context)
             .await
             .expect("build testing agent"),
     );
-    let manager = agent
-        .runtime()
-        .rendezvous()
-        .expect("runtime rendezvous service")
-        .clone();
-    let peer_public_key = generated_test_public_key(agent.runtime().effects().as_ref()).await;
-
-    let make_descriptor = move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
-        authority_id: peer,
-        device_id: None,
-        context_id: descriptor_context,
-        transport_hints: vec![
-            aura_rendezvous::facts::TransportHint::tcp_direct("127.0.0.1:6556").expect("tcp hint"),
-        ],
-        handshake_psk_commitment: [7u8; 32],
-        public_key: peer_public_key,
-        valid_from: 0,
-        valid_until: u64::MAX,
-        nonce: [9u8; 32],
-        nickname_suggestion: None,
-    };
-
-    manager
-        .cache_descriptor(make_descriptor(fallback_context))
-        .await
-        .expect("cache fallback descriptor for initiation");
-
-    let bridge = AgentRuntimeBridge::new(agent);
-    bridge
-        .bootstrap_signing_keys()
-        .await
-        .expect("bootstrap local identity keys");
-    let error = bridge.ensure_peer_channel(context, peer).await.expect_err(
-        "peer channel initiation should fail explicitly when prerequisites are unavailable",
-    );
     assert!(
-        error.to_string().contains("service unavailable"),
-        "expected service-unavailable boundary, got: {error}"
+        !agent
+            .runtime()
+            .effects()
+            .is_channel_established(context, peer)
+            .await
+    );
+    let bridge = AgentRuntimeBridge::new(agent);
+    let error = bridge
+        .ensure_peer_channel(context, peer)
+        .await
+        .expect_err("missing rendezvous owner cannot establish a transport");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Service
+    );
+}
+
+#[tokio::test]
+async fn ensure_peer_channel_preserves_actual_selected_provider_cause() {
+    use std::error::Error;
+    let authority = AuthorityId::new_from_entropy([87; 32]);
+    let peer = AuthorityId::new_from_entropy([88; 32]);
+    let context = ContextId::new_from_entropy([89; 32]);
+    let clock = Arc::new(crate::testing::NativeReadFaultClock::new(100_007));
+    let build_context = EffectContext::new(authority, context, ExecutionMode::Testing);
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_authority(authority)
+            .with_rendezvous()
+            .with_physical_time_provider(clock.clone())
+            .build_testing_async(&build_context)
+            .await
+            .expect("build selected-provider agent"),
+    );
+    clock.fail_reads();
+    let bridge = AgentRuntimeBridge::new(agent.clone());
+    let error = bridge
+        .ensure_peer_channel(context, peer)
+        .await
+        .expect_err("required native clock fault");
+    let mut cause: &(dyn Error + 'static) = &error;
+    while !cause.is::<crate::testing::NativePhysicalReadFault>() {
+        cause = cause
+            .source()
+            .expect("original native provider cause through actual handler/bridge");
+    }
+    assert!(
+        !agent
+            .runtime()
+            .effects()
+            .is_channel_established(context, peer)
+            .await
+    );
+}
+
+#[tokio::test]
+async fn required_native_absolute_deadline_retains_selected_provider_witness() {
+    let authority = AuthorityId::new_from_entropy([90; 32]);
+    let context = ContextId::new_from_entropy([91; 32]);
+    let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100_007));
+    let build_context = EffectContext::new(authority, context, ExecutionMode::Testing);
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_authority(authority)
+            .with_physical_time_provider(clock.clone())
+            .build_testing_async(&build_context)
+            .await
+            .expect("build original selected-provider runtime"),
+    );
+    let bridge = AgentRuntimeBridge::new(agent);
+    let endpoint = aura_core::types::window::WindowPosition::new(100_107);
+    let waiting = bridge.wait_until_physical_deadline(endpoint);
+    futures::pin_mut!(waiting);
+    assert!(futures::poll!(waiting.as_mut()).is_pending());
+    clock.advance(100);
+    assert_eq!(
+        waiting.await.expect("original provider endpoint witness"),
+        aura_core::time::PhysicalTime::exact(100_107)
     );
 }
 
@@ -3063,7 +3063,11 @@ pub(crate) async fn enrolled_two_device_account(
     .expect("account config json");
     let subject: AuthorityId =
         serde_json::from_value(projected["authority_id"].clone()).expect("adopted authority");
-    assert_eq!(subject, issuer.authority_id(), "joined device adopted the account");
+    assert_eq!(
+        subject,
+        issuer.authority_id(),
+        "joined device adopted the account"
+    );
     let adopted_context: aura_core::ContextId =
         serde_json::from_value(projected["context_id"].clone()).expect("adopted context");
     let config = invitee.runtime().effects().config().clone();
@@ -3073,7 +3077,14 @@ pub(crate) async fn enrolled_two_device_account(
         .shutdown_gracefully(std::time::Duration::from_secs(5))
         .await
         .expect("joined device tasks stop before reopen");
-    drop((invitee_app, invitee_bridge, info, accept, witness, invitation));
+    drop((
+        invitee_app,
+        invitee_bridge,
+        info,
+        accept,
+        witness,
+        invitation,
+    ));
     drop(invitee);
     let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
         .expect("exclusive joined-device profile after teardown");
@@ -3120,10 +3131,12 @@ async fn run_two_of_two_rotation(
     .expect("device threshold ceremony starts")
     .status_handle();
     for _ in 0..1200_u32 {
-        let state =
-            aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(&issuer_app, &status)
-                .await
-                .expect("ceremony status");
+        let state = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+            &issuer_app,
+            &status,
+        )
+        .await
+        .expect("ceremony status");
         if state.has_failed {
             return Err(state.error_message);
         }
@@ -3145,8 +3158,16 @@ async fn assert_devices_agree(
     use aura_core::effects::ThresholdSigningEffects;
     let authority = issuer.authority_id();
     for _ in 0..400_u32 {
-        let a = issuer.runtime().threshold_signing().threshold_state(&authority).await;
-        let b = joined.runtime().threshold_signing().threshold_state(&authority).await;
+        let a = issuer
+            .runtime()
+            .threshold_signing()
+            .threshold_state(&authority)
+            .await;
+        let b = joined
+            .runtime()
+            .threshold_signing()
+            .threshold_state(&authority)
+            .await;
         if let (Some(a), Some(b)) = (a, b) {
             if epoch_after(a.epoch) && a.epoch == b.epoch {
                 assert_eq!((a.threshold, b.threshold), (2, 2));
@@ -3282,7 +3303,6 @@ fn two_runtime_rotation_waits_for_user_consent_and_honors_decline() {
         assert_devices_agree(&issuer, &joined, |epoch| epoch > before).await;
     });
 }
-
 
 #[test]
 fn runtime_enrollment_selector_rejects_foreign_runtime_before_terminal_mutation() {

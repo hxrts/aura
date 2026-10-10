@@ -33,8 +33,8 @@ use crate::ui_contract::{
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
     execute_with_runtime_timeout_budget, require_runtime, scaled_workflow_duration,
-    timeout_runtime_call, warn_workflow_timeout, workflow_best_effort, workflow_retry_policy,
-    workflow_timeout_budget,
+    timeout_runtime_call, timeout_runtime_call_with_budget, warn_workflow_timeout,
+    workflow_best_effort, workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -59,25 +59,19 @@ use crate::workflows::stage_tracker::{
     new_workflow_stage_tracker, update_workflow_stage, WorkflowStageTracker,
 };
 use crate::{views::invitations::InvitationsState, AppCore};
-pub use accept::{
-    accept_imported_invitation, accept_imported_invitation_with_instance,
-    accept_imported_invitation_with_terminal_status, accept_invitation, accept_invitation_by_str,
-    accept_invitation_by_str_with_instance, accept_invitation_by_str_with_terminal_status,
-    accept_invitation_with_instance, accept_operation_for_imported_invitation, cancel_invitation,
-    cancel_invitation_by_str, cancel_invitation_by_str_with_terminal_status, decline_invitation,
-    decline_invitation_by_str, decline_invitation_by_str_with_terminal_status,
-    resolve_invitation_accept_operation,
-};
 #[allow(unused_imports)]
 pub(in crate::workflows) use accept::{
     accept_imported_invitation_inner, accept_imported_invitation_owned,
     authoritative_pending_home_or_channel_invitation,
     authoritative_pending_home_or_channel_invitation_for_accept,
     drive_invitation_accept_convergence, fail_invitation_accept,
-    fail_pending_invitation_accept_owned, fail_pending_invitation_accept_unowned,
-    invitation_accept_timeout_budget, pending_invitation_by_id_with_timeout,
-    reconcile_channel_invitation_acceptance, trigger_runtime_discovery_with_timeout,
+    fail_pending_invitation_accept_owned, reconcile_channel_invitation_acceptance,
     wait_for_contact_link, AcceptInvitationError,
+};
+pub use accept::{
+    accept_invitation_with_terminal_status, accept_operation_for_imported_invitation,
+    cancel_invitation, cancel_invitation_by_str, cancel_invitation_by_str_with_terminal_status,
+    decline_invitation, decline_invitation_by_str, decline_invitation_by_str_with_terminal_status,
 };
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
@@ -161,7 +155,6 @@ const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
 /// the inviter (request, signed acceptance, confirm).
 const CHOREOGRAPHY_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 60_000;
 const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 120_000;
-const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
 const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
 #[cfg(feature = "signals")]
 const PENDING_INVITATION_AUTHORITATIVE_ATTEMPTS: usize = 60;
@@ -191,6 +184,39 @@ pub struct InvitationHandle {
     invitation: InvitationInfo,
 }
 
+/// Exact input to the canonical invitation acceptance owner.
+#[derive(Debug)]
+pub enum InvitationAcceptanceRequest {
+    /// Previously retained invitation metadata; no claim of cryptographic provenance.
+    RetainedHandle {
+        /// Metadata retained from the canonical import/query owner.
+        invitation: Box<InvitationHandle>,
+        /// Existing handoff instance, or a new standalone operation.
+        operation_instance_id: Option<OperationInstanceId>,
+    },
+    /// An already submitted operation retains its original kind and instance.
+    SubmittedId {
+        /// Identifier to resolve through the canonical runtime query.
+        invitation_id: String,
+        /// Exact instance allocated by the original submission.
+        operation_instance_id: OperationInstanceId,
+        /// Original acceptance kind, checked against canonical metadata.
+        operation_kind: SemanticOperationKind,
+    },
+    /// Standalone ingress resolves the canonical kind before allocating an owner.
+    UnsubmittedId {
+        /// Identifier queried before allocating the canonical acceptance owner.
+        invitation_id: String,
+    },
+    /// Import a Contact code under the original Contact acceptance operation.
+    ContactCode {
+        /// Untrusted code imported and checked as Contact before mutation.
+        code: String,
+        /// Exact instance allocated by the original submission.
+        operation_instance_id: OperationInstanceId,
+    },
+}
+
 impl InvitationHandle {
     fn new(invitation: InvitationInfo) -> Self {
         Self { invitation }
@@ -204,10 +230,6 @@ impl InvitationHandle {
     /// Borrow the bridge-level invitation metadata.
     pub fn info(&self) -> &InvitationInfo {
         &self.invitation
-    }
-
-    fn into_info(self) -> InvitationInfo {
-        self.invitation
     }
 }
 
@@ -388,6 +410,30 @@ fn command_terminal_error(detail: impl Into<String>) -> crate::ui_contract::Sema
 pub mod handoff {
     use super::*;
 
+    /// A Contact invitation code and the original submitted acceptance instance.
+    #[derive(Debug, Clone)]
+    pub struct AcceptContactInvitationFromCodeRequest {
+        /// Untrusted code to import and verify before accepting.
+        pub code: String,
+        /// Exact frontend handoff instance, retained across import and acceptance.
+        pub operation_instance_id: OperationInstanceId,
+    }
+
+    /// Verify and accept a Contact code as one acceptance operation.
+    pub async fn accept_contact_invitation_from_code(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: AcceptContactInvitationFromCodeRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationHandle> {
+        super::accept_invitation_with_terminal_status(
+            app_core,
+            super::InvitationAcceptanceRequest::ContactCode {
+                code: request.code,
+                operation_instance_id: request.operation_instance_id,
+            },
+        )
+        .await
+    }
+
     /// Inputs for the create-contact-invitation handoff workflow.
     #[derive(Debug, Clone)]
     pub struct CreateContactInvitationRequest {
@@ -442,6 +488,17 @@ pub mod handoff {
         pub invitation: InvitationHandle,
         /// Optional frontend-owned semantic instance id.
         pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Original submitted acceptance identity, retained before canonical lookup.
+    #[derive(Debug, Clone)]
+    pub struct AcceptInvitationByIdRequest {
+        /// Canonical invitation identifier.
+        pub invitation_id: String,
+        /// Actual submitted operation instance.
+        pub operation_instance_id: OperationInstanceId,
+        /// Original acceptance kind; runtime evidence must match before mutation.
+        pub operation_kind: SemanticOperationKind,
     }
 
     /// Inputs for invitation actions that address an existing invitation id.
@@ -514,23 +571,32 @@ pub mod handoff {
         app_core: &Arc<RwLock<AppCore>>,
         request: AcceptImportedInvitationRequest,
     ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
-        super::accept_imported_invitation_with_terminal_status(
+        let outcome = super::accept_invitation_with_terminal_status(
             app_core,
-            request.invitation,
-            request.operation_instance_id,
+            InvitationAcceptanceRequest::RetainedHandle {
+                invitation: Box::new(request.invitation),
+                operation_instance_id: request.operation_instance_id,
+            },
         )
-        .await
+        .await;
+        crate::ui_contract::WorkflowTerminalOutcome {
+            result: outcome.result.map(|_| ()),
+            terminal: outcome.terminal,
+        }
     }
 
-    /// Accept a pending invitation by its canonical id.
+    /// Accept a pending invitation under its original submitted operation.
     pub async fn accept_invitation_by_id(
         app_core: &Arc<RwLock<AppCore>>,
-        request: InvitationByIdRequest,
-    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationInfo> {
-        super::accept_invitation_by_str_with_terminal_status(
+        request: AcceptInvitationByIdRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationHandle> {
+        super::accept_invitation_with_terminal_status(
             app_core,
-            &request.invitation_id,
-            request.operation_instance_id,
+            InvitationAcceptanceRequest::SubmittedId {
+                invitation_id: request.invitation_id,
+                operation_instance_id: request.operation_instance_id,
+                operation_kind: request.operation_kind,
+            },
         )
         .await
     }
@@ -637,34 +703,27 @@ mod tests {
             .expect("invitation workflow source should be readable")
     }
 
+    #[cfg(feature = "signals")]
+    fn seed_required_acceptance_convergence(runtime: &crate::runtime_bridge::OfflineRuntimeBridge) {
+        runtime.queue_sync_answers(vec![Box::pin(async { Ok(()) })]);
+        runtime.set_process_ceremony_result(Ok(
+            crate::runtime_bridge::CeremonyProcessingOutcome::NoProgress,
+        ));
+        runtime.queue_sync_status_answers(
+            (0..4)
+                .map(|_| {
+                    Box::pin(async {
+                        Ok(crate::runtime_bridge::SyncStatus {
+                            connected_peers: 1,
+                            ..Default::default()
+                        })
+                    }) as futures::future::BoxFuture<'static, _>
+                })
+                .collect(),
+        );
+    }
+
     // === Invitation Role Parsing Tests ===
-
-    #[test]
-    fn accept_pending_channel_invitation_owned_boundary_is_declared_and_wrapped() {
-        let source = read_invitation_workflow_source("src/workflows/invitation/pending_accept.rs");
-
-        assert!(source.contains("owner = \"accept_pending_channel_invitation_id_owned\""));
-        assert!(source.contains("async fn accept_pending_channel_invitation_id_owned("));
-        assert!(source.contains(
-            "super::accept::accept_imported_invitation_owned(app_core, invitation_info, owner, None)"
-        ));
-        assert!(source.contains("issue_pending_invitation_consumed_proof("));
-    }
-
-    #[test]
-    fn accept_imported_invitation_owned_boundary_preserves_wrapper_and_inner_split() {
-        let source = read_invitation_workflow_source("src/workflows/invitation/accept.rs");
-
-        assert!(source.contains("owner = \"accept_imported_invitation_owned\""));
-        assert!(source.contains("async fn accept_imported_invitation_owned("));
-        assert!(source.contains("async fn accept_imported_invitation_inner("));
-        assert!(source.contains(
-            "match accept_imported_invitation_inner(app_core, invitation, owner).await? {"
-        ));
-        assert!(source.contains(
-            "accept_imported_invitation_owned(app_core, &invitation, &owner, None).await"
-        ));
-    }
 
     #[test]
     fn create_channel_invitation_owned_boundary_is_declared() {
@@ -1348,6 +1407,9 @@ mod tests {
             &app_core,
             &runtime,
             AuthorityId::new_from_entropy([71u8; 32]),
+            &workflow_timeout_budget(&runtime, Duration::from_secs(40))
+                .await
+                .unwrap(),
         )
         .await
         .expect_err("contact-link wait should fail when the contacts signal is unavailable");
@@ -1455,6 +1517,9 @@ mod tests {
         reconcile_channel_invitation_acceptance(
             &app_core,
             &runtime_bridge,
+            &workflow_timeout_budget(&runtime_bridge, Duration::from_secs(150))
+                .await
+                .unwrap(),
             None,
             None,
             channel_id,
@@ -1503,6 +1568,9 @@ mod tests {
         let error = reconcile_channel_invitation_acceptance(
             &app_core,
             &runtime,
+            &workflow_timeout_budget(&runtime, Duration::from_secs(150))
+                .await
+                .unwrap(),
             None,
             None,
             channel_id,
@@ -1553,6 +1621,9 @@ mod tests {
         reconcile_channel_invitation_acceptance(
             &app_core,
             &runtime_bridge,
+            &workflow_timeout_budget(&runtime_bridge, Duration::from_secs(150))
+                .await
+                .unwrap(),
             None,
             None,
             channel_id,
@@ -1613,6 +1684,7 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
+        seed_required_acceptance_convergence(&runtime);
         // Accepting a channel commits its channel fact to the journal.
         runtime.record_relational_facts();
         runtime.set_accept_invitation_result(Ok(
@@ -1751,8 +1823,14 @@ mod tests {
             }]);
         };
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
-        let await_pending =
-            authoritative_pending_home_or_channel_invitation_for_accept(&app_core, &runtime_bridge);
+        let budget = workflow_timeout_budget(&runtime_bridge, Duration::from_secs(30))
+            .await
+            .unwrap();
+        let await_pending = authoritative_pending_home_or_channel_invitation_for_accept(
+            &app_core,
+            &runtime_bridge,
+            &budget,
+        );
         let ((), pending) = tokio::join!(delayed_pending_publish, await_pending);
 
         let accepted = pending
@@ -1833,17 +1911,21 @@ mod tests {
         .await
         .unwrap();
 
-        let accepted = accept_invitation_by_str_with_instance(
+        let accepted = accept_invitation_with_terminal_status(
             &app_core,
-            "pending-contact-accepted",
-            Some(OperationInstanceId(
-                "accept-contact-authoritative-fact-1".to_string(),
-            )),
+            InvitationAcceptanceRequest::SubmittedId {
+                invitation_id: ("pending-contact-accepted").to_owned(),
+                operation_instance_id: OperationInstanceId(
+                    "accept-contact-authoritative-fact-1".to_string(),
+                ),
+                operation_kind: SemanticOperationKind::AcceptContactInvitation,
+            },
         )
         .await
+        .result
         .expect("contact invitation acceptance should succeed");
         assert_eq!(
-            accepted.invitation_id,
+            *accepted.invitation_id(),
             InvitationId::new("pending-contact-accepted")
         );
 
@@ -1897,12 +1979,14 @@ mod tests {
                 .unwrap();
         }
 
-        let outcome = accept_imported_invitation_with_terminal_status(
+        let outcome = accept_invitation_with_terminal_status(
             &app_core,
-            InvitationHandle::new(invitation),
-            Some(OperationInstanceId(
-                "accept-imported-contact-terminal-1".to_string(),
-            )),
+            InvitationAcceptanceRequest::RetainedHandle {
+                invitation: Box::new(InvitationHandle::new(invitation)),
+                operation_instance_id: Some(OperationInstanceId(
+                    "accept-imported-contact-terminal-1".to_string(),
+                )),
+            },
         )
         .await;
 
@@ -1941,6 +2025,7 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
+        seed_required_acceptance_convergence(&runtime);
         // Accepting a channel commits its channel fact to the journal.
         runtime.record_relational_facts();
         runtime.set_accept_invitation_result(Ok(
@@ -2031,6 +2116,7 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
+        seed_required_acceptance_convergence(&runtime);
         // Accepting a channel commits its channel fact to the journal.
         runtime.record_relational_facts();
         runtime.set_accept_invitation_result(Ok(
@@ -2320,10 +2406,15 @@ mod tests {
         ]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
 
-        let invitation = authoritative_pending_home_or_channel_invitation(&runtime)
-            .await
-            .expect("authoritative pending invitation should resolve")
-            .expect("pending invitation should exist");
+        let invitation = authoritative_pending_home_or_channel_invitation(
+            &runtime,
+            &workflow_timeout_budget(&runtime, INVITATION_RUNTIME_QUERY_TIMEOUT)
+                .await
+                .unwrap(),
+        )
+        .await
+        .expect("authoritative pending invitation should resolve")
+        .expect("pending invitation should exist");
         assert_eq!(
             invitation.invitation_id,
             InvitationId::new("received-channel")
@@ -2354,10 +2445,15 @@ mod tests {
         }]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
 
-        assert!(authoritative_pending_home_or_channel_invitation(&runtime)
-            .await
-            .expect("authoritative pending lookup should succeed")
-            .is_none());
+        assert!(authoritative_pending_home_or_channel_invitation(
+            &runtime,
+            &workflow_timeout_budget(&runtime, INVITATION_RUNTIME_QUERY_TIMEOUT)
+                .await
+                .unwrap()
+        )
+        .await
+        .expect("authoritative pending lookup should succeed")
+        .is_none());
     }
 
     #[test]

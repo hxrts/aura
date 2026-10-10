@@ -7,18 +7,14 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_lock::RwLock;
-use futures::{
-    future::{select, Either},
-    pin_mut,
-};
 
 use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::{
     time::PhysicalTime, AuraError, ExponentialBackoffPolicy, PostTerminalBestEffort,
-    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutClockObservation,
-    TimeoutExecutionProfile, TimeoutRunError,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
+    TimeoutRunError,
 };
 
 // Harness-only convergence tuning for observed workflow stabilization. These
@@ -162,15 +158,30 @@ pub async fn workflow_timeout_budget(
     duration: Duration,
 ) -> Result<TimeoutBudget, TimeoutBudgetError> {
     let started_at = runtime
-        .current_time_ms()
+        .physical_time_provider()
+        .physical_time()
         .await
-        .map_err(TimeoutBudgetError::time_source_failure)
-        .map(|ts_ms| PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        })?;
+        .map_err(TimeoutBudgetError::time_source_failure)?;
     let scaled = scaled_workflow_duration(duration)?;
     TimeoutBudget::from_start_and_timeout(&started_at, scaled)
+}
+
+async fn runtime_observation_with_budget(
+    runtime: &Arc<dyn RuntimeBridge>,
+    parent: &TimeoutBudget,
+) -> Result<PhysicalTime, TimeoutBudgetError> {
+    aura_core::time::timeout::observe_with_timeout_budget(&runtime.physical_time_provider(), parent)
+        .await
+}
+
+/// Clamp a stage policy to the original workflow endpoint and clock observation.
+pub async fn workflow_child_timeout_budget(
+    runtime: &Arc<dyn RuntimeBridge>,
+    parent: &TimeoutBudget,
+    duration: Duration,
+) -> Result<TimeoutBudget, TimeoutBudgetError> {
+    let now = runtime_observation_with_budget(runtime, parent).await?;
+    parent.child_budget(&now, scaled_workflow_duration(duration)?)
 }
 
 /// Execute a workflow operation under a runtime-backed timeout budget.
@@ -183,43 +194,12 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    let now = runtime_current_physical_time(runtime)
-        .await
-        .map_err(TimeoutRunError::Timeout)?;
-    let remaining = budget
-        .remaining_at(&now)
-        .map_err(TimeoutRunError::Timeout)?;
-    let sleep_ms = duration_to_ms(remaining).map_err(TimeoutRunError::Timeout)?;
-
-    let operation_future = operation();
-    let sleep_future = runtime.sleep_ms(sleep_ms);
-    pin_mut!(operation_future);
-    pin_mut!(sleep_future);
-
-    match select(operation_future, sleep_future).await {
-        Either::Left((result, _sleep_future)) => {
-            let observed = runtime_current_physical_time(runtime)
-                .await
-                .map_err(TimeoutRunError::Timeout)?;
-            budget
-                .remaining_at(&observed)
-                .map_err(TimeoutRunError::Timeout)?;
-            result.map_err(TimeoutRunError::Operation)
-        }
-        Either::Right((sleep, _operation_future)) => {
-            sleep.map_err(|error| {
-                TimeoutRunError::Timeout(TimeoutBudgetError::time_source_failure(error))
-            })?;
-            let observed = runtime_current_physical_time(runtime)
-                .await
-                .map_err(TimeoutRunError::Timeout)?;
-            Err(TimeoutRunError::Timeout(
-                budget
-                    .expire_at(&observed)
-                    .map_err(TimeoutRunError::Timeout)?,
-            ))
-        }
-    }
+    aura_core::time::timeout::execute_with_timeout_budget(
+        &runtime.physical_time_provider(),
+        budget,
+        operation,
+    )
+    .await
 }
 
 /// Emit a diagnostic warning whenever a workflow-owned timeout fires.
@@ -252,7 +232,38 @@ where
     let budget = workflow_timeout_budget(runtime, duration)
         .await
         .map_err(AuraError::from)?;
-    match execute_with_runtime_timeout_budget(runtime, &budget, || async {
+    timeout_runtime_call_under_budget(runtime, &budget, operation, stage, call).await
+}
+
+/// Execute a nested runtime stage without replacing its owner's endpoint.
+pub async fn timeout_runtime_call_with_budget<T, F, Fut>(
+    runtime: &Arc<dyn RuntimeBridge>,
+    parent: &TimeoutBudget,
+    operation: &'static str,
+    stage: &'static str,
+    duration: Duration,
+    call: F,
+) -> Result<T, AuraError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = T>,
+{
+    let budget = workflow_child_timeout_budget(runtime, parent, duration).await?;
+    timeout_runtime_call_under_budget(runtime, &budget, operation, stage, call).await
+}
+
+async fn timeout_runtime_call_under_budget<T, F, Fut>(
+    runtime: &Arc<dyn RuntimeBridge>,
+    budget: &TimeoutBudget,
+    operation: &'static str,
+    stage: &'static str,
+    call: F,
+) -> Result<T, AuraError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = T>,
+{
+    match execute_with_runtime_timeout_budget(runtime, budget, || async {
         Ok::<T, AuraError>(call().await)
     })
     .await
@@ -289,8 +300,22 @@ pub(crate) async fn send_committed_fact(
     context: aura_core::types::identifiers::ContextId,
     fact: &aura_journal::fact::RelationalFact,
 ) -> Result<(), AuraError> {
-    timeout_runtime_call(
+    let budget = workflow_timeout_budget(runtime, COMMITTED_FACT_SEND_TIMEOUT).await?;
+    send_committed_fact_with_budget(runtime, &budget, operation, peer, context, fact).await
+}
+
+/// Send an already committed fact within an enclosing delivery owner's window.
+pub(crate) async fn send_committed_fact_with_budget(
+    runtime: &Arc<dyn RuntimeBridge>,
+    parent: &TimeoutBudget,
+    operation: &'static str,
+    peer: aura_core::types::identifiers::AuthorityId,
+    context: aura_core::types::identifiers::ContextId,
+    fact: &aura_journal::fact::RelationalFact,
+) -> Result<(), AuraError> {
+    timeout_runtime_call_with_budget(
         runtime,
+        parent,
         operation,
         "send_chat_fact",
         COMMITTED_FACT_SEND_TIMEOUT,
@@ -344,52 +369,51 @@ pub fn workflow_best_effort() -> WorkflowBestEffort {
     WorkflowBestEffort::post_terminal_only()
 }
 
-/// Execute a workflow operation under a runtime-backed retry budget.
-/// Execute a workflow operation under a runtime-backed retry budget.
+/// Execute bounded attempts and backoff under the original owner endpoint.
 pub async fn execute_with_runtime_retry_budget<T, E, F, Fut>(
     runtime: &Arc<dyn RuntimeBridge>,
+    parent: &TimeoutBudget,
     policy: &RetryBudgetPolicy,
     operation: F,
 ) -> Result<T, RetryRunError<E>>
 where
-    F: FnMut(u32) -> Fut,
+    E: std::error::Error + 'static,
+    F: FnMut(u32, TimeoutBudget) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    let initial = runtime_current_physical_time(runtime)
-        .await
-        .map_err(RetryRunError::Timeout)?;
-    let clock = TimeoutClockObservation::new(&initial);
     let mut attempts = policy.attempt_budget();
     let mut operation = operation;
 
     loop {
-        let observed = runtime_current_physical_time(runtime)
+        let observed = runtime_observation_with_budget(runtime, parent)
             .await
             .map_err(RetryRunError::Timeout)?;
-        clock.observe(&observed).map_err(RetryRunError::Timeout)?;
-        let attempt = attempts.record_attempt().map_err(RetryRunError::Timeout)?;
-
-        let result = if let Some(timeout) = policy.per_attempt_timeout() {
-            let budget = TimeoutBudget::from_start_and_timeout_with_observation(
-                &observed,
-                timeout,
-                clock.clone(),
-            )
+        let remaining = parent
+            .remaining_at(&observed)
             .map_err(RetryRunError::Timeout)?;
-            execute_with_runtime_timeout_budget(runtime, &budget, || operation(attempt)).await
-        } else {
-            let result = operation(attempt).await;
-            let observed = runtime_current_physical_time(runtime)
-                .await
-                .map_err(RetryRunError::Timeout)?;
-            clock.observe(&observed).map_err(RetryRunError::Timeout)?;
-            result.map_err(TimeoutRunError::Operation)
-        };
+        let attempt = attempts.record_attempt().map_err(RetryRunError::Timeout)?;
+        let child = parent
+            .child_budget(&observed, policy.per_attempt_timeout().unwrap_or(remaining))
+            .map_err(RetryRunError::Timeout)?;
+        let result = execute_with_runtime_timeout_budget(runtime, &child, || {
+            operation(attempt, child.clone())
+        })
+        .await;
 
         match result {
             Ok(value) => return Ok(value),
             Err(TimeoutRunError::Timeout(error)) => return Err(RetryRunError::Timeout(error)),
             Err(TimeoutRunError::Operation(error)) => {
+                // A child may have retained a clock/timer failure through a
+                // domain error. That failure terminates the same owner; it is
+                // never evidence that a later attempt is safe.
+                let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+                while let Some(source) = cause {
+                    if let Some(timeout) = source.downcast_ref::<TimeoutBudgetError>() {
+                        return Err(RetryRunError::Timeout(timeout.clone()));
+                    }
+                    cause = source.source();
+                }
                 if !attempts.can_attempt() {
                     return Err(RetryRunError::AttemptsExhausted {
                         attempts_used: attempts.attempts_used(),
@@ -399,13 +423,16 @@ where
 
                 let delay_ms = duration_to_ms(policy.delay_for_attempt(attempt))
                     .map_err(RetryRunError::Timeout)?;
-                runtime.sleep_ms(delay_ms).await.map_err(|error| {
-                    RetryRunError::Timeout(TimeoutBudgetError::time_source_failure(error))
-                })?;
-                let observed = runtime_current_physical_time(runtime)
+                execute_with_runtime_timeout_budget(runtime, parent, || runtime.sleep_ms(delay_ms))
                     .await
-                    .map_err(RetryRunError::Timeout)?;
-                clock.observe(&observed).map_err(RetryRunError::Timeout)?;
+                    .map_err(|error| {
+                        RetryRunError::Timeout(match error {
+                            TimeoutRunError::Timeout(error) => error,
+                            TimeoutRunError::Operation(error) => {
+                                TimeoutBudgetError::time_source_failure(error)
+                            }
+                        })
+                    })?;
             }
         }
     }
@@ -442,95 +469,68 @@ pub async fn cooperative_yield() {
     YieldOnce(false).await;
 }
 
-async fn runtime_current_physical_time(
-    runtime: &Arc<dyn RuntimeBridge>,
-) -> Result<PhysicalTime, TimeoutBudgetError> {
-    runtime
-        .current_time_ms()
-        .await
-        .map(|ts_ms| PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        })
-        .map_err(TimeoutBudgetError::time_source_failure)
-}
-
 fn duration_to_ms(duration: Duration) -> Result<u64, TimeoutBudgetError> {
     u64::try_from(duration.as_millis()).map_err(|_| {
         TimeoutBudgetError::invalid_policy("duration does not fit in u64 milliseconds")
     })
 }
 
-/// Ask the runtime to perform a bounded convergence pass suitable for harness-mode real-runtime
-/// execution. The runtime bridge owns the actual harness profile policy.
-pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
-    let rounds = if harness_mode_enabled() {
-        harness_convergence_rounds()
-    } else {
-        1
-    };
-    let backoff_ms = harness_convergence_backoff_ms();
-    let step_timeout_ms = harness_convergence_step_timeout_ms();
+/// Run required convergence under the caller's original operation endpoint.
+/// Each step may use a shorter local policy, but cannot extend its parent.
+pub async fn converge_runtime(
+    runtime: &Arc<dyn RuntimeBridge>,
+    budget: &TimeoutBudget,
+) -> Result<(), AuraError> {
+    converge_runtime_cycle(
+        runtime,
+        budget,
+        Duration::from_millis(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS),
+    )
+    .await
+}
 
-    async fn run_step<T, F>(runtime: &Arc<dyn RuntimeBridge>, step_timeout_ms: u64, future: F)
-    where
-        F: Future<Output = Result<T, IntentError>>,
-    {
-        let requested = Duration::from_millis(step_timeout_ms);
-        match workflow_timeout_budget(runtime, requested).await {
-            Ok(budget) => {
-                let _ = execute_with_runtime_timeout_budget(runtime, &budget, || future).await;
-            }
-            Err(_) => {
-                // Budget creation failed (time source unavailable, etc.).  Rather than
-                // awaiting without any deadline — which can stall the convergence loop
-                // indefinitely — race the operation against a hard ceiling sleep.
-                let ceiling_ms = step_timeout_ms.max(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS);
-                let operation = future;
-                let sleep = runtime.sleep_ms(ceiling_ms);
-                pin_mut!(operation);
-                pin_mut!(sleep);
-                match select(operation, sleep).await {
-                    Either::Left((result, _)) => {
-                        let _ = result;
-                    }
-                    Either::Right((_sleep_result, _)) => {
-                        // Hard ceiling reached — drop the operation and continue.
-                    }
+async fn converge_runtime_cycle(
+    runtime: &Arc<dyn RuntimeBridge>,
+    budget: &TimeoutBudget,
+    step_timeout: Duration,
+) -> Result<(), AuraError> {
+    async fn run_step<T>(
+        runtime: &Arc<dyn RuntimeBridge>,
+        parent: &TimeoutBudget,
+        requested: Duration,
+        operation: &'static str,
+        future: impl Future<Output = Result<T, IntentError>>,
+    ) -> Result<(), AuraError> {
+        let child = workflow_child_timeout_budget(runtime, parent, requested).await?;
+        execute_with_runtime_timeout_budget(runtime, &child, || future)
+            .await
+            .map(|_| ())
+            .map_err(|error| match error {
+                TimeoutRunError::Timeout(error) => AuraError::from(error),
+                TimeoutRunError::Operation(error) => {
+                    AuraError::from(super::error::runtime_call(operation, error))
                 }
-            }
-        }
+            })
     }
 
-    for round in 0..rounds {
-        if harness_mode_enabled() {
-            run_step(runtime, step_timeout_ms, runtime.trigger_discovery()).await;
-            run_step(
-                runtime,
-                step_timeout_ms,
-                runtime.process_ceremony_messages(),
-            )
-            .await;
-        }
-        run_step(runtime, step_timeout_ms, runtime.trigger_sync()).await;
-        // Sync can pull fresh acceptance/envelope traffic into the local inbox, so
-        // process ceremony messages again after sync before the caller observes
-        // any readiness derived from that traffic.
-        run_step(
-            runtime,
-            step_timeout_ms,
-            runtime.process_ceremony_messages(),
-        )
-        .await;
-        cooperative_yield().await;
-
-        if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {
-            // Post-terminal convergence remains explicitly best effort.
-            if runtime.sleep_ms(backoff_ms).await.is_err() {
-                return;
-            }
-        }
-    }
+    run_step(
+        runtime,
+        budget,
+        step_timeout,
+        "converge sync",
+        runtime.trigger_sync(),
+    )
+    .await?;
+    run_step(
+        runtime,
+        budget,
+        step_timeout,
+        "converge ceremony inbox",
+        runtime.process_ceremony_messages(),
+    )
+    .await?;
+    cooperative_yield().await;
+    Ok(())
 }
 
 /// Run one bounded harness/runtime upkeep pass and then republish observed
@@ -543,8 +543,62 @@ pub async fn run_harness_runtime_maintenance_pass(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
 ) -> Result<(), AuraError> {
-    converge_runtime(runtime).await;
-    super::system::refresh_account(app_core).await
+    let harness = harness_mode_enabled();
+    let rounds = if harness {
+        harness_convergence_rounds()
+    } else {
+        1
+    };
+    let rounds = u64::try_from(rounds).map_err(|_| TimeoutBudgetError::InvalidPolicy {
+        detail: "maintenance convergence round count exceeds u64".into(),
+    })?;
+    let step_ms = if harness {
+        harness_convergence_step_timeout_ms()
+    } else {
+        DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS
+    };
+    let steps = 2;
+    let backoff_ms = if harness {
+        harness_convergence_backoff_ms()
+    } else {
+        0
+    };
+    let timeout_ms = rounds
+        .checked_mul(steps)
+        .and_then(|steps| steps.checked_mul(step_ms))
+        .and_then(|steps| {
+            rounds
+                .saturating_sub(1)
+                .checked_mul(backoff_ms)
+                .and_then(|backoff| steps.checked_add(backoff))
+        })
+        .ok_or_else(|| TimeoutBudgetError::InvalidPolicy {
+            detail: "maintenance convergence policy overflows u64 milliseconds".into(),
+        })?;
+    let budget = workflow_timeout_budget(runtime, Duration::from_millis(timeout_ms)).await?;
+    execute_with_runtime_timeout_budget(runtime, &budget, || async {
+        for round in 0..rounds {
+            converge_runtime_cycle(runtime, &budget, Duration::from_millis(step_ms)).await?;
+            if round + 1 < rounds && backoff_ms > 0 {
+                execute_with_runtime_timeout_budget(runtime, &budget, || {
+                    runtime.sleep_ms(backoff_ms)
+                })
+                .await
+                .map_err(|error| match error {
+                    TimeoutRunError::Timeout(error) => AuraError::from(error),
+                    TimeoutRunError::Operation(error) => AuraError::from(
+                        super::error::runtime_call("maintenance convergence backoff", error),
+                    ),
+                })?;
+            }
+        }
+        super::system::refresh_account(app_core).await
+    })
+    .await
+    .map_err(|error| match error {
+        TimeoutRunError::Timeout(error) => error.into(),
+        TimeoutRunError::Operation(error) => error,
+    })
 }
 
 /// Process newly-delivered browser harness transport mailbox work without
@@ -559,16 +613,28 @@ pub async fn run_harness_runtime_mailbox_pass(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
 ) -> Result<(), AuraError> {
-    let _ = timeout_runtime_call(
-        runtime,
-        "web_harness_transport_tick",
-        "process_ceremony_messages",
-        Duration::from_secs(3),
-        || runtime.process_ceremony_messages(),
-    )
-    .await?;
-    cooperative_yield().await;
-    super::system::refresh_account(app_core).await
+    let budget = workflow_timeout_budget(runtime, Duration::from_secs(3)).await?;
+    execute_with_runtime_timeout_budget(runtime, &budget, || async {
+        timeout_runtime_call_with_budget(
+            runtime,
+            &budget,
+            "web_harness_transport_tick",
+            "process_ceremony_messages",
+            Duration::from_secs(3),
+            || runtime.process_ceremony_messages(),
+        )
+        .await?
+        .map_err(|error| {
+            AuraError::from(super::error::runtime_call("process runtime mailbox", error))
+        })?;
+        cooperative_yield().await;
+        super::system::refresh_account(app_core).await
+    })
+    .await
+    .map_err(|error| match error {
+        TimeoutRunError::Timeout(error) => error.into(),
+        TimeoutRunError::Operation(error) => error,
+    })
 }
 
 /// Validate that the runtime has at least one viable connectivity path before a
@@ -582,6 +648,9 @@ pub async fn ensure_runtime_peer_connectivity(
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("get sync status", e)))?;
     let connected_peers = sync_status.connected_peers;
+    if connected_peers > 0 {
+        return Ok(());
+    }
     let sync_peers = runtime
         .try_get_sync_peers()
         .await
@@ -595,18 +664,14 @@ pub async fn ensure_runtime_peer_connectivity(
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("get bootstrap candidates", e)))?;
 
-    if connected_peers == 0 {
-        return Err(super::error::WorkflowError::ConnectivityRequired {
-            flow: flow.to_string(),
-            connected_peers,
-            sync_peers: sync_peers.len(),
-            discovered_peers: discovered_peers.len(),
-            lan_peers: bootstrap_candidates.len(),
-        }
-        .into());
+    Err(super::error::WorkflowError::ConnectivityRequired {
+        flow: flow.to_string(),
+        connected_peers,
+        sync_peers: sync_peers.len(),
+        discovered_peers: discovered_peers.len(),
+        lan_peers: bootstrap_candidates.len(),
     }
-
-    Ok(())
+    .into())
 }
 
 #[cfg(test)]
@@ -657,6 +722,22 @@ mod tests {
         let result = f();
         super::HARNESS_MODE_OVERRIDE.store(previous, Ordering::Relaxed);
         result
+    }
+
+    #[tokio::test]
+    async fn verified_connection_does_not_require_optional_discovery_diagnostics() {
+        let bridge = OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([61; 32]));
+        bridge.queue_sync_status_answers(vec![Box::pin(async {
+            Ok(crate::runtime_bridge::SyncStatus {
+                connected_peers: 1,
+                ..Default::default()
+            })
+        })]);
+        let runtime: Arc<dyn RuntimeBridge> = Arc::new(bridge);
+        assert!(runtime.try_get_discovered_peers().await.is_err());
+        ensure_runtime_peer_connectivity(&runtime, "verified_connection")
+            .await
+            .expect("an authoritative connected peer suffices");
     }
 
     #[tokio::test]
@@ -726,47 +807,531 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod clock_owner_regressions {
     use super::*;
     use crate::runtime_bridge::OfflineRuntimeBridge;
-    fn bridge(times: &[u64]) -> (Arc<OfflineRuntimeBridge>, Arc<dyn RuntimeBridge>) {
-        let bridge = Arc::new(OfflineRuntimeBridge::new(
-            aura_core::AuthorityId::new_from_entropy([81; 32]),
-        ));
-        bridge.queue_clock_answers(times.iter().copied().map(Ok).collect());
-        let runtime: Arc<dyn RuntimeBridge> = bridge.clone();
-        (bridge, runtime)
+    use futures::FutureExt;
+
+    struct WitnessClock;
+    #[async_trait::async_trait]
+    impl aura_core::effects::PhysicalTimeEffects for WitnessClock {
+        async fn physical_time(&self) -> Result<PhysicalTime, aura_core::effects::TimeError> {
+            Ok(PhysicalTime {
+                ts_ms: 100,
+                uncertainty: Some(7),
+            })
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            panic!("original physical endpoint is required");
+        }
+        async fn wait_until_physical_deadline(
+            &self,
+            _: aura_core::types::window::WindowPosition<aura_core::types::window::PhysicalMillis>,
+        ) -> Result<PhysicalTime, aura_core::effects::TimeError> {
+            futures::future::pending().await
+        }
     }
+
     #[tokio::test]
-    async fn runtime_both_await_outcomes_reject_rollback_after_progress() {
-        for timer in [false, true] {
-            let (bridge, runtime) = bridge(&[150, 140]);
-            if timer {
-                bridge.queue_sleep_answers(vec![Ok(())]);
+    async fn runtime_observation_retains_original_selected_provider_and_uncertainty() {
+        let mut bridge =
+            OfflineRuntimeBridge::new(aura_core::AuthorityId::new_from_entropy([82; 32]));
+        bridge.use_time_provider(Arc::new(WitnessClock));
+        let runtime: Arc<dyn RuntimeBridge> = Arc::new(bridge);
+        assert!(Arc::ptr_eq(
+            &runtime.physical_time_provider(),
+            &runtime.physical_time_provider()
+        ));
+        let budget = workflow_timeout_budget(&runtime, Duration::from_millis(100))
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime_observation_with_budget(&runtime, &budget)
+                .await
+                .unwrap(),
+            PhysicalTime {
+                ts_ms: 100,
+                uncertainty: Some(7)
             }
+        );
+        execute_with_runtime_timeout_budget(&runtime, &budget, || async { Ok::<_, AuraError>(()) })
+            .await
+            .unwrap();
+    }
+
+    struct StalledReadClock {
+        clock: Arc<aura_testkit::time::ManualPhysicalClock>,
+        ready_reads: std::sync::atomic::AtomicUsize,
+        dropped: Arc<std::sync::atomic::AtomicBool>,
+    }
+    struct StalledReadLease(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for StalledReadLease {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    #[async_trait::async_trait]
+    impl aura_core::effects::PhysicalTimeEffects for StalledReadClock {
+        async fn physical_time(&self) -> Result<PhysicalTime, aura_core::effects::TimeError> {
+            if self
+                .ready_reads
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |remaining| remaining.checked_sub(1),
+                )
+                .is_ok()
+            {
+                return aura_core::effects::PhysicalTimeEffects::physical_time(self.clock.as_ref())
+                    .await;
+            }
+            let _lease = StalledReadLease(self.dropped.clone());
+            futures::future::pending().await
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            panic!("required observation retains the original absolute endpoint")
+        }
+        async fn wait_until_physical_deadline(
+            &self,
+            endpoint: aura_core::types::window::WindowPosition<
+                aura_core::types::window::PhysicalMillis,
+            >,
+        ) -> Result<PhysicalTime, aura_core::effects::TimeError> {
+            aura_core::effects::PhysicalTimeEffects::wait_until_physical_deadline(
+                self.clock.as_ref(),
+                endpoint,
+            )
+            .await
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_required_clock_reads_are_bounded_for_executor_child_and_retry() {
+        // Each case owns one original provider and window. Success observation
+        // permits exactly the executor's first read, then stalls its postcheck.
+        for stage in ["initial", "success", "child", "retry"] {
+            let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+            let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let provider = Arc::new(StalledReadClock {
+                clock: clock.clone(),
+                ready_reads: std::sync::atomic::AtomicUsize::new(usize::from(stage == "success")),
+                dropped: dropped.clone(),
+            });
+            let mut bridge =
+                OfflineRuntimeBridge::new(aura_core::AuthorityId::new_from_entropy([83; 32]));
+            bridge.use_time_provider(provider);
+            let runtime: Arc<dyn RuntimeBridge> = Arc::new(bridge);
             let budget = TimeoutBudget::from_start_and_timeout(
                 &PhysicalTime::exact(100),
                 Duration::from_millis(100),
             )
-            .expect("valid test budget");
-            let result = execute_with_runtime_timeout_budget(&runtime, &budget, || async move {
-                if timer {
-                    futures::future::pending::<()>().await;
+            .unwrap();
+            let polls = std::cell::Cell::new(0);
+            let operation = async {
+                match stage {
+                    "child" => {
+                        workflow_child_timeout_budget(&runtime, &budget, Duration::from_millis(50))
+                            .await
+                            .map(|_| ())
+                    }
+                    "retry" => {
+                        let policy = RetryBudgetPolicy::new(
+                            2,
+                            ExponentialBackoffPolicy::new(
+                                Duration::from_millis(1),
+                                Duration::from_millis(1),
+                                aura_core::JitterMode::None,
+                            )
+                            .unwrap(),
+                        );
+                        match execute_with_runtime_retry_budget(
+                            &runtime,
+                            &budget,
+                            &policy,
+                            |_, _| async {
+                                polls.set(polls.get() + 1);
+                                Ok::<_, AuraError>(())
+                            },
+                        )
+                        .await
+                        {
+                            Err(RetryRunError::Timeout(error)) => Err(error),
+                            other => {
+                                panic!("stalled initial observation must not run retry: {other:?}")
+                            }
+                        }
+                    }
+                    _ => match execute_with_runtime_timeout_budget(&runtime, &budget, || async {
+                        polls.set(polls.get() + 1);
+                        Ok::<_, AuraError>(())
+                    })
+                    .await
+                    {
+                        Err(TimeoutRunError::Timeout(error)) => Err(error),
+                        other => panic!("stalled required observation must fail: {other:?}"),
+                    },
                 }
-                Ok::<_, AuraError>(())
+            };
+            futures::pin_mut!(operation);
+            assert!(futures::poll!(operation.as_mut()).is_pending());
+            clock.advance(100);
+            assert!(matches!(
+                operation.await,
+                Err(TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 200,
+                    observed_at_ms: 200
+                })
+            ));
+            assert_eq!(polls.get(), usize::from(stage == "success"));
+            assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+        }
+    }
+
+    fn pending_sync() -> (
+        Arc<aura_testkit::time::ManualPhysicalClock>,
+        Arc<dyn RuntimeBridge>,
+        futures::channel::oneshot::Sender<()>,
+    ) {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let mut bridge =
+            OfflineRuntimeBridge::new(aura_core::AuthorityId::new_from_entropy([82; 32]));
+        bridge.use_time_provider(clock.clone());
+        let (ready, receiver) = futures::channel::oneshot::channel();
+        bridge.queue_sync_answers(vec![async move {
+            receiver.await.expect("sync readiness sender remains owned");
+            Ok(())
+        }
+        .boxed()]);
+        bridge.set_process_ceremony_result(Ok(
+            crate::runtime_bridge::CeremonyProcessingOutcome::NoProgress,
+        ));
+        (clock, Arc::new(bridge), ready)
+    }
+
+    #[tokio::test]
+    async fn absolute_wait_retains_endpoint_when_operation_advances_provider_before_registration() {
+        let (clock, runtime, _ready) = pending_sync();
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let operation_clock = clock.clone();
+        let execution = execute_with_runtime_timeout_budget(&runtime, &budget, || async move {
+            operation_clock.advance(80);
+            futures::future::pending::<Result<(), AuraError>>().await
+        });
+        futures::pin_mut!(execution);
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        assert_eq!(clock.now_ms(), 180);
+        clock.advance(20);
+        assert!(matches!(
+            futures::poll!(execution.as_mut()),
+            std::task::Poll::Ready(Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 200,
+                    observed_at_ms: 200
+                }
+            )))
+        ));
+    }
+
+    #[tokio::test]
+    async fn absolute_wait_preserves_relative_only_provider_failure() {
+        struct RelativeOnly;
+        #[async_trait::async_trait]
+        impl aura_core::effects::PhysicalTimeEffects for RelativeOnly {
+            async fn physical_time(&self) -> Result<PhysicalTime, aura_core::effects::TimeError> {
+                Ok(PhysicalTime::exact(100))
+            }
+            async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+                panic!("required endpoint cannot fall back to relative sleep")
+            }
+        }
+        let mut bridge =
+            OfflineRuntimeBridge::new(aura_core::AuthorityId::new_from_entropy([84; 32]));
+        bridge.use_time_provider(Arc::new(RelativeOnly));
+        let runtime: Arc<dyn RuntimeBridge> = Arc::new(bridge);
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let error = execute_with_runtime_timeout_budget(&runtime, &budget, || {
+            futures::future::pending::<Result<(), AuraError>>()
+        })
+        .await
+        .unwrap_err();
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        while let Some(error) = source {
+            if matches!(
+                error.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::AbsoluteDeadlineUnsupported)
+            ) {
+                return;
+            }
+            source = error.source();
+        }
+        panic!("original absolute-wait unsupported cause was lost");
+    }
+
+    #[tokio::test]
+    async fn retry_without_an_attempt_timeout_is_bounded_by_original_endpoint() {
+        let (clock, runtime, _ready) = pending_sync();
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let policy = RetryBudgetPolicy::new(
+            2,
+            ExponentialBackoffPolicy::new(
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                aura_core::JitterMode::None,
+            )
+            .unwrap(),
+        );
+        assert_eq!(policy.per_attempt_timeout(), None);
+        let retry =
+            execute_with_runtime_retry_budget(&runtime, &budget, &policy, |attempt, child| {
+                assert_eq!(attempt, 0);
+                assert_eq!(child.deadline_at_ms(), 200);
+                std::future::pending::<Result<(), AuraError>>()
+            });
+        futures::pin_mut!(retry);
+        assert!(futures::poll!(retry.as_mut()).is_pending());
+        clock.advance(99);
+        assert!(futures::poll!(retry.as_mut()).is_pending());
+        clock.advance(1);
+        assert!(matches!(
+            retry.await,
+            Err(RetryRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 200,
+                    observed_at_ms: 200
+                }
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn retry_backoff_and_second_attempt_share_original_remaining_window() {
+        let (clock, runtime, _ready) = pending_sync();
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let policy = RetryBudgetPolicy::new(
+            2,
+            ExponentialBackoffPolicy::new(
+                Duration::from_millis(50),
+                Duration::from_millis(50),
+                aura_core::JitterMode::None,
+            )
+            .unwrap(),
+        );
+        let attempts = std::cell::RefCell::new(Vec::new());
+        let retry =
+            execute_with_runtime_retry_budget(&runtime, &budget, &policy, |attempt, child| {
+                attempts
+                    .borrow_mut()
+                    .push((attempt, child.deadline_at_ms()));
+                async move {
+                    if attempt == 0 {
+                        Err(AuraError::agent("first attempt rejected"))
+                    } else {
+                        std::future::pending::<Result<(), AuraError>>().await
+                    }
+                }
+            });
+        futures::pin_mut!(retry);
+        assert!(futures::poll!(retry.as_mut()).is_pending());
+        assert_eq!(*attempts.borrow(), vec![(0, 200)]);
+        clock.advance(50);
+        assert!(futures::poll!(retry.as_mut()).is_pending());
+        assert_eq!(*attempts.borrow(), vec![(0, 200), (1, 200)]);
+        clock.advance(49);
+        assert!(futures::poll!(retry.as_mut()).is_pending());
+        clock.advance(1);
+        assert!(matches!(
+            retry.await,
+            Err(RetryRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 200,
+                    observed_at_ms: 200
+                }
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn required_convergence_waits_for_owned_sync_readiness_on_a_frozen_clock() {
+        let (clock, runtime, ready) = pending_sync();
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let convergence = converge_runtime(&runtime, &budget);
+        futures::pin_mut!(convergence);
+        assert!(futures::poll!(convergence.as_mut()).is_pending());
+        assert_eq!(clock.now_ms(), 100);
+        ready.send(()).unwrap();
+        convergence.await.unwrap();
+        assert_eq!(clock.now_ms(), 100);
+        assert_eq!(budget.deadline_at_ms(), 200);
+    }
+
+    #[tokio::test]
+    async fn required_convergence_child_expires_at_the_original_endpoint() {
+        let (clock, runtime, _ready) = pending_sync();
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let convergence = converge_runtime(&runtime, &budget);
+        futures::pin_mut!(convergence);
+        assert!(futures::poll!(convergence.as_mut()).is_pending());
+        clock.advance(99);
+        assert!(futures::poll!(convergence.as_mut()).is_pending());
+        clock.advance(1);
+        let error = convergence.await.unwrap_err();
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(error) = cause.downcast_ref::<TimeoutBudgetError>() {
+                assert!(matches!(
+                    error,
+                    TimeoutBudgetError::DeadlineExceeded {
+                        deadline_at_ms: 200,
+                        observed_at_ms: 200
+                    }
+                ));
+                break;
+            }
+            cause = cause
+                .source()
+                .expect("original child deadline remains typed");
+        }
+    }
+
+    #[tokio::test]
+    async fn required_convergence_retains_an_original_timer_failure() {
+        let (clock, runtime, _ready) = pending_sync();
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let convergence = converge_runtime(&runtime, &budget);
+        futures::pin_mut!(convergence);
+        assert!(futures::poll!(convergence.as_mut()).is_pending());
+        clock
+            .fail_next_sleep(aura_core::effects::TimeError::OperationFailed {
+                reason: "original convergence timer failed".into(),
             })
             .await;
-            assert!(matches!(
-                result,
-                Err(TimeoutRunError::Timeout(
-                    TimeoutBudgetError::ClockRollback {
-                        previous_observed_at_ms: 150,
-                        observed_at_ms: 140
-                    }
-                ))
-            ));
+        let error = convergence.await.unwrap_err();
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(aura_core::effects::TimeError::OperationFailed { reason }) =
+                cause.downcast_ref::<aura_core::effects::TimeError>()
+            {
+                assert_eq!(reason, "original convergence timer failed");
+                break;
+            }
+            cause = cause.source().expect("original timer cause remains typed");
         }
+        assert_eq!(clock.now_ms(), 100);
+    }
+    fn bridge(times: &[u64]) -> (Arc<OfflineRuntimeBridge>, Arc<dyn RuntimeBridge>) {
+        let mut bridge =
+            OfflineRuntimeBridge::new(aura_core::AuthorityId::new_from_entropy([81; 32]));
+        bridge.use_time_provider(Arc::new(aura_testkit::time::ManualPhysicalClock::new(100)));
+        let bridge = Arc::new(bridge);
+        bridge.queue_clock_answers(times.iter().copied().map(Ok).collect());
+        let runtime: Arc<dyn RuntimeBridge> = bridge.clone();
+        (bridge, runtime)
+    }
+
+    #[tokio::test]
+    async fn required_convergence_preserves_the_original_exhausted_endpoint() {
+        let (_bridge, runtime) = bridge(&[200]);
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let error = converge_runtime(&runtime, &budget).await.unwrap_err();
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(error) = cause.downcast_ref::<TimeoutBudgetError>() {
+                assert!(matches!(
+                    error,
+                    TimeoutBudgetError::DeadlineExceeded {
+                        deadline_at_ms: 200,
+                        observed_at_ms: 200,
+                    }
+                ));
+                break;
+            }
+            cause = cause.source().expect("typed original endpoint error");
+        }
+        assert_eq!(budget.deadline_at_ms(), 200);
+    }
+
+    #[tokio::test]
+    async fn required_convergence_preserves_clock_failure_without_fallback() {
+        #[derive(Debug, thiserror::Error)]
+        #[error("injected convergence clock failure")]
+        struct ClockFault;
+        let (bridge, runtime) = bridge(&[]);
+        bridge.queue_clock_answers(vec![Err(
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                crate::IntentError::service_error("convergence clock failed"),
+                ClockFault,
+            ),
+        )]);
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        let error = converge_runtime(&runtime, &budget).await.unwrap_err();
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if cause.downcast_ref::<ClockFault>().is_some() {
+                break;
+            }
+            cause = cause
+                .source()
+                .expect("original provider fault remains in source chain");
+        }
+    }
+    #[tokio::test]
+    async fn runtime_success_observation_rejects_rollback_after_progress() {
+        let (_bridge, runtime) = bridge(&[150, 140]);
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .expect("valid test budget");
+        let result = execute_with_runtime_timeout_budget(&runtime, &budget, || async {
+            Ok::<_, AuraError>(())
+        })
+        .await;
+        assert!(matches!(
+            result,
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::ClockRollback {
+                    previous_observed_at_ms: 150,
+                    observed_at_ms: 140,
+                }
+            ))
+        ));
     }
     #[tokio::test]
     async fn runtime_required_sleep_failure_retains_concrete_original_source() {
@@ -775,7 +1340,7 @@ mod clock_owner_regressions {
         #[error("injected required timer failure")]
         struct TimerFault;
         let (bridge, runtime) = bridge(&[150]);
-        bridge.queue_sleep_answers(vec![Err(
+        bridge.queue_deadline_answers(vec![Err(
             crate::runtime_bridge::RuntimeBridgeError::with_source(
                 crate::IntentError::service_error("required timer failed"),
                 TimerFault,

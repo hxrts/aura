@@ -288,13 +288,16 @@ async fn test_refresh_authoritative_channel_membership_readiness_preserves_exist
     let config = AppConfig::default();
     let local = AuthorityId::new_from_entropy([123u8; 32]);
     let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
-    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
     let app_core = Arc::new(RwLock::new(
         AppCore::with_runtime(config, runtime_bridge).unwrap(),
     ));
     register_signals_only(&app_core).await;
 
     let channel_id = ChannelId::from_bytes(hash(b"membership-ready-empty-refresh"));
+    let context_id = ContextId::new_from_entropy([124; 32]);
+    runtime.set_amp_channel_context(channel_id, context_id);
+    runtime.set_amp_channel_state_exists(context_id, channel_id, false);
     publish_authoritative_channel_membership_ready(
         &app_core,
         channel_id,
@@ -484,7 +487,13 @@ async fn authoritative_context_uses_runtime_context_over_stale_projection() {
     }
 
     assert_eq!(
-        resolve_authoritative_context_id_for_channel(&app_core, channel_id).await,
+        resolve_authoritative_context_id_for_channel(
+            &app_core,
+            channel_id,
+            &test_messaging_budget(&app_core).await
+        )
+        .await
+        .unwrap(),
         Some(authoritative_context)
     );
 }
@@ -518,10 +527,14 @@ async fn authoritative_context_id_for_channel_does_not_fallback_to_pending_chann
         receiver_nickname: None,
     }]);
 
-    assert_eq!(
-        resolve_authoritative_context_id_for_channel(&app_core, channel_id).await,
-        None
-    );
+    let error = resolve_authoritative_context_id_for_channel(
+        &app_core,
+        channel_id,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await
+    .unwrap_err();
+    assert_no_agent_source(&error);
 }
 
 #[tokio::test]
@@ -583,11 +596,25 @@ async fn test_authoritative_recipient_resolution_ignores_projection_members_with
     let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
     runtime.set_amp_channel_context(channel_id, context_id);
     runtime.set_amp_channel_participants(context_id, channel_id, Vec::new());
+    runtime.queue_sync_answers(
+        (0..3)
+            .map(|_| {
+                Box::pin(async { Ok(()) })
+                    as futures::future::BoxFuture<'static, Result<(), IntentError>>
+            })
+            .collect(),
+    );
+    runtime.set_process_ceremony_result(Ok(
+        crate::runtime_bridge::CeremonyProcessingOutcome::NoProgress,
+    ));
     let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
     let recipients = authoritative_recipient_peers_for_channel(
         &runtime_bridge,
         AuthoritativeChannelRef::new(channel_id, context_id),
         local,
+        &workflow_timeout_budget(&runtime_bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+            .await
+            .unwrap(),
     )
     .await
     .expect("authoritative recipient query should succeed");
@@ -724,9 +751,19 @@ async fn test_channel_readiness_coordinator_tracks_authoritative_membership_fact
     .await
     .unwrap();
 
-    let coordinator = ChannelReadinessCoordinator::load(&app_core, false)
-        .await
-        .expect("channel readiness should load");
+    let readiness_runtime = { app_core.read().await.runtime().cloned() };
+    let readiness_budget = match readiness_runtime.as_ref() {
+        Some(runtime) => Some(
+            workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+                .await
+                .unwrap(),
+        ),
+        None => None,
+    };
+    let coordinator =
+        ChannelReadinessCoordinator::load(&app_core, false, readiness_budget.as_ref())
+            .await
+            .expect("channel readiness should load");
     let state = coordinator
         .state_for_channel(channel_id)
         .unwrap_or_else(|| panic!("expected channel readiness state for {channel_id}"));
@@ -1021,7 +1058,7 @@ async fn test_join_channel_by_name_local_reuses_existing_channel_id() {
 async fn test_join_channel_by_name_reuses_observed_authoritative_binding() {
     let local = AuthorityId::new_from_entropy([110u8; 32]);
     let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
-    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
     let config = AppConfig::default();
     let core = AppCore::with_runtime(config, runtime_bridge).expect("runtime-backed app core");
     let app_core = Arc::new(RwLock::new(core));
@@ -1034,6 +1071,12 @@ async fn test_join_channel_by_name_reuses_observed_authoritative_binding() {
 
     let channel_id = ChannelId::from_bytes(hash(b"observed-authoritative-join"));
     let context_id = ContextId::new_from_entropy([111u8; 32]);
+    runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
+    runtime.set_amp_channel_participants_without_resolution(
+        context_id,
+        channel_id,
+        vec![local, AuthorityId::new_from_entropy([112u8; 32])],
+    );
     update_chat_projection_observed(&app_core, |chat| {
         chat.upsert_channel(Channel {
             id: channel_id,
@@ -1074,6 +1117,7 @@ async fn test_join_channel_by_name_reuses_observed_authoritative_binding() {
     let binding = outcome
         .result
         .expect("join should reuse observed authoritative binding");
+    assert_eq!(runtime.amp_context_resolve_call_count(), 0);
     let context_id_string = context_id.to_string();
     assert_eq!(binding.channel_id, channel_id.to_string());
     assert_eq!(
@@ -1173,6 +1217,228 @@ async fn test_join_channel_by_name_with_terminal_status_returns_direct_terminal_
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn join_channel_does_not_succeed_before_required_recipient_query() {
+    let owner = AuthorityId::new_from_entropy([116u8; 32]);
+    let peer = AuthorityId::new_from_entropy([117u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let channel_id = ChannelId::from_bytes(hash(b"join-channel-revalidate-membership"));
+    let context_id = ContextId::new_from_entropy([118u8; 32]);
+    runtime.set_amp_channel_context(channel_id, context_id);
+    runtime.set_amp_channel_state_exists(context_id, channel_id, false);
+
+    update_chat_projection_observed(&app_core, |chat| {
+        chat.upsert_channel(Channel {
+            id: channel_id,
+            context_id: Some(context_id),
+            name: "shared-parity-lab".to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: vec![peer],
+            member_count: 2,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        });
+    })
+    .await
+    .unwrap();
+    publish_authoritative_channel_membership_ready(
+        &app_core,
+        channel_id,
+        Some("shared-parity-lab"),
+        1,
+    )
+    .await
+    .unwrap();
+
+    let outcome = join_channel_by_name_with_binding_terminal_status(
+        &app_core,
+        "shared-parity-lab",
+        Some(OperationInstanceId(
+            "join-channel-recipient-failure-1".to_string(),
+        )),
+    )
+    .await;
+
+    let error = outcome.result.unwrap_err();
+    assert_no_agent_source(&error);
+    assert!(matches!(
+        outcome.terminal,
+        Some(WorkflowTerminalStatus {
+            status: SemanticOperationStatus {
+                phase: SemanticOperationPhase::Failed,
+                ..
+            },
+            ..
+        })
+    ));
+    let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert_terminal_failure_or_cancelled(
+        &facts,
+        &OperationId::join_channel(),
+        &OperationInstanceId("join-channel-recipient-failure-1".to_string()),
+        SemanticOperationKind::JoinChannel,
+    );
+}
+
+async fn scoped_readiness_fixture() -> (
+    Arc<RwLock<AppCore>>,
+    Arc<crate::runtime_bridge::OfflineRuntimeBridge>,
+    ChannelId,
+    ContextId,
+) {
+    let owner = AuthorityId::new_from_entropy([116u8; 32]);
+    let peer = AuthorityId::new_from_entropy([117u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let channel_id = ChannelId::from_bytes(hash(b"join-channel-revalidate-membership"));
+    let context_id = ContextId::new_from_entropy([118u8; 32]);
+    runtime.set_amp_channel_participants_without_resolution(
+        context_id,
+        channel_id,
+        vec![owner, peer],
+    );
+    runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
+
+    update_chat_projection_observed(&app_core, |chat| {
+        chat.upsert_channel(Channel {
+            id: channel_id,
+            context_id: Some(context_id),
+            name: "shared-parity-lab".to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: vec![peer],
+            member_count: 2,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        });
+    })
+    .await
+    .unwrap();
+    publish_authoritative_channel_membership_ready(
+        &app_core,
+        channel_id,
+        Some("shared-parity-lab"),
+        1,
+    )
+    .await
+    .unwrap();
+
+    (app_core, runtime, channel_id, context_id)
+}
+
+#[tokio::test]
+async fn scoped_channel_readiness_never_resolves_weaker_channel_id() {
+    let (app_core, runtime, channel_id, context_id) = scoped_readiness_fixture().await;
+    let parent = test_messaging_budget(&app_core).await;
+    refresh_authoritative_channel_readiness_for_channel(
+        &app_core,
+        AuthoritativeChannelRef::new(channel_id, context_id),
+        &parent,
+    )
+    .await
+    .unwrap();
+    assert_eq!(runtime.amp_context_resolve_call_count(), 0);
+    let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert!(facts.iter().any(|fact| matches!(
+        fact,
+        AuthoritativeSemanticFact::RecipientPeersResolved {
+            member_count: 2,
+            ..
+        }
+    )));
+}
+
+#[tokio::test]
+async fn required_delivery_readiness_preserves_peer_provider_failure_without_ready_facts() {
+    let (app_core, runtime, channel_id, context_id) = scoped_readiness_fixture().await;
+    let parent = test_messaging_budget(&app_core).await;
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let error = refresh_authoritative_delivery_readiness_for_channel(
+        &app_core,
+        &runtime_bridge,
+        AuthoritativeChannelRef::new(channel_id, context_id),
+        &parent,
+    )
+    .await
+    .expect_err("required peer provider failure cannot become pending readiness");
+    assert_no_agent_source(&error);
+    assert_eq!(runtime.amp_context_resolve_call_count(), 0);
+    let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert!(!facts.iter().any(|fact| matches!(
+        fact,
+        AuthoritativeSemanticFact::PeerChannelReady { .. }
+            | AuthoritativeSemanticFact::MessageDeliveryReady { .. }
+    )));
+}
+
+#[tokio::test]
+async fn required_scoped_readiness_rejects_detached_runtime_despite_prior_ready_facts() {
+    let (app_core, runtime, channel_id, context_id) = scoped_readiness_fixture().await;
+    let parent = test_messaging_budget(&app_core).await;
+    refresh_authoritative_channel_readiness_for_channel(
+        &app_core,
+        AuthoritativeChannelRef::new(channel_id, context_id),
+        &parent,
+    )
+    .await
+    .unwrap();
+    assert_eq!(runtime.amp_context_resolve_call_count(), 0);
+    let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert!(facts.iter().any(|fact| matches!(
+        fact,
+        AuthoritativeSemanticFact::RecipientPeersResolved {
+            member_count: 2,
+            ..
+        }
+    )));
+    assert!(AppCore::detach_runtime(&app_core).await);
+    let error = refresh_authoritative_channel_readiness_for_channel(
+        &app_core,
+        AuthoritativeChannelRef::new(channel_id, context_id),
+        &parent,
+    )
+    .await
+    .expect_err("prior facts cannot satisfy required runtime observation after detach");
+    assert_no_agent_source(&error);
+    let global_error =
+        refresh_authoritative_channel_membership_readiness_with_budget(&app_core, &parent)
+            .await
+            .expect_err("required parent cannot become an observational refresh after detach");
+    assert_no_agent_source(&global_error);
+    assert_eq!(runtime.amp_context_resolve_call_count(), 0);
+    let after = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert_eq!(
+        after, facts,
+        "failed required observation publishes no new readiness"
+    );
+    refresh_authoritative_channel_membership_readiness(&app_core)
+        .await
+        .unwrap();
+    refresh_authoritative_recipient_resolution_readiness(&app_core)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -2268,9 +2534,14 @@ async fn resolve_authoritative_context_id_for_channel_ignores_pending_invitation
     };
     runtime.set_pending_invitations(vec![invitation]);
 
-    let resolved = resolve_authoritative_context_id_for_channel(&app_core, channel_id).await;
-
-    assert_eq!(resolved, None);
+    let error = resolve_authoritative_context_id_for_channel(
+        &app_core,
+        channel_id,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await
+    .unwrap_err();
+    assert_no_agent_source(&error);
 }
 
 // OWNERSHIP: test-only-helper
@@ -2417,8 +2688,15 @@ async fn test_enforce_home_moderation_allows_when_member_list_is_empty() {
         core.views_mut().set_homes(homes);
     }
 
-    let result =
-        enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 1_000).await;
+    let result = enforce_home_moderation_for_sender(
+        &app_core,
+        context_id,
+        home_id,
+        sender,
+        1_000,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await;
     let error = result.expect_err("authoritative moderation now requires runtime");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
 }
@@ -2460,8 +2738,15 @@ async fn test_enforce_home_moderation_blocks_muted_sender_with_empty_members() {
         core.views_mut().set_homes(homes);
     }
 
-    let result =
-        enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 2_000).await;
+    let result = enforce_home_moderation_for_sender(
+        &app_core,
+        context_id,
+        home_id,
+        sender,
+        2_000,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await;
     let error = result.expect_err("authoritative moderation now requires runtime");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
 }
@@ -2522,9 +2807,15 @@ async fn test_enforce_home_join_blocks_banned_sender_when_context_mismatched() {
             is_member: false,
         },
     );
-    let error = enforce_home_join_allowed(&app_core, ctx, chan, who)
-        .await
-        .expect_err("a banned authority must not join");
+    let error = enforce_home_join_allowed(
+        &app_core,
+        ctx,
+        chan,
+        who,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await
+    .expect_err("a banned authority must not join");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
     assert!(matches!(
         std::error::Error::source(&error).and_then(|source| {
@@ -2587,9 +2878,15 @@ async fn test_enforce_home_moderation_blocks_muted_sender_across_context_homes()
         core.views_mut().set_homes(homes);
     }
 
-    let result =
-        enforce_home_moderation_for_sender(&app_core, context_id, channel_home_id, sender, 2_000)
-            .await;
+    let result = enforce_home_moderation_for_sender(
+        &app_core,
+        context_id,
+        channel_home_id,
+        sender,
+        2_000,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await;
     let error = result.expect_err("authoritative moderation now requires runtime");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
 }
@@ -2659,9 +2956,15 @@ async fn test_enforce_home_join_blocks_banned_sender_across_context_homes() {
             is_member: false,
         },
     );
-    let error = enforce_home_join_allowed(&app_core, ctx, chan, who)
-        .await
-        .expect_err("a banned authority must not join");
+    let error = enforce_home_join_allowed(
+        &app_core,
+        ctx,
+        chan,
+        who,
+        &test_messaging_budget(&app_core).await,
+    )
+    .await
+    .expect_err("a banned authority must not join");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
     assert!(matches!(
         std::error::Error::source(&error).and_then(|source| {
@@ -2766,9 +3069,9 @@ fn invite_authority_with_context_warms_receiver_before_create() {
     let warm_body = &warm_source[warm_start..warm_end];
     assert!(
         invite_body.contains(
-            "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver)"
+            "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver, deadline)"
         ) || invite_body.contains(
-                "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver).await;"
+                "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver, deadline).await;"
             ),
         "invite_authority_to_channel_with_context must warm the invite receiver before creating the channel invitation"
     );
@@ -3050,9 +3353,10 @@ async fn amp_failure_app() -> (
     Arc<dyn RuntimeBridge>,
     Arc<RwLock<AppCore>>,
 ) {
-    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
-        AuthorityId::new_from_entropy([0xE1; 32]),
-    ));
+    let mut runtime =
+        crate::runtime_bridge::OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([0xE1; 32]));
+    runtime.use_time_provider(Arc::new(aura_testkit::time::ManualPhysicalClock::new(0)));
+    let runtime = Arc::new(runtime);
     let bridge: Arc<dyn RuntimeBridge> = runtime.clone();
     let app = Arc::new(RwLock::new(
         AppCore::with_runtime(AppConfig::default(), bridge.clone()).unwrap(),
@@ -3066,9 +3370,17 @@ async fn note_to_self_creation_failure_stops_join_and_preserves_runtime_cause() 
     let (runtime, bridge, app) = amp_failure_app().await;
     runtime.queue_amp_create_results(vec![Err(injected_amp_io_failure())]);
     let authority = bridge.authority_id();
-    let error = ensure_runtime_note_to_self_channel(&app, &bridge, authority, 10)
-        .await
-        .unwrap_err();
+    let error = ensure_runtime_note_to_self_channel(
+        &app,
+        &bridge,
+        authority,
+        10,
+        &workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap_err();
     assert_amp_io_failure_source(&error);
     assert_eq!(runtime.amp_create_call_count(), 1);
     assert_eq!(runtime.amp_join_call_count(), 0);
@@ -3085,9 +3397,17 @@ async fn note_to_self_join_failure_cannot_publish_canonical_channel() {
     let channel = note_to_self_channel_id(authority);
     runtime.queue_amp_create_results(vec![Ok(channel)]);
     runtime.queue_amp_join_results(vec![Err(injected_amp_io_failure())]);
-    let error = ensure_runtime_note_to_self_channel(&app, &bridge, authority, 10)
-        .await
-        .unwrap_err();
+    let error = ensure_runtime_note_to_self_channel(
+        &app,
+        &bridge,
+        authority,
+        10,
+        &workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap_err();
     assert_amp_io_failure_source(&error);
     assert_eq!(runtime.amp_create_call_count(), 1);
     assert_eq!(runtime.amp_join_call_count(), 1);
@@ -3122,27 +3442,45 @@ async fn duplicate_diagnostic_requires_exact_scope_and_independent_canonical_rea
         channel: wrong_channel,
     };
     runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(true)]);
-    assert!(
-        !runtime_amp_duplicate_is_reconciled(&bridge, &mismatched, context, channel)
+    assert!(!runtime_amp_duplicate_is_reconciled(
+        &bridge,
+        &mismatched,
+        context,
+        channel,
+        &workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
             .await
             .unwrap()
-    );
+    )
+    .await
+    .unwrap());
     assert_eq!(
         runtime.remaining_amp_channel_state_answers(context, channel),
         1
     );
     let duplicate = aura_core::effects::amp::AmpChannelError::AlreadyExists { context, channel };
-    assert!(
-        runtime_amp_duplicate_is_reconciled(&bridge, &duplicate, context, channel)
+    assert!(runtime_amp_duplicate_is_reconciled(
+        &bridge,
+        &duplicate,
+        context,
+        channel,
+        &workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
             .await
             .unwrap()
-    );
+    )
+    .await
+    .unwrap());
     runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(false)]);
-    assert!(
-        !runtime_amp_duplicate_is_reconciled(&bridge, &duplicate, context, channel)
+    assert!(!runtime_amp_duplicate_is_reconciled(
+        &bridge,
+        &duplicate,
+        context,
+        channel,
+        &workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
             .await
             .unwrap()
-    );
+    )
+    .await
+    .unwrap());
     runtime.queue_amp_channel_state_answers(
         context,
         channel,
@@ -3155,9 +3493,17 @@ async fn duplicate_diagnostic_requires_exact_scope_and_independent_canonical_rea
             },
         ))],
     );
-    let failure = runtime_amp_duplicate_is_reconciled(&bridge, &duplicate, context, channel)
-        .await
-        .unwrap_err();
+    let failure = runtime_amp_duplicate_is_reconciled(
+        &bridge,
+        &duplicate,
+        context,
+        channel,
+        &workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+            .await
+            .unwrap(),
+    )
+    .await
+    .unwrap_err();
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
     let mut found = false;
     while let Some(error) = source {
@@ -3220,7 +3566,18 @@ async fn readiness_native_participants_override_stale_projection_and_published_c
         ),
         "native full membership count must defeat stale hints"
     );
-    let coordinator = ChannelReadinessCoordinator::load(&app, true).await.unwrap();
+    let readiness_runtime = { app.read().await.runtime().cloned() };
+    let readiness_budget = match readiness_runtime.as_ref() {
+        Some(runtime) => Some(
+            workflow_timeout_budget(runtime, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+                .await
+                .unwrap(),
+        ),
+        None => None,
+    };
+    let coordinator = ChannelReadinessCoordinator::load(&app, true, readiness_budget.as_ref())
+        .await
+        .unwrap();
     let state = coordinator.state_for_channel(channel).unwrap();
     assert_eq!(state.member_count, 1);
     assert!(state.recipients.is_empty());
@@ -3325,4 +3682,112 @@ async fn send_with_no_authoritative_recipients_fails_before_commit() {
             .contains("Recipient peers are not resolved"),
         "{error}"
     );
+}
+
+#[tokio::test]
+async fn channel_state_wait_preserves_original_clock_fault_before_runtime_probe() {
+    let (runtime, bridge, app) = amp_failure_app().await;
+    let context = ContextId::new_from_entropy([181u8; 32]);
+    let channel = ChannelId::from_bytes(hash(b"channel-wait-original-clock-fault"));
+    runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(true)]);
+    let budget = workflow_timeout_budget(&bridge, MESSAGING_RUNTIME_OPERATION_TIMEOUT)
+        .await
+        .unwrap();
+    runtime.queue_clock_answers(vec![Err(injected_amp_io_failure())]);
+    let failure = wait_for_runtime_channel_state(
+        &app,
+        &bridge,
+        AuthoritativeChannelRef::new(channel, context),
+        &budget,
+    )
+    .await
+    .unwrap_err();
+    assert_amp_io_failure_source(&failure);
+    assert_eq!(
+        runtime.remaining_amp_channel_state_answers(context, channel),
+        1
+    );
+}
+
+#[tokio::test]
+async fn channel_state_wait_cannot_restart_an_exhausted_owner_window() {
+    let (runtime, bridge, app) = amp_failure_app().await;
+    let context = ContextId::new_from_entropy([182u8; 32]);
+    let channel = ChannelId::from_bytes(hash(b"channel-wait-exhausted-owner-window"));
+    runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(true)]);
+    let budget = TimeoutBudget::from_start_and_timeout(
+        &aura_core::time::PhysicalTime::exact(100),
+        Duration::from_millis(10),
+    )
+    .unwrap();
+    runtime.queue_clock_answers(vec![Ok(110)]);
+    let failure = wait_for_runtime_channel_state(
+        &app,
+        &bridge,
+        AuthoritativeChannelRef::new(channel, context),
+        &budget,
+    )
+    .await
+    .unwrap_err();
+    let mut cause: &(dyn std::error::Error + 'static) = &failure;
+    loop {
+        if matches!(
+            cause.downcast_ref::<TimeoutBudgetError>(),
+            Some(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 110,
+                ..
+            })
+        ) {
+            break;
+        }
+        cause = cause
+            .source()
+            .expect("exact exhausted owner deadline is retained");
+    }
+    assert_eq!(
+        runtime.remaining_amp_channel_state_answers(context, channel),
+        1
+    );
+}
+
+#[tokio::test]
+async fn channel_state_wait_does_not_retry_a_nested_child_clock_fault() {
+    let (runtime, bridge, app) = amp_failure_app().await;
+    let context = ContextId::new_from_entropy([183u8; 32]);
+    let channel = ChannelId::from_bytes(hash(b"channel-wait-child-clock-fault"));
+    runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(true)]);
+    let budget = TimeoutBudget::from_start_and_timeout(
+        &aura_core::time::PhysicalTime::exact(0),
+        Duration::from_millis(100),
+    )
+    .unwrap();
+    // Retry admission and its enclosing attempt read the original provider;
+    // the nested query's child-budget observation then fails. A fresh later
+    // attempt would see the queued positive state and conceal that fault.
+    runtime.queue_clock_answers(vec![Ok(0), Ok(0), Err(injected_amp_io_failure()), Ok(0)]);
+    let failure = wait_for_runtime_channel_state(
+        &app,
+        &bridge,
+        AuthoritativeChannelRef::new(channel, context),
+        &budget,
+    )
+    .await
+    .unwrap_err();
+    assert_amp_io_failure_source(&failure);
+    assert_eq!(
+        runtime.remaining_amp_channel_state_answers(context, channel),
+        1
+    );
+}
+
+fn assert_no_agent_source(error: &AuraError) {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if let Some(original) = current.downcast_ref::<IntentError>() {
+            assert!(matches!(original, IntentError::NoAgent { .. }));
+            return;
+        }
+        source = current.source();
+    }
+    panic!("original NoAgent cause was lost: {error:?}");
 }

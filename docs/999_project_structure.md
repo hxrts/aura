@@ -1137,7 +1137,7 @@ What it validates:
 - Impure function routing through effects (`SystemTime::now`, `thread_rng`, etc.)
 - Physical time guardrails (`tokio::time::sleep` confinement)
 - Handler composition patterns (no direct instantiation)
-- Placeholder/TODO detection
+- Parsed production placeholder and terminal facade syntax: `just lint-arch-syntax` (style lane); positive lexical test cfg only, ordinary identifier substrings are not WIP evidence
 - Invariants documentation schema validation
 
 The checker reports violations that must be fixed and warnings for review. Run it before submitting changes to ensure architectural compliance.

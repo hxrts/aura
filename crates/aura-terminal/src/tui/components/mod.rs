@@ -49,6 +49,7 @@ pub use contact_multi_select::{
     contact_multi_select, ContactMultiSelectItem, ContactMultiSelectProps,
 };
 pub use contact_select_modal_template::{ContactSelectModal, ContactSelectState};
+pub(crate) use contact_select_modal_template::{SelectionModal, SelectionModalRow};
 #[cfg(feature = "development")]
 pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use detail_panel::DetailPanel;

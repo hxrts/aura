@@ -316,6 +316,30 @@ pub(super) async fn sleep_ms(
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
+    capability = "runtime_bridge_identity_absolute_wait",
+    capability_type = AgentRuntimeBridge,
+    family = "runtime_helper"
+)]
+pub(super) async fn wait_until_physical_deadline(
+    bridge: &AgentRuntimeBridge,
+    deadline: aura_core::types::window::WindowPosition<aura_core::types::window::PhysicalMillis>,
+) -> Result<aura_core::time::PhysicalTime, aura_app::runtime_bridge::RuntimeBridgeError> {
+    bridge
+        .agent
+        .runtime()
+        .effects()
+        .wait_until_physical_deadline(deadline)
+        .await
+        .map_err(|error| {
+            aura_app::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::service_error("Required runtime absolute wait failed"),
+                error,
+            )
+        })
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
     capability = "runtime_bridge_identity_authentication_query",
     capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
