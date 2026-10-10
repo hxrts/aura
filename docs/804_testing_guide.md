@@ -2329,9 +2329,17 @@ layout and drawing on the same node. Hidden and Scroll overflow boundaries, the
 terminal-provided viewport and actual registered field/list nodes compose their
 bounds; keyboard-only actions do not gain fabricated button observations.
 Browser layout fixtures include child-owned rerenders with a memoized parent,
-real resize notification, an exact-target actual scroll-listener witness and a
-fresh canonical snapshot measurement. DOM references arrange these changes;
-typed renderer observations are their postconditions. Dependency graph updates
+exact-target actual resize and scroll-listener witnesses and a fresh canonical
+snapshot measurement. DOM references arrange these changes;
+typed renderer observations are their postconditions. The web producer uses an
+unmodified, exactly pinned dioxus-web 0.7.4 renderer: its owned future wrapper
+revokes observations before every poll and captures the final flushed state
+when the renderer suspends. Tests must also cover no-edit wakeups, reentrant
+reads during revocation, cancellation revocation, and stylesheet replacement
+before asynchronous MutationObserver delivery. Hydration remains unsupported;
+renderer upgrades require an audit of synchronous flush/suspension ordering,
+not merely successful compilation. Component effects and mutation notifications
+alone cannot acknowledge a root-wide render. Dependency graph updates
 and executed native/browser gates are required before treating this candidate as
 integration evidence.
 

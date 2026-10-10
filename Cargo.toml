@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
 
-# Host build support and vendored upstream sources are outside Aura runtime layers.
-exclude = ["toolkit/test-support", "vendor/dioxus-web-0.7.4"]
+# Host-only build support is outside the runtime workspace.
+exclude = ["toolkit/test-support"]
 
 members = [
     # L1 Foundation
@@ -243,7 +243,3 @@ semicolon_if_nothing_returned = "warn"
 unsafe_code = "deny"
 missing_docs = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
-
-[patch.crates-io]
-# Released 0.7.4 source plus generic renderer batch observation; see vendor provenance.
-dioxus-web = { path = "vendor/dioxus-web-0.7.4" }

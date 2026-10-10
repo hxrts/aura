@@ -272,9 +272,14 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 | Browser semantic lifecycle rendering | `Observed` | authoritative semantic facts from `aura-app` | browser presentation state only | harness, user-visible rendering |
 | Render-convergence and projection publication | `Observed` | browser projection/export path | `aura-web::harness::publication` only | Playwright/harness |
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
+| Registered control layout and renderer-future observation | `Observed` over `WebTaskOwner` custody | `rendered_controls::BrowserRendererObserver`; `UiController` issues capture receipts | registered nodes and active layout captures only | harness, render readers |
 | Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper from `aura-app::frontend_primitives` | shared frontend task-manager implementation | browser shell wiring only | harness, render layer |
 
 ### Capability-Gated Points
+
+- Renderer observations retain the UI publication owner's opaque capture receipt.
+  Only the owned renderer-future poll boundary acknowledges completed DOM edits;
+  resize/scroll callbacks may refresh an existing capture but cannot issue one.
 
 - Harness bridge command ingress and compatibility-gated semantic command execution in `src/harness_bridge.rs`.
 - Browser-side semantic projection, render-heartbeat publication, and typed
@@ -363,8 +368,23 @@ Browser semantic observation surface version 2 includes required `UiSnapshot.hom
 If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
 
 The onboarding rendered-control producer retains actual renderer-registered
-node instances and uses the renderer-owned edit-batch observer for before-render
-revocation, before-commit source binding, and after-flush acknowledgment.
+node instances and owns every poll of the unmodified, exactly pinned
+`dioxus-web` 0.7.4 renderer future. It revokes evidence before polling and
+binds the final rendered source and acknowledges DOM completion only after
+`Poll::Pending`: this audited non-hydrating renderer synchronously flushes all
+edits and mounted callbacks before suspending. Child-only renders are covered;
+multiple batches in one poll collapse into its final state, and no-op polls
+conservatively replace the capture. Drop revokes evidence before renderer
+teardown. This is DOM completion, not browser paint or protocol completion.
+
+The renderer runs through `WebTaskOwner`; there is no separate render loop or
+fork of Dioxus internals. Component effects alone cannot cover a memoized root's
+child-only renders. Hydration is unsupported and must remain disabled in the
+resolved renderer feature graph. A document asset guard fails closed on link
+URL changes, including devtools stylesheet reloads, and drains pending mutation
+records before acknowledging a poll or measuring fresh layout. The asset guard
+never supplies commit evidence. Renderer upgrades must re-audit `run` suspension
+and synchronous `flush_edits` ordering and execute the real-browser regressions.
 It never finds controls by selector or equates focus/mounting with visibility.
 The existing UI snapshot publication owner issues opaque active capture receipts;
 replacement/remount revokes old callbacks, including old disposal callbacks.

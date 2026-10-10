@@ -718,7 +718,7 @@ ci-workspace-wasm-test:
     WASM_BINDGEN_USE_BROWSER=1 \
       CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=scripts/verify/wasm-browser.sh \
       cargo test -p aura-web --bin aura-web --target wasm32-unknown-unknown --features web \
-        actual_renderer_visible_hidden_zero_unmount_and_same_source_remount
+        actual_renderer_
 
 # Effects system violation checks
 ci-effects:

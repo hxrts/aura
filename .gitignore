@@ -4,8 +4,6 @@ target/
 **/*.rs.bk
 *.pdb
 Cargo.lock
-# Standalone vendored renderer tooling uses the reviewed workspace dependency graph.
-!/vendor/dioxus-web-0.7.4/Cargo.lock
 result
 result-*
 
@@ -61,7 +59,6 @@ logs/
 *.tmp
 *.temp
 *.txt
-!/vendor/dioxus-web-0.7.4/src/js/hash.txt
 !scripts/verify/kani-consensus-inventory.txt
 work/
 ext/
