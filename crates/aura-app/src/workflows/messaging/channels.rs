@@ -701,6 +701,9 @@ async fn join_channel_binding_witness(
             "join workflow returned invalid canonical channel id '{channel_id}': {error}"
         ))
     })?;
+    // OWNERSHIP: observed - this helper reads the local-only join result for
+    // presentation. Runtime-backed joins retain their resolved authoritative
+    // binding directly and never derive it from this projection.
     let context_id = observed_chat_snapshot(app_core)
         .await
         .channel(&channel_id)
