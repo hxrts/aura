@@ -1003,7 +1003,13 @@ checkout build budget before preparing browser tools, web assets or harness
 binaries. Nested invocations reuse the held admission. These lanes preserve
 existing tool caches and rely on the canonical sweep and admission policy;
 they do not delete build lanes when disk space is low. Use guarded
-`just prune-inactive-lane <lane> --apply` only for an idle lane. Isolated
+`just prune-inactive-lane <lane> --apply` only for an idle lane.
+Use `wasm-profile` for the canonical Cargo `[profile.wasm]` output at
+`target/wasm32-unknown-unknown/wasm`. It differs from `wasm-debug`,
+`wasm-release` and `wasm-host-release`; pruning it preserves those siblings.
+Its apply path refuses active checkout builders, production/harness consumers,
+open files, build/prune locks and symlinked lanes or parents. This is explicit
+idle-lane cleanup, not an added automatic pruning candidate. Isolated
 browser admission and command-failure fixtures run in `ci-build-cache-policy`.
 
 Route builds through `scripts/dev/build-budget.sh`. It writes to the

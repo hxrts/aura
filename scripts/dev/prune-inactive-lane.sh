@@ -14,7 +14,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) mode=dry; shift ;;
     --apply) mode=apply; shift ;;
     --lock-owned-by) lock_owner="${2:?missing owner pid}"; shift 2 ;;
-    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|trybuild-host-triple|kani|wasm-debug|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
+    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|trybuild-host-triple|kani|wasm-debug|wasm-profile|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
   esac
 done
 case "$lane" in
@@ -29,6 +29,8 @@ case "$lane" in
     relative="target/tests/trybuild/$host_triple" ;;
   kani) relative=target/kani ;;
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
+  # Cargo [profile.wasm], used by the canonical Dioxus build.
+  wasm-profile) relative=target/wasm32-unknown-unknown/wasm ;;
   wasm-release) relative=target/wasm32-unknown-unknown/wasm-release ;;
   wasm-host-release) relative=target/wasm-release ;;
   dylint) relative=target/dylint ;;
@@ -68,7 +70,7 @@ fi
 source "$repo_root/scripts/dev/scoped-builders.sh"
 builders="$(aura_scoped_processes "$root" 'cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|cargo-kani|kani-driver' "$$")"
 [[ -z "$builders" ]] || { echo "builder active: $builders" >&2; exit 1; }
-if [[ "$lane" == release || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
+if [[ "$lane" == release || "$lane" == wasm-profile || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
   consumers="$(aura_scoped_processes "$root" 'tool_repl|aura-harness|aura' "$$")"
   [[ -z "$consumers" ]] || { echo "harness consumer active: $consumers" >&2; exit 1; }
 fi

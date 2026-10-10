@@ -22,6 +22,7 @@ cat > "$fakebin/ps" <<'EOF'
 EOF
 cat > "$fakebin/lsof" <<'EOF'
 #!/usr/bin/env bash
+[[ "${LSOF_EXIT:-0}" == 0 ]] || exit "$LSOF_EXIT"
 [[ ! -f "$OPEN_FILE" ]] || cat "$OPEN_FILE"
 EOF
 chmod +x "$fakebin"/*
@@ -68,8 +69,10 @@ expect_status 0 prune --lane wasm-debug --apply
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 [[ -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
 
-for lane in wasm-release wasm-host-release; do
-  if [[ "$lane" == wasm-release ]]; then
+for lane in wasm-profile wasm-release wasm-host-release; do
+  if [[ "$lane" == wasm-profile ]]; then
+    cache="$project/target/wasm32-unknown-unknown/wasm"
+  elif [[ "$lane" == wasm-release ]]; then
     cache="$project/target/wasm32-unknown-unknown/wasm-release"
   else
     cache="$project/target/wasm-release"
@@ -78,7 +81,7 @@ for lane in wasm-release wasm-host-release; do
   : > "$cache/data"
   expect_status 0 prune --lane "$lane" --dry-run
   [[ -f "$cache/data" ]]
-  for consumer in cargo tool_repl aura-harness; do
+  for consumer in cargo rustc dx tool_repl aura-harness aura; do
     printf '%s\n' "$consumer" > "$ACTIVE_FILE"
     expect_status 1 prune --lane "$lane" --apply
   done
@@ -90,6 +93,58 @@ for lane in wasm-release wasm-host-release; do
   [[ ! -e "$cache" && -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
   rm "$OPEN_FILE"
 done
+
+# Exact actual Dioxus wasm profile: never remove neighboring profile outputs.
+cache="$project/target/wasm32-unknown-unknown/wasm"
+mkdir -p "$cache" "$project/target/wasm32-unknown-unknown/debug" "$project/target/wasm32-unknown-unknown/wasm-release"
+: > "$cache/data"
+: > "$project/target/wasm32-unknown-unknown/debug/keep"
+: > "$project/target/wasm32-unknown-unknown/wasm-release/keep"
+mkdir "$project/target/.aura-build-budget.lock"
+expect_status 1 prune --lane wasm-profile --apply
+[[ -f "$cache/data" ]]
+rmdir "$project/target/.aura-build-budget.lock"
+expect_status 1 prune --lane wasm-profile --lock-owned-by 0 --apply
+[[ -f "$cache/data" ]]
+# Missing inspection / inspection failure must not permit deletion.
+missingbin="$test_root/missing-inspector"
+mkdir "$missingbin"
+for tool in bash dirname du awk mkdir rmdir cat ps rg; do
+  ln -s "$(command -v "$tool")" "$missingbin/$tool"
+done
+PATH="$missingbin" expect_status 1 prune --lane wasm-profile --apply
+rg -F 'lsof is required to prove this lane is idle' "$test_root/output" >/dev/null
+[[ -f "$cache/data" ]]
+LSOF_EXIT=44 expect_status 1 prune --lane wasm-profile --apply
+[[ -f "$cache/data" ]]
+mv "$cache" "$test_root/wasm-lane"
+ln -s "$test_root/wasm-lane" "$cache"
+expect_status 1 prune --lane wasm-profile --dry-run
+expect_status 1 prune --lane wasm-profile --apply
+[[ -f "$test_root/wasm-lane/data" ]]
+rm "$cache"
+mv "$test_root/wasm-lane" "$cache"
+mv "$project/target/wasm32-unknown-unknown" "$test_root/wasm-parent"
+ln -s "$test_root/wasm-parent" "$project/target/wasm32-unknown-unknown"
+expect_status 1 prune --lane wasm-profile --apply
+[[ -f "$test_root/wasm-parent/wasm/data" ]]
+rm "$project/target/wasm32-unknown-unknown"
+mv "$test_root/wasm-parent" "$project/target/wasm32-unknown-unknown"
+mv "$project/target" "$test_root/target-parent"
+ln -s "$test_root/target-parent" "$project/target"
+expect_status 1 prune --lane wasm-profile --apply
+[[ -f "$test_root/target-parent/wasm32-unknown-unknown/wasm/data" ]]
+rm "$project/target"
+mv "$test_root/target-parent" "$project/target"
+# Foreign-checkout builder cannot block the exact idle lane.
+printf 'cargo\n' > "$ACTIVE_FILE"
+ACTIVE_ROOT="$test_root/sibling-worktree" expect_status 0 prune --lane wasm-profile --apply
+rm "$ACTIVE_FILE"
+[[ ! -e "$cache" ]]
+[[ -f "$project/target/wasm32-unknown-unknown/debug/keep" && -f "$project/target/wasm32-unknown-unknown/wasm-release/keep" && -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
+expect_status 0 prune --lane wasm-profile --apply
+expect_status 2 prune --lane wasm --apply
+printf 'actual wasm-profile isolation/refusal fixtures passed\n'
 
 mkdir -p "$project/target/debug/incremental"
 : > "$project/target/debug/incremental/cache"
