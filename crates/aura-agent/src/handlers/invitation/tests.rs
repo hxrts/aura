@@ -6684,23 +6684,6 @@ large_stack_async_test!(
 large_stack_async_test!(
     timed_enrollment_attempt_keeps_actual_vm_for_required_close,
     {
-        struct DeadlineTime(std::sync::atomic::AtomicUsize);
-        #[async_trait::async_trait]
-        impl aura_core::effects::PhysicalTimeEffects for DeadlineTime {
-            async fn physical_time(
-                &self,
-            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
-                let count = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Ok(aura_core::time::PhysicalTime::exact(if count == 0 {
-                    100
-                } else {
-                    101
-                }))
-            }
-            async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
-                Ok(())
-            }
-        }
         let (_, invitee, invitation, _, _, _) =
             actual_pinned_device_enrollment_fixture("attempt-slot-close").await;
         let effects = invitee.runtime().effects();
@@ -6744,15 +6727,23 @@ large_stack_async_test!(
             std::time::Duration::from_millis(1),
         )
         .expect("deterministic diagnostic timeout around the actual owned VM");
-        let time = DeadlineTime(std::sync::atomic::AtomicUsize::new(0));
-        let timed = aura_core::execute_with_timeout_budget(&time, &budget, || async {
-            let session = slot
-                .as_mut()
-                .expect("attempt borrows the caller's actual session slot");
-            let _owned_id = session.vm_session_id();
-            futures::future::pending::<AgentResult<()>>().await
-        })
-        .await;
+        let time = aura_testkit::time::ManualPhysicalClock::new(100);
+        let attempt_entered = std::sync::atomic::AtomicBool::new(false);
+        let timed = {
+            let timed = aura_core::execute_with_timeout_budget(&time, &budget, || async {
+                let session = slot
+                    .as_mut()
+                    .expect("attempt borrows the caller's actual session slot");
+                let _owned_id = session.vm_session_id();
+                attempt_entered.store(true, std::sync::atomic::Ordering::SeqCst);
+                futures::future::pending::<AgentResult<()>>().await
+            });
+            futures::pin_mut!(timed);
+            assert!(futures::poll!(timed.as_mut()).is_pending());
+            assert!(attempt_entered.load(std::sync::atomic::Ordering::SeqCst));
+            time.set_time(101);
+            timed.await
+        };
         assert!(matches!(
             timed,
             Err(aura_core::TimeoutRunError::Timeout(

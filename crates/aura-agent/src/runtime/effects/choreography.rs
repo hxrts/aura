@@ -575,23 +575,29 @@ mod tests {
 
     struct SessionFaultClock(std::sync::atomic::AtomicBool);
 
-    struct ReceiveSleepFault;
+    struct ReceiveDeadlineFault;
     #[async_trait::async_trait]
-    impl PhysicalTimeEffects for ReceiveSleepFault {
+    impl PhysicalTimeEffects for ReceiveDeadlineFault {
         async fn physical_time(
             &self,
         ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
             Ok(aura_core::time::PhysicalTime::exact(100))
         }
-        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+        async fn wait_until_physical_deadline(
+            &self,
+            _: aura_core::types::window::WindowPosition<aura_core::types::window::PhysicalMillis>,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
             Err(aura_core::effects::TimeError::OperationFailed {
-                reason: "required receive sleep fault".into(),
+                reason: "required receive deadline fault".into(),
             })
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            panic!("absolute receive must not fall back to relative sleep")
         }
     }
 
     #[tokio::test]
-    async fn receive_required_sleep_failure_retains_original_source_without_timer() {
+    async fn receive_required_deadline_failure_retains_original_source_without_timer() {
         use std::error::Error;
         let authority = AuthorityId::new_from_entropy([0x7a; 32]);
         let effects = AuraEffectSystem::simulation_for_test_for_authority_with_salt(
@@ -600,7 +606,7 @@ mod tests {
             0x7a0,
         )
         .expect("actual effects")
-        .with_physical_time_provider(Arc::new(ReceiveSleepFault));
+        .with_physical_time_provider(Arc::new(ReceiveDeadlineFault));
         let role = authority_device_role(authority, 0);
         effects
             .start_session(Uuid::from_u128(0x7a0), vec![role])
@@ -609,7 +615,7 @@ mod tests {
         let error = effects
             .receive_from_role_bytes(role)
             .await
-            .expect_err("required sleep cannot establish expiry");
+            .expect_err("required deadline provider failure cannot establish expiry");
         assert!(matches!(
             &error,
             ChoreographyError::RequiredTime {
@@ -621,13 +627,14 @@ mod tests {
         loop {
             if matches!(
                 source.downcast_ref::<aura_core::effects::TimeError>(),
-                Some(aura_core::effects::TimeError::OperationFailed { .. })
+                Some(aura_core::effects::TimeError::OperationFailed { reason })
+                    if reason == "required receive deadline fault"
             ) {
                 break;
             }
             source = source
                 .source()
-                .expect("original required sleep cause retained");
+                .expect("original required deadline cause retained");
         }
         assert_eq!(
             effects.time_handler.get_statistics().await.active_timeouts,
