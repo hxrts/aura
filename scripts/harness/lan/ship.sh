@@ -29,6 +29,12 @@ here="$(cd "$(dirname "$0")" && pwd)"
 build=1
 [ "${1:-}" = --no-build ] && build=0
 
+# Resolve all lifecycle tools through this clean candidate's pinned shell even
+# when the canonical ship entry is invoked from an ordinary terminal/SSH shell.
+if [[ -z "${IN_NIX_SHELL:-}" ]]; then
+  nix_bin="${AURA_NIX_BIN:-$(command -v nix || printf '/nix/var/nix/profiles/default/bin/nix')}"
+  exec "$nix_bin" develop "$AURA_E2E_ROOT" --command bash "$here/ship.sh" "$@"
+fi
 cd "$AURA_E2E_ROOT"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo 'ship: checkout has uncommitted changes' >&2; exit 1; }
 commit="$(git rev-parse HEAD)"
@@ -40,11 +46,24 @@ remote_platform="$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" 'uname -sm')"
 }
 
 remote_root="$AURA_E2E_REMOTE_ROOT"
-# A previous run's harness (tool_repl and the aura processes it drives) is a
-# build consumer the budget waits on, and its binaries are about to be
-# replaced: stop it on both hosts first (work/8.md Task 209).
+# Bootstrap the exact candidate's portable lock closure before stopping an old
+# checkout: older Darwin hosts have neither lockf nor flock. No remote build.
+nix_bin="${AURA_NIX_BIN:-$(command -v nix || printf '/nix/var/nix/profiles/default/bin/nix')}"
+remote_bin="${AURA_NIX_REMOTE_BIN:-/nix/var/nix/profiles/default/bin}"
+remote_program="${AURA_NIX_REMOTE_PROGRAM:-/nix/var/nix/profiles/default/bin/nix-daemon}"
+flock_bin="$(command -v flock)" || { echo 'ship: pinned portable flock is required' >&2; exit 127; }
+flock_store="${flock_bin%/bin/flock}"
+[[ "$flock_store" == /nix/store/* && -x "$flock_store/bin/flock" ]] || { echo 'ship: flock must come from the pinned Nix store' >&2; exit 1; }
+mkdir -p .nix-ship
+"$(dirname "$nix_bin")/nix-store" --add-root .nix-ship/lifecycle-flock -r "$flock_store" >/dev/null
+"$nix_bin" copy --no-check-sigs --to "ssh-ng://$AURA_E2E_REMOTE?remote-program=$remote_program" "$flock_store"
+printf -v remote_root_cmd '%q ' bash -c 'cd "$1" && mkdir -p .nix-ship && "$2/nix-store" --add-root .nix-ship/lifecycle-flock -r "$3" >/dev/null' bash "$remote_root" "$remote_bin" "$flock_store"
+ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "$remote_root_cmd"
+# Preserve old-checkout helpers/config/identity custody but execute the exact
+# clean candidate driver, with its real remote $0 and the pinned tool on PATH.
 bash "$here/drv.sh" stop
-ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && bash scripts/harness/lan/drv.sh stop"
+printf -v remote_stop_cmd '%q ' bash -c 'cd "$1"; root="$(pwd -P)"; exec "$2/nix" develop "$root" --command bash -c "$4" "$root/scripts/harness/lan/drv.sh" "$3" stop' bash "$remote_root" "$remote_bin" "$flock_store" 'export PATH="$1/bin:$PATH"; shift; source /dev/stdin'
+ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "$remote_stop_cmd" < "$here/drv.sh"
 # Wait for the volume, the lock and other worktrees' builds instead of failing.
 export AURA_BUILD_WAIT_SECONDS="${AURA_BUILD_WAIT_SECONDS:-3600}"
 
