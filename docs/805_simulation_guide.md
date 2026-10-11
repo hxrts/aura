@@ -39,6 +39,19 @@ Declare package, features, exact test inventory and expected count before buildi
 
 Select stages that cover the affected contract. A pure component or documentation change does not require an unrelated full-flow run. Preserve explicit task and policy requirements, and never use a narrow result to claim broader lifecycle or platform coverage.
 
+### Assign coverage before execution
+
+Use the lowest stage that executes the affected contract. Record unsupported stages as fixture or adapter work, with a named owner and dependency, before scheduling broader runs.
+
+| Contract under test | Primary evidence | Remaining integration evidence |
+|---|---|---|
+| Admission, signing, journal convergence, replay and cancellation | Actual runtime/app execution with controlled effects and deterministic fault boundaries | Final network integration of locally proven flows |
+| Required persistence, task disposal and profile reopen | Real storage and owned runtime lifecycle in-process | Platform-specific persistence and process integration |
+| Browser storage, renderer events and TUI input wiring | Actual local browser/TUI conformance | Cross-machine user-flow integration |
+| Socket discovery, real transport and independent processes | Focused network diagnostics when necessary | One declared, batched both-host E2E run |
+
+A passing runtime fixture does not close an app terminal-publication or browser persistence gap. Keep those dependencies explicit while reusing the same participant setup and semantic contract. Likewise, a passing model or scenario adapter does not certify production execution. Report discovered and executed fixtures separately for each stage.
+
 ### First reusable complete flow
 
 Enrollment is the first target for extending complete-flow coverage. Reuse genuine account/profile setup, signed setup export, explicit independent verifier transfer, original issuer registration, actual acceptance/rejection, app terminal publication, host persistence acknowledgment, required disposal and same-profile reopen. Obtain all capabilities and receipts from their canonical producers. Named fault boundaries should cover preparation, required writes, host finalization, terminal observation and shutdown.

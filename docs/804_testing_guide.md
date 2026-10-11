@@ -104,6 +104,8 @@ Declare package, features, test binary/filter and expected discovered fixtures b
 
 Enrollment is the first reusable complete-flow fixture target. Extend canonical setup/export, explicit verifier transfer, issuer/receiver execution, app host-finalization, terminal publication, persistence and cleanup/reopen seams. Keep generic effect controls in testkit and runtime assembly in its sanctioned owner. Existing model-only AMP steps and incomplete fixture paths remain coverage gaps until real execution proves them.
 
+Select the primary evidence using the [coverage assignment matrix](805_simulation_guide.md#assign-coverage-before-execution). When a reusable fixture cannot execute a required stage, record the missing seam and its dependent flow; extending that seam precedes repeated E2E attempts for the same local blocker.
+
 Cross-machine runs establish real transport, discovery and process/platform integration. They should batch locally proven flows after the required gates and smoke. A network-specific investigation may use a targeted real-network test, but record the boundary that requires it and turn reproducible logic failures into deterministic regressions. Retain revision, seeds, exact test inventory, typed action/operation/owner, selected provider/endpoint, fault boundary and first failure in evidence. Detailed workflow: [Simulation Guide](805_simulation_guide.md#validation-sequence).
 
 User-facing docs and harness guidance must not point readers at scratch-note or
