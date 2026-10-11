@@ -525,7 +525,7 @@ module time_system {
     else s
 
   pure def armImport(s: ImportCustody, origin: int, operation: int): ImportCustody =
-    if (s.admitted and not(s.cancelled) and s.origin == origin and
+    if (s.admitted and not(s.disposed) and not(s.cancelled) and s.origin == origin and
         s.operation == operation and s.terminal == ImportPending)
       s.with("armed", true)
     else s
@@ -564,21 +564,21 @@ module time_system {
       s.with("terminal", terminal).with("publications", s.publications + 1)
     } else s
 
-// The custodian registry acknowledges only after its cleanup has returned.
-// Observing the result/terminal alone does not establish this acknowledgment.
-pure def acknowledgeImportCustodian(s: ImportCustody): ImportCustody =
-  if (s.disposed and s.terminal != ImportPending)
-    s.with("custodianAcknowledged", true)
-  else s
+  // The custodian registry acknowledges only after its cleanup has returned.
+  // Observing the result/terminal alone does not establish this acknowledgment.
+  pure def acknowledgeImportCustodian(s: ImportCustody): ImportCustody =
+    if (s.disposed and (not(s.armed) or s.terminal != ImportPending))
+      s.with("custodianAcknowledged", true)
+    else s
 
-run importTerminalObservationDoesNotAcknowledgeCustodianDisposalTest = {
-  val armed = armImport(admitImport(importCustody(1, 2, 100), true), 1, 2)
-  val terminal = settleImport(disposeImport(cancelImportObservation(armed), true))
-  assert(not(acknowledgeImportCustodian(armed).custodianAcknowledged) and
-    terminal.terminal == ImportCancelled and not(terminal.custodianAcknowledged) and
-    acknowledgeImportCustodian(terminal).custodianAcknowledged and
-    acknowledgeImportCustodian(terminal).publications == 1)
-}
+  run importTerminalObservationDoesNotAcknowledgeCustodianDisposalTest = {
+    val armed = armImport(admitImport(importCustody(1, 2, 100), true), 1, 2)
+    val terminal = settleImport(disposeImport(cancelImportObservation(armed), true))
+    assert(not(acknowledgeImportCustodian(armed).custodianAcknowledged) and
+      terminal.terminal == ImportCancelled and not(terminal.custodianAcknowledged) and
+      acknowledgeImportCustodian(terminal).custodianAcknowledged and
+      acknowledgeImportCustodian(terminal).publications == 1)
+  }
 
   run importRefusalAndUnarmedCancellationRetainPriorCustodyTest = {
     val initial = importCustody(1, 2, 100)
@@ -588,6 +588,15 @@ run importTerminalObservationDoesNotAcknowledgeCustodianDisposalTest = {
       settleImport(disposeImport(refused, true)).publications == 0 and
       not(armImport(unarmed, 1, 2).armed) and
       settleImport(disposeImport(unarmed, true)).publications == 0)
+  }
+
+  run importDisposedUnarmedCustodianCannotAcceptLateHandoffTest = {
+    val admitted = admitImport(importCustody(1, 2, 100), true)
+    val disposed = disposeImport(admitted, true)
+    val attempted = armImport(disposed, 1, 2)
+    assert(attempted == disposed and not(attempted.armed) and
+      settleImport(attempted).publications == 0 and
+      acknowledgeImportCustodian(attempted).custodianAcknowledged)
   }
 
   run importArmRequiresExactOriginalBindingTest = {
