@@ -82,15 +82,29 @@ Run the relevant ownership `just ci-*` policy checks alongside crate tests. Run 
 
 ### Harness Policy
 
-The runtime harness is the primary end-to-end validation lane. Default harness runs exercise the real Aura runtime with real TUI and web frontends. The goal is to catch integration failures in the actual product, not just prove a model.
+The primary development loop for runtime and app workflows is deterministic in-process execution of the real implementation. Extend reusable simulator/testkit fixtures when a required lifecycle stage is missing. Model-only transitions, seeded projections and fabricated acknowledgments cannot stand in for real protocol, persistence or cleanup outcomes.
 
-The harness has two distinct responsibilities. The shared semantic lane executes parity-critical shared flows through the shared semantic command plane. It waits on typed handles, readiness facts, runtime events, quiescence, and authoritative projections. This is the primary lane for debugging production code paths.
+The runtime harness supplies frontend integration and final E2E evidence. Its shared semantic lane executes parity-critical shared flows through the shared semantic command plane and waits on typed handles, readiness facts, runtime events, quiescence and authoritative projections. Runtime/app failures should first be reproduced in-process wherever the affected boundary supports it.
 
 The frontend-conformance lane validates renderer-specific control wiring, DOM structure, PTY key mappings, and shell-level integration. It may use renderer-specific mechanics intentionally. It must not be the primary execution substrate for shared scenarios.
 
 Quint and other verification tools generate models, traces, and invariants. They are not a replacement for real frontends.
 
-`aura-app` owns the shared semantic scenario, command-plane, and UI contracts. `aura-harness` consumes those contracts and submits shared semantic commands to real frontends. `aura-simulator` is a separate alternate runtime substrate.
+`aura-app` owns shared semantic scenario, command-plane and UI contracts. `aura-harness` consumes them and submits commands to real frontends; `aura-simulator` supplies controlled runtime execution. Share actions and expected outcomes without creating a second frontend executor or parallel protocol implementation.
+
+### Validation order and evidence
+
+1. Compile the smallest coherent production slice and run focused component tests.
+2. Execute the complete runtime/app flow in-process with real protocol and crypto, controlled transport, selected virtual time, required persistence, original terminal ownership, disposal and same-profile restart.
+3. Run local frontend conformance for actual browser/TUI input, renderer, subscriptions and platform storage. Real local browser tests remain necessary for browser-specific boundaries.
+4. Run required checkpoint policy gates, integrate and obtain a green main smoke.
+5. Confirm a declared batch of E2E flows across machines using prebuilt identical revisions. Air does not build, and a LAN run need not remain continuously active.
+
+Declare package, features, test binary/filter and expected discovered fixtures before each batch. Actual discovery and successful nonignored execution are both required. Preserve valid receipts for unchanged scopes; rerun scopes affected by a changed dependency. Keep one active vertical integration batch per worktree and compile before expanding adjacent functionality. The two-worktree and external build setup stay unchanged.
+
+Enrollment is the first reusable complete-flow fixture target. Extend canonical setup/export, explicit verifier transfer, issuer/receiver execution, app host-finalization, terminal publication, persistence and cleanup/reopen seams. Keep generic effect controls in testkit and runtime assembly in its sanctioned owner. Existing model-only AMP steps and incomplete fixture paths remain coverage gaps until real execution proves them.
+
+Cross-machine runs establish real transport, discovery and process/platform integration. They should batch locally proven flows after the required gates and smoke. A network-specific investigation may use a targeted real-network test, but record the boundary that requires it and turn reproducible logic failures into deterministic regressions. Retain revision, seeds, exact test inventory, typed action/operation/owner, selected provider/endpoint, fault boundary and first failure in evidence. Detailed workflow: [Simulation Guide](805_simulation_guide.md#validation-sequence).
 
 User-facing docs and harness guidance must not point readers at scratch-note or
 ephemeral local-output paths. Describe outputs in terms of the stable harness
@@ -853,6 +867,8 @@ The harness is the single executor for real frontend scenarios. Scripted mode us
 Multi-host runs use one harness per host with the same run token. Set `[run] fixed_ports = true` so configured `bind_address` and `lan_discovery.port` values stay literal instead of being namespaced by the run token; peers on different hosts must agree on these ports.
 
 The tracked LAN helpers live in `scripts/harness/lan/`. `configs/harness/lan-host-{a,b}.toml` name each host's LAN address as `__HOST_ADDR__`; `drv.sh start` renders the config with `AURA_E2E_HOST_ADDR` (detected from the primary interface by default), so no address is committed. Build and ship the exact commit's binaries, web bundle and runtime Nix closure from Host A with `ship.sh`; do not build on Air. `fresh.sh <run-token>` starts both drivers, onboards the standard cast and links contacts; `lib.sh` provides the request helpers used by scenario scripts.
+
+Schedule these cross-machine helpers after complete in-process validation, required local frontend coverage, checkpoint gates and main smoke. Batch several declared E2E flows into one owned run; preserve per-flow results and both-host cleanup evidence. A successful LAN flow does not replace deterministic fault, cancellation or restart coverage.
 
 Run a complete owned batch with `AURA_E2E_REMOTE=user@host scripts/harness/lan/batch.sh <fresh-token> -- bash <checklist.sh> [arguments...]`. It requires matching clean local/remote commits and the complete local smoke marker. Workflow success, failure and interruption all attempt both hosts' exact-token finalization independently, retain shutdown logs and return failure if cleanup refuses ownership. Interruption first cancels and waits for the owned checklist command before finalizing. The command and commit are recorded in `.tmp/lan-checklist-<token>/`; the caller must describe which flows its checklist actually covers.
 

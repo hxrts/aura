@@ -12,11 +12,18 @@ The harness coverage model has two explicit lanes:
 
 - shared semantic lane:
   - parity-critical shared flows execute through the shared semantic command plane
-  - this is the primary lane for debugging production workflows
+  - this establishes real frontend semantic integration after deterministic in-process runtime/app validation
 - frontend-conformance lane:
   - renderer-specific control wiring, DOM/PTy mechanics, and shell integration
     are validated separately
   - these scenarios are intentionally not the primary shared-flow substrate
+
+Coverage in this report describes frontend execution. Complete runtime/app flow
+regressions run first in-process using the real implementation and controlled
+effects. Local frontend checks follow; cross-machine P2P confirmation batches
+locally proven flows after checkpoint gates and main smoke. A harness coverage
+row does not imply simulator, fault/restart or cross-machine evidence. See
+[Testing Guide](804_testing_guide.md#validation-order-and-evidence).
 
 ## Summary Metrics
 

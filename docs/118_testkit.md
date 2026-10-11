@@ -8,6 +8,16 @@ The `aura-testkit` crate occupies Layer 8 in the Aura architecture. It provides 
 
 The crate serves three purposes. It provides stateful effect handlers for controllable test environments. It offers fixture builders for consistent test setup. It includes verification utilities for property testing and differential testing.
 
+## Complete-flow fixture contract
+
+Reusable fixtures support deterministic execution of the actual runtime and app workflow. Generic providers, fault controls and evidence utilities belong in `aura-testkit`; runtime-specific assembly belongs in sanctioned runtime test support or simulation factories. Testkit utilities do not introduce upward production dependencies or a second implementation of a protocol.
+
+Positive evidence comes from canonical producers: real signing and verification, explicit transferred trust, committed journal state, acknowledged storage and actual owned task disposal. `MockRuntimeBridge` projections and mock crypto remain useful for component tests, but cannot establish authenticated distributed success or profile restart continuity.
+
+A complete lifecycle fixture retains participant identity, selected clock/provider, original operation and window ownership, storage profile and typed failure sources across its stages. Restart requires acknowledged old-owner shutdown and reacquisition of the same original profile, with durable evidence revalidated. Scenario checkpoints and copied metadata cannot substitute for that custody. Fault and replay evidence distinguishes actual runtime execution from observational model steps.
+
+Enrollment is the first complete-flow fixture target; its implementation and migration remain explicit work until actual execution covers setup, issuance, acceptance/rejection, host persistence, terminal publication, cleanup and reopen. [Simulation Guide](805_simulation_guide.md#first-reusable-complete-flow) defines the development workflow and coverage sequence.
+
 ## Stateful Effect Handlers
 
 Stateful effect handlers maintain internal state across calls. They enable deterministic testing by controlling time, randomness, and storage. These handlers implement the same traits as production handlers but store state for inspection and manipulation.
@@ -33,13 +43,13 @@ The `SimulatedTimeHandler` provides controllable time for tests.
 use aura_testkit::stateful_effects::SimulatedTimeHandler;
 use aura_core::effects::PhysicalTimeEffects;
 
-let time = SimulatedTimeHandler::new();
+let time = SimulatedTimeHandler::new_with_time(5_000);
 let now = time.physical_time().await?;
 time.advance_time(5000);
 let later = time.physical_time().await?;
 ```
 
-This handler starts at the current system time by default. Use `SimulatedTimeHandler::new_at_epoch()` for tests starting at Unix epoch, or `SimulatedTimeHandler::new_with_time(start_ms)` for a specific start time. Tests can verify time-dependent behavior without wall-clock delays.
+The existing `new()` constructor starts at current system time; deterministic fixtures select `new_at_epoch()` or `new_with_time(start_ms)` explicitly. Concurrent runtime fixtures instead retain `ManualPhysicalClock` for exact fault boundaries or a shared `QuiescentClock` with paused Tokio time. Clock reads never provide distributed ordering authority, and provider sleep semantics must not silently advance another owner's deadline. See [Testing Guide](804_testing_guide.md) for runtime assembly and restart contracts.
 
 ### Random Handler
 

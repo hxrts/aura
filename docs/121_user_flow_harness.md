@@ -6,7 +6,7 @@ This document defines the harness contract for parity-critical user flows. It su
 
 `aura-harness` is the multi-instance orchestration crate for end-to-end Aura validation. It starts local, browser, and SSH-backed instances. It runs shared scenarios against real frontends instead of renderer-specific scripts.
 
-The default correctness lane is the real runtime with real TUI or web surfaces. The harness is not a replacement for simulator, Quint, or unit-level validation. Those systems provide supporting evidence and alternate execution environments.
+Complete runtime and app workflow correctness is established first by deterministic in-process execution of the real implementation. The harness owns real frontend integration evidence, including renderer and platform boundaries. Cross-machine P2P evidence is a final batched integration scope. Models and mock projections cannot replace actual protocol execution; simulator results cannot replace real frontend evidence. Validation scheduling is defined in [Testing Guide](804_testing_guide.md#validation-order-and-evidence).
 
 ## 2. Execution Lanes
 
@@ -104,9 +104,9 @@ See [Testing Guide](804_testing_guide.md) for determinism and replay details.
 
 ## 9. Runtime Substrate
 
-The harness supports `real` and `simulator` runtime substrates. The real substrate is the default lane. The simulator substrate is an alternate deterministic runtime controller for fault injection and transcript capture.
+The harness supports `real` and `simulator` runtime substrates. The existing harness command default is `real`; that command default does not determine development validation order. The simulator substrate is a deterministic runtime controller for fault injection and transcript capture.
 
-Simulator substrate runs currently support local instances only. Browser instances are not allowed in simulator mode. Shared user-flow correctness still belongs to the real frontend lane even when simulator support is enabled for controlled experiments.
+Simulator substrate runs currently support local instances only. Browser instances are not allowed in simulator mode. Runtime/app flow evidence, local frontend-conformance evidence and cross-machine integration evidence retain distinct scopes. Shared actions and expected outcomes come from the app contract; missing complete-flow simulator coverage remains explicit until implemented. No browser simulator support is implied by this contract.
 
 ## 10. Governance And Policy
 

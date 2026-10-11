@@ -12,7 +12,13 @@ The crate provides four capabilities. It offers specialized effect handlers for 
 
 The simulator provides two execution modes. TOML scenarios are human-written declarative test scripts that specify operations, assertions, and fault injection. Quint actions are model-generated traces from formal specifications that exercise state-space coverage.
 
-Simulation is an alternate runtime substrate for testing and verification. It does not replace the harness, which executes real frontends. Shared semantic contracts live in `aura-app` and are consumed by both simulation and harness execution.
+Simulation is the deterministic execution substrate for runtime and app workflow validation. Complete-flow evidence requires the actual protocol, cryptographic, journal, ownership and app lifecycle implementations under controlled effects. Shared semantic contracts live in `aura-app` and are consumed by simulation and harness execution. The harness owns real frontend execution; local frontend evidence and final cross-machine integration evidence remain distinct from in-process correctness.
+
+### Complete-flow evidence boundary
+
+A complete-flow result binds each action and terminal outcome to the original participant, operation and capability owner. Persistence acknowledgment, required task/session disposal and same-profile restart continuity are part of the lifecycle when the flow requires them. Seeds, selected providers, original endpoints and injected fault boundaries identify replay inputs. A restored scenario snapshot is not itself a restored runtime profile or a reissued capability.
+
+Model-only transition adapters, mock runtime projections and artifact comparisons establish only their declared scope. They cannot manufacture signed acceptance, durable writes, quorum agreement or successful cleanup. Missing production integration remains an explicit coverage gap. Simulator growth extends existing production seams and shared semantic contracts rather than maintaining an independent protocol implementation. Execution and promotion workflows are defined in [Simulation Guide](805_simulation_guide.md#validation-sequence).
 
 ## Handler-Based Architecture
 
@@ -47,7 +53,7 @@ time.jump_to_time(Duration::from_secs(10));
 let now = time.physical_time().await?;
 ```
 
-Time starts at zero and advances only through explicit `jump_to_time` calls or `sleep_ms` invocations. The `sleep_ms` method returns immediately after advancing simulated time by the scaled duration. This enables testing timeout behavior without wall-clock delays. Use `set_acceleration` to adjust time scaling.
+Time starts at zero and advances through explicit `jump_to_time` calls or `sleep_ms` invocations. This handler's sleep returns after advancing its local simulated time by the scaled duration. That behavior is distinct from concurrent runtime clocks: `ManualPhysicalClock` waits for explicit advancement, and `QuiescentClock` progresses at scheduler quiescence. Complete multi-participant runtime evidence retains the selected shared provider and original endpoints; background sleeps cannot independently spend the entire flow's lifetime. The testing and simulation guides specify provider selection.
 
 ### SimulationFaultHandler
 

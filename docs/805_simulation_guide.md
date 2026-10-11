@@ -13,7 +13,7 @@ This guide covers how to use Aura's simulation infrastructure for testing distri
 
 Simulation suits scenarios that unit tests cannot address. Use simulation for fault injection testing. Use it for multi-participant protocol testing. Use it for time-dependent behavior validation.
 
-Do not use simulation for simple unit tests. Direct effect handler testing is faster and simpler for single-component validation. Do not treat simulation as the default end-to-end correctness oracle for user-facing flows. Aura's primary feedback loop remains the real-runtime harness running against the real software stack.
+Use direct effect-handler tests for single-component validation. For distributed runtime and app workflows, the primary feedback loop is deterministic in-process execution of the real implementation. Use controlled transport, selected virtual-time providers and real cryptographic, journal and ownership paths. A model-only adapter or a mock success response cannot establish complete-flow correctness.
 
 See [Simulation Infrastructure Reference](119_simulator.md) for the complete architecture documentation.
 
@@ -21,7 +21,29 @@ See [Simulation Infrastructure Reference](119_simulator.md) for the complete arc
 
 The simulation architecture is specified in [Simulation Infrastructure Reference](119_simulator.md). The harness architecture is specified in [User Flow Harness](121_user_flow_harness.md).
 
-Use the real-runtime harness by default when validating product behavior through the TUI or webapp. Use simulation when you need deterministic virtual time, controlled network faults, scheduler control, or MBT and trace replay under constrained distributed conditions. Promote high-value simulation findings back into real-runtime harness coverage when the flow is user-visible or integration-sensitive.
+Validate complete runtime and app workflows in-process before escalating to frontend or cross-machine execution. The harness remains the executor for real frontend scenarios. Local browser and TUI conformance tests establish submission, rendering, subscriptions and platform storage behavior. Cross-machine P2P runs are a final, batched integration check for real transport, discovery and process/platform boundaries.
+
+If a required flow cannot execute completely in-process, identify the missing production adapter or reusable fixture and extend that seam before using LAN runs as the development loop. Keep genuinely platform-specific checks in their appropriate local lane. Share semantic actions and expected outcomes through `aura-app`; do not create a second protocol implementation or frontend executor.
+
+### Validation sequence
+
+| Stage | Required evidence |
+|---|---|
+| Narrow compile and component tests | Production APIs compile; focused invariants and error sources hold |
+| Complete in-process flow | Real participants, protocol, app owner, persistence, cancellation, disposal and restart under selected virtual time |
+| Local frontend conformance | Actual renderer/input wiring, browser or native storage, subscription and teardown behavior |
+| Checkpoint gates and main smoke | Required policy and integration checks on the resulting source revision |
+| Batched cross-machine confirmation | Prebuilt identical revisions; declared E2E flows and real network/platform integration |
+
+Declare package, features, exact test inventory and expected count before building. Discover intended fixtures before executing them; zero or ignored matches fail validation. Reuse valid evidence for unchanged scopes and rerun affected scopes when their dependencies change. Record the first failing typed action, original operation/owner, seed, provider, endpoint and fault boundary so a later LAN failure can become a deterministic regression.
+
+Select stages that cover the affected contract. A pure component or documentation change does not require an unrelated full-flow run. Preserve explicit task and policy requirements, and never use a narrow result to claim broader lifecycle or platform coverage.
+
+### First reusable complete flow
+
+Enrollment is the first target for extending complete-flow coverage. Reuse genuine account/profile setup, signed setup export, explicit independent verifier transfer, original issuer registration, actual acceptance/rejection, app terminal publication, host persistence acknowledgment, required disposal and same-profile reopen. Obtain all capabilities and receipts from their canonical producers. Named fault boundaries should cover preparation, required writes, host finalization, terminal observation and shutdown.
+
+Keep effect providers and reusable fault controls in `aura-testkit`, runtime assembly in sanctioned `aura-agent` test support/factories, and scenario orchestration in the simulator or existing integration tests. Preserve downward production dependencies. This is a coverage target, not a claim that a complete reusable enrollment fixture already exists. Extend the same pattern to other flows once this vertical slice compiles and executes.
 
 ## Two Simulation Systems
 
@@ -135,7 +157,7 @@ time.jump_to_time(Duration::from_secs(60));
 let later = time.physical_time().await?;
 ```
 
-Simulated time advances only through explicit calls (`jump_to_time`) or sleep operations. This enables testing timeout behavior without delays.
+This handler advances time through explicit calls and its own sleep operations. For concurrent real-runtime fixtures, inject `ManualPhysicalClock` before service assembly when the test controls exact boundaries, or use the shared `QuiescentClock` with paused Tokio time for whole-flow scheduling. Sleeps on these runtime providers wait for controlled progress; one background sleeper must not advance every participant past a ceremony deadline. Retain original providers and durable endpoints across restart. Wall clock never decides distributed ordering, and timeout widening cannot repair readiness.
 
 ### Fault Injection
 
