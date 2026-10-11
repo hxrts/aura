@@ -502,4 +502,116 @@ module time_system {
       | _ => false
     }
 
+  // Pure custody model only: acknowledgment inputs stand for actual owner-issued
+  // runtime receipts. These transitions do not prove adapter execution/liveness.
+  type ImportTerminal = ImportPending | ImportSucceeded | ImportFailed | ImportCancelled
+  type ImportCustody = {
+    origin: int, operation: int, deadline: int,
+    admitted: bool, armed: bool, refused: bool,
+    cancelled: bool, hostAcknowledged: bool, firstFailure: int,
+    disposed: bool, terminal: ImportTerminal, publications: int
+  }
+
+  pure def importCustody(origin: int, operation: int, deadline: int): ImportCustody = {
+    origin: origin, operation: operation, deadline: deadline,
+    admitted: false, armed: false, refused: false,
+    cancelled: false, hostAcknowledged: false, firstFailure: 0,
+    disposed: false, terminal: ImportPending, publications: 0
+  }
+
+  pure def admitImport(s: ImportCustody, accepted: bool): ImportCustody =
+    if (not(s.admitted) and not(s.refused))
+      if (accepted) s.with("admitted", true) else s.with("refused", true)
+    else s
+
+  pure def armImport(s: ImportCustody, origin: int, operation: int): ImportCustody =
+    if (s.admitted and not(s.cancelled) and s.origin == origin and
+        s.operation == operation and s.terminal == ImportPending)
+      s.with("armed", true)
+    else s
+
+  pure def cancelImportObservation(s: ImportCustody): ImportCustody =
+    s.with("cancelled", true)
+
+  pure def retainImportFailure(s: ImportCustody, cause: int): ImportCustody =
+    if (s.armed and s.firstFailure == 0 and cause > 0 and
+        s.terminal == ImportPending) s.with("firstFailure", cause)
+    else s
+
+  // For async finalization, writes alone are insufficient: the outer original
+  // executor must acknowledge its selected postread. Prepared synchronous commit
+  // also requires that read and its own actual successful commit receipt.
+  pure def acknowledgeImportHost(s: ImportCustody, origin: int, operation: int,
+      observedAt: int, selectedPostread: bool, commitReceipt: bool): ImportCustody =
+    if (s.armed and not(s.cancelled) and s.firstFailure == 0 and
+        s.terminal == ImportPending and s.origin == origin and
+        s.operation == operation and observedAt < s.deadline and
+        selectedPostread and commitReceipt)
+      s.with("hostAcknowledged", true)
+    else s
+
+  pure def disposeImport(s: ImportCustody, originalOwnerAcknowledged: bool): ImportCustody =
+    if (s.admitted and originalOwnerAcknowledged) s.with("disposed", true) else s
+
+  // Cleanup retains the sole publisher; observer Drop never publishes. Refusal
+  // and an unarmed admission remain the prior owner's responsibility.
+  pure def settleImport(s: ImportCustody): ImportCustody =
+    if (s.armed and s.disposed and s.terminal == ImportPending and
+        (s.firstFailure > 0 or s.hostAcknowledged or s.cancelled)) {
+      val terminal = if (s.firstFailure > 0) ImportFailed
+        else if (s.hostAcknowledged) ImportSucceeded else ImportCancelled
+      s.with("terminal", terminal).with("publications", s.publications + 1)
+    } else s
+
+  run importRefusalAndUnarmedCancellationRetainPriorCustodyTest = {
+    val initial = importCustody(1, 2, 100)
+    val refused = admitImport(initial, false)
+    val unarmed = cancelImportObservation(admitImport(initial, true))
+    assert(refused.refused and not(refused.admitted) and
+      settleImport(disposeImport(refused, true)).publications == 0 and
+      not(armImport(unarmed, 1, 2).armed) and
+      settleImport(disposeImport(unarmed, true)).publications == 0)
+  }
+
+  run importArmRequiresExactOriginalBindingTest = {
+    val admitted = admitImport(importCustody(1, 2, 100), true)
+    assert(not(armImport(admitted, 3, 2).armed) and
+      not(armImport(admitted, 1, 3).armed) and armImport(admitted, 1, 2).armed)
+  }
+
+  run importHostWritesRequireOriginalPostreadAndEndpointTest = {
+    val armed = armImport(admitImport(importCustody(1, 2, 100), true), 1, 2)
+    assert(not(acknowledgeImportHost(armed, 1, 2, 99, false, true).hostAcknowledged) and
+      not(acknowledgeImportHost(armed, 1, 2, 100, true, true).hostAcknowledged) and
+      not(acknowledgeImportHost(armed, 3, 2, 99, true, true).hostAcknowledged) and
+      not(acknowledgeImportHost(armed, 1, 2, 99, true, false).hostAcknowledged) and
+      acknowledgeImportHost(armed, 1, 2, 99, true, true).hostAcknowledged)
+  }
+
+  run importCancelledBeforeCommitRequiresDisposalTest = {
+    val armed = armImport(admitImport(importCustody(1, 2, 100), true), 1, 2)
+    val cancelled = cancelImportObservation(armed)
+    val disposed = disposeImport(cancelled, true)
+    assert(settleImport(cancelled).publications == 0 and
+      not(acknowledgeImportHost(cancelled, 1, 2, 99, true, true).hostAcknowledged) and
+      settleImport(disposed).terminal == ImportCancelled and
+      settleImport(settleImport(disposed)).publications == 1)
+  }
+
+  run importActualHostAcknowledgmentWinsObserverCancellationTest = {
+    val armed = armImport(admitImport(importCustody(1, 2, 100), true), 1, 2)
+    val committed = acknowledgeImportHost(armed, 1, 2, 99, true, true)
+    val settled = settleImport(disposeImport(cancelImportObservation(committed), true))
+    assert(settled.terminal == ImportSucceeded and settled.publications == 1 and
+      settled.origin == 1 and settled.operation == 2 and settled.deadline == 100)
+  }
+
+  run importFirstNativeFailureSurvivesCancellationAndCleanupTest = {
+    val armed = armImport(admitImport(importCustody(1, 2, 100), true), 1, 2)
+    val failed = retainImportFailure(retainImportFailure(armed, 7), 8)
+    val settled = settleImport(disposeImport(cancelImportObservation(failed), true))
+    assert(settled.firstFailure == 7 and settled.terminal == ImportFailed and
+      settled.publications == 1 and settleImport(settled) == settled)
+  }
+
 }

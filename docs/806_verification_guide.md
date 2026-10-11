@@ -56,6 +56,12 @@ module protocol_example {
 
 Run `quint typecheck` to validate syntax. Run `quint run` to simulate execution.
 
+### Enrollment import custody model
+
+`verification/quint/time_system.qnt` includes pure enrollment-import transitions for bound admission, exact operation handoff, selected-provider postread and exclusive deadline, observer cancellation, retained first failure, acknowledged host commit and single terminal publication after required disposal. Refused or unarmed admission retains the prior owner's publication responsibility. An actual host acknowledgment takes precedence over later observer cancellation; required failure retains its original cause.
+
+Run `quint typecheck verification/quint/time_system.qnt` and `quint test verification/quint/time_system.qnt --main=time_system`. These finite regression examples validate the modeled contract, not exhaustive state exploration, runtime execution or liveness. Acknowledgment inputs represent receipts that actual production owners must issue. Pair them with supervised runtime/app cancellation and disposal tests, including cancellation immediately after handoff before the worker first polls, and platform-specific persistence tests where required.
+
 ### Authority Model
 
 Specifications should use `AuthorityId` for identity, not `DeviceId`. Model relational semantics without device-level details.
