@@ -20,6 +20,15 @@ A complete-flow result binds each action and terminal outcome to the original pa
 
 Model-only transition adapters, mock runtime projections and artifact comparisons establish only their declared scope. They cannot manufacture signed acceptance, durable writes, quorum agreement or successful cleanup. Missing production integration remains an explicit coverage gap. Simulator growth extends existing production seams and shared semantic contracts rather than maintaining an independent protocol implementation. Execution and promotion workflows are defined in [Simulation Guide](805_simulation_guide.md#validation-sequence).
 
+### Coverage boundaries
+
+Runtime protocol execution, app semantic terminal publication, platform storage
+and real-network integration are separate evidence scopes. A complete-flow
+fixture exposes the real owners and acknowledgments needed to observe each
+supported scope. Unsupported stages remain explicit gaps; simulator availability
+alone does not establish coverage. Simulation and frontend execution share the
+app semantic contract while retaining their respective execution boundaries.
+
 ## Handler-Based Architecture
 
 The simulator composes effect handlers rather than wrapping them in a central engine. Each simulated participant uses its own handler instances. This approach aligns with Aura's stateless effect architecture.

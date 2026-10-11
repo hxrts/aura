@@ -52,6 +52,21 @@ Use the lowest stage that executes the affected contract. Record unsupported sta
 
 A passing runtime fixture does not close an app terminal-publication or browser persistence gap. Keep those dependencies explicit while reusing the same participant setup and semantic contract. Likewise, a passing model or scenario adapter does not certify production execution. Report discovered and executed fixtures separately for each stage.
 
+### When a complete flow is missing
+
+Record the first unsupported stage, its canonical production owner and the
+smallest adapter or fixture needed to execute it. Implement that seam with its
+focused regression in the active batch, compile it, then reuse it in the actual
+flow. Keep the broader task open until that flow executes. Do not substitute a
+mock success, copied protected state or repeated LAN attempts for the missing
+stage. Reuse participant setup, fault controls and cleanup across scenarios.
+
+Before implementation, settle ownership, provider, original deadline and
+cancellation behavior. Keep one coherent integration batch per worktree and at
+most one next draft. Compile before expanding adjacent functionality; review the
+implementation using compiler and focused test feedback. Classify new findings
+as current blockers or subsequent work.
+
 ### First reusable complete flow
 
 Enrollment is the first target for extending complete-flow coverage. Reuse genuine account/profile setup, signed setup export, explicit independent verifier transfer, original issuer registration, actual acceptance/rejection, app terminal publication, host persistence acknowledgment, required disposal and same-profile reopen. Obtain all capabilities and receipts from their canonical producers. Named fault boundaries should cover preparation, required writes, host finalization, terminal observation and shutdown.

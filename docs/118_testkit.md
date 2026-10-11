@@ -20,6 +20,16 @@ Failure after partial assembly or issuance still requires acknowledged cleanup o
 
 Enrollment is the first complete-flow fixture target; its implementation and migration remain explicit work until actual execution covers setup, issuance, acceptance/rejection, host persistence, terminal publication, cleanup and reopen. [Simulation Guide](805_simulation_guide.md#first-reusable-complete-flow) defines the development workflow and coverage sequence.
 
+### Reusable lifecycle support
+
+A reusable fixture exposes deterministic fault boundaries and retains the
+original owners through failure and cleanup. Its observations distinguish domain
+outcome, persistence acknowledgment, semantic terminal publication and required
+resource disposal. Failure in one stage cannot manufacture evidence for another.
+Participant setup and restart custody are shared infrastructure, rather than
+independently reconstructed state in each regression. Platform-specific storage
+and network behavior remain separately identified coverage requirements.
+
 ## Stateful Effect Handlers
 
 Stateful effect handlers maintain internal state across calls. They enable deterministic testing by controlling time, randomness, and storage. These handlers implement the same traits as production handlers but store state for inspection and manipulation.

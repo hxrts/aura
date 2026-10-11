@@ -22,6 +22,29 @@ sync fire at the same logical point regardless of host load. Bound waits in
 virtual time and re-check conditions at quiescent points (see
 `crates/aura-agent/tests/support`); never wait on wall-clock sleeps.
 
+## Checkpoint and final network validation
+
+Before a batch, declare the source revision, package/features, production compile
+command, exact test binary/filter, expected fixture names/count and required
+gates. Discover fixtures before execution; zero matches or ignored required
+fixtures fail the checkpoint. Use `--features signals` for messaging coverage.
+Run narrow checks first and retain receipts only while their dependency scope
+remains unchanged. Report state changes with compile result, discovered and
+executed tests, blocker, remaining gates and next action.
+
+Follow the [simulation validation sequence](805_simulation_guide.md#validation-sequence):
+component checks, complete runtime/app execution in-process, applicable local
+frontend conformance, checkpoint gates/main smoke, then batched cross-machine
+confirmation. A missing in-process stage calls for reusable fixture work before
+network escalation. Keep real platform behavior in its local conformance lane.
+
+For final P2P confirmation, declare the locally proven flows and remaining
+network/process boundaries, ship the exact clean revision once and run prebuilt
+artifacts on both hosts. Record per-flow results and independent shutdown
+acknowledgments. A known local blocker does not justify another unchanged Air
+run. Reproduce integration failures deterministically where possible before the
+next confirmation batch.
+
 ## AMP lifecycle replay
 
 The leave action drives the native runtime key ceremony and member consensus
