@@ -43,6 +43,8 @@ Select stages that cover the affected contract. A pure component or documentatio
 
 Enrollment is the first target for extending complete-flow coverage. Reuse genuine account/profile setup, signed setup export, explicit independent verifier transfer, original issuer registration, actual acceptance/rejection, app terminal publication, host persistence acknowledgment, required disposal and same-profile reopen. Obtain all capabilities and receipts from their canonical producers. Named fault boundaries should cover preparation, required writes, host finalization, terminal observation and shutdown.
 
+Include a failure after actual issuance in the fixture inventory. Route early errors through cleanup of every assembled owner, retain the primary native error separately from cleanup errors, and observe task disposal before attempting same-profile reacquisition. A dropped fixture or empty task snapshot alone does not acknowledge cleanup.
+
 Keep effect providers and reusable fault controls in `aura-testkit`, runtime assembly in sanctioned `aura-agent` test support/factories, and scenario orchestration in the simulator or existing integration tests. Preserve downward production dependencies. This is a coverage target, not a claim that a complete reusable enrollment fixture already exists. Extend the same pattern to other flows once this vertical slice compiles and executes.
 
 ## Two Simulation Systems

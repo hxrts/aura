@@ -16,6 +16,8 @@ Positive evidence comes from canonical producers: real signing and verification,
 
 A complete lifecycle fixture retains participant identity, selected clock/provider, original operation and window ownership, storage profile and typed failure sources across its stages. Restart requires acknowledged old-owner shutdown and reacquisition of the same original profile, with durable evidence revalidated. Scenario checkpoints and copied metadata cannot substitute for that custody. Fault and replay evidence distinguishes actual runtime execution from observational model steps.
 
+Failure after partial assembly or issuance still requires acknowledged cleanup of every acquired runtime owner. Dropping a fixture is not shutdown evidence. Cleanup preserves the original concrete failure and reports any required cleanup failure separately; it cannot manufacture a cancellation or successful terminal receipt.
+
 Enrollment is the first complete-flow fixture target; its implementation and migration remain explicit work until actual execution covers setup, issuance, acceptance/rejection, host persistence, terminal publication, cleanup and reopen. [Simulation Guide](805_simulation_guide.md#first-reusable-complete-flow) defines the development workflow and coverage sequence.
 
 ## Stateful Effect Handlers
