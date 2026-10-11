@@ -30,6 +30,14 @@ Participant setup and restart custody are shared infrastructure, rather than
 independently reconstructed state in each regression. Platform-specific storage
 and network behavior remain separately identified coverage requirements.
 
+### Fixture coverage identity
+
+Fixture evidence identifies the original participants, operation, selected
+providers and durable profile, together with the supported lifecycle stages.
+Required host persistence names the actual storage producer: a generic callback
+write does not establish native or browser identity persistence. Unsupported
+stages remain explicit dependencies rather than implied fixture capabilities.
+
 ## Stateful Effect Handlers
 
 Stateful effect handlers maintain internal state across calls. They enable deterministic testing by controlling time, randomness, and storage. These handlers implement the same traits as production handlers but store state for inspection and manipulation.

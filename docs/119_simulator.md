@@ -29,6 +29,14 @@ supported scope. Unsupported stages remain explicit gaps; simulator availability
 alone does not establish coverage. Simulation and frontend execution share the
 app semantic contract while retaining their respective execution boundaries.
 
+### Declared execution scope
+
+A flow's evidence identifies which stages execute canonical production owners
+and which remain unsupported. Runtime protocol, app terminal publication, host
+persistence and restart have independent acknowledgments. Coverage of one stage
+does not imply coverage of the next. Cross-machine confirmation binds the exact
+source revision and locally established flows to real network/process behavior.
+
 ## Handler-Based Architecture
 
 The simulator composes effect handlers rather than wrapping them in a central engine. Each simulated participant uses its own handler instances. This approach aligns with Aura's stateless effect architecture.

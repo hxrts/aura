@@ -45,6 +45,15 @@ acknowledgments. A known local blocker does not justify another unchanged Air
 run. Reproduce integration failures deterministically where possible before the
 next confirmation batch.
 
+### Final P2P batch manifest
+
+Prepare one manifest after the affected local checks and main smoke pass. Record
+the clean commit, prebuilt artifact identities, locally proven flow names,
+remaining transport/discovery/process assertions, and independent shutdown
+acknowledgments for both hosts. Record failures per flow and preserve unaffected
+receipts. Reproduce a failure in-process where possible before the next batch;
+a known local failure is a blocker rather than a reason to repeat Air execution.
+
 ## AMP lifecycle replay
 
 The leave action drives the native runtime key ceremony and member consensus

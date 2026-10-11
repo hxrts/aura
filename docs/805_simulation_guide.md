@@ -67,6 +67,26 @@ most one next draft. Compile before expanding adjacent functionality; review the
 implementation using compiler and focused test feedback. Classify new findings
 as current blockers or subsequent work.
 
+### Declare the next checkpoint
+
+Before editing, attach this short declaration to the active task or batch:
+
+```text
+Source revision and affected contract:
+Canonical producer and retained owner:
+Package / features / test binary / exact names / expected count:
+In-process stages covered:
+Missing reusable seam and blocking task:
+Local frontend evidence required:
+Final P2P assertions remaining:
+Required gates:
+```
+
+After the check, report compilation, discovery and execution separately. Extend
+the existing fixture for a missing stage before growing the dependent feature.
+Preserve valid receipts for unchanged dependencies; do not repeatedly run a broad
+suite while a known shared compiler blocker remains.
+
 ### First reusable complete flow
 
 Enrollment is the first target for extending complete-flow coverage. Reuse genuine account/profile setup, signed setup export, explicit independent verifier transfer, original issuer registration, actual acceptance/rejection, app terminal publication, host persistence acknowledgment, required disposal and same-profile reopen. Obtain all capabilities and receipts from their canonical producers. Named fault boundaries should cover preparation, required writes, host finalization, terminal observation and shutdown.
