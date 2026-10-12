@@ -1259,8 +1259,20 @@ cargo run -p aura-harness --bin aura-harness -- \
 Patchbay is the authoritative NAT-realism backend for holepunch validation. Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
 
 The Linux harness pins Patchbay to upstream revision
-`cecd3b22e23396874169fa12d4441a6bdcaa1de9`, which migrates its DNS implementation
-to Hickory 0.26. Its two lab construction paths use the upstream builder API.
+`5cc60db1eb190360dfcd64eaf2f829bce4072551` (the `patchbay-v0.7.0` tag). The same
+revision is exported as `aura_harness::network_lab::PATCHBAY_PINNED_REV` and
+passed to `patchbay-vm --patchbay-version`, so the native and VM lanes cannot
+drift; `scripts/ci/holepunch.sh audit` fails when the two disagree. Patchbay 0.7
+models NAT as three RFC 4787 behavior tiers (`Open`, `Moderate`, `Strict`) and
+Aura's deployment-named `NatPreset` values map onto them in
+`network_lab::topology_adapter::to_patchbay_nat`: `Home` and `Cgnat` are
+`Moderate`, `Corporate` and `CloudNat` are `Strict`, `FullCone` is `Open`.
+Patchbay's `docs/reference/nat-limitations.md` lists what it does not model
+(port-preserving symmetric NAT, sequential allocation, vendor quirks); a passing
+`Strict` scenario is not full carrier coverage. The Linux integration tests
+enable the `patchbay-backend` feature through a self dev-dependency, so
+`cargo test -p aura-harness --test holepunch` exercises the native backend when
+`check_caps` succeeds.
 The Linux dependency manifest additionally requires Hickory Proto `=0.26.1`:
 0.26.0 is affected by RUSTSEC-2026-0119, while 0.25 is also affected by
 RUSTSEC-2026-0118. Keep the backend enabled and validate the Linux harness,

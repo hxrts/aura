@@ -18,6 +18,12 @@ mod vm_backend;
 pub use patchbay_backend::PatchbayBackend;
 pub use vm_backend::VmPatchbayBackend;
 
+/// Upstream patchbay revision shared by the native library dependency in this
+/// crate's `Cargo.toml` and the `patchbay-vm` guest runner, so the two lanes
+/// run the same NAT and link-condition semantics. `scripts/ci/holepunch.sh
+/// audit` checks that the two agree. This is the `patchbay-v0.7.0` tag.
+pub const PATCHBAY_PINNED_REV: &str = "5cc60db1eb190360dfcd64eaf2f829bce4072551";
+
 /// Supported network lab backend modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "kebab-case")]

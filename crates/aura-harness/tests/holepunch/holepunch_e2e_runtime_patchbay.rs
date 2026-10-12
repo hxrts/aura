@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", feature = "patchbay-backend"))]
 //! End-to-end UDP holepunch validation via Aura network-lab topology + Patchbay.
 
 use std::collections::BTreeMap;
@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_harness::network_lab::scenario_builder::ScenarioBuilder;
+use aura_harness::network_lab::topology_adapter::to_patchbay_lab_config;
 use aura_harness::network_lab::{
     AuthoritySpec, FirewallPreset, LinkConditionPreset, LinkSpec, NatPreset, RouterSpec,
     TopologySpec,
 };
-use patchbay::config::LabConfig;
 use patchbay::{check_caps, Lab, OutDir};
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
@@ -83,28 +83,6 @@ fn holepunch_topology() -> Result<TopologySpec> {
         .build()
 }
 
-fn to_patchbay_nat(nat: NatPreset) -> patchbay::Nat {
-    match nat {
-        NatPreset::None => patchbay::Nat::None,
-        NatPreset::Home => patchbay::Nat::Home,
-        NatPreset::Corporate => patchbay::Nat::Corporate,
-        NatPreset::FullCone => patchbay::Nat::FullCone,
-        NatPreset::Cgnat => patchbay::Nat::Cgnat,
-        NatPreset::CloudNat => patchbay::Nat::CloudNat,
-    }
-}
-
-fn to_patchbay_impair_token(condition: LinkConditionPreset) -> &'static str {
-    match condition {
-        LinkConditionPreset::Lan => "lan",
-        LinkConditionPreset::Wifi => "wifi",
-        LinkConditionPreset::WifiBad => "wifi-bad",
-        LinkConditionPreset::Mobile4G => "mobile-4g",
-        LinkConditionPreset::Mobile3G => "mobile-3g",
-        LinkConditionPreset::Satellite => "satellite",
-    }
-}
-
 async fn flush_nat_state_if_present(router: &patchbay::Router, router_name: &str) -> Result<()> {
     match router.flush_nat_state().await {
         Ok(()) => Ok(()),
@@ -117,90 +95,6 @@ async fn flush_nat_state_if_present(router: &patchbay::Router, router_name: &str
             }
         }
     }
-}
-
-fn find_link_condition(
-    spec: &TopologySpec,
-    authority: &AuthoritySpec,
-) -> Option<LinkConditionPreset> {
-    spec.links.iter().find_map(|link| {
-        let forward = link.left == authority.device_name && link.right == authority.gateway_router;
-        let reverse = link.right == authority.device_name && link.left == authority.gateway_router;
-        if forward || reverse {
-            Some(link.condition)
-        } else {
-            None
-        }
-    })
-}
-
-fn to_patchbay_lab_config(spec: &TopologySpec) -> Result<LabConfig> {
-    #[derive(serde::Serialize)]
-    struct RouterConfigDoc {
-        name: String,
-        region: Option<String>,
-        upstream: Option<String>,
-        nat: patchbay::Nat,
-        ip_support: patchbay::IpSupport,
-        nat_v6: patchbay::NatV6Mode,
-        ra_enabled: Option<bool>,
-        ra_interval_secs: Option<u64>,
-        ra_lifetime_secs: Option<u64>,
-    }
-
-    #[derive(serde::Serialize)]
-    struct LabConfigDoc {
-        region: Option<BTreeMap<String, toml::Value>>,
-        router: Vec<RouterConfigDoc>,
-        device: BTreeMap<String, toml::Value>,
-    }
-
-    let routers = spec
-        .routers
-        .iter()
-        .map(|router| RouterConfigDoc {
-            name: router.name.clone(),
-            region: None,
-            upstream: router.upstream.clone(),
-            nat: to_patchbay_nat(router.nat),
-            ip_support: patchbay::IpSupport::V4Only,
-            nat_v6: patchbay::NatV6Mode::None,
-            ra_enabled: None,
-            ra_interval_secs: None,
-            ra_lifetime_secs: None,
-        })
-        .collect();
-
-    let mut device = BTreeMap::new();
-    for authority in &spec.authorities {
-        let mut table = toml::map::Map::new();
-        table.insert(
-            "default_via".to_string(),
-            toml::Value::String("eth0".to_string()),
-        );
-
-        let mut iface = toml::map::Map::new();
-        iface.insert(
-            "gateway".to_string(),
-            toml::Value::String(authority.gateway_router.clone()),
-        );
-        if let Some(condition) = find_link_condition(spec, authority) {
-            iface.insert(
-                "impair".to_string(),
-                toml::Value::String(to_patchbay_impair_token(condition).to_string()),
-            );
-        }
-        table.insert("eth0".to_string(), toml::Value::Table(iface));
-        device.insert(authority.device_name.clone(), toml::Value::Table(table));
-    }
-
-    let config_doc = LabConfigDoc {
-        region: None,
-        router: routers,
-        device,
-    };
-    let encoded = toml::to_string(&config_doc).context("encode patchbay lab config TOML")?;
-    toml::from_str(&encoded).context("decode patchbay lab config from TOML")
 }
 
 async fn discover_public_addr(socket: &UdpSocket, reflector: SocketAddr) -> Result<SocketAddr> {

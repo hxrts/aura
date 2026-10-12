@@ -79,10 +79,19 @@ EOF_MD
     ;;
   audit)
     mkdir -p artifacts/holepunch/weekly
+    # The native library pin in Cargo.toml and the patchbay-vm guest pin in
+    # network_lab/mod.rs must name the same upstream revision.
+    manifest_revs="$(rg -o -N 'patchbay", rev = "[0-9a-f]{40}"' crates/aura-harness/Cargo.toml | rg -o '[0-9a-f]{40}' | sort -u)"
+    vm_rev="$(rg -o -N 'PATCHBAY_PINNED_REV: &str = "[0-9a-f]{40}"' crates/aura-harness/src/network_lab/mod.rs | rg -o '[0-9a-f]{40}')"
+    if [[ "$(wc -l <<<"$manifest_revs")" -ne 1 || "$manifest_revs" != "$vm_rev" ]]; then
+      echo "patchbay pin mismatch: Cargo.toml=[$manifest_revs] PATCHBAY_PINNED_REV=$vm_rev" >&2
+      exit 1
+    fi
     rg -n -F 'name = "patchbay"' Cargo.lock
-    rg -n -F 'source = "git+https://github.com/n0-computer/patchbay?rev=' Cargo.lock
+    rg -n -F "source = \"git+https://github.com/n0-computer/patchbay?rev=$vm_rev" Cargo.lock
     {
       echo "# Holepunch Toolchain Audit"
+      echo "patchbay-pin: $vm_rev"
       echo "cargo-lock-pin: ok"
       if command -v patchbay-vm >/dev/null 2>&1; then
         echo "patchbay-vm: $(patchbay-vm --version 2>/dev/null || echo installed)"

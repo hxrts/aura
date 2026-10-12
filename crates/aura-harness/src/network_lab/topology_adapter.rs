@@ -87,13 +87,15 @@ cfg_if! {
             let routers = cfg
                 .router
                 .iter()
-                .map(|router| RouterSpec {
-                    name: router.name.clone(),
-                    nat: from_patchbay_nat(router.nat),
-                    upstream: router.upstream.clone(),
-                    firewall: FirewallPreset::Open,
+                .map(|router| {
+                    Ok(RouterSpec {
+                        name: router.name.clone(),
+                        nat: from_patchbay_nat(router.nat)?,
+                        upstream: router.upstream.clone(),
+                        firewall: FirewallPreset::Open,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
 
             let mut authorities = Vec::new();
             let mut links = Vec::new();
@@ -153,36 +155,58 @@ cfg_if! {
             })
         }
 
-        fn to_patchbay_nat(nat: super::NatPreset) -> patchbay::Nat {
+        /// Map an Aura NAT preset onto patchbay's behavior-only NAT tiers.
+        ///
+        /// Patchbay 0.7 replaced its deployment-flavored presets with three
+        /// RFC 4787 behavior tiers. Aura keeps its deployment names because the
+        /// holepunch scenarios are written in those terms, so the mapping is
+        /// many-to-one:
+        ///
+        /// | Aura        | patchbay   | RFC 4787 behavior                     |
+        /// |-------------|------------|---------------------------------------|
+        /// | `None`      | `None`     | public address, no translation        |
+        /// | `FullCone`  | `Open`     | EIM + EIF                             |
+        /// | `Home`      | `Moderate` | EIM + APDF                            |
+        /// | `Cgnat`     | `Moderate` | EIM + APDF (RFC 6888 compliant CGNAT) |
+        /// | `Corporate` | `Strict`   | EDM random ports + APDF               |
+        /// | `CloudNat`  | `Strict`   | EDM random ports + APDF               |
+        ///
+        /// `Cgnat` follows patchbay's own `IspCgnat` router preset rather than
+        /// its `Cgnat -> Open` migration alias: compliant carrier NAT filters on
+        /// address and port, and the Aura double-NAT scenarios depend on that.
+        pub fn to_patchbay_nat(nat: super::NatPreset) -> patchbay::Nat {
             match nat {
                 super::NatPreset::None => patchbay::Nat::None,
-                super::NatPreset::Home => patchbay::Nat::Home,
-                super::NatPreset::Corporate => patchbay::Nat::Corporate,
-                super::NatPreset::FullCone => patchbay::Nat::FullCone,
-                super::NatPreset::Cgnat => patchbay::Nat::Cgnat,
-                super::NatPreset::CloudNat => patchbay::Nat::CloudNat,
+                super::NatPreset::FullCone => patchbay::Nat::Open,
+                super::NatPreset::Home | super::NatPreset::Cgnat => patchbay::Nat::Moderate,
+                super::NatPreset::Corporate | super::NatPreset::CloudNat => patchbay::Nat::Strict,
             }
         }
 
-        fn from_patchbay_nat(nat: patchbay::Nat) -> super::NatPreset {
+        /// Inverse of [`to_patchbay_nat`] for the representative Aura preset of
+        /// each patchbay tier. The mapping is lossy, so `Moderate` reads back as
+        /// `Home` and `Strict` as `Corporate`. Custom configurations have no
+        /// Aura preset and are rejected.
+        fn from_patchbay_nat(nat: patchbay::Nat) -> Result<super::NatPreset> {
             match nat {
-                patchbay::Nat::None => super::NatPreset::None,
-                patchbay::Nat::Home => super::NatPreset::Home,
-                patchbay::Nat::Corporate => super::NatPreset::Corporate,
-                patchbay::Nat::FullCone => super::NatPreset::FullCone,
-                patchbay::Nat::Cgnat => super::NatPreset::Cgnat,
-                patchbay::Nat::CloudNat => super::NatPreset::CloudNat,
+                patchbay::Nat::None => Ok(super::NatPreset::None),
+                patchbay::Nat::Open => Ok(super::NatPreset::FullCone),
+                patchbay::Nat::Moderate => Ok(super::NatPreset::Home),
+                patchbay::Nat::Strict => Ok(super::NatPreset::Corporate),
+                patchbay::Nat::Custom(config) => {
+                    bail!("custom patchbay NAT config has no Aura NatPreset: {config:?}")
+                }
             }
         }
 
         pub fn to_patchbay_link_condition(condition: LinkConditionPreset) -> patchbay::LinkCondition {
             match condition {
-                LinkConditionPreset::Lan => patchbay::LinkCondition::Lan,
-                LinkConditionPreset::Wifi => patchbay::LinkCondition::Wifi,
-                LinkConditionPreset::WifiBad => patchbay::LinkCondition::WifiBad,
-                LinkConditionPreset::Mobile4G => patchbay::LinkCondition::Mobile4G,
-                LinkConditionPreset::Mobile3G => patchbay::LinkCondition::Mobile3G,
-                LinkConditionPreset::Satellite => patchbay::LinkCondition::Satellite,
+                LinkConditionPreset::Lan => patchbay::LinkCondition::lan(),
+                LinkConditionPreset::Wifi => patchbay::LinkCondition::wifi(),
+                LinkConditionPreset::WifiBad => patchbay::LinkCondition::wifi_bad(),
+                LinkConditionPreset::Mobile4G => patchbay::LinkCondition::mobile_4g(),
+                LinkConditionPreset::Mobile3G => patchbay::LinkCondition::mobile_3g(),
+                LinkConditionPreset::Satellite => patchbay::LinkCondition::satellite(),
             }
         }
 
