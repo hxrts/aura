@@ -124,6 +124,10 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   that custody; typed trusted-key checks require exact owner/accessor origins
   with negative regression coverage.
 - **Security boundary policy sync**: when adding or changing security-sensitive toolkit checks in `toolkit/xtask/src/checks/policy.rs`, keep this guidance aligned and run `just _policy-check check security-boundary-policy` before broader CI
+  A bare `None` has type-specific meaning: `Option<Ordering>::None` means
+  incomparable capability values, not successful authorization. Security
+  evidence checks must reject actual success fallbacks without treating every
+  `None` as one.
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
 - **Optional scratch governance**: ownership checks must work in clean
@@ -467,9 +471,12 @@ See `docs/804_testing_guide.md` "Build and Caching" for details.
   `SCCACHE_DIR=~/.cache/aura-sccache`, 10G cap), so dependencies compile once.
   Opt out with `AURA_NO_SCCACHE=1` (shell entry or a single cargo command).
 - `scripts/dev/build-budget.sh` builds into the checkout's own `target/`,
-  sweeps it to a per-checkout cap (10 GiB default) automatically, and admits a
-  build only if the volume stays above a shared 15 GiB floor after other
-  admitted builds' reservations. Do not run `cargo sweep` by hand.
+  uses a per-checkout soft target (10 GiB default), and admits a build only if
+  the volume stays above a shared 15 GiB floor after other admitted builds'
+  reservations. It reclaims guarded inactive lanes first and retains reusable
+  debug dependencies while the floor is safe; a global sweep runs only when
+  headroom is low. Live-process, open-file and protected-artifact guards still
+  apply. Do not run `cargo sweep` by hand.
 - Two worktrees can build at once: `git worktree add ../aura-wt2 <branch>`,
   enter `nix develop` there, and build in one while editing the other.
 - While iterating, build narrowly (`-p <crate>`, one `--test` binary, a lib
@@ -748,3 +755,16 @@ changing these policy owners.
 Retained `check-arch-lane` dispatch supports only parser-backed lanes and
 propagates policy failures. Removed `todos` and unsupported `completeness` lane
 names fail explicitly; use `lint-arch-syntax` for executable placeholder checks.
+
+### Security scanner test scope
+
+Security policy scanners compute parsed positive-test scope once per file and
+reuse its line inventory across checks. A prior test module, `_for_tests` name,
+comment, string or nearby test attribute cannot exempt production declarations
+or macro tokens. Mixed test/production cfg predicates remain production.
+Keep regression coverage for production following a closed test module and
+run `just _policy-check check security-boundary-policy` before broader CI.
+
+Raw Biscuit signature-chain parsing belongs only to `aura-core::crypto::verified_biscuit::VerifiedBiscuitToken::from_bytes`. Core capability algebra and authorization's verified-token facade use that typed producer. Do not add direct raw parsing to journal algebra or import the higher-layer authorization crate into core; supplied/stored root integrity is distinct from trusted root selection.
+
+Security substring authorization checks distinguish source-proven `Vec<DeviceId>` enum-field membership from string matching. The policy parses actual field types and match bindings, including `matches!` guards, and masks only those collection method identifiers, preserving all argument expressions. Unknown, shadowed or string origins retain enforcement; no identifier or file path grants an exemption. Preserve actual scanner regressions for typed membership, production after test scopes, mixed cfg and same-line string checks.

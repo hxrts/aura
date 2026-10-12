@@ -13,6 +13,20 @@ participants where the scenario requires one physical clock; restart tests must
 also retain original durable window evidence. Use real held ownership capabilities
 for persistent enrollment fixtures rather than constructing raw registration state.
 
+To isolate a transient required-read rollback, call
+`ManualPhysicalClock::script_next_observation(at_ms)` on the already selected
+provider at the owned fixture boundary. The next actual `physical_time` read
+consumes that sample once; subsequent reads use the unchanged base clock. An
+occupied or borrowed override slot is a typed failure. The sample neither
+advances the clock nor changes or wakes the original absolute deadline waiter.
+Use explicit `set_time` for global clock movement and `fail_next_sleep` for an
+actual selected-provider timer failure, and retain those separate regressions.
+Assert the required read actually consumed the sample and that original budget
+refusal survives later forward time. Keep the same provider and budget through
+the operation; scripting a source observation grants no checkpoint ACK, cleanup
+authority or new completion semantics.
+
+
 Multi-agent runtime tests (several `AgentBuilder` runtimes on one
 `SharedTransport`) share one `aura_testkit::time::QuiescentClock`, injected with
 `AgentBuilder::with_physical_time_provider`, and run under
@@ -1121,8 +1135,8 @@ idle-lane cleanup, not an added automatic pruning candidate. Isolated
 browser admission and command-failure fixtures run in `ci-build-cache-policy`.
 
 Route builds through `scripts/dev/build-budget.sh`. It writes to the
-checkout's own `target/` (it unsets `CARGO_TARGET_DIR`), sweeps that target to a
-per-checkout soft cap (`AURA_BUILD_TARGET_CAP_GIB`, default 10), and admits a
+checkout's own `target/` (it unsets `CARGO_TARGET_DIR`), uses a per-checkout
+soft target (`AURA_BUILD_TARGET_CAP_GIB`, default 10 GiB), and admits a
 build only if the volume keeps `AURA_BUILD_MIN_FREE_GIB` (default 15) free
 after the reservations of other admitted builds. Each admitted build reserves
 `AURA_BUILD_RESERVE_GIB` (default 4) under `~/.cache/aura-build/reservations`
@@ -1133,10 +1147,11 @@ build at once.
 When recovery is needed, the default nonincremental build first reclaims the
 inactive `debug-incremental` lane through the guarded lane cleaner, preserving
 reusable debug dependencies. Explicit `CARGO_INCREMENTAL=1` builds retain that
-lane and its debug parent. A successful Cargo sweep is remeasured: if it leaves
-the target above the soft cap or below the admission floor, recovery tries
-guarded inactive lanes and reports any remaining protected excess. Live-process,
-open-file, release-artifact and disk-floor protections still apply.
+lane and its debug parent. Recovery then tries other guarded inactive lanes.
+The target may remain above the soft cap while free space meets the admission
+floor; a global Cargo sweep runs only when headroom falls below that floor.
+Remaining protected excess is reported. Live-process, open-file,
+release-artifact and disk-floor protections still apply.
 
 Each budgeted command prints a JSON receipt path under
 `artifacts/disk-budget/receipts/`. The atomic snapshot records the source
@@ -2496,3 +2511,52 @@ runs must explicitly select their actual browser and matching driver with
 refuses before runner execution. The wrapper preserves runner status and removes
 its private capabilities file after success or failure. Playwright is a separate
 protocol and cannot serve as a WebDriver executable.
+
+### Canonical signed-owner checkpoint validation
+
+Declare the source fingerprint, package/features and source-declared fixture
+inventory before compiling. Keep native production compilation, applicable WASM
+compilation, exact discovery and execution in one guarded source lifetime.
+Discover the complete timeout inventory and canonical launch, participant,
+cancellation, peer and opaque-disposal regressions before executing exact names;
+source declarations and zero-match/ignored harness output cannot establish a
+passing fixture. Derive execution counts from the actual selected harness.
+
+Checkpoint regressions must retain the actual final receipt, native operation
+failure, first checkpoint failure and independent selected-clock validation.
+Exercise original Pending birth, fixed provider/interval, observer disposal,
+refused required admission, partial native acquisition and actual participant
+completion before Closed. Proposal/consent negatives must reject another
+manifest, enrolling device, purpose, historical intent, substituted domain order
+and noncanonical transfer bytes. Task disposal tests must distinguish same-named
+foreign custody and successful cleanup from failed domain execution. Pure or
+component evidence does not establish genuine signed enrollment, platform
+persistence, reopen correctness or final independent-process network behavior.
+
+For original issuer reconciliation, exercise genuine cancellation and actual
+cancelled-generation retirement before retrying cleanup through the retained
+control. Drop an in-flight reconciliation attempt and verify the canonical entry
+still owns that exact control; reject a same-named foreign task. Assert no new
+spawn, provider or budget birth, and preserve concrete operation failures apart
+from final negative-budget validation. Cover already disposed resource
+observation without granting positive authority, and active-execution refusal
+without unbounded polling or a fabricated ACK. Complete durable cleanup and
+original-window validation before asserting full resource acknowledgment.
+These requirements are fixture scope, not evidence that the candidate ran.
+
+Run security-boundary policy first and strict Clippy once for the complete
+integration checkpoint, with required syntax, ownership, absolute-time,
+annotation and retained architecture gates. Preserve the existing main smoke and
+final paired-host requirements; do not repeat broad checks per fixture or treat
+this documentation as evidence that the candidate executed.
+
+### Security scanner test scope
+
+Security policy scanners compute parsed positive-test scope once per file and
+reuse its line inventory across checks. A prior test module, `_for_tests` name,
+comment, string or nearby test attribute cannot exempt production declarations
+or macro tokens. Mixed test/production cfg predicates remain production.
+Exercise the actual production scanner with production following a closed test
+module, text decoys and macro tokens; classifier-only coverage does not prove
+scanner wiring. Run `just _policy-check check security-boundary-policy` before
+broader CI.
