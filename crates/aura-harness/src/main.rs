@@ -230,6 +230,9 @@ fn run(args: RunArgs) -> Result<()> {
             )?;
             artifact_bundle.write_json("network_lab_runtime.json", lab.lab_runtime())?;
             summary.attach_network_lab(&config, &lab)?;
+            // Placement is evidence even when the run later fails; the success
+            // path rewrites the same file at the end.
+            artifact_bundle.write_json("startup_summary.json", &summary)?;
             Some(lab)
         }
         None => None,
