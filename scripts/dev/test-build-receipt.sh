@@ -26,6 +26,28 @@ git -C "$fixture" -c core.hooksPath=/dev/null -c commit.gpgsign=false \
 source "$repo_root/scripts/dev/build-receipt.sh"
 aura_receipt_init "$fixture" fixture cargo check --locked -p aura-simulator --features 'signals, test'
 jq -e '.command_argv==["cargo","check","--locked","-p","aura-simulator","--features","signals, test"]' "$AURA_BUILD_RECEIPT" >/dev/null
+jq -e '.metadata.packages=="aura-simulator" and .metadata.features=="signals, test" and
+  .metadata.test_target==null and .metadata.test_filter==null and .metadata.test_inventory==null' "$AURA_BUILD_RECEIPT" >/dev/null
+# Direct Cargo selectors describe intent, never discovery or execution. Harness
+# flags after -- cannot turn a requested filter into an observed inventory.
+aura_receipt_init "$fixture" fixture cargo test --locked -p hxrts-aura-agent --features 'signals, web' \
+  --lib 'original_crash_fixture' -- --exact --nocapture
+jq -e '.metadata.packages=="hxrts-aura-agent" and .metadata.features=="signals, web" and
+  .metadata.test_target=="lib" and .metadata.test_filter=="original_crash_fixture" and
+  .metadata.test_inventory==null and .phases==[] and .command_exit_status==null' "$AURA_BUILD_RECEIPT" >/dev/null
+aura_receipt_init "$fixture" fixture cargo test --package=aura-terminal --test regression \
+  demo_mode_sequential_device_enrollments -- --exact
+jq -e '.metadata.packages=="aura-terminal" and .metadata.test_target=="test:regression" and
+  .metadata.test_filter=="demo_mode_sequential_device_enrollments" and
+  .metadata.test_inventory==null' "$AURA_BUILD_RECEIPT" >/dev/null
+# A wrapper, ambiguous target, or option Cargo may interpret differently stays
+# unknown rather than publishing a guessed test selector.
+aura_receipt_init "$fixture" fixture just test-crate hxrts-aura-agent
+jq -e '.metadata.packages==null and .metadata.features==null and .metadata.test_target==null and
+  .metadata.test_filter==null and .metadata.test_inventory==null' "$AURA_BUILD_RECEIPT" >/dev/null
+aura_receipt_init "$fixture" fixture cargo test -p hxrts-aura-agent --lib --test smoke --mystery value
+jq -e '.metadata.packages=="hxrts-aura-agent" and .metadata.test_target==null and
+  .metadata.test_filter==null and .metadata.test_inventory==null' "$AURA_BUILD_RECEIPT" >/dev/null
 original="$(jq -r '.source.fingerprint' "$AURA_BUILD_RECEIPT")"
 printf 'new module\n' > "$fixture/new.rs"
 aura_receipt_init "$fixture" fixture sh -c 'exit 0'

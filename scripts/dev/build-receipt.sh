@@ -29,6 +29,50 @@ aura_receipt_update() (
   fi
 )
 
+aura_receipt_cargo_metadata() {
+  receipt_packages='' receipt_features='' receipt_test_target='' receipt_test_filter=''
+  [[ "${1:-}" == cargo ]] || return 0
+  shift
+  local subcommand="${1:-}" option value target_ambiguous=0 filter_safe=1
+  case "$subcommand" in test|check|build|clippy) shift ;; *) return 0 ;; esac
+  while (( $# > 0 )); do
+    option="$1"; shift
+    [[ "$option" != -- ]] || break
+    case "$option" in
+      -p|--package|-F|--features|--test|--bin|--example)
+        (( $# > 0 )) || { filter_safe=0; break; }
+        value="$1"; shift
+        case "$option" in
+          -p|--package) receipt_packages+="${receipt_packages:+,}$value" ;;
+          -F|--features) receipt_features+="${receipt_features:+,}$value" ;;
+          --test|--bin|--example)
+            if [[ -n "$receipt_test_target" ]]; then target_ambiguous=1; fi
+            receipt_test_target="${option#--}:$value" ;;
+        esac ;;
+      --package=*|-p?*) value="${option#*=}"; [[ "$option" != -p* ]] || value="${option#-p}"; receipt_packages+="${receipt_packages:+,}$value" ;;
+      --features=*|-F?*) value="${option#*=}"; [[ "$option" != -F* ]] || value="${option#-F}"; receipt_features+="${receipt_features:+,}$value" ;;
+      --lib|--doc|--tests|--bins|--examples)
+        if [[ -n "$receipt_test_target" ]]; then target_ambiguous=1; fi
+        receipt_test_target="${option#--}" ;;
+      --locked|--offline|--frozen|--quiet|-q|--release|--no-default-features|--workspace|--all-targets) ;;
+      --all-features) receipt_features=all ;;
+      --manifest-path|--target|--target-dir|--profile|--jobs|-j|--color|--message-format|--config|-Z)
+        (( $# > 0 )) || { filter_safe=0; break; }
+        shift ;;
+      --manifest-path=*|--target=*|--target-dir=*|--profile=*|--jobs=*|-j?*|--color=*|--message-format=*|--config=*|-Z?*) ;;
+      -*) filter_safe=0 ;;
+      *)
+        if [[ "$subcommand" == test && -z "$receipt_test_filter" && "$filter_safe" == 1 ]]; then
+          receipt_test_filter="$option"
+        else
+          filter_safe=0
+        fi ;;
+    esac
+  done
+  [[ "$subcommand" == test && "$target_ambiguous" == 0 ]] || receipt_test_target=''
+  [[ "$subcommand" == test && "$filter_safe" == 1 ]] || receipt_test_filter=''
+}
+
 aura_receipt_init() {
   local checkout="$1" build_lane="$2" directory fingerprint revision identity argv path
   shift 2
@@ -56,14 +100,18 @@ aura_receipt_init() {
   fi
   identity="$(ps -p "$$" -o lstart= 2>/dev/null || true)"
   argv="$(jq -cn --args '$ARGS.positional' -- "$@")"
+  aura_receipt_cargo_metadata "$@"
   jq -n --arg root "$checkout" --arg lane "$build_lane" \
     --arg revision "$revision" --arg fingerprint "$fingerprint" \
     --arg identity "$identity" --argjson pid "$$" --argjson argv "$argv" \
-    --arg packages "${AURA_BUILD_PACKAGES:-}" --arg features "${AURA_BUILD_FEATURES:-}" \
+    --arg packages "${AURA_BUILD_PACKAGES:-$receipt_packages}" --arg features "${AURA_BUILD_FEATURES:-$receipt_features}" \
+    --arg test_target "$receipt_test_target" --arg test_filter "$receipt_test_filter" \
     --arg inventory "${AURA_BUILD_TEST_INVENTORY:-}" --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{schema:1,root:$root,lane:$lane,source:{revision:$revision, fingerprint:$fingerprint},
       metadata:{packages:(if $packages=="" then null else $packages end),
         features:(if $features=="" then null else $features end),
+        test_target:(if $test_target=="" then null else $test_target end),
+        test_filter:(if $test_filter=="" then null else $test_filter end),
         test_inventory:(if $inventory=="" then null else $inventory end)},
       wrapper:{pid:$pid,start_identity:$identity},child:null,command_argv:$argv,
       started_utc:$started,finished_utc:null,current_phase:"admission",active_phase:null,phases:[],
