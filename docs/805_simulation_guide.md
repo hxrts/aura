@@ -35,6 +35,13 @@ If a required flow cannot execute completely in-process, identify the missing pr
 | Checkpoint gates and main smoke | Required policy and integration checks on the resulting source revision |
 | Batched cross-machine confirmation | Prebuilt identical revisions; declared E2E flows and real network/platform integration |
 
+Use narrow compiles and exact deterministic regressions while implementing each
+slice. Batch full-project tests, broad ownership aggregates and Clippy at the
+reviewable integration checkpoint rather than rerunning them after each fixture
+change. Deferred gates remain required acceptance evidence. Reuse compiled
+fixtures and valid results for unchanged scopes, then run main smoke on the
+integrated revision before final network confirmation.
+
 Declare package, features, exact test inventory and expected count before building. Discover intended fixtures before executing them; zero or ignored matches fail validation. Reuse valid evidence for unchanged scopes and rerun affected scopes when their dependencies change. Record the first failing typed action, original operation/owner, seed, provider, endpoint and fault boundary so a later LAN failure can become a deterministic regression.
 
 Select stages that cover the affected contract. A pure component or documentation change does not require an unrelated full-flow run. Preserve explicit task and policy requirements, and never use a narrow result to claim broader lifecycle or platform coverage.
@@ -87,6 +94,16 @@ the existing fixture for a missing stage before growing the dependent feature.
 Preserve valid receipts for unchanged dependencies; do not repeatedly run a broad
 suite while a known shared compiler blocker remains.
 
+### Inventory lifecycle outcomes
+
+For each real flow, record success, rejection, failure after partial progress,
+cancellation, persistence, disposal and same-profile restart independently.
+Identify the canonical producer, deterministic control and actual acknowledgment
+for every applicable stage. Mark a stage not applicable with a reason; name the
+missing reusable seam when it is unsupported. Compile and execute one coherent
+slice before adding the next stage. This inventory guides fixture development
+and keeps the final network batch focused on remaining integration assertions.
+
 ### First reusable complete flow
 
 Enrollment is the first target for extending complete-flow coverage. Reuse genuine account/profile setup, signed setup export, explicit independent verifier transfer, original issuer registration, actual acceptance/rejection, app terminal publication, host persistence acknowledgment, required disposal and same-profile reopen. Obtain all capabilities and receipts from their canonical producers. Named fault boundaries should cover preparation, required writes, host finalization, terminal observation and shutdown.
@@ -94,6 +111,29 @@ Enrollment is the first target for extending complete-flow coverage. Reuse genui
 Include a failure after actual issuance in the fixture inventory. Route early errors through cleanup of every assembled owner, retain the primary native error separately from cleanup errors, and observe task disposal before attempting same-profile reacquisition. A dropped fixture or empty task snapshot alone does not acknowledge cleanup.
 
 Keep effect providers and reusable fault controls in `aura-testkit`, runtime assembly in sanctioned `aura-agent` test support/factories, and scenario orchestration in the simulator or existing integration tests. Preserve downward production dependencies. This is a coverage target, not a claim that a complete reusable enrollment fixture already exists. Extend the same pattern to other flows once this vertical slice compiles and executes.
+
+### Bootstrap delivery checkpoint
+
+For the recipient and purpose contract in [Rendezvous](113_rendezvous.md), start
+with the existing in-process broker and canonical signed invitation producers.
+Register two actual devices of one authority with different retrieval credentials.
+Verify that each receives only its own deliveries, a foreign device's credential
+cannot retrieve them, and refreshing one registration cannot replace the other.
+Check empty retrieval separately from the one-use credential consumed by an
+actual nonempty delivery.
+
+Deliver enrollment and contact invitations together. Require the existing
+bootstrap owner to retain both, dispatch each by its declared purpose, and
+preserve explicit enrollment approval and canonical contact verification.
+Exercise wrong-purpose, foreign-recipient, verification-failure and cancellation
+outcomes without losing unrelated deliveries. Observe workflow completion and
+required disposal independently of the broker's transport receipt.
+
+Declare and confirm the exact discovered tests before execution. After this
+checkpoint, use the existing local browser fixture for real HTTP, cross-origin
+headers and browser dispatch. Reserve cross-machine transport and full frontend
+integration for the final batched Air run. These are required coverage cases;
+the current broker client receipts alone do not prove them.
 
 ## Two Simulation Systems
 

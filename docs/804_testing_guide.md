@@ -32,6 +32,14 @@ Run narrow checks first and retain receipts only while their dependency scope
 remains unchanged. Report state changes with compile result, discovered and
 executed tests, blocker, remaining gates and next action.
 
+During implementation, use narrow production compiles and exact deterministic
+regressions, reusing their compiled binaries while the source and feature scope
+remain valid. Reserve full-project test suites, broad ownership aggregates and
+Clippy for a reviewable integration batch. Run those required checks together on
+the resulting checkpoint, followed by main smoke; a small fixture correction
+does not require restarting every broad lane. Record deferred gates explicitly
+and require their results before declaring the batch complete.
+
 Follow the [simulation validation sequence](805_simulation_guide.md#validation-sequence):
 component checks, complete runtime/app execution in-process, applicable local
 frontend conformance, checkpoint gates/main smoke, then batched cross-machine
@@ -44,6 +52,12 @@ artifacts on both hosts. Record per-flow results and independent shutdown
 acknowledgments. A known local blocker does not justify another unchanged Air
 run. Reproduce integration failures deterministically where possible before the
 next confirmation batch.
+
+Keep a per-flow lifecycle inventory using the
+[simulation outcome checklist](805_simulation_guide.md#inventory-lifecycle-outcomes).
+Attach actual compile, discovery and execution receipts to the stages they cover.
+A missing fixture is implementation work with a named blocking task; a broad E2E
+pass cannot stand in for unexecuted deterministic failure or cancellation cases.
 
 ### Final P2P batch manifest
 

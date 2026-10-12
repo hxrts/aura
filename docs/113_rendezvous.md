@@ -67,6 +67,33 @@ The bootstrap broker publishes ephemeral bootstrap descriptors only. It exists t
 
 Bootstrap broker URLs carry only non-secret endpoint identifiers. Bearer credentials and invitation retrieval tokens travel in headers or another explicit credential channel, never in URL query strings, so logs, histories, referrers, and diagnostics do not capture secret material.
 
+Bootstrap delivery identifies the recipient by both authority and device. Two
+devices belonging to one authority have independent retrieval credentials and
+pending deliveries; registering either device cannot replace the other's
+credential or drain its queue. Discovery metadata identifies a destination but
+does not authorize an enrollment, contact, or device operation.
+
+The broker wire contract is version 2. Registration and candidate records carry
+the device identifier, delivery records carry the recipient device identifier,
+and retrieval addresses name both authority and device. Version 1 records and
+authority-only retrieval paths are not accepted.
+
+Each delivery carries an explicit invitation purpose. The receiving bootstrap
+owner retains every retrieved delivery until the matching existing workflow
+accepts custody or returns a typed refusal. Queue order does not determine
+purpose, and retrieving a batch cannot silently discard its other members.
+An enrollment prefill is observed input requiring the existing explicit
+approval and verifier contract. Contact delivery likewise requires canonical
+signed invitation verification and the contact workflow; neither purpose can
+substitute for the other.
+
+Broker retrieval acknowledges transport custody only. One-use retrieval
+credentials do not acknowledge workflow completion, enrolled-device authority,
+or cancellation cleanup. Any subsequent shortcut delivery retains the original
+approved enrollment owner and its purpose-bound acknowledgment under the
+original selected provider and deadline; broker records cannot reconstruct
+that authority.
+
 Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton bootstrap registry. Runtime code may combine remembered direct contacts, neighborhood discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood re-entry hints, but it does not own final route choice or a global bootstrap cache.
 
 Operationally, browser and native first-run startup may become bootstrap-visible only after the first native account runtime exists and begins hosting the broker automatically. For example, in a TUI plus Web startup, the user may create the web account first and the TUI account second. Once the TUI runtime is live, both instances should surface one another as bootstrap candidates without extra user setup steps.

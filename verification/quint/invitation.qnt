@@ -651,4 +651,73 @@ module invitation {
     nondet reason = oneOf(Set("prestate_stale", "newer_request", "timeout"))
     supersedeCeremony(oldCerId, newCerId, reason)
   }
+
+  // Transport custody only: these records cannot authorize invitation acceptance.
+  type BootstrapTransportDelivery = { purpose: InvitationType, code: str }
+  type BootstrapRecipient = (AuthorityId, str)
+  type BootstrapMailbox = { retrievalToken: str, deliveries: List[BootstrapTransportDelivery] }
+  type BootstrapMailboxes = BootstrapRecipient -> BootstrapMailbox
+
+  pure def registerBootstrapDevice(boxes: BootstrapMailboxes,
+      recipient: BootstrapRecipient, token: str): BootstrapMailboxes = {
+    val prior = if (boxes.keys().contains(recipient)) boxes.get(recipient).deliveries else List()
+    boxes.put(recipient, { retrievalToken: token, deliveries: prior })
+  }
+
+  pure def enqueueBootstrapDelivery(boxes: BootstrapMailboxes,
+      recipient: BootstrapRecipient, delivery: BootstrapTransportDelivery): BootstrapMailboxes = {
+    val prior = boxes.get(recipient)
+    boxes.put(recipient, { ...prior, deliveries: prior.deliveries.append(delivery) })
+  }
+
+  pure def retrieveBootstrapDeliveries(boxes: BootstrapMailboxes,
+      recipient: BootstrapRecipient, token: str): {
+        boxes: BootstrapMailboxes, accepted: bool, delivered: List[BootstrapTransportDelivery]
+      } = {
+    if (boxes.keys().contains(recipient) and token != "" and
+        boxes.get(recipient).retrievalToken == token) {
+      val mailbox = boxes.get(recipient)
+      val retained = if (mailbox.deliveries.length() == 0) boxes else
+        boxes.put(recipient, { retrievalToken: "", deliveries: List() })
+      { boxes: retained, accepted: true, delivered: mailbox.deliveries }
+    } else { boxes: boxes, accepted: false, delivered: List() }
+  }
+
+  run bootstrapSiblingDevicesKeepIndependentCredentialsAndDeliveriesTest = {
+    val first = ("authority", "phone")
+    val second = ("authority", "browser")
+    val registered = registerBootstrapDevice(registerBootstrapDevice(Map(), first, "first-token"), second, "second-token")
+    val queued = enqueueBootstrapDelivery(enqueueBootstrapDelivery(registered, first, { purpose: ContactInvitation, code: "first-code" }), second, { purpose: ContactInvitation, code: "second-code" })
+    val refreshed = registerBootstrapDevice(queued, second, "refreshed-token")
+    val wrong = retrieveBootstrapDeliveries(refreshed, first, "refreshed-token")
+    val one = retrieveBootstrapDeliveries(wrong.boxes, first, "first-token")
+    val two = retrieveBootstrapDeliveries(one.boxes, second, "refreshed-token")
+    assert(not(wrong.accepted) and wrong.boxes == refreshed and
+      one.accepted and one.delivered == List({ purpose: ContactInvitation, code: "first-code" }) and
+      two.accepted and two.delivered == List({ purpose: ContactInvitation, code: "second-code" }))
+  }
+
+  run bootstrapEmptyRetrievalKeepsCredentialAndNonemptyConsumesItTest = {
+    val recipient = ("authority", "device")
+    val registered = registerBootstrapDevice(Map(), recipient, "token")
+    val empty = retrieveBootstrapDeliveries(registered, recipient, "token")
+    val queued = enqueueBootstrapDelivery(empty.boxes, recipient, { purpose: ContactInvitation, code: "code" })
+    val delivered = retrieveBootstrapDeliveries(queued, recipient, "token")
+    val replay = retrieveBootstrapDeliveries(delivered.boxes, recipient, "token")
+    assert(empty.accepted and empty.boxes == registered and
+      delivered.accepted and delivered.delivered == List({ purpose: ContactInvitation, code: "code" }) and
+      not(replay.accepted) and replay.boxes == delivered.boxes)
+  }
+
+  run bootstrapMixedPurposeRetrievalRetainsEveryOriginalDeliveryTest = {
+    val recipient = ("authority", "browser")
+    val contact = { purpose: ContactInvitation, code: "signed-contact" }
+    val enrollment = { purpose: DeviceEnrollmentInvitation, code: "signed-enrollment" }
+    val registered = registerBootstrapDevice(Map(), recipient, "token")
+    val queued = enqueueBootstrapDelivery(enqueueBootstrapDelivery(registered,
+      recipient, contact), recipient, enrollment)
+    val received = retrieveBootstrapDeliveries(queued, recipient, "token")
+    assert(received.accepted and received.delivered == List(contact, enrollment) and
+      not(retrieveBootstrapDeliveries(received.boxes, recipient, "token").accepted))
+  }
 }
