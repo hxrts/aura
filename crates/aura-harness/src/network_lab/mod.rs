@@ -449,9 +449,17 @@ impl ProvisionedLab {
             receipts,
             ..
         } = self;
-        // Dropping the backend drops the lab, which flushes events.jsonl and
-        // emits its teardown events. The runtime goes after the lab it served.
-        drop(backend);
+        // Patchbay's event writer is a task on this runtime, so it only makes
+        // progress while something blocks on the runtime. Drop the lab inside a
+        // block_on and yield afterwards so the writer appends the queued events
+        // (including the teardown ones the drop emits) before the final flush;
+        // the runtime goes after the lab it served.
+        runtime.block_on(async move {
+            drop(backend);
+            for _ in 0..16 {
+                tokio::task::yield_now().await;
+            }
+        });
         drop(runtime);
 
         let mut lab_event_count = 0;
@@ -471,6 +479,7 @@ impl ProvisionedLab {
             bundle
                 .metadata
                 .insert("timeline_entries".to_string(), entries.len().to_string());
+            bundle.metadata.remove("timeline_provisional");
         }
         Ok(FinishedLabArtifacts {
             bundle,
