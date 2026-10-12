@@ -119,8 +119,29 @@ phase execution --expected-tests "$fixture/failed-expected" -- printf \
 jq -e '.phases[-1].inventory_result=="mismatch"' "$AURA_BUILD_RECEIPT" >/dev/null
 printf 'pass_fixture\n' > "$fixture/pass-expected"
 phase execution --expected-tests "$fixture/pass-expected" -- printf \
-  'test pass_fixture ... \ndiagnostic\nok\n'
+  'test pass_fixture ... \ndiagnostic\nok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n'
 jq -e '.phases[-1] | .inventory_result=="matched" and .passed_tests==["pass_fixture"]' "$AURA_BUILD_RECEIPT" >/dev/null
+phase execution --expected-tests "$fixture/pass-expected" -- printf \
+  'running 1 test\ntest pass_fixture ... enrollment fixture: build runtime\nenrollment fixture: prepare\nok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n'
+jq -e '.phases[-1] | .inventory_result=="matched" and .observed_tests==["pass_fixture"] and
+  .passed_count==1 and .failed_count==0 and .command_exit_status==0' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/pass-expected" -- printf \
+  'test pass_fixture ... diagnostic printed by a child\nok\ntest result: ok. 0 passed; 0 failed; 0 ignored\n' || status=$?
+[[ "$status" == 78 ]]
+jq -e '.phases[-1] | .inventory_result=="mismatch" and .observed_count==0 and
+  .passed_count==0 and .command_exit_status==0 and .exit_status==78' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
+  'printf "test failed_fixture ... enrollment fixture: build runtime\npanic at original site\nFAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n"; exit 101' || status=$?
+[[ "$status" == 101 ]]
+jq -e '.phases[-1] | .inventory_result=="matched" and .failed_tests==["failed_fixture"] and
+  .passed_count==0 and .failed_count==1 and .command_exit_status==101 and .exit_status==101' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/pass-expected" -- printf \
+  'test other_fixture ... diagnostic masquerading as a test header\nok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n' || status=$?
+[[ "$status" == 78 ]]
+jq -e '.phases[-1] | .inventory_result=="mismatch" and .passed_count==0 and .observed_count==0' "$AURA_BUILD_RECEIPT" >/dev/null
 status=0
 phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
   'printf "test failed_fixture ... \nok\npanic at original site\nFAILED\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n"; exit 101' || status=$?

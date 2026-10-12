@@ -82,7 +82,7 @@ failed='null'
 ignored='null'
 if [[ "$phase" == execution && -n "$expected" ]]; then
   # --nocapture may put diagnostics between a test name and its terminal status.
-  parsed="$(awk -f "$repo_root/scripts/dev/libtest-inventory.awk" "$phase_log")" || parse_status=$?
+  parsed="$(awk -v expected_file="$expected" -f "$repo_root/scripts/dev/libtest-inventory.awk" "$phase_log")" || parse_status=$?
   passed="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="passed" {print $2}' | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
   failed="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="failed" {print $2}' | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
   ignored="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="ignored" {print $2}' | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
