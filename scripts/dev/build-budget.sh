@@ -265,6 +265,11 @@ prune_safe_lanes() {
 
 printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free\n' \
   "$cap_gib" "$min_free_gib" "$emergency_gib"
+if (( dry_run == 0 )); then
+  source "$repo_root/scripts/dev/build-receipt.sh"
+  aura_receipt_init "$root" "$lane" "$@"
+  trap 'receipt_status=$?; aura_receipt_finish "$receipt_status"' EXIT
+fi
 printf 'Build policy: CARGO_INCREMENTAL=%s\n' "$CARGO_INCREMENTAL"
 before_free="$(free_kib)"
 before_target="$(target_kib strict)"
@@ -329,12 +334,14 @@ stop_owned_group() {
   kill -KILL -- "-$pid" 2>/dev/null || true
 }
 cleanup() {
+  local exit_status=$?
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
     stop_owned_group "$child_pid"
     wait "$child_pid" 2>/dev/null || true
   fi
   [[ -z "$reservation" ]] || rm -f "$reservation"
   release_checkout_lock
+  aura_receipt_finish "$exit_status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -370,10 +377,14 @@ target_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host
 printf 'Build lane=%s command:' "$lane"
 printf ' %q' "$@"
 printf '\n'
+aura_receipt_update '.current_phase="command"'
 set -m # Give the background build its own process group for bounded shutdown.
 (cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") &
 child_pid=$!
 set +m
+aura_receipt_update --argjson pid "$child_pid" \
+  --arg identity "$(ps -p "$child_pid" -o lstart= 2>/dev/null || true)" \
+  '.child={pid:$pid,start_identity:$identity}'
 lowest_free="$pre_free"
 peak_target="$pre_target"
 poll_count=0
@@ -397,18 +408,23 @@ done
 if wait "$child_pid"; then :; else child_status=$?; (( status == 0 )) && status="$child_status"; fi
 stop_owned_group "$child_pid" # Reap any build-owned background descendants.
 child_pid=''
+aura_receipt_update --argjson status "$status" \
+  '.command_exit_status=$status | .current_phase="cache-cleanup"'
 post_build_target="$(target_kib)"
 (( post_build_target > peak_target )) && peak_target="$post_build_target"
 
 # The build is done: its post-build sweep never waits for other builders.
 wait_seconds=0
+cache_cleanup=not-run-command-failed
 if (( status == 0 && no_prune == 1 )); then
+  cache_cleanup=skipped-no-prune
   echo 'No-prune mode: post-build cache collection skipped'
 elif (( status == 0 )); then
   # Cleanup is best effort: a sweep skipped because another builder is (or
   # became) active leaves the build's own status (Task 212). Only a genuine
   # sweep failure changes it.
   if idle_now; then
+    cache_cleanup=attempted
     if (( post_build_target > cap_kib )); then
       recovery_command=recover_cache
     else
@@ -420,18 +436,25 @@ elif (( status == 0 )); then
       if (( sweep_status == 3 )); then
         prune_safe_lanes apply || true
       elif ! idle_now; then
+        cache_cleanup=skipped-busy
         echo 'build-budget: post-build sweep skipped because another builder started' >&2
       else
+        cache_cleanup=failed
         echo 'build-budget: post-build sweep failed' >&2
         status=76
       fi
     fi
   else
+    cache_cleanup=skipped-busy
     echo 'build-budget: post-build sweep skipped because another builder started' >&2
   fi
 fi
 after_free="$(free_kib)"
 after_target="$(target_kib)"
+aura_receipt_update --arg result "$cache_cleanup" \
+  --argjson free "$after_free" --argjson target "$after_target" --argjson cap "$cap_kib" \
+  '.cleanup={result:$result,after_free_kib:$free,after_target_kib:$target,
+    target_above_soft_cap:($target>$cap)} | .current_phase="report"'
 printf 'After: free=%s KiB target=%s KiB lowest-free=%s KiB sampled-peak-target=%s KiB exit=%s\n' \
   "$after_free" "$after_target" "$lowest_free" "$peak_target" "$status"
 mkdir -p "$root/artifacts/disk-budget"
@@ -455,4 +478,6 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n
   "$target_triple" "$features" "$cap_gib" \
   "$min_free_gib" "$emergency_gib" "$before_free" "$before_target" \
   "$pre_free" "$pre_target" "$lowest_free" "$peak_target" "$after_free" "$after_target" "$status" >> "$log_path"
+aura_receipt_update --arg disk_log "$log_path" --arg report "${report_path:-}" \
+  '.artifacts={disk_log:$disk_log,disk_report:(if $report=="" then null else $report end)}'
 exit "$status"

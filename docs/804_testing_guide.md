@@ -1127,6 +1127,30 @@ the target above the soft cap or below the admission floor, recovery tries
 guarded inactive lanes and reports any remaining protected excess. Live-process,
 open-file, release-artifact and disk-floor protections still apply.
 
+Each budgeted command prints a JSON receipt path under
+`artifacts/disk-budget/receipts/`. The atomic snapshot records the source
+revision and fingerprint (including nonignored new source files), declared
+`AURA_BUILD_PACKAGES`, `AURA_BUILD_FEATURES`, and `AURA_BUILD_TEST_INVENTORY`,
+wrapper, driver and active phase command identities, current phase,
+command/final exit statuses, cache cleanup
+observations and artifact paths. Missing metadata and unexecuted phases remain
+unknown; an opaque command's exit does not prove test discovery or execution.
+Read JSON with `jq`; never source or evaluate receipt contents.
+
+Within one budgeted lifetime, use `bash scripts/dev/build-phase.sh compile --
+COMMAND...`, followed by `discovery` and `execution` phases with
+`--expected-tests FILE -- COMMAND...`. The file contains one exact Rust test
+name per line. Discovery requires standard `--list` output, execution requires
+default pretty text harness output without `--quiet` or `--nocapture` (JSON
+output is unsupported); both require a
+nonempty exact match. The runner executes the command itself and records its
+raw exit separately from inventory validation. The expected inventory is
+selected before command execution; missing tests fail with exit status78.
+Use a separate `disposal` phase for an actual native shutdown/cleanup command;
+its result remains independent of semantic or compile failure. Completion
+prints the final status and receipt path, so coordinators can inspect one
+snapshot instead of reconstructing status from logs and process trees.
+
 The dev shell exports `RUSTC_WRAPPER=sccache` with one shared store at
 `SCCACHE_DIR` (default `~/.cache/aura-sccache`, capped by
 `SCCACHE_CACHE_SIZE`, default 10G). Every worktree and checkout reuses its

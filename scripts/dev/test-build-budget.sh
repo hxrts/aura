@@ -108,6 +108,10 @@ expect_status 0 run_budget -- sh -c 'exit 0'
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 [[ "$(awk -F '\t' 'NR == 2 {print NF}' "$project/artifacts/disk-budget/builds.tsv")" -eq 18 ]]
 rg -l 'Build context: lane=test' "$project"/artifacts/disk-budget/report.* >/dev/null
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==0 and .command_exit_status==0 and .current_phase=="finished"
+  and .phases==[] and .cleanup.result=="attempted" and .child.pid!=null
+  and .artifacts.disk_report!=null' "$receipt" >/dev/null
 
 reset_case
 expect_status 0 env -u CARGO_INCREMENTAL bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --no-prune -- sh -c 'test "$CARGO_INCREMENTAL" = 0'
@@ -290,6 +294,8 @@ expect_status 1 run_budget -- sh -c 'exit 0'
 
 reset_case
 expect_status 7 run_budget -- sh -c 'exit 7'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==7 and .command_exit_status==7 and .cleanup.result=="not-run-command-failed"' "$receipt" >/dev/null
 [[ ! -s "$CALLS_FILE" ]]
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 
@@ -316,6 +322,8 @@ done
 kill -TERM "$wrapper_pid"
 if wait "$wrapper_pid"; then interrupt_status=0; else interrupt_status=$?; fi
 [[ "$interrupt_status" -eq 143 ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/interrupt-output")"
+jq -e '.final_exit_status==143 and .command_exit_status==null and .current_phase=="finished"' "$receipt" >/dev/null
 if kill -0 "$(cat "$CHILD_PID_FILE")" 2>/dev/null; then
   echo 'interrupted child survived' >&2
   exit 1
