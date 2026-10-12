@@ -1119,6 +1119,14 @@ until it exits. The admission lock is held only while checking and reserving,
 and only builders of the same checkout block its sweeps, so two worktrees can
 build at once.
 
+When recovery is needed, the default nonincremental build first reclaims the
+inactive `debug-incremental` lane through the guarded lane cleaner, preserving
+reusable debug dependencies. Explicit `CARGO_INCREMENTAL=1` builds retain that
+lane and its debug parent. A successful Cargo sweep is remeasured: if it leaves
+the target above the soft cap or below the admission floor, recovery tries
+guarded inactive lanes and reports any remaining protected excess. Live-process,
+open-file, release-artifact and disk-floor protections still apply.
+
 The dev shell exports `RUSTC_WRAPPER=sccache` with one shared store at
 `SCCACHE_DIR` (default `~/.cache/aura-sccache`, capped by
 `SCCACHE_CACHE_SIZE`, default 10G). Every worktree and checkout reuses its

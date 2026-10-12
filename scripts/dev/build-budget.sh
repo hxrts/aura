@@ -207,9 +207,44 @@ sweep() {
   printf 'Sweep: cargo sweep --maxsize %sGiB .\n' "$cap_gib"
   (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" .)
 }
+# Default nonincremental builds cannot reuse incremental state. Reclaim that
+# lane with the existing lock and process/open-file guards before cargo-sweep
+# evicts dependencies needed by the current batch.
+prune_unused_incremental() {
+  [[ "$CARGO_INCREMENTAL" == 0 && "$allow_live_harness" == 0 ]] || return 0
+  [[ -d "$root/target/debug/incremental" ]] || return 0
+  require_idle || return $?
+  if ! bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" \
+    --lane debug-incremental --apply --lock-owned-by "$$"; then
+    echo 'build-budget: incremental cache remains protected or busy' >&2
+    require_idle || return $?
+  fi
+}
+recover_cache() {
+  local sweep_status
+  prune_unused_incremental || return $?
+  if (( $(target_kib strict) <= cap_kib && $(free_kib) >= min_free_kib )); then
+    return 0
+  fi
+  if sweep apply; then
+    if (( $(target_kib strict) > cap_kib || $(free_kib) < min_free_kib )); then
+      echo 'build-budget: successful sweep left target over budget or insufficient headroom; trying guarded inactive lanes' >&2
+      prune_safe_lanes apply
+    fi
+  else
+    sweep_status=$?
+    if (( sweep_status == 3 )); then prune_safe_lanes apply;
+    else return "$sweep_status"; fi
+  fi
+  if (( $(target_kib strict) > cap_kib )); then
+    echo 'build-budget: target remains above soft cap after guarded recovery; protected caches retained' >&2
+  fi
+}
 prune_safe_lanes() {
   local mode="$1" candidate
   local candidates=(wasm-debug dylint debug-incremental trybuild debug)
+  # Explicit incremental builds retain that cache, including its debug parent.
+  if [[ "$CARGO_INCREMENTAL" == 1 ]]; then candidates=(wasm-debug dylint trybuild); fi
   if (( allow_live_harness == 1 )); then candidates=(wasm-debug); fi
   for candidate in "${candidates[@]}"; do
     if [[ "$mode" == dry ]]; then
@@ -312,12 +347,7 @@ if (( before_target > cap_kib || before_free < min_free_kib )); then
     exit 1
   fi
   require_idle
-  if sweep apply; then :;
-  else
-    sweep_status=$?
-    if (( sweep_status == 3 )); then prune_safe_lanes apply;
-    else exit "$sweep_status"; fi
-  fi
+  recover_cache || exit $?
 fi
 pre_free="$(free_kib)"
 pre_target="$(target_kib strict)"
@@ -379,7 +409,12 @@ elif (( status == 0 )); then
   # became) active leaves the build's own status (Task 212). Only a genuine
   # sweep failure changes it.
   if idle_now; then
-    if sweep apply; then :;
+    if (( post_build_target > cap_kib )); then
+      recovery_command=recover_cache
+    else
+      recovery_command=sweep
+    fi
+    if "$recovery_command" apply; then :;
     else
       sweep_status=$?
       if (( sweep_status == 3 )); then

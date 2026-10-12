@@ -21,6 +21,8 @@ export RACE_ON_PREVIEW_FILE="$test_root/race-on-preview"
 export OPEN_TARGET_FILE="$test_root/open-target"
 export DU_FAIL_ONCE_FILE="$test_root/du-fail-once"
 export DU_EMPTY_FILE="$test_root/du-empty"
+export INCREMENTAL_SIZE_FILE="$test_root/incremental-size"
+export WASM_SIZE_FILE="$test_root/wasm-size"
 export AURA_BUILD_TARGET_CAP_GIB=8
 # Cases choose their own waits; a caller's AURA_BUILD_WAIT_SECONDS (gates and
 # ship.sh export one) must not turn an expected refusal into a long wait.
@@ -38,7 +40,14 @@ EOF
 cat > "$fakebin/du" <<'EOF'
 #!/usr/bin/env bash
 [[ ! -f "$DU_EMPTY_FILE" ]] || exit 1
-printf '%s\t%s\n' "$(cat "$SIZE_FILE")" "${@: -1}"
+size="$(cat "$SIZE_FILE")"
+if [[ -f "$INCREMENTAL_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/debug/incremental" ]]; then
+  size=$((size - $(cat "$INCREMENTAL_SIZE_FILE")))
+fi
+if [[ -f "$WASM_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/wasm32-unknown-unknown/debug" ]]; then
+  size=$((size - $(cat "$WASM_SIZE_FILE")))
+fi
+printf '%s\t%s\n' "$size" "${@: -1}"
 if [[ -f "$DU_FAIL_ONCE_FILE" ]]; then
   rm -f "$DU_FAIL_ONCE_FILE"
   echo 'du: transient disappearing Cargo artifact' >&2
@@ -75,6 +84,7 @@ reset_case() {
   : > "$CALLS_FILE"
   rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
+  rm -f "$INCREMENTAL_SIZE_FILE" "$WASM_SIZE_FILE"
 }
 
 run_budget() {
@@ -200,6 +210,41 @@ expect_status 0 run_budget --dry-run
 [[ "$(wc -l < "$CALLS_FILE")" -eq 1 ]]
 rg -q -- '--dry-run' "$CALLS_FILE"
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
+
+# An oversized unused incremental lane is reclaimed before dependencies are
+# swept; the running command observes both admission size and dependency reuse.
+reset_case
+printf '%s\n' $((17 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((11 * 1024 * 1024)) > "$INCREMENTAL_SIZE_FILE"
+mkdir -p "$project/target/debug/incremental" "$project/target/debug/deps"
+touch "$project/target/debug/deps/reusable.rlib"
+expect_status 0 env CARGO_INCREMENTAL=0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" -- \
+  sh -c 'test ! -d target/debug/incremental && test -f target/debug/deps/reusable.rlib && test ! -s "$CALLS_FILE"'
+[[ "$(wc -l < "$CALLS_FILE")" -eq 2 ]] # Only the post-build sweep.
+
+# Sweep success is not proof of reaching the cap: a remaining inactive lane
+# must still be reclaimed, without evicting sibling debug dependencies.
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+expect_status 0 run_budget -- sh -c 'test ! -d target/wasm32-unknown-unknown/debug && test -f target/debug/deps/reusable.rlib'
+rg -q 'successful sweep left target over budget' "$test_root/output"
+
+# Explicit incremental opt-in and loaded incremental files forbid preferential
+# reclamation; existing scoped guards remain authoritative.
+for protection in opt-in open-file; do
+  reset_case
+  printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+  mkdir -p "$project/target/debug/incremental"
+  incremental=1
+  if [[ "$protection" == open-file ]]; then
+    incremental=0
+    printf 'fake 123 %s\n' "$project/target/debug/incremental/loaded" > "$OPEN_TARGET_FILE"
+  fi
+  expect_status 0 env CARGO_INCREMENTAL="$incremental" bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" -- \
+    sh -c 'test -d target/debug/incremental'
+done
 
 reset_case
 printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
