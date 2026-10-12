@@ -48,4 +48,20 @@ printf '%s\n' '- [ ] 2. Duplicate target.' >> "$plan"
 cp "$plan" "$fixture/duplicate.md"
 if "${tool[@]}" log 2 "$fixture/entry.md" > "$fixture/duplicate.log" 2>&1; then exit 1; fi
 cmp -s "$plan" "$fixture/duplicate.md"
+cat > "$plan" <<'EOF'
+- [x] 72. Completed numeric task.
+  - Acceptance: retain original contract.
+### Next independent section
+- [ ] **S6. Unnumbered live task.**
+  - Its independent acceptance.
+- [ ] 109. Another numeric task.
+EOF
+"${tool[@]}" show 72 > "$fixture/bounded-show.md"
+if rg -q 'independent|S6|109' "$fixture/bounded-show.md"; then exit 1; fi
+"${tool[@]}" log 72 "$fixture/entry.md" > "$fixture/bounded-log.log"
+awk '/New evidence/ { added=NR } /^### Next/ { boundary=NR } END { exit !(added && added<boundary) }' "$plan"
+sed '/^### Next independent section/d' "$plan" > "$fixture/no-heading.md"
+mv "$fixture/no-heading.md" "$plan"
+"${tool[@]}" show 72 > "$fixture/peer-bounded-show.md"
+if rg -q 'S6|independent acceptance|109' "$fixture/peer-bounded-show.md"; then exit 1; fi
 echo 'task plan fixtures passed: show, archive, backup, literal insertion, missing/duplicate refusal'

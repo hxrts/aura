@@ -38,9 +38,10 @@ awk -v action="$command_name" -v task="$task" -v entry="$entry" \
   { lines[NR]=$0 }
   END {
     for (i=1;i<=NR;i++) {
+      if (start && i>start && !stop &&
+          (lines[i] ~ /^#/ || lines[i] ~ /^- \[[ x]\] /)) stop=i
       if (lines[i] ~ /^- \[[ x]\] [0-9]+\./) {
         if (header_id(lines[i]) == task) { start=i; found++ }
-        else if (start && !stop) stop=i
       }
     }
     if (found != 1) { print "expected exactly one task " task > "/dev/stderr"; exit 2 }
