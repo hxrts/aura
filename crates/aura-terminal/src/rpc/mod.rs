@@ -6,7 +6,7 @@
 //! The server first writes a hello line:
 //!
 //! ```json
-//! {"type":"hello","protocol":"aura-rpc","version":1,"aura_version":"0.2.0","capabilities":[..],"methods":[..]}
+//! {"type":"hello","protocol":"aura-rpc","version":2,"aura_version":"0.2.0","capabilities":[..],"methods":[..]}
 //! ```
 //!
 //! A client request is a [`Request`](crate::command::Request) plus an `id`
@@ -41,7 +41,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 /// Wire protocol name in the hello line.
 pub const PROTOCOL: &str = "aura-rpc";
 /// Wire protocol version; bumped on incompatible changes.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Methods every request line may use besides the [`Request`] methods.
 pub const CONTROL_METHODS: &[&str] = &["shutdown", "subscribe", "unsubscribe"];

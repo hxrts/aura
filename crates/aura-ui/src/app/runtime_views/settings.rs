@@ -62,11 +62,12 @@ fn build_settings_runtime_view(
         .authorities
         .iter()
         .map(|authority| SettingsRuntimeAuthority {
-            label: if authority.nickname_suggestion.trim().is_empty() {
-                authority.id.to_string()
-            } else {
-                authority.nickname_suggestion.clone()
-            },
+            label: authority
+                .nickname_suggestion
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| authority.id.to_string()),
             id: authority.id,
             is_current: authority.is_current,
         })

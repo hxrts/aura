@@ -326,8 +326,8 @@ pub struct DeviceInfo {
 pub struct AuthorityInfo {
     /// Authority identifier.
     pub id: AuthorityId,
-    /// Best-effort display label.
-    pub nickname_suggestion: String,
+    /// Optional native nickname suggestion; absence is preserved in projections.
+    pub nickname_suggestion: Option<String>,
     /// Whether this is the active authority.
     pub is_current: bool,
 }

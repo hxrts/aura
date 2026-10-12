@@ -50,8 +50,13 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   `aura rpc` route to that socket first; otherwise the CLI opens the
   production runtime itself through `handlers::tui::open_production_runtime`,
   the TUI's own assembly. The published schema
-  (`schema/aura-rpc-v1.json`) is generated from the types and checked by
+  (`schema/aura-rpc-v2.json`) is generated from the types and checked by
   `just ci-rpc-schema`.
+
+- RPC v2 preserves optional authority nickname metadata as a nullable `nickname`
+  field. An unnamed authority remains selectable by its original authority id
+  and current-selection flag. Human-facing renderers choose a display label
+  for absence; that label does not become RPC or canonical profile metadata.
 
 - `aura rpc` keeps one runtime online across requests. RPC events derive
   from the reactive signals the TUI observes; each subscription has a bounded

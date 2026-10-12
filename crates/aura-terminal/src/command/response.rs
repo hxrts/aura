@@ -47,7 +47,8 @@ pub struct AccountView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthorityView {
     pub authority_id: String,
-    pub nickname: String,
+    /// Native optional nickname metadata, independent of display labels.
+    pub nickname: Option<String>,
     pub current: bool,
 }
 
@@ -276,6 +277,31 @@ pub enum Response {
 #[cfg(test)]
 mod tests {
     use super::Response;
+
+    #[test]
+    fn authority_metadata_preserves_absent_and_named_nicknames() {
+        for nickname in [None, Some("Alice".to_owned())] {
+            let authority = super::AuthorityView {
+                authority_id: "authority-id".into(),
+                nickname: nickname.clone(),
+                current: true,
+            };
+            let encoded = serde_json::to_value(&authority).unwrap();
+            assert_eq!(
+                encoded["nickname"],
+                serde_json::to_value(&nickname).unwrap()
+            );
+            assert_eq!(
+                serde_json::from_value::<super::AuthorityView>(encoded).unwrap(),
+                authority
+            );
+        }
+        let schema = serde_json::to_value(schemars::schema_for!(super::AuthorityView)).unwrap();
+        assert_eq!(
+            schema["properties"]["nickname"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+    }
 
     #[test]
     fn response_counts_preserve_the_full_published_wire_range() {

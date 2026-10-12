@@ -293,6 +293,71 @@ mod tests {
     }
 
     #[test]
+    fn transactional_handoff_refusal_retains_original_submission_and_cause() {
+        let publisher = TestPublisher::default();
+        let instance = OperationInstanceId("refused-original".to_owned());
+        let submission = WorkflowHandoffSubmission::submit_with_instance_unpublished(
+            publisher.clone(),
+            OperationId::device_enrollment(),
+            SemanticOperationKind::ImportDeviceEnrollmentCode,
+            instance.clone(),
+        );
+        let source = Arc::new(std::io::Error::other("original recipient closed"));
+        let (submission, actual) = submission
+            .try_handoff_to_workflow(|release| {
+                assert_eq!(release.instance_id(), &instance);
+                Err(source.clone())
+            })
+            .expect_err("refused recipient retains prior owner");
+        assert!(Arc::ptr_eq(&actual, &source));
+        assert_eq!(submission.instance_id(), &instance);
+        assert!(events(&publisher).is_empty());
+        drop(submission);
+        assert_eq!(
+            events(&publisher),
+            vec![Event::Dropped(
+                OperationId::device_enrollment(),
+                instance,
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+            )]
+        );
+    }
+
+    #[test]
+    fn transactional_handoff_acceptance_transfers_exact_identity_without_drop_publication() {
+        let publisher = TestPublisher::default();
+        let instance = OperationInstanceId("accepted-original".to_owned());
+        let submission = WorkflowHandoffSubmission::submit_with_instance_unpublished(
+            publisher.clone(),
+            OperationId::device_enrollment(),
+            SemanticOperationKind::ImportDeviceEnrollmentCode,
+            instance.clone(),
+        );
+        let mut accepted = None;
+        let release = submission
+            .try_handoff_to_workflow(|release| {
+                accepted = Some((
+                    release.operation_id().clone(),
+                    release.instance_id().clone(),
+                    release.kind(),
+                ));
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .ok()
+            .expect("recipient synchronously accepts original responsibility");
+        assert_eq!(
+            accepted,
+            Some((
+                OperationId::device_enrollment(),
+                instance.clone(),
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+            ))
+        );
+        assert_eq!(release.instance_id(), &instance);
+        assert!(events(&publisher).is_empty());
+    }
+
+    #[test]
     fn local_terminal_submission_delegates_terminal_publication() {
         let publisher = TestPublisher::default();
         let operation = block_on(LocalTerminalSubmission::submit(

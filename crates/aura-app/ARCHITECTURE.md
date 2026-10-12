@@ -8,6 +8,14 @@ Portable, platform-agnostic application core containing pure business logic (int
 
 ## Scope
 
+Workflow handoff may require synchronous recipient acceptance before the prior
+submission relinquishes terminal responsibility. The shared
+`WorkflowHandoffSubmission::try_handoff_to_workflow` primitive returns the same
+unsettled submission and concrete cause on refusal. Acceptance transfers the
+exact operation identity; subsequent notification failure belongs to the
+accepted owner. This primitive alone does not establish terminal delivery or
+required task disposal, which remain responsibilities of the workflow owner.
+
 | Belongs here | Does not belong here |
 |---|---|
 | Pure workflow logic (intents, reducers, views) | Runtime assembly or lifecycle management (`aura-agent`) |
@@ -554,3 +562,10 @@ list/field and generic modal-input wire variants are removed with their raw-key
 selector/fallback paths; no compatibility decoder remains. Actual native and
 shared UI snapshot regressions cover all four contact-invitation fields. These
 are local observation checks, not paired-client business completion evidence.
+
+Settings authority projections preserve the runtime's optional nickname suggestion.
+An unnamed authority remains valid; shell presentation may display its identifier
+without turning that display label into canonical nickname metadata. Settings
+refresh still propagates native read failures. A failed required authority read
+retains the original cause and leaves the previously published settings
+projection intact; failure cannot publish an empty authority list.

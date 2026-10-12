@@ -57,7 +57,12 @@ pub fn render(response: &Response) -> CliOutput {
             out.section(format!("Authorities ({})", list.len()));
             for a in list {
                 let current = if a.current { " (current account)" } else { "" };
-                out.println(format!("  - {} {}{current}", a.authority_id, a.nickname));
+                let label = a
+                    .nickname
+                    .as_deref()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or(&a.authority_id);
+                out.println(format!("  - {} {label}{current}", a.authority_id));
             }
         }
         Response::Contacts(contacts) => {

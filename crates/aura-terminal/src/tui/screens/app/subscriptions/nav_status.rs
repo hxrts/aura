@@ -49,7 +49,12 @@ pub fn use_authority_id_subscription(
                 .map(|authority| {
                     let info = AuthorityInfo::new(
                         authority.id.to_string(),
-                        authority.nickname_suggestion.clone(),
+                        authority
+                            .nickname_suggestion
+                            .as_deref()
+                            .filter(|name| !name.trim().is_empty())
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| authority.id.to_string()),
                     );
                     if authority.is_current {
                         info.current()

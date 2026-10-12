@@ -1,5 +1,5 @@
 {
-  "$id": "aura-rpc/v1",
+  "$id": "aura-rpc/v2",
   "client_line": {
     "oneOf": [
       {
@@ -2349,12 +2349,15 @@
             "type": "boolean"
           },
           "nickname": {
-            "type": "string"
+            "description": "Native optional nickname metadata, independent of display labels.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "authority_id",
-          "nickname",
           "current"
         ],
         "type": "object"
@@ -3799,5 +3802,5 @@
     "drops",
     "task_failures"
   ],
-  "version": 1
+  "version": 2
 }

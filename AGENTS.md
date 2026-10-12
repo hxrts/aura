@@ -201,7 +201,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Driving aura from a program**: use `aura rpc` (JSON lines on stdio, hello
   line, request ids, typed results/errors, `subscribe` events) or the running
   node's owner-only socket (path recorded in `<data-dir>.sock-path`, a short `aura-<hash>.sock` in the user runtime dir); the schema is
-  `crates/aura-terminal/schema/aura-rpc-v1.json` (`just ci-rpc-schema`). Do
+  `crates/aura-terminal/schema/aura-rpc-v2.json` (`just ci-rpc-schema`). Do
   not open a profile the TUI or `aura serve` holds; CLI commands route to it
 - **Account creation handoff**: `CreateAccountCallback` requires a workflow
   handoff owner. Runtime-free native staging delegates actual profile writes to

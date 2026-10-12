@@ -291,6 +291,29 @@ where
     pub fn handoff_to_workflow(self) -> WorkflowHandoffRelease {
         WorkflowHandoffRelease(self.0.handoff())
     }
+
+    /// Transfer terminal responsibility only after synchronous owner acceptance.
+    ///
+    /// Refusal returns the original unsettled submission and concrete cause.
+    /// The recipient must accept responsibility atomically: after acceptance,
+    /// notification failure cannot be reported as refusal of the handoff.
+    pub fn try_handoff_to_workflow<E>(
+        mut self,
+        accept: impl FnOnce(&WorkflowHandoffRelease) -> Result<(), E>,
+    ) -> Result<WorkflowHandoffRelease, (Self, E)> {
+        let release = WorkflowHandoffRelease(SubmittedOperationRelease::new(
+            self.0.operation_id.clone(),
+            self.0.instance_id.clone(),
+            self.0.kind,
+        ));
+        match accept(&release) {
+            Ok(()) => {
+                self.0.settled = true;
+                Ok(release)
+            }
+            Err(source) => Err((self, source)),
+        }
+    }
 }
 
 impl<P> CeremonyMonitorHandoffSubmission<P>

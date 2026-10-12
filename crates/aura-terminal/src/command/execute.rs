@@ -394,7 +394,7 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                     0,
                     AuthorityView {
                         authority_id: ctx.authority_id.to_string(),
-                        nickname: s.authority_nickname,
+                        nickname: Some(s.authority_nickname),
                         current: true,
                     },
                 );

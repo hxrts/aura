@@ -107,7 +107,19 @@ impl aura_core::effects::PhysicalTimeEffects for OfflinePhysicalTimeFixture {
     }
 }
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct OfflineSettingsSnapshot {
+    pub settings: SettingsBridgeState,
+    pub devices: Vec<BridgeDeviceInfo>,
+    pub authorities: Vec<BridgeAuthorityInfo>,
+    pub authorities_error: Option<RuntimeBridgeError>,
+    pub pending_requests: Vec<super::PendingSigningRequest>,
+}
+
 pub struct OfflineRuntimeBridge {
+    #[cfg(test)]
+    settings_snapshot: Arc<Mutex<Option<OfflineSettingsSnapshot>>>,
     physical_time: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
     #[cfg(test)]
     clock_answers: OfflineClockAnswers,
@@ -164,6 +176,14 @@ pub struct OfflineRuntimeBridge {
 }
 
 impl OfflineRuntimeBridge {
+    #[cfg(test)]
+    pub(crate) fn set_settings_snapshot(&self, snapshot: OfflineSettingsSnapshot) {
+        *self
+            .settings_snapshot
+            .try_lock()
+            .expect("settings fixture is idle") = Some(snapshot);
+    }
+
     #[cfg(test)]
     pub(crate) fn queue_guardian_outcome_answers(
         &self,
@@ -361,6 +381,8 @@ impl OfflineRuntimeBridge {
     /// Create a new offline runtime bridge
     pub fn new(authority_id: AuthorityId) -> Self {
         let bridge = Self {
+            #[cfg(test)]
+            settings_snapshot: Arc::new(Mutex::new(None)),
             physical_time: Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
             #[cfg(test)]
             clock_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
@@ -1409,6 +1431,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_get_settings(&self) -> Result<SettingsBridgeState, RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(snapshot) = self.settings_snapshot.lock().await.as_ref() {
+            return Ok(snapshot.settings.clone());
+        }
         Err(IntentError::no_agent("Settings not available in offline mode").into())
     }
 
@@ -1424,10 +1450,21 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(snapshot) = self.settings_snapshot.lock().await.as_ref() {
+            return Ok(snapshot.devices.clone());
+        }
         Err(IntentError::no_agent("Devices not available in offline mode").into())
     }
 
     async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(snapshot) = self.settings_snapshot.lock().await.as_ref() {
+            if let Some(error) = &snapshot.authorities_error {
+                return Err(error.clone());
+            }
+            return Ok(snapshot.authorities.clone());
+        }
         Err(IntentError::no_agent("Authorities not available in offline mode").into())
     }
 
@@ -1449,6 +1486,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn try_list_pending_signing_requests(
         &self,
     ) -> Result<Vec<super::PendingSigningRequest>, RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(snapshot) = self.settings_snapshot.lock().await.as_ref() {
+            return Ok(snapshot.pending_requests.clone());
+        }
         Err(IntentError::no_agent("Signing requests not available in offline mode").into())
     }
 

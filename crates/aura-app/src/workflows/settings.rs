@@ -94,18 +94,12 @@ async fn refresh_settings_signal_from_runtime(
     state.authority_nickname = settings.nickname_suggestion;
     state.authorities = authorities
         .into_iter()
-        .map(|authority| -> Result<AuthorityInfo, AuraError> {
-            Ok(AuthorityInfo {
-                id: authority.id,
-                nickname_suggestion: authority.nickname_suggestion.ok_or_else(|| {
-                    AuraError::from(WorkflowError::Precondition(
-                        "authority has no nickname suggestion",
-                    ))
-                })?,
-                is_current: authority.is_current,
-            })
+        .map(|authority| AuthorityInfo {
+            id: authority.id,
+            nickname_suggestion: authority.nickname_suggestion,
+            is_current: authority.is_current,
         })
-        .collect::<Result<Vec<_>, AuraError>>()?;
+        .collect();
 
     emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await
 }
@@ -475,6 +469,112 @@ mod tests {
     use crate::workflows::signals::{emit_signal, read_signal};
     use crate::AppConfig;
     use aura_core::{crypto::hash::hash, AuthorityId, ChannelId, ContextId};
+
+    #[tokio::test]
+    async fn unnamed_authority_settings_refresh_preserves_optional_nickname() {
+        let authority = AuthorityId::new_from_entropy([91; 32]);
+        let runtime = Arc::new(OfflineRuntimeBridge::new(authority));
+        runtime.set_settings_snapshot(crate::runtime_bridge::offline::OfflineSettingsSnapshot {
+            authorities: vec![
+                crate::runtime_bridge::BridgeAuthorityInfo {
+                    id: authority,
+                    nickname_suggestion: None,
+                    is_current: true,
+                },
+                crate::runtime_bridge::BridgeAuthorityInfo {
+                    id: AuthorityId::new_from_entropy([92; 32]),
+                    nickname_suggestion: Some("Named authority".into()),
+                    is_current: false,
+                },
+            ],
+            ..Default::default()
+        });
+        let app = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
+        refresh_settings_from_runtime(&app).await.unwrap();
+        let settings = read_signal(&app, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME)
+            .await
+            .unwrap();
+        assert_eq!(settings.authorities.len(), 2);
+        assert_eq!(settings.authorities[0].id, authority);
+        assert_eq!(settings.authorities[0].nickname_suggestion, None);
+        assert!(settings.authorities[0].is_current);
+        assert_eq!(
+            settings.authorities[1].id,
+            AuthorityId::new_from_entropy([92; 32])
+        );
+        assert_eq!(
+            settings.authorities[1].nickname_suggestion.as_deref(),
+            Some("Named authority")
+        );
+        assert!(!settings.authorities[1].is_current);
+    }
+
+    #[tokio::test]
+    async fn authority_settings_read_failure_retains_native_cause_and_prior_projection() {
+        use crate::runtime_bridge::{RuntimeBridgeError, RuntimeBridgeErrorKind};
+        use std::error::Error;
+
+        let authority = AuthorityId::new_from_entropy([93; 32]);
+        let runtime = Arc::new(OfflineRuntimeBridge::new(authority));
+        let snapshot = crate::runtime_bridge::offline::OfflineSettingsSnapshot {
+            authorities: vec![crate::runtime_bridge::BridgeAuthorityInfo {
+                id: authority,
+                nickname_suggestion: None,
+                is_current: true,
+            }],
+            ..Default::default()
+        };
+        runtime.set_settings_snapshot(snapshot.clone());
+        let app = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        register_app_signals(app.read().await.reactive())
+            .await
+            .unwrap();
+        refresh_settings_from_runtime(&app).await.unwrap();
+
+        let original = Arc::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "authority store denied",
+        ));
+        runtime.set_settings_snapshot(crate::runtime_bridge::offline::OfflineSettingsSnapshot {
+            authorities: Vec::new(),
+            authorities_error: Some(RuntimeBridgeError::with_source(
+                crate::IntentError::storage_error("list authorities failed"),
+                original.clone(),
+            )),
+            ..snapshot
+        });
+        let error = refresh_settings_from_runtime(&app).await.unwrap_err();
+        let mut cursor: &(dyn Error + 'static) = &error;
+        let mut native_kind = None;
+        loop {
+            if let Some(native) = cursor.downcast_ref::<RuntimeBridgeError>() {
+                native_kind = Some(native.kind());
+            }
+            if let Some(actual) = cursor.downcast_ref::<Arc<std::io::Error>>() {
+                assert!(Arc::ptr_eq(actual, &original));
+                break;
+            }
+            cursor = cursor
+                .source()
+                .expect("original authority read cause retained");
+        }
+        assert_eq!(native_kind, Some(RuntimeBridgeErrorKind::Storage));
+        let settings = read_signal(&app, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME)
+            .await
+            .unwrap();
+        assert_eq!(settings.authorities.len(), 1);
+        assert_eq!(settings.authorities[0].id, authority);
+        assert_eq!(settings.authorities[0].nickname_suggestion, None);
+        assert!(settings.authorities[0].is_current);
+    }
 
     #[tokio::test]
     async fn test_get_settings_default() {
