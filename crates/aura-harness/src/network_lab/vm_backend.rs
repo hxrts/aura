@@ -11,7 +11,8 @@ use super::{
     RawEventReceipt, TopologySpec,
 };
 
-/// macOS and cross-platform runner that delegates execution to `patchbay-vm`.
+/// macOS and cross-platform runner that delegates execution to the upstream
+/// `patchbay` CLI's `vm run` subcommand (the `patchbay-vm` library backend).
 #[derive(Debug)]
 pub struct VmPatchbayBackend {
     artifact_root: PathBuf,
@@ -67,7 +68,8 @@ impl VmPatchbayBackend {
         let vm_target_dir = self.vm_target_dir()?;
 
         let topology = self.topology_path()?;
-        let output = Command::new("patchbay-vm")
+        let output = Command::new("patchbay")
+            .arg("vm")
             .arg("run")
             .arg(topology)
             .arg("--work-dir")
@@ -78,11 +80,11 @@ impl VmPatchbayBackend {
             .env("CARGO_TARGET_DIR", &vm_target_dir)
             .env("NETSIM_TARGET_DIR", &vm_target_dir)
             .output()
-            .context("failed to run patchbay-vm")?;
+            .context("failed to run `patchbay vm run`")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("patchbay-vm run failed: {stderr}");
+            bail!("`patchbay vm run` failed: {stderr}");
         }
 
         Ok(())

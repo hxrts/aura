@@ -1274,8 +1274,9 @@ Patchbay is the authoritative NAT-realism backend for holepunch validation. Use 
 The Linux harness pins Patchbay to upstream revision
 `5cc60db1eb190360dfcd64eaf2f829bce4072551` (the `patchbay-v0.7.0` tag). The same
 revision is exported as `aura_harness::network_lab::PATCHBAY_PINNED_REV` and
-passed to `patchbay-vm --patchbay-version`, so the native and VM lanes cannot
-drift; `scripts/ci/holepunch.sh audit` fails when the two disagree. Patchbay 0.7
+passed to `patchbay vm run --patchbay-version`, so the native and VM lanes cannot
+drift; the Nix flake builds that `patchbay` CLI from the same upstream revision
+(the former `hxrts/patchbay` fork is retired, upstream has Apple Silicon support); `scripts/ci/holepunch.sh audit` fails when the two disagree. Patchbay 0.7
 models NAT as three RFC 4787 behavior tiers (`Open`, `Moderate`, `Strict`) and
 Aura's deployment-named `NatPreset` values map onto them in
 `network_lab::topology_adapter::to_patchbay_nat`: `Home` and `Cgnat` are
@@ -1294,7 +1295,7 @@ target-specific compatibility. Regenerate the tracked `Cargo.nix` after changing
 these dependencies, commit it together with `Cargo.lock`, and run
 `just ci-security-audit`; `just ci-cargo-nix-check` fails when the two drift.
 
-`patchbay-vm` relies on the explicit harness work and artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
+The `patchbay-vm` backend runs the upstream `patchbay` CLI (`patchbay vm run`, built by the flake's `patchbay` package) and relies on the explicit harness work and artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
 
 ### Backend Resolution
 

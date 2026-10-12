@@ -24,9 +24,11 @@
       url = "github:AeneasVerif/aeneas";
       # Don't follow nixpkgs - Aeneas has specific OCaml/Coq version requirements
     };
-    # Patchbay: Network simulation for holepunch testing
+    # Patchbay: Network simulation for holepunch testing. Pinned to the same
+    # upstream revision as crates/aura-harness/Cargo.toml and
+    # aura_harness::network_lab::PATCHBAY_PINNED_REV (the patchbay-v0.7.0 tag).
     patchbay = {
-      url = "github:hxrts/patchbay/hxrts/aura";
+      url = "github:n0-computer/patchbay/5cc60db1eb190360dfcd64eaf2f829bce4072551";
       flake = false; # Use as source, not as flake (no packages exported)
     };
   };
@@ -134,32 +136,28 @@
           };
         };
 
-        # patchbay-vm: QEMU wrapper for running patchbay network simulations
+        # patchbay: unified upstream CLI whose `vm` subcommand drives patchbay
+        # network simulations in a QEMU guest (`patchbay vm run`). Built without
+        # the `serve`/`upload` features so no UI bundle or network fetch is needed.
         # Only available on Linux (requires QEMU and network namespace support)
-        patchbay-vm = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (
-          pkgs.rustPlatform.buildRustPackage {
-            pname = "patchbay-vm";
-            version = "0.1.0";
+        patchbayCli = pkgs.rustPlatform.buildRustPackage {
+            pname = "patchbay";
+            version = "0.7.0";
             src = patchbay;
             cargoLock = {
               lockFile = "${patchbay}/Cargo.lock";
             };
-            cargoBuildFlags = [ "-p" "patchbay-vm" ];
-            nativeBuildInputs = with pkgs; [ pkg-config nodejs ]; # nodejs for patchbay-utils build
+            cargoBuildFlags = [ "-p" "patchbay-cli" "--no-default-features" "--features" "vm" ];
+            nativeBuildInputs = with pkgs; [ pkg-config ];
             buildInputs = with pkgs; [ openssl ];
             # Skip tests as they require network capabilities
             doCheck = false;
-            # npm needs HOME to write logs
-            preBuild = ''
-              export HOME=$(mktemp -d)
-            '';
             meta = with pkgs.lib; {
-              description = "QEMU VM wrapper for patchbay network simulations";
+              description = "Patchbay CLI with the QEMU VM backend for network simulations";
               license = with licenses; [ mit asl20 ];
               platforms = platforms.linux;
             };
-          }
-        );
+          };
 
         # Import generated Cargo.nix with CC crate fix and other overrides
         cargoNix = import ./Cargo.nix {
@@ -220,6 +218,9 @@
             ${crate2nix.packages.${system}.default}/bin/crate2nix generate
             echo "Cargo.nix regenerated successfully!"
           '';
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          # Upstream patchbay CLI for the patchbay-vm harness backend.
+          patchbay = patchbayCli;
         };
 
         checks = {

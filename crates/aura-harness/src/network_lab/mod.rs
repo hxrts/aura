@@ -363,14 +363,14 @@ pub fn resolve_backend_mode(requested: NetworkBackendMode) -> BackendPreflightRe
         },
     });
 
-    let vm_available = binary_in_path("patchbay-vm");
+    let vm_available = binary_in_path("patchbay");
     checks.push(BackendPreflightCheck {
         name: "patchbay_vm_binary".to_string(),
         ok: vm_available,
         details: if vm_available {
-            "patchbay-vm found in PATH".to_string()
+            "patchbay CLI (vm subcommand) found in PATH".to_string()
         } else {
-            "patchbay-vm not found in PATH".to_string()
+            "patchbay CLI not found in PATH".to_string()
         },
     });
 

@@ -93,10 +93,10 @@ EOF_MD
       echo "# Holepunch Toolchain Audit"
       echo "patchbay-pin: $vm_rev"
       echo "cargo-lock-pin: ok"
-      if command -v patchbay-vm >/dev/null 2>&1; then
-        echo "patchbay-vm: $(patchbay-vm --version 2>/dev/null || echo installed)"
+      if command -v patchbay >/dev/null 2>&1; then
+        echo "patchbay-cli: $(patchbay --version 2>/dev/null || echo installed)"
       else
-        echo "patchbay-vm: not installed in runner"
+        echo "patchbay-cli: not installed in runner"
       fi
     } > artifacts/holepunch/weekly/toolchain-audit.md
     ;;
