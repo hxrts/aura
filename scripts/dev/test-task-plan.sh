@@ -51,12 +51,15 @@ cmp -s "$plan" "$fixture/duplicate.md"
 cat > "$plan" <<'EOF'
 - [x] 72. Completed numeric task.
   - Acceptance: retain original contract.
+##### Task 72 owned addendum
+  - Retain this additional contract.
 ### Next independent section
 - [ ] **S6. Unnumbered live task.**
   - Its independent acceptance.
 - [ ] 109. Another numeric task.
 EOF
 "${tool[@]}" show 72 > "$fixture/bounded-show.md"
+rg -q 'Retain this additional contract' "$fixture/bounded-show.md"
 if rg -q 'independent|S6|109' "$fixture/bounded-show.md"; then exit 1; fi
 "${tool[@]}" log 72 "$fixture/entry.md" > "$fixture/bounded-log.log"
 awk '/New evidence/ { added=NR } /^### Next/ { boundary=NR } END { exit !(added && added<boundary) }' "$plan"

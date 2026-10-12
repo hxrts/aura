@@ -39,7 +39,8 @@ awk -v action="$command_name" -v task="$task" -v entry="$entry" \
   END {
     for (i=1;i<=NR;i++) {
       if (start && i>start && !stop &&
-          (lines[i] ~ /^#/ || lines[i] ~ /^- \[[ x]\] /)) stop=i
+          (lines[i] ~ /^# / || lines[i] ~ /^###? / ||
+           lines[i] ~ /^- \[[ x]\] /)) stop=i
       if (lines[i] ~ /^- \[[ x]\] [0-9]+\./) {
         if (header_id(lines[i]) == task) { start=i; found++ }
       }
