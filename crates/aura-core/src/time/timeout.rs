@@ -1126,11 +1126,46 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, TimeoutRunError<E>>>,
 {
+    bounded_timeout_observation_with_deadline_projection(time, budget, observe, |witness| {
+        expire_witnessed_deadline::<std::convert::Infallible>(budget, witness.map_err(time_error)?)
+    })
+    .await
+}
+
+async fn bounded_timeout_observation_with_deadline_projection<TTime, F, Fut, T, E, D>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    observe: F,
+    project_deadline: D,
+) -> Result<(T, TimeoutObservationLease), TimeoutRunError<E>>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, TimeoutRunError<E>>>,
+    D: FnOnce(Result<PhysicalTime, TimeError>) -> TimeoutBudgetResult<std::convert::Infallible>,
+{
     let observation = Box::pin(async {
         let lease = budget.acquire_observation().await;
         let value = observe().await?;
         Ok((value, lease))
     });
+    race_original_deadline(time, budget, observation, project_deadline).await
+}
+
+// One arbitration owner for observations and work. Work may intentionally run
+// without an observation lease when original descendants need that same gate.
+async fn race_original_deadline<TTime, Fut, T, E, D>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    work: Fut,
+    project_deadline: D,
+) -> Result<T, TimeoutRunError<E>>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    Fut: Future<Output = Result<T, TimeoutRunError<E>>>,
+    D: FnOnce(Result<PhysicalTime, TimeError>) -> TimeoutBudgetResult<std::convert::Infallible>,
+{
+    let observation = Box::pin(work);
     let deadline =
         Box::pin(time.wait_until_physical_deadline(WindowPosition::new(budget.deadline_at_ms())));
     let witness = match futures::future::select(deadline, observation).await {
@@ -1150,13 +1185,247 @@ where
             }
         }
     };
-    expire_witnessed_deadline(
+    match project_deadline(witness) {
+        Err(error) => Err(TimeoutRunError::Timeout(error)),
+        Ok(never) => match never {},
+    }
+}
+
+/// The actual result of a required checkpoint attempt. This observation does
+/// not authorize domain cleanup or prove durable terminal completion.
+pub enum CheckpointAttempt<A> {
+    /// The caller's actual checkpoint returned this receipt under its endpoint.
+    Returned(A),
+    /// No checkpoint future was polled before the original window failed.
+    NotAttempted,
+    /// Callback was polled but returned no receipt or native failure before disposal.
+    Interrupted,
+    /// The callback returned this actual native failure; deadline disposition is separate.
+    Failed { source: TimeoutBudgetError },
+}
+
+/// Negative-only observation; no positive publication or domain authority.
+pub struct NegativeCheckpointObservation<P, A> {
+    pub primary: P,
+    pub checkpoint: CheckpointAttempt<A>,
+    pub validation: TimeoutBudgetResult<PhysicalTime>,
+}
+
+impl TimeoutBudget {
+    // Private: only the negative helper bypasses positive sticky rollback refusal.
+    fn validate_negative_observation(&self, now: &PhysicalTime) -> TimeoutBudgetResult<()> {
+        let mut clock = self
+            .clock
+            .state
+            .try_lock()
+            .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        let mut expired = self
+            .expired_at_ms
+            .try_lock()
+            .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        if now.ts_ms < clock.max_observed_at_ms
+            && matches!(clock.rollback, TimeoutClockRollbackSnapshot::Absent)
+        {
+            clock.rollback = TimeoutClockRollbackSnapshot::Detected {
+                previous_observed_at_ms: clock.max_observed_at_ms,
+                observed_at_ms: now.ts_ms,
+            };
+        }
+        clock.max_observed_at_ms = clock.max_observed_at_ms.max(now.ts_ms);
+        let effective = clock.max_observed_at_ms;
+        if let Some(observed_at_ms) = *expired {
+            return Err(TimeoutBudgetError::deadline_exceeded(
+                self.deadline_at_ms(),
+                observed_at_ms,
+            ));
+        }
+        if effective >= self.deadline_at_ms() {
+            *expired = Some(effective);
+            return Err(TimeoutBudgetError::deadline_exceeded(
+                self.deadline_at_ms(),
+                effective,
+            ));
+        }
+        // A rolled-back sample below allocation start cannot restore positive
+        // eligibility, but does not prevent destructive refusal within the
+        // retained original high-water interval.
+        if effective < self.started_at_ms() {
+            return Err(TimeoutBudgetError::CheckpointDiscontinuity {
+                detail: "negative cleanup highwater precedes original allocation start".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Actual negative-only work and its independent clock validation. This result
+/// does not construct cleanup authority or acknowledge durable completion.
+pub struct NegativeCleanupExecution<P, T, E> {
+    pub primary: P,
+    pub operation: Option<Result<T, E>>,
+    pub validation: TimeoutBudgetResult<PhysicalTime>,
+}
+
+async fn observe_negative_cleanup<TTime>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+) -> TimeoutBudgetResult<PhysicalTime>
+where
+    TTime: PhysicalTimeEffects + Sync,
+{
+    let observed = bounded_timeout_observation_with_deadline_projection(
+        time,
         budget,
-        witness
-            .map_err(time_error)
-            .map_err(TimeoutRunError::Timeout)?,
+        || async {
+            let now = current_physical_time(time)
+                .await
+                .map_err(TimeoutRunError::<std::convert::Infallible>::Timeout)?;
+            budget
+                .validate_negative_observation(&now)
+                .map_err(TimeoutRunError::Timeout)?;
+            Ok(now)
+        },
+        |witness| negative_deadline_validation(budget, witness),
     )
-    .map_err(TimeoutRunError::Timeout)
+    .await;
+    match observed {
+        Ok((now, lease)) => {
+            drop(lease);
+            Ok(now)
+        }
+        Err(TimeoutRunError::Timeout(source)) => Err(source),
+        Err(TimeoutRunError::Operation(never)) => match never {},
+    }
+}
+
+/// Bound original negative work without retaining the observation gate while
+/// descendants drain. The caller must already own the original negative-only
+/// authority and cleanup endpoint. Actual proofs must be stored in its retained
+/// holder before Ready; cancelling this entire future otherwise drops local T.
+pub async fn execute_negative_cleanup_with_timeout_budget<TTime, P, F, Fut, T, E>(
+    time: &TTime,
+    original_cleanup: &TimeoutBudget,
+    primary: P,
+    operation: F,
+) -> NegativeCleanupExecution<P, T, E>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    if let Err(source) = observe_negative_cleanup(time, original_cleanup).await {
+        return NegativeCleanupExecution {
+            primary,
+            operation: None,
+            validation: Err(source),
+        };
+    }
+    let mut completed = None;
+    let work = async {
+        completed = Some(operation().await);
+        Ok::<(), TimeoutRunError<std::convert::Infallible>>(())
+    };
+    let raced = race_original_deadline(time, original_cleanup, work, |witness| {
+        negative_deadline_validation(original_cleanup, witness)
+    })
+    .await;
+    let validation = match raced {
+        Ok(()) => observe_negative_cleanup(time, original_cleanup).await,
+        Err(TimeoutRunError::Timeout(source)) => Err(source),
+        Err(TimeoutRunError::Operation(never)) => match never {},
+    };
+    NegativeCleanupExecution {
+        primary,
+        operation: completed,
+        validation,
+    }
+}
+
+pub async fn acknowledge_negative_cleanup_with_timeout_budget<TTime, P, C, CFut, A>(
+    time: &TTime,
+    original_cleanup: &TimeoutBudget,
+    primary: P,
+    checkpoint: C,
+) -> NegativeCheckpointObservation<P, A>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    C: FnOnce() -> CFut,
+    CFut: Future<Output = TimeoutBudgetResult<A>>,
+{
+    // These slots belong to the returned owner outcome, outside the losing
+    // future. A completed write receipt survives deadline-first arbitration.
+    let mut returned = None;
+    let mut attempted = false;
+    let mut checkpoint_error = None;
+    let observed = bounded_timeout_observation_with_deadline_projection(
+        time,
+        original_cleanup,
+        || async {
+            let validation: TimeoutBudgetResult<PhysicalTime> = async {
+                let before = current_physical_time(time).await?;
+                original_cleanup.validate_negative_observation(&before)?;
+                attempted = true;
+                match checkpoint().await {
+                    Ok(receipt) => returned = Some(receipt),
+                    Err(error) => {
+                        checkpoint_error = Some(error.clone());
+                        return Err(error);
+                    }
+                }
+                let after = current_physical_time(time).await?;
+                original_cleanup.validate_negative_observation(&after)?;
+                Ok(after)
+            }
+            .await;
+            validation.map_err(TimeoutRunError::<std::convert::Infallible>::Timeout)
+        },
+        |witness| negative_deadline_validation(original_cleanup, witness),
+    )
+    .await;
+    let validation = match observed {
+        Ok((now, lease)) => {
+            drop(lease);
+            Ok(now)
+        }
+        Err(TimeoutRunError::Timeout(error)) => Err(error),
+        Err(TimeoutRunError::Operation(never)) => match never {},
+    };
+    let checkpoint = match returned {
+        Some(receipt) => CheckpointAttempt::Returned(receipt),
+        None if !attempted => CheckpointAttempt::NotAttempted,
+        None => match checkpoint_error {
+            Some(source) => CheckpointAttempt::Failed { source },
+            None => CheckpointAttempt::Interrupted,
+        },
+    };
+    NegativeCheckpointObservation {
+        primary,
+        checkpoint,
+        validation,
+    }
+}
+
+fn negative_deadline_validation(
+    budget: &TimeoutBudget,
+    witness: Result<PhysicalTime, TimeError>,
+) -> TimeoutBudgetResult<std::convert::Infallible> {
+    let now = witness.map_err(time_error)?;
+    budget.validate_negative_observation(&now)?;
+    // An early selected timer return is a contract failure, never fabricated expiry.
+    if now.ts_ms < budget.deadline_at_ms() {
+        return Err(TimeoutBudgetError::invalid_policy(
+            "provider returned before the original negative cleanup endpoint",
+        ));
+    }
+    let mut expired = budget
+        .expired_at_ms
+        .try_lock()
+        .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+    let observed = *expired.get_or_insert(now.ts_ms);
+    Err(TimeoutBudgetError::deadline_exceeded(
+        budget.deadline_at_ms(),
+        observed,
+    ))
 }
 
 /// Execute under a deadline whose owner acknowledges every observation before
@@ -1365,6 +1634,7 @@ fn time_error(error: TimeError) -> TimeoutBudgetError {
 #[cfg(test)]
 #[allow(clippy::disallowed_types, clippy::expect_used, clippy::redundant_clone)]
 mod tests {
+    use super::TimeoutBudgetResult;
     use super::{
         acknowledge_initial_publication_with_timeout_budget, execute_with_retry_budget,
         execute_with_timeout_budget, execute_with_timeout_budget_and_checkpoint, AttemptBudget,
@@ -1380,6 +1650,7 @@ mod tests {
     };
     use futures::FutureExt;
     use parking_lot::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use std::{collections::VecDeque, sync::Arc};
 
@@ -3081,6 +3352,421 @@ mod tests {
             .source()
             .unwrap()
             .is::<TimeError>());
+    }
+    #[tokio::test]
+    async fn required_negative_work_releases_original_gate_for_descendant_disposal() {
+        let budget = terminal_test_budget();
+        let clock = ScriptedTimeEffects::new(
+            [physical_time(100), physical_time(100)],
+            SleepBehavior::Immediate,
+        );
+        let result = super::execute_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original cancellation",
+            || async {
+                // A descendant's required cleanup uses this identical owner.
+                // Holding the parent's observation lease would stall here.
+                let lease = budget.acquire_observation().await;
+                drop(lease);
+                Ok::<_, std::io::Error>(41u32)
+            },
+        )
+        .await;
+        assert_eq!(result.primary, "original cancellation");
+        assert!(matches!(result.operation, Some(Ok(41))));
+        assert!(result.validation.is_ok());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_negative_work_same_poll_endpoint_retains_completed_result() {
+        let (clock, endpoint) = ScriptedTimeEffects::new(
+            [physical_time(100), physical_time(100)],
+            SleepBehavior::Immediate,
+        )
+        .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let result = super::execute_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original cancellation",
+            || async move {
+                endpoint
+                    .send(Ok(physical_time(500)))
+                    .expect("original endpoint witness");
+                Err::<(), _>(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "native disposal failure",
+                ))
+            },
+        )
+        .await;
+        assert_eq!(result.primary, "original cancellation");
+        assert!(
+            matches!(result.operation, Some(Err(ref source)) if source.kind() == std::io::ErrorKind::BrokenPipe)
+        );
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_negative_work_bounds_hung_disposal_and_drops_losing_work() {
+        struct DisposalWait(Arc<AtomicUsize>);
+        impl Drop for DisposalWait {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let (clock, endpoint) =
+            ScriptedTimeEffects::new([physical_time(100)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let actual_wait = DisposalWait(dropped.clone());
+        let mut execution = Box::pin(super::execute_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original abort",
+            || async move {
+                let _actual_wait = actual_wait;
+                futures::future::pending::<Result<(), std::io::Error>>().await
+            },
+        ));
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        let result = execution.await;
+        assert_eq!(result.primary, "original abort");
+        assert!(result.operation.is_none());
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn required_negative_cleanup_preserves_rollback_and_allows_below_start_sample() {
+        let positive = terminal_test_budget();
+        let cleanup = TimeoutBudget::from_start_and_timeout_with_observation(
+            &physical_time(100),
+            Duration::from_millis(700),
+            positive.clock.clone(),
+        )
+        .expect("original birth cleanup interval");
+        let primary = positive
+            .remaining_at(&physical_time(99))
+            .expect_err("actual rollback");
+        let clock = ScriptedTimeEffects::new(
+            [physical_time(99), physical_time(99)],
+            SleepBehavior::Immediate,
+        );
+        let result = super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &cleanup,
+            primary.clone(),
+            || futures::future::ready(Ok(41u32)),
+        )
+        .await;
+        assert!(matches!(
+            result.primary,
+            TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 100,
+                observed_at_ms: 99
+            }
+        ));
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::Returned(41)
+        ));
+        assert!(result.validation.is_ok());
+        assert!(matches!(
+            positive.remaining_at(&physical_time(200)),
+            Err(TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 100,
+                observed_at_ms: 99
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn required_negative_cleanup_same_poll_endpoint_retains_actual_receipt() {
+        let (clock, endpoint) = ScriptedTimeEffects::new(
+            [physical_time(100), physical_time(100)],
+            SleepBehavior::Immediate,
+        )
+        .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let result = super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original cancellation",
+            || async move {
+                endpoint
+                    .send(Ok(physical_time(500)))
+                    .expect("actual endpoint witness");
+                Ok(41u32)
+            },
+        )
+        .await;
+        assert_eq!(result.primary, "original cancellation");
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::Returned(41)
+        ));
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_negative_cleanup_hung_read_is_bounded_without_checkpoint_attempt() {
+        let (clock, endpoint) =
+            ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_controlled_deadline();
+        let clock = clock.with_clock_reads(vec![futures::future::pending().boxed()]);
+        let budget = terminal_test_budget();
+        let mut observation = Box::pin(super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original abort",
+            || futures::future::ready(Ok(41u32)),
+        ));
+        assert!(futures::poll!(observation.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("actual endpoint witness");
+        let result = observation.await;
+        assert_eq!(result.primary, "original abort");
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::NotAttempted
+        ));
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+    #[tokio::test]
+    async fn required_negative_cleanup_postread_fault_retains_actual_receipt_and_native_source() {
+        let clock = ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_clock_reads(vec![
+            futures::future::ready(Ok(physical_time(100))).boxed(),
+            futures::future::ready(Err(TimeError::ServiceUnavailable)).boxed(),
+        ]);
+        let budget = terminal_test_budget();
+        let result = super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original cancellation",
+            || futures::future::ready(Ok(41u32)),
+        )
+        .await;
+        assert_eq!(result.primary, "original cancellation");
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::Returned(41)
+        ));
+        let error = result
+            .validation
+            .expect_err("required selected postread must fail");
+        use std::error::Error;
+        assert!(matches!(
+            error
+                .source()
+                .and_then(|cause| cause.source())
+                .and_then(|cause| cause.downcast_ref::<TimeError>()),
+            Some(TimeError::ServiceUnavailable)
+        ));
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+    #[tokio::test]
+    async fn required_negative_cleanup_bounds_original_gate_without_checkpoint() {
+        let (clock, endpoint) =
+            ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let lease = budget.acquire_observation().await;
+        let mut observation = Box::pin(super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original abort",
+            || futures::future::ready(Ok(41u32)),
+        ));
+        assert!(futures::poll!(observation.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        let result = observation.await;
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::NotAttempted
+        ));
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        drop(lease);
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_negative_cleanup_bounds_callback_and_retains_interrupted_disposition() {
+        let (clock, endpoint) =
+            ScriptedTimeEffects::new([physical_time(100)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let mut observation = Box::pin(super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original abort",
+            futures::future::pending::<TimeoutBudgetResult<u32>>,
+        ));
+        assert!(futures::poll!(observation.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        let result = observation.await;
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::Interrupted
+        ));
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_negative_cleanup_bounds_postread_and_retains_receipt() {
+        let (clock, endpoint) =
+            ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_controlled_deadline();
+        let clock = clock.with_clock_reads(vec![
+            futures::future::ready(Ok(physical_time(100))).boxed(),
+            futures::future::pending().boxed(),
+        ]);
+        let budget = terminal_test_budget();
+        let mut observation = Box::pin(super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original abort",
+            || futures::future::ready(Ok(41u32)),
+        ));
+        assert!(futures::poll!(observation.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        let result = observation.await;
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::Returned(41)
+        ));
+        assert!(matches!(
+            result.validation,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_negative_cleanup_same_poll_timer_failure_retains_receipt_and_native_cause() {
+        let (clock, endpoint) = ScriptedTimeEffects::new(
+            [physical_time(100), physical_time(100)],
+            SleepBehavior::Immediate,
+        )
+        .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let result = super::acknowledge_negative_cleanup_with_timeout_budget(
+            &clock,
+            &budget,
+            "original abort",
+            || async move {
+                endpoint
+                    .send(Err(TimeError::ServiceUnavailable))
+                    .expect("actual native timer failure");
+                Ok(41u32)
+            },
+        )
+        .await;
+        assert!(matches!(
+            result.checkpoint,
+            super::CheckpointAttempt::Returned(41)
+        ));
+        let error = result.validation.expect_err("actual timer fault");
+        use std::error::Error;
+        let mut source = error.source();
+        let mut retained = false;
+        while let Some(cause) = source {
+            retained |= matches!(
+                cause.downcast_ref::<TimeError>(),
+                Some(TimeError::ServiceUnavailable)
+            );
+            source = cause.source();
+        }
+        assert!(retained);
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+    #[tokio::test]
+    async fn required_negative_cleanup_refuses_current_or_retained_endpoint_without_attempt() {
+        for retained_highwater in [false, true] {
+            let budget = terminal_test_budget();
+            if retained_highwater {
+                assert!(budget.remaining_at(&physical_time(500)).is_err());
+            }
+            let sample = if retained_highwater { 99 } else { 500 };
+            let clock = ScriptedTimeEffects::new([physical_time(sample)], SleepBehavior::Immediate);
+            let attempted = std::cell::Cell::new(false);
+            let result = super::acknowledge_negative_cleanup_with_timeout_budget(
+                &clock,
+                &budget,
+                "original abort",
+                || {
+                    attempted.set(true);
+                    futures::future::ready(Ok(41u32))
+                },
+            )
+            .await;
+            assert!(!attempted.get());
+            assert!(matches!(
+                result.checkpoint,
+                super::CheckpointAttempt::NotAttempted
+            ));
+            assert!(matches!(
+                result.validation,
+                Err(TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    ..
+                })
+            ));
+        }
     }
 }
 

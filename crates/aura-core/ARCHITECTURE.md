@@ -214,6 +214,8 @@ Timeout budgets retain their original deadline and share a latched physical-cloc
 
 The checkpointed timeout executor waits for the owner acknowledgment after each observation, including rollback and timer exhaustion, before polling the operation or returning its result. Cancellation before acknowledgment cannot continue the operation. Historical snapshot validation checks frozen bounds and sticky failure state without treating recorded time as a fresh clock observation; that pure check grants no authority.
 
+Negative cleanup primitives bound gate acquisition, physical reads, destructive work and checkpoint callbacks by the caller's original cleanup endpoint on the selected provider. They preserve actual operation results and checkpoint receipts independently from final deadline validation. They do not mint negative authority or authorize a renewed interval; the sealed domain owner must already retain the original cleanup capability authorized at birth. Destructive work releases its observation lease before polling descendants that may need the same gate. A caller must deposit required receipts in its retained holder before returning Ready, because dropping the entire helper cannot preserve helper-local custody. Positive sticky rollback remains latched.
+
 ### Native identity query failures
 
 Device leaf metadata decoding preserves the canonical codec source inside `AuraError::Serialization`; an empty legacy metadata value remains explicit absence, while malformed nonempty metadata is a required-read failure.

@@ -56,6 +56,32 @@ const TERMINAL_OBSERVATION_SUITES: &[LifecycleSuite] = &[
     LifecycleSuite {
         source: "crates/aura-core/src/time/timeout.rs",
         functions: &[
+            "required_negative_work_releases_original_gate_for_descendant_disposal",
+            "required_negative_work_same_poll_endpoint_retains_completed_result",
+            "required_negative_work_bounds_hung_disposal_and_drops_losing_work",
+        ],
+        harness_prefix: "time::timeout::tests::",
+        filter: "time::timeout::tests::required_negative_work_",
+    },
+    LifecycleSuite {
+        source: "crates/aura-core/src/time/timeout.rs",
+        functions: &[
+            "required_negative_cleanup_bounds_original_gate_without_checkpoint",
+            "required_negative_cleanup_bounds_callback_and_retains_interrupted_disposition",
+            "required_negative_cleanup_bounds_postread_and_retains_receipt",
+            "required_negative_cleanup_same_poll_timer_failure_retains_receipt_and_native_cause",
+            "required_negative_cleanup_refuses_current_or_retained_endpoint_without_attempt",
+            "required_negative_cleanup_preserves_rollback_and_allows_below_start_sample",
+            "required_negative_cleanup_same_poll_endpoint_retains_actual_receipt",
+            "required_negative_cleanup_hung_read_is_bounded_without_checkpoint_attempt",
+            "required_negative_cleanup_postread_fault_retains_actual_receipt_and_native_source",
+        ],
+        harness_prefix: "time::timeout::tests::",
+        filter: "time::timeout::tests::required_negative_cleanup_",
+    },
+    LifecycleSuite {
+        source: "crates/aura-core/src/time/timeout.rs",
+        functions: &[
             "required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease",
             "required_terminal_ack_bounds_contended_observation_gate",
             "required_terminal_ack_bounds_checkpoint_and_rejects_late_completion",
