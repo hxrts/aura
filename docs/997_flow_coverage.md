@@ -148,6 +148,10 @@ The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend
 | Decline inbound friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Remove friend / revoke outbound friendship | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate notifications | `shared-notifications-and-authority.toml` | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Contact link over one LAN inside patchbay namespaces (real instances, modeled router) | Scenario 13 under `configs/harness/patchbay-lan.toml` `--network-backend patchbay` (ubu1) | tier 2 `tests/holepunch/` | TUI in lab namespaces |
+| Relay-first contact link across two home NATs | Scenario 13 under `configs/harness/patchbay-double-nat.toml` (ubu1); currently fails at invitation acceptance, which is evidence about the rendezvous relay path, not the lab | tier 2 `tests/holepunch/` NAT cells | TUI in lab namespaces |
+| Direct-path upgrade and re-upgrade after NAT flush | not yet observable: needs the rendezvous path state exposed through `aura_app::ui_contract` | tier 1 `holepunch_tier1` invariants | TUI in lab namespaces |
+| Corporate (symmetric) NAT stays on relay with bounded attempts | not yet observable: same semantic observation dependency | tier 2 `corporate`/`udp_blocked` cells | TUI in lab namespaces |
 | Navigate settings | `shared-settings-parity.toml` | `shared-notifications-and-authority.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | TUI + Web |
 | Create invitation | Scenario 13 | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Accept invitation | Scenario 13 | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |

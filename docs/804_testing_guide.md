@@ -926,7 +926,7 @@ Multi-host runs use one harness per host with the same run token. Set `[run] fix
 
 The tracked LAN helpers live in `scripts/harness/lan/`. `configs/harness/lan-host-{a,b}.toml` name each host's LAN address as `__HOST_ADDR__`; `drv.sh start` renders the config with `AURA_E2E_HOST_ADDR` (detected from the primary interface by default), so no address is committed. Build and ship the exact commit's binaries, web bundle and runtime Nix closure from Host A with `ship.sh`; do not build on Air. `fresh.sh <run-token>` starts both drivers, onboards the standard cast and links contacts; `lib.sh` provides the request helpers used by scenario scripts.
 
-Schedule these cross-machine helpers after complete in-process validation, required local frontend coverage, checkpoint gates and main smoke. Batch several declared E2E flows into one owned run; preserve per-flow results and both-host cleanup evidence. A successful LAN flow does not replace deterministic fault, cancellation or restart coverage.
+Schedule these cross-machine helpers after complete in-process validation, required local frontend coverage, checkpoint gates and main smoke. Batch several declared E2E flows into one owned run; preserve per-flow results and both-host cleanup evidence. A successful LAN flow does not replace deterministic fault, cancellation or restart coverage. The patchbay lab (§13) settles one-host transport assertions first: real instances in separate network namespaces behind modeled NATs, link impairment, NAT flushes and link toggles. Only assertions that need real machines, real broadcast domains or independent hosts stay LAN-only.
 
 Run a complete owned batch with `AURA_E2E_REMOTE=user@host scripts/harness/lan/batch.sh <fresh-token> -- bash <checklist.sh> [arguments...]`. It requires matching clean local/remote commits and the complete local smoke marker. Workflow success, failure and interruption all attempt both hosts' exact-token finalization independently, retain shutdown logs and return failure if cleanup refuses ownership. Interruption first cancels and waits for the owned checklist command before finalizing. The command and commit are recorded in `.tmp/lan-checklist-<token>/`; the caller must describe which flows its checklist actually covers.
 
@@ -1331,7 +1331,22 @@ patchbay run directory copy, one `<device>.pcap` per device captured by
 
 ### Backend Resolution
 
-The harness writes backend resolution details to `artifacts/harness/<run>/network_backend_preflight.json`. Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
+The harness writes backend resolution details to `artifacts/harness/<run>/network_backend_preflight.json`. Coverage has three tiers, and each proves something different:
+
+| Tier | Where | Proves | Does not prove |
+|---|---|---|---|
+| 1 | `aura-testkit` deterministic and property tests | retry-budget and path-selection invariants of `PeerConnectionActor` | anything about sockets or NAT |
+| 2 | `aura-harness` holepunch tests and lab runs (PR gating on Linux) | the lab provisions, applies events and collects artifacts; real `aura` instances in namespaces complete the shared scenarios over modeled NAT and impairment | carrier NAT behavior, cross-machine discovery |
+| 3 | nightly stress and flake detection | the same under repeated flushes, link toggles and the stress presets, attributed per condition | correctness of a single run |
+
+What no tier proves: real carrier or vendor NAT behavior. Patchbay models the
+RFC 4787 behavior classes with nftables and its own
+`docs/reference/nat-limitations.md` lists what that cannot express
+(port-preserving symmetric NAT, sequential port allocation, vendor quirks,
+behavior under load). A passing `corporate`/`strict` cell means symmetric NAT
+with random ports does not punch and the relay path holds, not carrier
+coverage. Real machines, real discovery broadcast domains and independent
+processes remain the two-host LAN batch's assertions.
 
 ### Triaging Failures
 
