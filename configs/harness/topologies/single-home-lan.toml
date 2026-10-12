@@ -1,0 +1,35 @@
+# One consumer router with two devices on its LAN. Devices share the router's
+# downstream bridge, so LAN discovery broadcasts reach each other and the
+# contact/channel scenarios run over real sockets inside patchbay namespaces.
+# NAT separation scenarios live in their own topology files.
+name = "single-home-lan"
+required_relay_authority = "alice"
+
+[[routers]]
+name = "home-a"
+nat = "home"
+firewall = "home"
+
+[[links]]
+left = "alice-dev"
+right = "home-a"
+condition = "wifi"
+
+[[links]]
+left = "bob-dev"
+right = "home-a"
+condition = "wifi"
+
+[[authorities]]
+authority_id = "alice"
+device_name = "alice-dev"
+gateway_router = "home-a"
+bind_address = "0.0.0.0:41001"
+relay_capable = true
+
+[[authorities]]
+authority_id = "bob"
+device_name = "bob-dev"
+gateway_router = "home-a"
+bind_address = "0.0.0.0:41002"
+relay_capable = false

@@ -36,6 +36,7 @@ use crate::backend::{
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::event_details;
 use crate::events::EventStream;
+use crate::network_lab::{InstanceNamespace, ProvisionedLab};
 use crate::runtime_substrate::RuntimeSubstrateController;
 use crate::screen_normalization::normalize_screen;
 use crate::timeouts::blocking_sleep;
@@ -77,6 +78,8 @@ pub struct HarnessCoordinator {
     instance_order: Vec<String>,
     instance_modes: HashMap<String, InstanceMode>,
     instance_bind_addresses: HashMap<String, String>,
+    /// Network namespace each instance was launched in; bind probes run there.
+    instance_namespaces: HashMap<String, InstanceNamespace>,
     instance_data_dirs: HashMap<String, PathBuf>,
     instance_transient_dirs: HashMap<String, PathBuf>,
     runtime_substrate: RuntimeSubstrate,
@@ -118,12 +121,24 @@ struct InstanceClaim {
 #[allow(clippy::disallowed_methods)] // Harness timeout enforcement requires wall-clock bounds.
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
+        Self::from_run_config_with_lab(config, None)
+    }
+
+    /// Build the coordinator, launching instances that map a `lab_authority`
+    /// inside the corresponding device namespace of `lab`. Such an instance
+    /// binds on the device's lab address (keeping its configured port) and
+    /// inherits the lab's per-authority environment.
+    pub fn from_run_config_with_lab(
+        config: &RunConfig,
+        lab: Option<&ProvisionedLab>,
+    ) -> Result<Self> {
         reap_orphaned_harness_processes();
         let browser_app_url = provision_browser_app_url(config)?;
         let mut backends = HashMap::new();
         let mut instance_order = Vec::new();
         let mut instance_modes = HashMap::new();
         let mut instance_bind_addresses = HashMap::new();
+        let mut instance_namespaces = HashMap::new();
         let mut instance_data_dirs = HashMap::new();
         let mut instance_transient_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
@@ -140,6 +155,27 @@ impl HarnessCoordinator {
                     browser_app_url.url
                 ));
             }
+            let namespace = match (&instance.lab_authority, lab) {
+                (Some(authority), Some(lab)) => {
+                    let context = lab.authority_context(authority)?;
+                    for (key, value) in &context.env {
+                        let already_set = instance
+                            .env
+                            .iter()
+                            .any(|entry| entry.split_once('=').is_some_and(|(k, _)| k == key));
+                        if !already_set {
+                            instance.env.push(format!("{key}={value}"));
+                        }
+                    }
+                    let namespace = lab.instance_namespace(authority)?;
+                    instance.bind_address = namespace.rewrite_bind_address(&instance.bind_address)?;
+                    namespace
+                }
+                (Some(authority), None) => bail!(
+                    "instance {id} maps lab_authority {authority} but no network lab was provisioned"
+                ),
+                (None, _) => InstanceNamespace::host(),
+            };
             let instance_mode = instance.mode.clone();
             let instance_bind_address = instance.bind_address.clone();
             let instance_data_dir = absolutize_path(instance.data_dir.clone());
@@ -170,10 +206,12 @@ impl HarnessCoordinator {
                     instance_transient_dir.display()
                 ));
             }
-            let backend = BackendHandle::from_config(instance, pty_rows, pty_cols)?;
+            let backend =
+                BackendHandle::from_config(instance, pty_rows, pty_cols, namespace.clone())?;
             instance_order.push(id.clone());
             instance_modes.insert(id.clone(), instance_mode);
             instance_bind_addresses.insert(id.clone(), instance_bind_address);
+            instance_namespaces.insert(id.clone(), namespace);
             instance_data_dirs.insert(id.clone(), instance_data_dir);
             instance_transient_dirs.insert(id.clone(), instance_transient_dir);
             backends.insert(id, backend);
@@ -223,6 +261,7 @@ impl HarnessCoordinator {
             instance_order,
             instance_modes,
             instance_bind_addresses,
+            instance_namespaces,
             instance_data_dirs,
             instance_transient_dirs,
             runtime_substrate: config.run.runtime_substrate,
@@ -797,11 +836,23 @@ impl HarnessCoordinator {
         if bind_address.ends_with(":0") {
             return Ok(());
         }
-        let listener = TcpListener::bind(&bind_address).map_err(|error| {
-            anyhow!("instance {instance_id} did not release bind address {bind_address}: {error}")
-        })?;
-        drop(listener);
-        Ok(())
+        // The address belongs to the namespace the instance ran in, so probe
+        // it from there; a lab address is not bindable from the host.
+        let namespace = self
+            .instance_namespaces
+            .get(instance_id)
+            .cloned()
+            .unwrap_or_else(InstanceNamespace::host);
+        let probe_instance = instance_id.to_string();
+        namespace.run_sync(move || {
+            let listener = TcpListener::bind(&bind_address).map_err(|error| {
+                anyhow!(
+                    "instance {probe_instance} did not release bind address {bind_address}: {error}"
+                )
+            })?;
+            drop(listener);
+            Ok(())
+        })
     }
 
     fn lookup_bind_address(&self, instance_id: &str) -> Result<String> {

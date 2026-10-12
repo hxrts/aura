@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use cfg_if::cfg_if;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-pub mod launcher;
 pub mod scenario_builder;
 pub mod topology_adapter;
 
@@ -232,6 +231,198 @@ pub trait NetworkLabBackend: Send + Sync {
     async fn apply_event(&mut self, event: NetworkEvent) -> Result<RawEventReceipt>;
     async fn collect_artifacts(&self, out_dir: &Path) -> Result<ArtifactBundle>;
     fn backend_mode(&self) -> NetworkBackendMode;
+    /// Namespace an instance process for `authority_id` must be spawned in.
+    /// Backends without isolated namespaces return the host namespace.
+    fn instance_namespace(&self, authority_id: &str) -> Result<InstanceNamespace> {
+        let _ = authority_id;
+        Ok(InstanceNamespace::host())
+    }
+}
+
+/// Network namespace in which a harness instance process runs.
+///
+/// Patchbay namespaces are anonymous: they exist only as file descriptors held
+/// by the lab and have no `/run/netns` entry, so they cannot be entered with
+/// `ip netns exec` or `nsenter`. The only way to put a child in one is to fork
+/// from a thread that already sits inside it, which is what [`Self::run_sync`]
+/// provides. The launcher forks the PTY child inside that closure.
+#[derive(Clone)]
+pub struct InstanceNamespace {
+    inner: NamespaceInner,
+}
+
+#[derive(Clone)]
+enum NamespaceInner {
+    Host,
+    #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+    Patchbay {
+        device: patchbay::Device,
+    },
+}
+
+impl fmt::Debug for InstanceNamespace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.name() {
+            Some(name) => write!(f, "InstanceNamespace({name})"),
+            None => f.write_str("InstanceNamespace(host)"),
+        }
+    }
+}
+
+impl InstanceNamespace {
+    /// The host network namespace: processes spawn as they do today.
+    pub fn host() -> Self {
+        Self {
+            inner: NamespaceInner::Host,
+        }
+    }
+
+    #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+    pub(crate) fn patchbay(device: patchbay::Device) -> Self {
+        Self {
+            inner: NamespaceInner::Patchbay { device },
+        }
+    }
+
+    pub fn is_host(&self) -> bool {
+        matches!(self.inner, NamespaceInner::Host)
+    }
+
+    /// Lab namespace name, or `None` for the host namespace.
+    pub fn name(&self) -> Option<&str> {
+        match &self.inner {
+            NamespaceInner::Host => None,
+            #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+            NamespaceInner::Patchbay { device } => Some(device.ns()),
+        }
+    }
+
+    /// IPv4 address of the device's default interface inside the lab.
+    pub fn lab_ipv4(&self) -> Option<std::net::Ipv4Addr> {
+        match &self.inner {
+            NamespaceInner::Host => None,
+            #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+            NamespaceInner::Patchbay { device } => device.ip(),
+        }
+    }
+
+    /// Run `f` inside this namespace and return its result. Anything `f`
+    /// forks or binds lives in the namespace. In the host namespace `f` runs
+    /// on the calling thread.
+    pub fn run_sync<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce() -> Result<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        match &self.inner {
+            NamespaceInner::Host => f(),
+            #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+            NamespaceInner::Patchbay { device } => device
+                .run_sync(f)
+                .with_context(|| format!("run inside lab namespace {}", device.ns())),
+        }
+    }
+
+    /// Rewrite the host part of `bind_address` to this namespace's lab address,
+    /// keeping the port. Host-namespace instances keep their address.
+    pub fn rewrite_bind_address(&self, bind_address: &str) -> Result<String> {
+        let Some(ip) = self.lab_ipv4() else {
+            return Ok(bind_address.to_string());
+        };
+        let (_, port) = bind_address
+            .trim()
+            .rsplit_once(':')
+            .ok_or_else(|| anyhow!("bind_address must be host:port, got {bind_address}"))?;
+        Ok(format!("{ip}:{port}"))
+    }
+}
+
+/// A provisioned network lab owned for the duration of a harness run.
+///
+/// Owns the backend, the lab runtime description and the Tokio runtime the
+/// async backend methods execute on. The current-thread runtime creates no
+/// threads of its own, so provisioning can follow
+/// [`prepare_native_patchbay`] while the process is still single-threaded.
+/// Drop order: instances must be stopped before this is dropped, since the
+/// namespaces disappear with it.
+pub struct ProvisionedLab {
+    runtime: tokio::runtime::Runtime,
+    backend: Box<dyn NetworkLabBackend>,
+    lab_runtime: LabRuntime,
+}
+
+impl fmt::Debug for ProvisionedLab {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProvisionedLab")
+            .field("backend_mode", &self.backend.backend_mode())
+            .field("topology", &self.lab_runtime.topology_name)
+            .finish()
+    }
+}
+
+impl ProvisionedLab {
+    /// Build the backend for `mode`, provision `topology` and retain both.
+    pub fn provision(
+        mode: NetworkBackendMode,
+        topology: TopologySpec,
+        artifact_root: &Path,
+    ) -> Result<Self> {
+        std::fs::create_dir_all(artifact_root)
+            .with_context(|| format!("create lab artifact root {}", artifact_root.display()))?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build network lab runtime")?;
+        let mut backend = build_backend(mode, artifact_root)?;
+        let lab_runtime = runtime
+            .block_on(backend.provision(topology))
+            .context("provision network lab")?;
+        Ok(Self {
+            runtime,
+            backend,
+            lab_runtime,
+        })
+    }
+
+    pub fn lab_runtime(&self) -> &LabRuntime {
+        &self.lab_runtime
+    }
+
+    pub fn backend_mode(&self) -> NetworkBackendMode {
+        self.backend.backend_mode()
+    }
+
+    pub fn authority_context(&self, authority_id: &str) -> Result<&AuthorityNetworkContext> {
+        self.lab_runtime
+            .authorities
+            .get(authority_id)
+            .ok_or_else(|| anyhow!("authority {authority_id} is not mapped in the network lab"))
+    }
+
+    pub fn instance_namespace(&self, authority_id: &str) -> Result<InstanceNamespace> {
+        self.authority_context(authority_id)?;
+        self.backend.instance_namespace(authority_id)
+    }
+
+    pub fn apply_event(&mut self, event: NetworkEvent) -> Result<RawEventReceipt> {
+        self.runtime.block_on(self.backend.apply_event(event))
+    }
+
+    pub fn collect_artifacts(&self, out_dir: &Path) -> Result<ArtifactBundle> {
+        self.runtime
+            .block_on(self.backend.collect_artifacts(out_dir))
+    }
+}
+
+/// Load a `TopologySpec` from a TOML file and validate it.
+pub fn load_topology(path: &Path) -> Result<TopologySpec> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("read network topology {}", path.display()))?;
+    let topology: TopologySpec = toml::from_str(&text)
+        .with_context(|| format!("parse network topology {}", path.display()))?;
+    scenario_builder::validate_topology(&topology)
+        .with_context(|| format!("validate network topology {}", path.display()))?;
+    Ok(topology)
 }
 
 /// Backend capability marker: supports NAT changes and resets.

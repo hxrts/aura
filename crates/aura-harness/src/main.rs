@@ -18,7 +18,9 @@ use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::failure_attribution::attribute_failure;
 use aura_harness::governance::{self, GovernanceCheck};
-use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
+use aura_harness::network_lab::{
+    load_topology, resolve_backend_mode, NetworkBackendMode, ProvisionedLab,
+};
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::residue_checks::check_run_residue;
@@ -179,12 +181,66 @@ fn run(args: RunArgs) -> Result<()> {
         }
     };
 
+    // The lab outlives the coordinator: instances are stopped inside
+    // run_with_artifacts, and the namespaces go away when this binding drops.
+    let network_lab = match &config.run.network_topology {
+        Some(topology_path) => {
+            if backend_preflight.fallback_used() {
+                let payload = serde_json::json!({
+                    "error": "network topology configured but requested backend unavailable",
+                    "requested": backend_preflight.requested,
+                    "resolved": backend_preflight.resolved,
+                    "checks": backend_preflight.checks,
+                });
+                let _ = artifact_bundle.write_json("network_lab_error.json", &payload);
+                return Err(anyhow!(
+                    "run.network_topology requires the requested --network-backend {}; preflight resolved {} (see network_lab_error.json)",
+                    backend_preflight.requested,
+                    backend_preflight.resolved
+                ));
+            }
+            let topology_path = if topology_path.is_absolute() {
+                topology_path.clone()
+            } else {
+                args.config
+                    .parent()
+                    .map(|dir| dir.join(topology_path))
+                    .unwrap_or_else(|| topology_path.clone())
+            };
+            let topology = load_topology(&topology_path)?;
+            for instance in &config.instances {
+                if let Some(authority) = &instance.lab_authority {
+                    if !topology
+                        .authorities
+                        .iter()
+                        .any(|mapped| mapped.authority_id == *authority)
+                    {
+                        return Err(anyhow!(
+                            "instance {} maps lab_authority {authority}, which is not in topology {}",
+                            instance.id,
+                            topology.name
+                        ));
+                    }
+                }
+            }
+            let lab = ProvisionedLab::provision(
+                backend_preflight.resolved,
+                topology,
+                &artifact_bundle.run_dir.join("network-lab"),
+            )?;
+            artifact_bundle.write_json("network_lab_runtime.json", lab.lab_runtime())?;
+            Some(lab)
+        }
+        None => None,
+    };
+
     let run_result = run_with_artifacts(
         &config,
         &artifact_bundle,
         &summary,
         &preflight_report,
         &backend_preflight,
+        network_lab.as_ref(),
         scenario_config.as_ref(),
     );
     if let Err(error) = run_result {
@@ -208,6 +264,7 @@ fn run_with_artifacts(
     summary: &aura_harness::tool_api::StartupSummary,
     preflight_report: &PreflightReport,
     backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
+    network_lab: Option<&ProvisionedLab>,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
     let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
@@ -215,7 +272,7 @@ fn run_with_artifacts(
     let mut resource_guard = ResourceGuard::from_run_config(config);
     resource_guard.sample("run_start");
 
-    let coordinator = HarnessCoordinator::from_run_config(config)?;
+    let coordinator = HarnessCoordinator::from_run_config_with_lab(config, network_lab)?;
     let mut tool_api = ToolApi::new(coordinator);
     if verbose_steps {
         eprintln!("[harness] startup phase=start_all begin");
@@ -285,6 +342,13 @@ fn run_with_artifacts(
     let events = tool_api.event_snapshot();
     let action_log = tool_api.action_log();
     tool_api.stop_all()?;
+    if let Some(lab) = network_lab {
+        // Instances are down; capture pcaps, namespace dumps and the lab's
+        // own run directory before the namespaces are torn down.
+        let lab_artifacts =
+            lab.collect_artifacts(&artifact_bundle.run_dir.join("network-lab-artifacts"))?;
+        artifact_bundle.write_json("network_lab_artifacts.json", &lab_artifacts)?;
+    }
     let post_run_residue_report = check_run_residue(config);
     if !post_run_residue_report.clean {
         artifact_bundle.write_json("post_run_residue_report.json", &post_run_residue_report)?;

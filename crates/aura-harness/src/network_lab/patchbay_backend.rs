@@ -405,6 +405,26 @@ impl NetworkLabBackend for PatchbayBackend {
     fn backend_mode(&self) -> NetworkBackendMode {
         NetworkBackendMode::Patchbay
     }
+
+    fn instance_namespace(&self, authority_id: &str) -> Result<super::InstanceNamespace> {
+        cfg_if! {
+            if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
+                let context = self
+                    .runtime()?
+                    .authorities
+                    .get(authority_id)
+                    .ok_or_else(|| anyhow!("unknown authority {authority_id}"))?;
+                let device = self
+                    .lab()?
+                    .device_by_name(&context.device_name)
+                    .ok_or_else(|| anyhow!("device {} not found", context.device_name))?;
+                Ok(super::InstanceNamespace::patchbay(device))
+            } else {
+                let _ = authority_id;
+                bail!("PatchbayBackend requires Linux with feature 'patchbay-backend' enabled")
+            }
+        }
+    }
 }
 
 impl CanNat for PatchbayBackend {}
