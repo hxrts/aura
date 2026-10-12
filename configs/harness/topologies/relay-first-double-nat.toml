@@ -1,0 +1,60 @@
+# Relay-first NAT traversal shape from docs/113_rendezvous.md: a public relay
+# behind a NAT-less core router and two peers each behind their own home NAT.
+# LAN discovery cannot cross the NATs, so any contact link here must go
+# through the relay path. A failure in this topology is evidence about the
+# rendezvous implementation, not about the harness lab.
+name = "relay-first-double-nat"
+required_relay_authority = "relay"
+
+[[routers]]
+name = "core-dc"
+nat = "none"
+firewall = "open"
+
+[[routers]]
+name = "nat-a"
+nat = "home"
+upstream = "core-dc"
+firewall = "home"
+
+[[routers]]
+name = "nat-b"
+nat = "home"
+upstream = "core-dc"
+firewall = "home"
+
+[[links]]
+left = "relay-dev"
+right = "core-dc"
+condition = "lan"
+
+[[links]]
+left = "alice-dev"
+right = "nat-a"
+condition = "wifi"
+
+[[links]]
+left = "bob-dev"
+right = "nat-b"
+condition = "wifi"
+
+[[authorities]]
+authority_id = "relay"
+device_name = "relay-dev"
+gateway_router = "core-dc"
+bind_address = "0.0.0.0:41000"
+relay_capable = true
+
+[[authorities]]
+authority_id = "alice"
+device_name = "alice-dev"
+gateway_router = "nat-a"
+bind_address = "0.0.0.0:41001"
+relay_capable = false
+
+[[authorities]]
+authority_id = "bob"
+device_name = "bob-dev"
+gateway_router = "nat-b"
+bind_address = "0.0.0.0:41002"
+relay_capable = false

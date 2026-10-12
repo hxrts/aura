@@ -1280,8 +1280,25 @@ drift; the Nix flake builds that `patchbay` CLI from the same upstream revision
 (the former `hxrts/patchbay` fork is retired, upstream has Apple Silicon support); `scripts/ci/holepunch.sh audit` fails when the two disagree. Patchbay 0.7
 models NAT as three RFC 4787 behavior tiers (`Open`, `Moderate`, `Strict`) and
 Aura's deployment-named `NatPreset` values map onto them in
-`network_lab::topology_adapter::to_patchbay_nat`: `Home` and `Cgnat` are
-`Moderate`, `Corporate` and `CloudNat` are `Strict`, `FullCone` is `Open`.
+`network_lab::topology_adapter::to_patchbay_nat`:
+
+| `NatPreset` | patchbay | RFC 4787 behavior | RFC 3489 name |
+|---|---|---|---|
+| `none` | `None` | no translation | public |
+| `full_cone` | `Open` | EIM + EIF | full cone |
+| `restricted` | custom `NatConfig` | EIM + ADF | restricted cone |
+| `home`, `cgnat` | `Moderate` | EIM + APDF | port-restricted cone |
+| `corporate`, `cloud_nat` | `Strict` | EDM (random ports) + APDF | symmetric |
+
+Link conditions: the named presets (`lan`, `wifi`, `wifi_bad`, `mobile4_g`,
+`mobile3_g`, `satellite`) map onto patchbay's presets; `wifi_bursty` adds
+Gilbert-Elliott bursty loss, `mobile4_g_congested` a rate cap with a bounded
+queue so loss emerges from overflow, and `custom` carries explicit
+`latency_ms`, `jitter_ms`, `rate_kbit`, `loss_tenths_pct`, `loss_burst_pkts`
+and `buffer_ms`. The stress presets are for the nightly tier 3 lane, not PR
+gating. Patchbay exposes no per-interface control on routers, so a
+router-to-router link condition applies on the downstream router's downlink
+bridge and its receipt names every authority behind that router.
 Patchbay's `docs/reference/nat-limitations.md` lists what it does not model
 (port-preserving symmetric NAT, sequential allocation, vendor quirks); a passing
 `Strict` scenario is not full carrier coverage. The Linux integration tests

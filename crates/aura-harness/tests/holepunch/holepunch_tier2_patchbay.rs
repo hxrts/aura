@@ -378,3 +378,67 @@ fn finished_lab_timeline_covers_provisioning_through_teardown() -> anyhow::Resul
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn restricted_nat_provisions_and_flushes() -> anyhow::Result<()> {
+    // Restricted cone (EIM + ADF) sits between Home and FullCone; patchbay has
+    // no tier for it, so it provisions as an explicit NAT config.
+    let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
+        "restricted",
+        NatPreset::Restricted,
+        NatPreset::Home,
+        FirewallPreset::Home,
+    ))
+    .await?;
+    let receipt = backend
+        .apply_event(NetworkEvent::FlushNat {
+            router: "home-a".to_string(),
+        })
+        .await?;
+    assert_eq!(receipt.event_type, "nat_flush");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
+    assert!(bundle.root.exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn stress_link_presets_apply_on_device_and_router_links() -> anyhow::Result<()> {
+    let (mut backend, _runtime, _temp, _artifact_root) = provision(topology(
+        "stress-presets",
+        NatPreset::Home,
+        NatPreset::Home,
+        FirewallPreset::Home,
+    ))
+    .await?;
+    let presets = [
+        LinkConditionPreset::WifiBursty,
+        LinkConditionPreset::Mobile4GCongested,
+        LinkConditionPreset::Custom {
+            latency_ms: 80,
+            jitter_ms: 20,
+            rate_kbit: Some(4_000),
+            loss_tenths_pct: 25,
+            loss_burst_pkts: Some(3),
+            buffer_ms: Some(160),
+        },
+    ];
+    for preset in presets {
+        let device = backend
+            .apply_event(NetworkEvent::SetLinkCondition {
+                left_node: "alice-dev".to_string(),
+                right_node: "home-a".to_string(),
+                condition: preset,
+            })
+            .await?;
+        assert_eq!(device.affected_authorities, vec!["alice".to_string()]);
+        let router = backend
+            .apply_event(NetworkEvent::SetLinkCondition {
+                left_node: "home-a".to_string(),
+                right_node: "edge-b".to_string(),
+                condition: preset,
+            })
+            .await?;
+        assert_eq!(router.affected_authorities, vec!["bob".to_string()]);
+    }
+    Ok(())
+}

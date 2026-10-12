@@ -141,3 +141,68 @@ async fn nightly_artifact_capture_and_retention_smoke() {
         assert!(timeline.exists());
     }
 }
+
+/// Nightly: cycle the realistic impairment presets on alice's uplink and the
+/// router link while flushing NAT state, one artifact directory per preset so a
+/// flake report attributes failures to a condition. Patchbay-level smoke only:
+/// AMP delivery assertions under these presets belong to the real-runtime lab
+/// scenario once chat delivery is stable on `main`.
+#[tokio::test]
+async fn stress_link_presets_under_nat_flush_cycles() {
+    let temp = tempfile::tempdir().unwrap();
+    let mode = resolve_backend_mode(NetworkBackendMode::Patchbay).resolved;
+    let presets = [
+        LinkConditionPreset::WifiBursty,
+        LinkConditionPreset::Mobile4GCongested,
+        LinkConditionPreset::Custom {
+            latency_ms: 150,
+            jitter_ms: 30,
+            rate_kbit: Some(1_500),
+            loss_tenths_pct: 40,
+            loss_burst_pkts: Some(5),
+            buffer_ms: Some(300),
+        },
+    ];
+    for preset in presets {
+        let out_root = artifact_root(temp.path()).join(format!("stress-preset-{}", preset.slug()));
+        std::fs::create_dir_all(&out_root).unwrap();
+        let mut backend = build_backend(mode, &out_root).unwrap();
+        backend.provision(stress_topology()).await.unwrap();
+
+        for _ in 0..10 {
+            backend
+                .apply_event(NetworkEvent::SetLinkCondition {
+                    left_node: "alice-dev".to_string(),
+                    right_node: "home-a".to_string(),
+                    condition: preset,
+                })
+                .await
+                .unwrap();
+            backend
+                .apply_event(NetworkEvent::SetLinkCondition {
+                    left_node: "home-a".to_string(),
+                    right_node: "corp-b".to_string(),
+                    condition: preset,
+                })
+                .await
+                .unwrap();
+            backend
+                .apply_event(NetworkEvent::FlushNat {
+                    router: "corp-b".to_string(),
+                })
+                .await
+                .unwrap();
+            backend
+                .apply_event(NetworkEvent::SetLinkCondition {
+                    left_node: "alice-dev".to_string(),
+                    right_node: "home-a".to_string(),
+                    condition: LinkConditionPreset::Lan,
+                })
+                .await
+                .unwrap();
+        }
+
+        let artifacts = backend.collect_artifacts(&out_root).await.unwrap();
+        assert!(artifacts.root.exists(), "{}", preset.slug());
+    }
+}

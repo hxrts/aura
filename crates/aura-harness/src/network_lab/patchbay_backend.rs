@@ -454,6 +454,7 @@ impl NetworkLabBackend for PatchbayBackend {
                 let entries = super::build_network_timeline(
                     &run_dir.join(super::LAB_EVENTS_FILE),
                     &self.receipts,
+                    true,
                 )?;
                 let timeline_path = super::write_network_timeline(out_dir, &entries)?;
 

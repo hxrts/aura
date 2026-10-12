@@ -100,6 +100,8 @@ pub struct LinkSpec {
     pub condition: LinkConditionPreset,
 }
 
+/// Deployment-named NAT presets. `topology_adapter::to_patchbay_nat` maps them
+/// onto patchbay's RFC 4787 behavior tiers.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NatPreset {
@@ -109,6 +111,10 @@ pub enum NatPreset {
     FullCone,
     Cgnat,
     CloudNat,
+    /// RFC 3489 "restricted cone": endpoint-independent mapping with
+    /// address-dependent filtering. Sits between `Home` (port-restricted) and
+    /// `FullCone`: any port of a contacted host gets back in.
+    Restricted,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,7 +126,10 @@ pub enum FirewallPreset {
     UdpBlocked,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Link impairment presets. The named ones map onto patchbay's presets; the
+/// stress-lane ones add clustered loss and a bottleneck buffer; `Custom`
+/// carries explicit parameters so a scenario can tune without a code change.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkConditionPreset {
     Lan,
@@ -129,6 +138,46 @@ pub enum LinkConditionPreset {
     Mobile4G,
     Mobile3G,
     Satellite,
+    /// Wifi with Gilbert-Elliott bursty loss: fades drop runs of packets
+    /// rather than one here and there, which stresses acknowledgment windows
+    /// more than the same rate spread evenly.
+    WifiBursty,
+    /// 4G behind a congested bottleneck: rate-capped with a buffer sized to the
+    /// round trip, so loss emerges from queue overflow instead of a dice roll.
+    Mobile4GCongested,
+    /// Explicit parameters. Loss is in tenths of a percent so the preset stays
+    /// `Eq`/`Hash`; `loss_burst_pkts` selects bursty loss, `buffer_ms` bounds
+    /// the rate-limiter queue (only with `rate_kbit`).
+    Custom {
+        latency_ms: u32,
+        jitter_ms: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rate_kbit: Option<u32>,
+        #[serde(default)]
+        loss_tenths_pct: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        loss_burst_pkts: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        buffer_ms: Option<u32>,
+    },
+}
+
+impl LinkConditionPreset {
+    /// Short name for artifact directories and reports, so a stress failure is
+    /// attributed to the condition it ran under.
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Self::Lan => "lan",
+            Self::Wifi => "wifi",
+            Self::WifiBad => "wifi-bad",
+            Self::Mobile4G => "mobile-4g",
+            Self::Mobile3G => "mobile-3g",
+            Self::Satellite => "satellite",
+            Self::WifiBursty => "wifi-bursty",
+            Self::Mobile4GCongested => "mobile-4g-congested",
+            Self::Custom { .. } => "custom",
+        }
+    }
 }
 
 /// Runtime network context for a launched authority.
@@ -470,7 +519,7 @@ impl ProvisionedLab {
 
         let mut lab_event_count = 0;
         if let Some(log) = lab_events_log {
-            let entries = build_network_timeline(&log, &receipts)?;
+            let entries = build_network_timeline(&log, &receipts, false)?;
             lab_event_count = entries
                 .iter()
                 .filter(|entry| matches!(entry, TimelineEntry::Lab { .. }))
@@ -1065,11 +1114,14 @@ impl TimelineEntry {
 
 /// Merge the lab's event log with the harness receipts into one ordered timeline.
 ///
-/// A missing or empty log yields only the harness entries; a malformed line is
-/// an error, since a partially read log would misrepresent what happened.
+/// A missing or empty log yields only the harness entries. A malformed line is
+/// an error, since a partially read log would misrepresent what happened, with
+/// one exception: while the lab is alive (`allow_partial_tail`) the writer may
+/// be mid-line, so an unparsable final line is dropped as not yet written.
 pub fn build_network_timeline(
     lab_events_log: &Path,
     receipts: &[RawEventReceipt],
+    allow_partial_tail: bool,
 ) -> Result<Vec<TimelineEntry>> {
     let mut entries: Vec<TimelineEntry> = receipts
         .iter()
@@ -1082,13 +1134,21 @@ pub fn build_network_timeline(
     if lab_events_log.exists() {
         let text = std::fs::read_to_string(lab_events_log)
             .with_context(|| format!("read lab event log {}", lab_events_log.display()))?;
-        for (index, line) in text.lines().enumerate() {
+        let lines: Vec<&str> = text.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
-            let event: serde_json::Value = serde_json::from_str(line).with_context(|| {
-                format!("parse lab event {}:{}", lab_events_log.display(), index + 1)
-            })?;
+            let parsed: std::result::Result<serde_json::Value, _> = serde_json::from_str(line);
+            let event = match parsed {
+                Ok(event) => event,
+                Err(_) if allow_partial_tail && index + 1 == lines.len() => break,
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("parse lab event {}:{}", lab_events_log.display(), index + 1)
+                    })
+                }
+            };
             let opid = event
                 .get("opid")
                 .and_then(serde_json::Value::as_u64)
