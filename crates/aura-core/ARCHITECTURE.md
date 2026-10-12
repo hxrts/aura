@@ -212,6 +212,8 @@ Timeout budgets retain their original deadline and share a latched physical-cloc
 
 ### Required observation acknowledgment
 
+The terminal acknowledgment boundary forwards the actual generic checkpoint receipt to synchronous publication under the original observation lease. The receipt need not clone or deserialize. It does not establish domain authority: the sealed caller must retain its required original receipt before returning Ready when cancellation of the entire helper could otherwise drop local custody.
+
 The checkpointed timeout executor waits for the owner acknowledgment after each observation, including rollback and timer exhaustion, before polling the operation or returning its result. Cancellation before acknowledgment cannot continue the operation. Historical snapshot validation checks frozen bounds and sticky failure state without treating recorded time as a fresh clock observation; that pure check grants no authority.
 
 Negative cleanup primitives bound gate acquisition, physical reads, destructive work and checkpoint callbacks by the caller's original cleanup endpoint on the selected provider. They preserve actual operation results and checkpoint receipts independently from final deadline validation. They do not mint negative authority or authorize a renewed interval; the sealed domain owner must already retain the original cleanup capability authorized at birth. Destructive work releases its observation lease before polling descendants that may need the same gate. A caller must deposit required receipts in its retained holder before returning Ready, because dropping the entire helper cannot preserve helper-local custody. Positive sticky rollback remains latched.
@@ -250,6 +252,21 @@ rollback from delayed earlier queries.
 ### Required task outcome contract
 
 `TaskSpawner` and `OwnedTaskSpawner` distinguish unit background work from required cancellable work returning `Result<(), AuraError>`. Required admission returns a native error immediately when the adapter cannot supervise it or the runtime owner has closed admission. Unsupported adapters cannot acknowledge successful required admission. The owned facade rejects unit futures for required work; its compile-fail guard enforces that distinction.
+
+Required task admission transfers an actual `RequiredTaskCustody` or
+`LocalRequiredTaskCustody` into the configured supervisor. Both retained owners
+are `Send`; local borrowed futures may remain executor-local. Rejection returns
+the original boxed owner and concrete admission failure. The configured spawner
+alone installs required supervision control in the private control field of
+`OwnedTaskHandle`; that specialization cannot clone, deserialize or reconstruct
+control through the ordinary unit-control constructor. Supervision control does
+not prove a domain acknowledgment.
+
+Required cleanup reports resource settlement separately from domain success.
+`RequiredTaskSettlement::ResolvedWithDomainFailure` carries the actual terminal
+validation source after required resources have settled. It is a supervision
+outcome, never a domain receipt. `RequiredTaskTerminalFailure` retains the
+original execution disposition and independent terminal cause.
 
 ### Individual participant key proofs
 

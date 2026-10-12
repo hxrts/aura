@@ -551,7 +551,7 @@ impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
                     .await
                     .map_err(TimeoutBudgetError::checkpoint_failure)
             },
-            || AcknowledgedIssuerEnrollmentWindow { terminal },
+            |()| AcknowledgedIssuerEnrollmentWindow { terminal },
         )
         .await
         .map_err(AuraError::from)

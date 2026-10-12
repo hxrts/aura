@@ -1505,7 +1505,7 @@ where
 /// and checkpoint. This helper does not establish domain completion: its caller
 /// must already hold the actual resource owner's acknowledgment. No await or
 /// fallible clock validation follows publication.
-pub async fn acknowledge_with_timeout_budget<TTime, C, CFut, P, T>(
+pub async fn acknowledge_with_timeout_budget<TTime, C, CFut, P, T, A>(
     time: &TTime,
     budget: &TimeoutBudget,
     checkpoint: C,
@@ -1514,21 +1514,22 @@ pub async fn acknowledge_with_timeout_budget<TTime, C, CFut, P, T>(
 where
     TTime: PhysicalTimeEffects + Sync,
     C: FnOnce() -> CFut,
-    CFut: Future<Output = TimeoutBudgetResult<()>>,
-    P: FnOnce() -> T,
+    CFut: Future<Output = TimeoutBudgetResult<A>>,
+    P: FnOnce(A) -> T,
 {
-    let ((), _lease) = bounded_timeout_observation(time, budget, || async {
+    // The sealed caller retains actual domain receipt custody before returning
+    // Ready; A may borrow it. This local race cannot preserve owned A against
+    // dropping the entire helper future.
+    let (receipt, _lease) = bounded_timeout_observation(time, budget, || async {
         let now = current_physical_time(time).await?;
         budget.remaining_at(&now)?;
-        checkpoint().await?;
-        // A checkpoint may advance the selected clock in the same poll that
-        // returns Ready. Validate that completion under the original race.
+        let receipt = checkpoint().await?;
         let completed_at = current_physical_time(time).await?;
         budget.remaining_at(&completed_at)?;
-        Ok(())
+        Ok(receipt)
     })
     .await?;
-    Ok(publish())
+    Ok(publish(receipt))
 }
 
 fn expire_witnessed_deadline<T>(
@@ -1720,6 +1721,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn required_terminal_ack_forwards_original_nonclone_callback_receipt() {
+        struct ActualReceipt(Arc<()>);
+        let identity = Arc::new(());
+        let checkpoint_identity = identity.clone();
+        let clock = ScriptedTimeEffects::new(
+            [physical_time(100), physical_time(100)],
+            SleepBehavior::Immediate,
+        );
+        let budget = terminal_test_budget();
+        let retained = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async move { Ok(ActualReceipt(checkpoint_identity)) },
+            |receipt| Arc::ptr_eq(&identity, &receipt.0),
+        )
+        .await
+        .expect("actual receipt under original endpoint");
+        assert!(retained);
+    }
+    #[tokio::test]
     async fn required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease() {
         let (clock, read, endpoint) = TerminalObservationClock::controlled();
         let budget = terminal_test_budget();
@@ -1728,7 +1749,7 @@ mod tests {
             &clock,
             &budget,
             || async { Ok(()) },
-            || published.set(true),
+            |()| published.set(true),
         ));
         assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
         endpoint
@@ -1763,7 +1784,7 @@ mod tests {
             &clock,
             &budget,
             || async { Ok(()) },
-            || published.set(true),
+            |()| published.set(true),
         ));
         assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
         endpoint
@@ -1796,7 +1817,7 @@ mod tests {
                 checkpoint.await.expect("checkpoint release");
                 Ok(())
             },
-            || published.set(true),
+            |()| published.set(true),
         ));
         assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
         checkpoint_release
@@ -1836,7 +1857,7 @@ mod tests {
             &clock,
             &budget,
             || async { Ok(()) },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await
         .expect_err("timer outage is not timeout or successful acknowledgment");
@@ -1870,7 +1891,7 @@ mod tests {
                 checkpointed.set(true);
                 Ok(())
             },
-            || {
+            |()| {
                 assert!(checkpointed.get());
                 assert!(
                     budget.clock.observation_gate.try_lock().is_none(),
@@ -1902,7 +1923,7 @@ mod tests {
                     "selected required checkpoint outage",
                 )))
             },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await
         .expect_err("valid clock cannot authorize failed checkpoint publication");
@@ -1947,7 +1968,7 @@ mod tests {
             &clock,
             &budget,
             || async { Ok(()) },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await
         .expect_err("relative-only provider cannot authorize bounded final acknowledgment");
@@ -1978,7 +1999,7 @@ mod tests {
                 endpoint.send(Ok(physical_time(500))).unwrap();
                 Ok(())
             },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await;
         assert!(matches!(
@@ -2008,7 +2029,7 @@ mod tests {
                 endpoint.send(Ok(physical_time(500))).unwrap();
                 Ok(())
             },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await;
         assert!(
@@ -2047,7 +2068,7 @@ mod tests {
                     .unwrap();
                 Ok(())
             },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await
         .expect_err("same-poll selected timer fault cannot publish");
@@ -2077,7 +2098,7 @@ mod tests {
                 checkpointed.set(true);
                 Ok(())
             },
-            || published.set(true),
+            |()| published.set(true),
         ));
         assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
         assert!(checkpointed.get());
@@ -2111,7 +2132,7 @@ mod tests {
             &clock,
             &budget,
             || async { Ok(()) },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await
         .expect_err("failed selected postread cannot publish");
@@ -2148,7 +2169,7 @@ mod tests {
             &clock,
             &budget,
             || async { Ok(()) },
-            || published.set(true),
+            |()| published.set(true),
         )
         .await;
         assert!(matches!(

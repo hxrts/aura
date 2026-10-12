@@ -620,6 +620,52 @@ impl OwnedTaskSpawner {
             .spawn_local_fallible_cancellable(name, fut, token)
     }
 
+    /// Transfer the actual owner into the configured registered supervision kernel.
+    pub fn spawn_required_custody(
+        &self,
+        name: &'static str,
+        obligation: Box<dyn crate::effects::task::RequiredTaskCustody>,
+    ) -> Result<
+        OwnedTaskHandle<(), Box<dyn crate::effects::task::RequiredTaskControl>>,
+        crate::effects::task::RejectedRequiredTask<dyn crate::effects::task::RequiredTaskCustody>,
+    > {
+        let token = self
+            .shutdown
+            .raw()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NeverCancel));
+        self.inner
+            .admit_required_custody(name, obligation, token)
+            .map(|control| OwnedTaskHandle {
+                handle_id: (),
+                shutdown: self.shutdown.clone(),
+                control,
+            })
+    }
+    /// Transfer the actual Send owner whose borrowed futures remain executor-local.
+    pub fn spawn_local_required_custody(
+        &self,
+        name: &'static str,
+        obligation: Box<dyn crate::effects::task::LocalRequiredTaskCustody>,
+    ) -> Result<
+        OwnedTaskHandle<(), Box<dyn crate::effects::task::RequiredTaskControl>>,
+        crate::effects::task::RejectedRequiredTask<
+            dyn crate::effects::task::LocalRequiredTaskCustody,
+        >,
+    > {
+        let token = self
+            .shutdown
+            .raw()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NeverCancel));
+        self.inner
+            .admit_local_required_custody(name, obligation, token)
+            .map(|control| OwnedTaskHandle {
+                handle_id: (),
+                shutdown: self.shutdown.clone(),
+                control,
+            })
+    }
     pub fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
         self.inner.spawn_local(fut);
     }
@@ -635,26 +681,72 @@ impl OwnedTaskSpawner {
 }
 
 /// Opaque owned task handle metadata for parity-critical bookkeeping.
-#[derive(Debug, Clone)]
-pub struct OwnedTaskHandle<HandleId> {
+#[derive(Clone)]
+pub struct OwnedTaskHandle<HandleId, Control = ()> {
     handle_id: HandleId,
     shutdown: OwnedShutdownToken,
+    control: Control,
 }
 
+impl<HandleId: std::fmt::Debug, Control> std::fmt::Debug for OwnedTaskHandle<HandleId, Control> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedTaskHandle")
+            .field("handle_id", &self.handle_id)
+            .field("shutdown", &self.shutdown)
+            .finish()
+    }
+}
 impl<HandleId> OwnedTaskHandle<HandleId> {
     pub fn new(handle_id: HandleId, shutdown: OwnedShutdownToken) -> Self {
         Self {
             handle_id,
             shutdown,
+            control: (),
         }
     }
+}
 
+impl<HandleId, Control> OwnedTaskHandle<HandleId, Control> {
     pub fn handle_id(&self) -> &HandleId {
         &self.handle_id
     }
 
     pub fn shutdown_token(&self) -> &OwnedShutdownToken {
         &self.shutdown
+    }
+}
+
+/// Required registrations cannot clone or reconstruct their original control.
+/// ```compile_fail
+/// use aura_core::OwnedTaskHandle;
+/// use aura_core::effects::task::RequiredTaskControl;
+/// fn duplicate(handle: OwnedTaskHandle<(), Box<dyn RequiredTaskControl>>) {
+///     let _ = handle.clone();
+/// }
+/// ```
+/// ```compile_fail
+/// use aura_core::{OwnedTaskHandle, OwnedShutdownToken};
+/// use aura_core::effects::task::RequiredTaskControl;
+/// let _ = OwnedTaskHandle::<(), Box<dyn RequiredTaskControl>>::new((), OwnedShutdownToken::detached());
+/// ```
+/// ```compile_fail
+/// use aura_core::OwnedTaskHandle;
+/// use aura_core::effects::task::RequiredTaskControl;
+/// fn deserialize<T: serde::de::DeserializeOwned>() {}
+/// deserialize::<OwnedTaskHandle<(), Box<dyn RequiredTaskControl>>>();
+/// ```
+impl OwnedTaskHandle<(), Box<dyn crate::effects::task::RequiredTaskControl>> {
+    /// Request cancellation of the original required task without discarding custody.
+    pub fn request_cancel(&mut self) {
+        self.control.request_cancel();
+    }
+    /// Retry actual native cleanup under its retained domain owner.
+    pub async fn reconcile(&mut self) -> Result<(), crate::AuraError> {
+        self.control.reconcile().await
+    }
+    /// Retry actual local cleanup on its owning executor.
+    pub async fn reconcile_local(&mut self) -> Result<(), crate::AuraError> {
+        self.control.reconcile_local().await
     }
 }
 

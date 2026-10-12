@@ -632,7 +632,7 @@ impl RuntimeShutdownWindowCapability {
             effects,
             &self.budget,
             || async { Ok(()) },
-            publish,
+            |()| publish(),
         )
         .await
         .map_err(|source| {

@@ -82,6 +82,7 @@ const TERMINAL_OBSERVATION_SUITES: &[LifecycleSuite] = &[
     LifecycleSuite {
         source: "crates/aura-core/src/time/timeout.rs",
         functions: &[
+            "required_terminal_ack_forwards_original_nonclone_callback_receipt",
             "required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease",
             "required_terminal_ack_bounds_contended_observation_gate",
             "required_terminal_ack_bounds_checkpoint_and_rejects_late_completion",
