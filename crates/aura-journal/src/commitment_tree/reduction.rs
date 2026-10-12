@@ -3,13 +3,12 @@
 //! This module implements the deterministic reduction algorithm that converts
 //! an OpLog (OR-set of AttestedOp) into a TreeState.
 //!
-//! ## Algorithm (from docs/123_commitment_tree.md):
+//! ## Algorithm (from docs/102_authority_and_identity.md):
 //!
-//! 1. Build a DAG using parent references (parent_epoch, parent_commitment)
-//! 2. Topologically sort by ancestry
-//! 3. For concurrent operations (same parent), use H(op) as tie-breaker (max wins)
-//! 4. Apply winners in order, updating TreeState and commitment
-//! 5. Mark losers as superseded
+//! 1. Select maximum H(op) among operations naming the exact same parent
+//! 2. Start from the genesis TreeState
+//! 3. Apply the selected operation naming the current (epoch, commitment)
+//! 4. Repeat using the resulting state, rejecting any disconnected parent
 //!
 //! ## Required Properties:
 //!
@@ -67,7 +66,7 @@ impl ParentKey {
 ///
 /// Unlike view dependencies (explicit list of view IDs), operation dependencies
 /// are parent references that may point to state rather than other operations.
-/// The DAG sorting algorithm gracefully handles missing dependencies.
+/// The reducer follows actual reduced states and rejects missing dependencies.
 #[derive(Clone)]
 pub struct OpNode<'a>(pub &'a AttestedOp);
 
@@ -101,10 +100,10 @@ impl DagNode for OpNode<'_> {
 ///
 /// ## Algorithm:
 ///
-/// 1. Build parent-child DAG
-/// 2. Topological sort with tie-breaking
-/// 3. Apply operations in order
-/// 4. Validate at each step
+/// 1. Resolve exact-parent siblings using maximum H(op)
+/// 2. Follow the current reduced epoch and commitment from genesis
+/// 3. Apply each selected operation once
+/// 4. Reject disconnected parents rather than inferring missing ancestors
 ///
 /// ## Invariants:
 ///
@@ -112,85 +111,44 @@ impl DagNode for OpNode<'_> {
 /// - Invalid operations are rejected
 /// - TreeState always consistent with OpLog
 pub fn reduce(ops: &[AttestedOp]) -> Result<TreeState, ReductionError> {
-    if ops.is_empty() {
-        return Ok(TreeState::new());
+    // Resolve concurrency only among operations naming the exact same parent.
+    // Parent commitment bytes are identifiers, never an ancestry ordering.
+    let mut winners: BTreeMap<(Epoch, TreeHash32), &AttestedOp> = BTreeMap::new();
+    for op in ops {
+        let parent = (op.op.parent_epoch, op.op.parent_commitment);
+        winners
+            .entry(parent)
+            .and_modify(|current| {
+                if hash_op(op) > hash_op(current) {
+                    *current = op;
+                }
+            })
+            .or_insert(op);
     }
-
-    // Step 1: Build DAG
-    let dag = build_dag(ops)?;
-
-    // Step 2: Topological sort with tie-breaking
-    let sorted_ops = topological_sort_with_tiebreak(&dag, ops)?;
-
-    // Step 3: Apply operations in order
     let mut state = TreeState::new();
-    for op in sorted_ops {
+    while !winners.is_empty() {
+        let parent = (state.current_epoch(), state.current_commitment());
+        let Some(op) = winners.remove(&parent) else {
+            // A disconnected operation is invalid, even at genesis. Do not
+            // infer a missing ancestor or silently discard an unlinked branch.
+            let Some(((epoch, commitment), _)) = winners.first_key_value() else {
+                return Ok(state);
+            };
+            return Err(if *epoch != state.current_epoch() {
+                ReductionError::ParentBindingInvalid {
+                    expected: state.current_epoch(),
+                    actual: *epoch,
+                }
+            } else {
+                ReductionError::CommitmentMismatch {
+                    expected: Hash32(state.current_commitment()),
+                    actual: Hash32(*commitment),
+                }
+            });
+        };
         apply_operation(&mut state, op)?;
     }
-
     Ok(state)
-}
-
-/// Build parent-child DAG from operations
-///
-/// Each operation references its parent by (epoch, commitment).
-/// This builds the dependency graph for topological sorting.
-fn build_dag(ops: &[AttestedOp]) -> Result<Dag<'_>, ReductionError> {
-    let mut dag = Dag::new();
-
-    for op in ops {
-        let op_hash = hash_op(op);
-        let parent_key = (op.op.parent_epoch, op.op.parent_commitment);
-
-        dag.add_edge(parent_key, op_hash, op);
-    }
-
-    Ok(dag)
-}
-
-/// Topological sort with tie-breaking for concurrent operations
-///
-/// When multiple operations share the same parent (concurrent), we use
-/// H(op) as a deterministic tie-breaker (maximum hash wins).
-fn topological_sort_with_tiebreak<'a>(
-    _dag: &Dag<'a>,
-    ops: &'a [AttestedOp],
-) -> Result<Vec<&'a AttestedOp>, ReductionError> {
-    let mut sorted = Vec::new();
-    let mut visited = BTreeSet::new();
-
-    // Group operations by parent
-    let mut by_parent: BTreeMap<(Epoch, Hash32), Vec<&AttestedOp>> = BTreeMap::new();
-    for op in ops {
-        let parent_key = (
-            op.op.parent_epoch,
-            aura_core::Hash32(op.op.parent_commitment),
-        );
-        by_parent.entry(parent_key).or_default().push(op);
-    }
-
-    // For each parent, resolve conflicts using H(op) tie-breaker
-    for (_parent_key, mut children) in by_parent {
-        if children.len() > 1 {
-            // Multiple concurrent operations - use tie-breaker
-            children.sort_by_key(|op| hash_op(op));
-            children.reverse(); // Maximum hash wins
-        }
-
-        // Take the winner (first after sorting)
-        if let Some(winner) = children.first() {
-            let op_hash = hash_op(winner);
-            if !visited.contains(&op_hash) {
-                sorted.push(*winner);
-                visited.insert(op_hash);
-            }
-        }
-    }
-
-    // Sort by parent epoch for proper ordering
-    sorted.sort_by_key(|op| op.op.parent_epoch);
-
-    Ok(sorted)
 }
 
 /// Apply a single operation to the tree state (Phase 2.1d)
@@ -520,24 +478,6 @@ fn hash_op(op: &AttestedOp) -> TreeHash32 {
     hasher.finalize()
 }
 
-/// Directed acyclic graph for operation ordering
-struct Dag<'a> {
-    /// Edges: parent_key -> (op_hash, operation)
-    edges: BTreeMap<(Epoch, TreeHash32), Vec<(TreeHash32, &'a AttestedOp)>>,
-}
-
-impl<'a> Dag<'a> {
-    fn new() -> Self {
-        Self {
-            edges: BTreeMap::new(),
-        }
-    }
-
-    fn add_edge(&mut self, parent: (Epoch, TreeHash32), op_hash: TreeHash32, op: &'a AttestedOp) {
-        self.edges.entry(parent).or_default().push((op_hash, op));
-    }
-}
-
 /// Errors that can occur during reduction
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ReductionError {
@@ -645,6 +585,93 @@ mod tests {
             agg_sig: vec![],
             signer_count: 1,
         }
+    }
+
+    #[test]
+    fn same_epoch_leaf_and_fence_follow_ancestry_in_every_input_order() {
+        let genesis = create_test_op(Epoch::initial(), 1);
+        let mut baseline = TreeState::new();
+        apply_operation(&mut baseline, &genesis).unwrap();
+        let first_fence = AttestedOp {
+            op: TreeOp {
+                parent_epoch: baseline.epoch,
+                parent_commitment: baseline.root_commitment,
+                op: TreeOpKind::RotateEpoch {
+                    affected: vec![NodeIndex(0)],
+                },
+                version: 1,
+            },
+            agg_sig: vec![],
+            signer_count: 1,
+        };
+        apply_operation(&mut baseline, &first_fence).unwrap();
+        // Deliberately select a child commitment that sorts before its parent.
+        // Sorting same-epoch parent hashes would reverse this actual chain.
+        let (leaf, after_leaf) = (2..512)
+            .find_map(|id| {
+                let mut leaf = create_test_op(baseline.epoch, id);
+                leaf.op.parent_commitment = baseline.root_commitment;
+                let mut after = baseline.clone();
+                apply_operation(&mut after, &leaf).unwrap();
+                (after.root_commitment < baseline.root_commitment).then_some((leaf, after))
+            })
+            .expect("a hash-order inversion");
+        let fence = AttestedOp {
+            op: TreeOp {
+                parent_epoch: after_leaf.epoch,
+                parent_commitment: after_leaf.root_commitment,
+                op: TreeOpKind::RotateEpoch {
+                    affected: vec![NodeIndex(0)],
+                },
+                version: 1,
+            },
+            agg_sig: vec![],
+            signer_count: 1,
+        };
+        let mut expected = after_leaf;
+        apply_operation(&mut expected, &fence).unwrap();
+        let history = [genesis, first_fence, leaf, fence];
+        for a in 0..4 {
+            for b in 0..4 {
+                for c in 0..4 {
+                    for d in 0..4 {
+                        let order = [a, b, c, d];
+                        if (0..4).all(|i| (i + 1..4).all(|j| order[i] != order[j])) {
+                            let input = order.map(|i| history[i].clone());
+                            assert_eq!(reduce(&input).unwrap(), expected);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn disconnected_parent_is_rejected_including_genesis() {
+        let mut genesis = create_test_op(Epoch::initial(), 1);
+        genesis.op.parent_commitment = [7; 32];
+        assert!(matches!(
+            reduce(&[genesis]),
+            Err(ReductionError::CommitmentMismatch { .. })
+        ));
+        assert!(matches!(
+            reduce(&[create_test_op(Epoch::new(2), 1)]),
+            Err(ReductionError::ParentBindingInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn concurrent_parent_keeps_maximum_operation_hash() {
+        let first = create_test_op(Epoch::initial(), 1);
+        let second = create_test_op(Epoch::initial(), 2);
+        let winner = if hash_op(&first) > hash_op(&second) {
+            &first
+        } else {
+            &second
+        };
+        let expected = reduce(&[winner.clone()]).unwrap();
+        assert_eq!(reduce(&[first.clone(), second.clone()]).unwrap(), expected);
+        assert_eq!(reduce(&[second, first]).unwrap(), expected);
     }
 
     #[test]
