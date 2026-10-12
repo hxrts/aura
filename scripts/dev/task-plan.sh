@@ -98,7 +98,7 @@ if [[ -s "$archive" ]]; then
         result=result substr(rest,1,RSTART-1)
         link=substr(rest,RSTART,RLENGTH)
         target=substr(link,3,length(link)-3)
-        if(target!="" && target!~/^[/#?]/ && target!~/^[[:alpha:]][[:alnum:]+.-]*:/)
+        if(target!="" && target!~/^\// && target!~/^#/ && target!~/^\?/ && target!~/^[[:alpha:]][[:alnum:]+.-]*:/)
           link="](../" target ")"
         result=result link
         rest=substr(rest,RSTART+RLENGTH)
