@@ -1259,6 +1259,7 @@ cargo run -p aura-harness --bin aura-harness -- \
   --network-backend mock
 
 # Native Linux Patchbay (requires Linux + userns/capabilities)
+# The Nix shells provide tc, nft and conntrack; patchbay enters a user namespace itself.
 cargo run -p aura-harness --bin aura-harness -- \
   run --config configs/harness/local-loopback.toml \
   --network-backend patchbay

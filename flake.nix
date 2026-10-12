@@ -311,6 +311,7 @@
             iproute2 # tc command for traffic control
             nftables # nft command for NAT rules
             iptables # iptables-legacy for some nftables compat
+            conntrack-tools # conntrack, used by patchbay to flush NAT state
           ];
 
           shellHook = ''
@@ -446,7 +447,15 @@
           ++ toolkitSupport.packages
           ++ toolkitCommands
           ++ toolkitSupport.buildInputs
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.chromium pkgs.chromedriver ]
+          # Linux-only: browser harness plus the patchbay network lab tools
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.chromium
+            pkgs.chromedriver
+            pkgs.iproute2
+            pkgs.nftables
+            pkgs.iptables
+            pkgs.conntrack-tools
+          ]
           ;
 
           shellHook = ''

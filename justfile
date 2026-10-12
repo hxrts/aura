@@ -628,7 +628,7 @@ ci-holepunch-tier1:
     cargo test -p aura-testkit --test holepunch_tier1 -q
 
 # Tier 2 Patchbay NAT traversal integration scenarios
-# Requires: Linux with unprivileged user namespaces enabled, tc, nft in PATH
+# Requires: Linux with unprivileged user namespaces enabled; tc, nft and conntrack in PATH (provided by the Nix shells)
 
 # CI enables userns via: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ci-holepunch-tier2:
