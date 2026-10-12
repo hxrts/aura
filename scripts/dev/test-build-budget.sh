@@ -23,6 +23,8 @@ export DU_FAIL_ONCE_FILE="$test_root/du-fail-once"
 export DU_EMPTY_FILE="$test_root/du-empty"
 export INCREMENTAL_SIZE_FILE="$test_root/incremental-size"
 export WASM_SIZE_FILE="$test_root/wasm-size"
+export DYLINT_SIZE_FILE="$test_root/dylint-size"
+export TRYBUILD_SIZE_FILE="$test_root/trybuild-size"
 export AURA_BUILD_TARGET_CAP_GIB=8
 # Cases choose their own waits; a caller's AURA_BUILD_WAIT_SECONDS (gates and
 # ship.sh export one) must not turn an expected refusal into a long wait.
@@ -49,11 +51,25 @@ if [[ "${@: -1}" == "$PROJECT_ROOT/target/wasm32-unknown-unknown/debug" && -f "$
   printf '%s\t%s\n' "$(cat "$WASM_SIZE_FILE")" "${@: -1}"
   exit 0
 fi
+if [[ "${@: -1}" == "$PROJECT_ROOT/target/dylint" && -f "$DYLINT_SIZE_FILE" ]]; then
+  printf '%s\t%s\n' "$(cat "$DYLINT_SIZE_FILE")" "${@: -1}"
+  exit 0
+fi
+if [[ "${@: -1}" == "$PROJECT_ROOT/target/tests/trybuild" && -f "$TRYBUILD_SIZE_FILE" ]]; then
+  printf '%s\t%s\n' "$(cat "$TRYBUILD_SIZE_FILE")" "${@: -1}"
+  exit 0
+fi
 if [[ -f "$INCREMENTAL_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/debug/incremental" ]]; then
   size=$((size - $(cat "$INCREMENTAL_SIZE_FILE")))
 fi
 if [[ -f "$WASM_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/wasm32-unknown-unknown/debug" ]]; then
   size=$((size - $(cat "$WASM_SIZE_FILE")))
+fi
+if [[ -f "$DYLINT_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/dylint" ]]; then
+  size=$((size - $(cat "$DYLINT_SIZE_FILE")))
+fi
+if [[ -f "$TRYBUILD_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/tests/trybuild" ]]; then
+  size=$((size - $(cat "$TRYBUILD_SIZE_FILE")))
 fi
 printf '%s\t%s\n' "$size" "${@: -1}"
 if [[ -f "$DU_FAIL_ONCE_FILE" ]]; then
@@ -92,7 +108,7 @@ reset_case() {
   : > "$CALLS_FILE"
   rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
-  rm -f "$INCREMENTAL_SIZE_FILE" "$WASM_SIZE_FILE"
+  rm -f "$INCREMENTAL_SIZE_FILE" "$WASM_SIZE_FILE" "$DYLINT_SIZE_FILE" "$TRYBUILD_SIZE_FILE"
 }
 
 run_budget() {
@@ -153,8 +169,10 @@ expect_status 0 run_budget --no-prune -- sh -c 'printf "cargo\n" > "$ACTIVE_FILE
 
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
-expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
-[[ ! -e "$FREE_FILE.build-ran" && ! -s "$CALLS_FILE" ]]
+expect_status 0 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ -e "$FREE_FILE.build-ran" && ! -s "$CALLS_FILE" ]]
+rg -q 'above soft cap' "$test_root/output"
+rm -f "$FREE_FILE.build-ran"
 
 reset_case
 rmdir "$project/target"
@@ -165,12 +183,17 @@ mkdir "$project/target"
 
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+mkdir -p "$project/target/debug/deps"
+printf 'reusable\n' > "$project/target/debug/deps/reusable.rlib"
 expect_status 0 run_budget -- sh -c 'exit 0'
-[[ "$(wc -l < "$CALLS_FILE")" -eq 4 ]] # Pre- and post-build preview/apply.
-rg -q -- '--dry-run' "$CALLS_FILE"
+[[ ! -s "$CALLS_FILE" && -f "$project/target/debug/deps/reusable.rlib" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.cleanup.target_above_soft_cap==true and
+  all(.cleanup_events[]; .operation!="sweep")' "$receipt" >/dev/null
 
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
 touch "$RACE_ON_PREVIEW_FILE"
 expect_status 1 run_budget -- sh -c 'touch "$FREE_FILE.build-ran"'
 [[ ! -e "$FREE_FILE.build-ran" ]]
@@ -179,7 +202,7 @@ rg -q -- '--dry-run' "$CALLS_FILE"
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 
 reset_case
-printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
 mkdir -p "$project/target/release" "$project/target/wasm32-unknown-unknown/debug"
 printf 'loaded\n' > "$project/target/release/loaded"
 printf 'stale\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
@@ -193,7 +216,7 @@ fi
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 
 reset_case
-printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
 touch "$PROTECTED_FILE"
 mkdir -p "$project/target/release" "$project/target/wasm32-unknown-unknown/debug"
 printf 'keep\n' > "$project/target/release/production"
@@ -208,7 +231,7 @@ rg -q 'Protected production/web candidates: 1' "$test_root/output"
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 
 reset_case
-printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
 touch "$PROTECTED_WEB_FILE"
 expect_status 0 run_budget -- sh -c 'exit 0'
 if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
@@ -249,19 +272,46 @@ receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.final_exit_status==37 and .cleanup.result=="not-run-command-failed" and
   any(.cleanup_events[];.stage=="pre-admission" and .outcome=="removed" and .reclaimed_kib==11534336)' "$receipt" >/dev/null
 
-# Sweep success is not proof of reaching the cap: a remaining inactive lane
-# must still be reclaimed, without evicting sibling debug dependencies.
+# Inactive wasm is reclaimed before any dependency sweep.
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
 printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
 mkdir -p "$project/target/wasm32-unknown-unknown/debug"
 expect_status 0 run_budget -- sh -c 'test ! -d target/wasm32-unknown-unknown/debug && test -f target/debug/deps/reusable.rlib'
-rg -q 'successful sweep left target over budget' "$test_root/output"
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
-jq -e 'any(.cleanup_events[];.operation=="sweep" and .stage=="pre-admission" and
-  .exit_status==0 and .outcome=="completed" and .target_above_soft_cap==true) and
+jq -e 'all(.cleanup_events[]; .operation!="sweep" or .stage!="pre-admission") and
   any(.cleanup_events[];.operation=="guarded-lane" and .lane=="wasm-debug" and
   .outcome=="removed" and .before_kib==5242880 and .after_kib==0)' "$receipt" >/dev/null
+
+# The soft cap may still be exceeded by useful debug dependencies after all
+# independent inactive wasm, dylint and trybuild caches have been reclaimed.
+reset_case
+printf '%s\n' $((17 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((3 * 1024 * 1024)) > "$WASM_SIZE_FILE"
+printf '%s\n' $((2 * 1024 * 1024)) > "$DYLINT_SIZE_FILE"
+printf '%s\n' $((2 * 1024 * 1024)) > "$TRYBUILD_SIZE_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug" "$project/target/dylint" "$project/target/tests/trybuild" "$project/target/debug/deps"
+printf 'reusable\n' > "$project/target/debug/deps/reusable.rlib"
+expect_status 0 run_budget -- sh -c 'test -f target/debug/deps/reusable.rlib && test ! -d target/wasm32-unknown-unknown/debug && test ! -d target/dylint && test ! -d target/tests/trybuild'
+[[ ! -s "$CALLS_FILE" && -f "$project/target/debug/deps/reusable.rlib" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.cleanup.target_above_soft_cap==true and
+  all(.cleanup_events[]; .operation!="sweep") and
+  ([(.cleanup_events[] | select(.stage=="pre-admission" and .outcome=="removed") | .lane)] |
+    index("wasm-debug")!=null and index("dylint")!=null and index("trybuild")!=null)' "$receipt" >/dev/null
+
+# When the hard disk floor is low, try guarded inactive lanes first and only
+# then allow the dependency sweep. The fake df stays low, so admission refuses.
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((2 * 1024 * 1024)) > "$WASM_SIZE_FILE"
+printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+expect_status 1 run_budget -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ ! -e "$FREE_FILE.build-ran" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '(.cleanup_events[0] | .stage=="pre-admission" and .operation=="guarded-lane" and .lane=="wasm-debug" and .outcome=="removed") and
+  any(.cleanup_events[1:][]; .stage=="pre-admission" and .operation=="sweep" and .outcome=="completed")' "$receipt" >/dev/null
 
 # Explicit incremental opt-in and loaded incremental files forbid preferential
 # reclamation; existing scoped guards remain authoritative.
@@ -280,7 +330,7 @@ for protection in opt-in open-file; do
     receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
     jq -e 'any(.cleanup_events[];.operation=="guarded-lane" and .reason=="open-files" and
       .outcome=="refused" and .exit_status==1 and .reclaimed_kib==null) and
-      any(.cleanup_events[];.operation=="sweep" and .reason=="open-files" and .outcome=="skipped" and .exit_status==3)' "$receipt" >/dev/null
+      all(.cleanup_events[];.operation!="sweep")' "$receipt" >/dev/null
   fi
 done
 
@@ -293,6 +343,7 @@ expect_status 1 run_budget -- sh -c 'touch "$FREE_FILE.build-ran"'
 reset_case
 touch "$FAIL_SWEEP_FILE"
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
 expect_status 1 run_budget -- sh -c 'exit 0'
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 

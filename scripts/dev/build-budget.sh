@@ -249,23 +249,23 @@ recover_cache() {
   if (( $(target_kib strict) <= cap_kib && $(free_kib) >= min_free_kib )); then
     return 0
   fi
-  if sweep apply; then
-    if (( $(target_kib strict) > cap_kib || $(free_kib) < min_free_kib )); then
-      echo 'build-budget: successful sweep left target over budget or insufficient headroom; trying guarded inactive lanes' >&2
-      prune_safe_lanes apply
+  # Reclaim isolated, inactive caches before considering the shared debug
+  # dependency tree. The target cap is soft while the disk floor is healthy.
+  prune_safe_lanes apply || return $?
+  if (( $(free_kib) < min_free_kib )); then
+    if sweep apply; then :;
+    else
+      sweep_status=$?
+      (( sweep_status == 3 )) || return "$sweep_status"
     fi
-  else
-    sweep_status=$?
-    if (( sweep_status == 3 )); then prune_safe_lanes apply;
-    else return "$sweep_status"; fi
   fi
   if (( $(target_kib strict) > cap_kib )); then
-    echo 'build-budget: target remains above soft cap after guarded recovery; protected caches retained' >&2
+    echo 'build-budget: target remains above soft cap after guarded inactive-lane recovery; reusable dependencies retained' >&2
   fi
 }
 prune_safe_lanes() {
   local mode="$1" candidate
-  local candidates=(wasm-debug dylint debug-incremental trybuild debug)
+  local candidates=(wasm-debug dylint debug-incremental trybuild)
   # Explicit incremental builds retain that cache, including its debug parent.
   if [[ "$CARGO_INCREMENTAL" == 1 ]]; then candidates=(wasm-debug dylint trybuild); fi
   if (( allow_live_harness == 1 )); then candidates=(wasm-debug); fi
@@ -374,11 +374,15 @@ trap 'exit 143' TERM
 require_idle || exit $?
 if (( before_target > cap_kib || before_free < min_free_kib )); then
   if (( no_prune == 1 )); then
-    echo 'build-budget: no-prune mode cannot recover the required headroom or target cap' >&2
-    exit 1
+    if (( before_free < min_free_kib )); then
+      echo 'build-budget: no-prune mode cannot recover the required headroom' >&2
+      exit 1
+    fi
+    echo 'build-budget: no-prune mode retains target above soft cap with healthy disk headroom' >&2
+  else
+    require_idle
+    recover_cache || exit $?
   fi
-  require_idle
-  recover_cache || exit $?
 fi
 pre_free="$(free_kib)"
 pre_target="$(target_kib strict)"
