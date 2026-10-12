@@ -2004,6 +2004,12 @@ with optional architecture-specific hardware acceleration
         ];
         devDependencies = [
           {
+            name = "aura-harness";
+            packageId = "aura-harness";
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "patchbay-backend" ];
+          }
+          {
             name = "hxrts-aura-effects";
             packageId = "hxrts-aura-effects";
             rename = "aura-effects";
@@ -4898,7 +4904,7 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -6767,7 +6773,7 @@ full support for heapless no_std targets
           "try_unwrap" = [ "derive_more-impl/try_unwrap" ];
           "unwrap" = [ "derive_more-impl/unwrap" ];
         };
-        resolvedDefaultFeatures = [ "as_ref" "debug" "default" "deref" "deref_mut" "display" "from" "into" "std" ];
+        resolvedDefaultFeatures = [ "as_ref" "debug" "default" "deref" "deref_mut" "display" "eq" "from" "into" "std" ];
       };
       "derive_more-impl" = rec {
         crateName = "derive_more-impl";
@@ -6831,7 +6837,7 @@ full support for heapless no_std targets
           "try_unwrap" = [ "dep:convert_case" ];
           "unwrap" = [ "dep:convert_case" ];
         };
-        resolvedDefaultFeatures = [ "as_ref" "debug" "default" "deref" "deref_mut" "display" "from" "into" ];
+        resolvedDefaultFeatures = [ "as_ref" "debug" "default" "deref" "deref_mut" "display" "eq" "from" "into" ];
       };
       "digest 0.10.7" = rec {
         crateName = "digest";
@@ -8835,7 +8841,7 @@ full support for heapless no_std targets
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -9187,11 +9193,11 @@ decoding/encoding support
       };
       "either" = rec {
         crateName = "either";
-        version = "1.19.0";
+        version = "1.18.0";
         edition = "2021";
         description = "The enum `Either` with variants `Left` and `Right` is a general purpose sum type with two cases.
 ";
-        sha256 = "1gjq21g0sgk5ylpj85zafcinwhh3jj91i6drhb4278vw2v17370f";
+        sha256 = "0d7dx31sf8rakcgp63070ngb2vkjynrni866pnx879pawndgnai5";
         features = {
           "default" = [ "std" ];
           "serde" = [ "dep:serde" ];
@@ -9467,7 +9473,7 @@ decoding/encoding support
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -12684,7 +12690,7 @@ library used by the other higher-level Hickory DNS crates.
         features = {
           "choreo-backend-telltale-machine" = [ "dep:telltale-machine" "aura-effects/telltale-runtime-capability" ];
           "default" = [ "choreo-backend-telltale-machine" ];
-          "simulation" = [ "aura-core/simulation" "aura-journal/simulation" ];
+          "simulation" = [ "aura-core/simulation" "aura-journal/simulation" "aura-effects/simulation" ];
           "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" "aura-social/transparent_onion" "aura-sync/transparent_onion" ];
         };
         resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "real-android-keystore" "simulation" "transparent_onion" "web" ];
@@ -15639,10 +15645,10 @@ library used by the other higher-level Hickory DNS crates.
       };
       "hyper" = rec {
         crateName = "hyper";
-        version = "1.12.0";
+        version = "1.11.1";
         edition = "2021";
         description = "A protective and efficient HTTP library for all.";
-        sha256 = "173wg6msakx4lha6hxm9z0i1h3bw34q8fk0x57b7flf9li6k4gic";
+        sha256 = "0hxyikj5livhmw5q3x3ifyhphh1g2cjsc32nsg1jcyhflpx03d97";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -15655,6 +15661,11 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "bytes";
             packageId = "bytes";
+          }
+          {
+            name = "futures-channel";
+            packageId = "futures-channel";
+            optional = true;
           }
           {
             name = "futures-core";
@@ -15703,6 +15714,11 @@ library used by the other higher-level Hickory DNS crates.
         ];
         devDependencies = [
           {
+            name = "futures-channel";
+            packageId = "futures-channel";
+            features = [ "sink" ];
+          }
+          {
             name = "pin-project-lite";
             packageId = "pin-project-lite";
           }
@@ -15716,7 +15732,7 @@ library used by the other higher-level Hickory DNS crates.
           "client" = [ "dep:want" "dep:pin-project-lite" "dep:smallvec" ];
           "ffi" = [ "dep:http-body-util" "dep:futures-util" ];
           "full" = [ "client" "http1" "http2" "server" ];
-          "http1" = [ "dep:atomic-waker" "dep:futures-core" "dep:httparse" "dep:itoa" ];
+          "http1" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:httparse" "dep:itoa" ];
           "http2" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:h2" ];
           "server" = [ "dep:httpdate" "dep:pin-project-lite" "dep:smallvec" ];
           "tracing" = [ "dep:tracing" ];
@@ -15985,7 +16001,7 @@ library used by the other higher-level Hickory DNS crates.
           }
           {
             name = "windows-core";
-            packageId = "windows-core 0.62.2";
+            packageId = "windows-core";
             target = { target, features }: ("windows" == target."os" or null);
           }
         ];
@@ -17096,7 +17112,7 @@ library used by the other higher-level Hickory DNS crates.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -17227,13 +17243,13 @@ library used by the other higher-level Hickory DNS crates.
       };
       "jiff" = rec {
         crateName = "jiff";
-        version = "0.2.38";
+        version = "0.2.37";
         edition = "2021";
         description = "A date-time library that encourages you to jump into the pit of success.
 
 This library is heavily inspired by the Temporal project.
 ";
-        sha256 = "10x38b9qb1b47mq54d9j4ljkpk7i5ygvknn0lf4h1sybbmqhbc5j";
+        sha256 = "1nxgdj2wajw9ml8fcc2zq858k6v9618m22864vh6sy885zvvmc8a";
         authors = [
           "Andrew Gallant <jamslam@gmail.com>"
         ];
@@ -17357,10 +17373,10 @@ This library is heavily inspired by the Temporal project.
       };
       "jiff-static" = rec {
         crateName = "jiff-static";
-        version = "0.2.38";
+        version = "0.2.37";
         edition = "2021";
         description = "Create static TimeZone values for Jiff (useful in core-only environments).";
-        sha256 = "0p39a035j9c634llmr8lh1jz7ml8gqrbsla4d3j7wz6gadr83j9c";
+        sha256 = "04kjdzg4h4wy38ghm91qva7xg4glr65120c74bk7mmka26hni0ip";
         procMacro = true;
         libName = "jiff_static";
         authors = [
@@ -17392,10 +17408,10 @@ This library is heavily inspired by the Temporal project.
       };
       "jiff-tzdb" = rec {
         crateName = "jiff-tzdb";
-        version = "0.1.9";
+        version = "0.1.8";
         edition = "2021";
         description = "The entire Time Zone Database embedded into your binary.";
-        sha256 = "19rd52w3il7603xln19s5yvz113dyrvmlpj4b63qdbkb1h3pg0zs";
+        sha256 = "07hl9sgzfb9as1x0n5bjk1qxishzcriapy9xa481y8xd6acx6aql";
         libName = "jiff_tzdb";
         libPath = "lib.rs";
         authors = [
@@ -19335,10 +19351,10 @@ be used outside of a proc-macro context.
       };
       "netlink-packet-route" = rec {
         crateName = "netlink-packet-route";
-        version = "0.28.0";
+        version = "0.30.0";
         edition = "2021";
         description = "netlink packet types";
-        sha256 = "0icl5iy0f97h3df1wshpxzaiyj1hnn19aqaj8l8qis8mlxpn7qsc";
+        sha256 = "14jhj28nj1hrymzmx4g0qqi3fgm4m4s15zmvmi7ana305xhik2dy";
         libName = "netlink_packet_route";
         authors = [
           "Corentin Henry <corentinhenry@gmail.com>"
@@ -19362,8 +19378,7 @@ be used outside of a proc-macro context.
             packageId = "netlink-packet-core";
           }
         ];
-        features = {
-        };
+
       };
       "netlink-proto" = rec {
         crateName = "netlink-proto";
@@ -19671,7 +19686,7 @@ be used outside of a proc-macro context.
           "user" = [ "feature" ];
           "zerocopy" = [ "fs" "uio" ];
         };
-        resolvedDefaultFeatures = [ "default" "feature" "fs" "ioctl" "mount" "process" "sched" "signal" "uio" "user" ];
+        resolvedDefaultFeatures = [ "fs" "mount" "process" "sched" "signal" "uio" ];
       };
       "nix 0.31.3" = rec {
         crateName = "nix";
@@ -19717,7 +19732,7 @@ be used outside of a proc-macro context.
           "user" = [ "feature" ];
           "zerocopy" = [ "fs" "uio" ];
         };
-        resolvedDefaultFeatures = [ "process" "signal" ];
+        resolvedDefaultFeatures = [ "default" "feature" "fs" "ioctl" "mount" "process" "sched" "signal" "uio" "user" ];
       };
       "nom" = rec {
         crateName = "nom";
@@ -19784,7 +19799,7 @@ be used outside of a proc-macro context.
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -20146,10 +20161,10 @@ turbofish syntax.
       };
       "objc2" = rec {
         crateName = "objc2";
-        version = "0.6.5";
+        version = "0.6.4";
         edition = "2021";
         description = "Objective-C interface and runtime bindings";
-        sha256 = "1y41g7xhc3idzymsgr5vh414xzl43jp5cs39ayaaxpv78yyrp108";
+        sha256 = "17x8qpl512frscfqbmgjr20kg3y4r0xdqxphja17dz5f0znsh4is";
         authors = [
           "Mads Marquart <mads@marquart.dk>"
         ];
@@ -21161,13 +21176,13 @@ This removes the `loom` target and dependency which helps with UniFFI's downstre
       };
       "patchbay" = rec {
         crateName = "patchbay";
-        version = "0.5.0";
+        version = "0.7.0";
         edition = "2021";
         description = "Linux network-namespace lab for NAT, routing, and link-impairment experiments";
         workspace_member = null;
         src = builtins.fetchGit {
           url = "https://github.com/n0-computer/patchbay";
-          rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9";
+          rev = "5cc60db1eb190360dfcd64eaf2f829bce4072551";
           submodules = true;
         };
         authors = [
@@ -21187,7 +21202,7 @@ This removes the `loom` target and dependency which helps with UniFFI's downstre
           {
             name = "derive_more";
             packageId = "derive_more";
-            features = [ "debug" "display" ];
+            features = [ "debug" "display" "eq" ];
           }
           {
             name = "futures";
@@ -21209,7 +21224,7 @@ This removes the `loom` target and dependency which helps with UniFFI's downstre
           }
           {
             name = "nix";
-            packageId = "nix 0.30.1";
+            packageId = "nix 0.31.3";
             features = [ "sched" "mount" "fs" "signal" "process" "user" "ioctl" ];
           }
           {
@@ -22118,13 +22133,13 @@ a Message Authentication Code (MAC)
       };
       "powerfmt" = rec {
         crateName = "powerfmt";
-        version = "0.2.1";
+        version = "0.2.0";
         edition = "2021";
         description = "    `powerfmt` is a library that provides utilities for formatting values. This crate makes it
     significantly easier to support filling to a minimum width with alignment, avoid heap
     allocation, and avoid repetitive calculations.
 ";
-        sha256 = "0n293rvnpisjmxdqhq6zmrvcdql7j1c4zrcy5053vrv5x6wr8qsa";
+        sha256 = "14ckj2xdpkhv3h6l5sdmb9f1d57z8hbfpdldjc2vl5givq2y77j3";
         authors = [
           "Jacob Pratt <jacob@jhpratt.dev>"
         ];
@@ -22579,7 +22594,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.5";
+            packageId = "socket2 0.5.10";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
@@ -22762,7 +22777,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.5";
+            packageId = "socket2 0.5.10";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
@@ -22774,7 +22789,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -23975,10 +23990,10 @@ finite automata and guarantees linear time matching on all inputs.
       };
       "rtnetlink" = rec {
         crateName = "rtnetlink";
-        version = "0.20.0";
+        version = "0.21.0";
         edition = "2021";
         description = "manipulate linux networking resources via netlink";
-        sha256 = "1dfpsj3adys07wk7bb3vsbfdslkg2hxygcb1jyzbax9shxfhv5jb";
+        sha256 = "112pr9qkg7w7v27y5fp7plj45ab0090c16vzc4vz78hgf57zh6fw";
         authors = [
           "Corentin Henry <corentinhenry@gmail.com>"
         ];
@@ -24408,7 +24423,7 @@ finite automata and guarantees linear time matching on all inputs.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -26787,7 +26802,7 @@ possible intended.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -28134,7 +28149,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "getrandom";
-            packageId = "getrandom 0.4.3";
+            packageId = "getrandom 0.3.4";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: ((target."unix" or false) || (target."windows" or false) || ("wasi" == target."os" or null));
@@ -28153,7 +28168,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -30042,7 +30057,7 @@ clients and servers.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" "Win32_Foundation" "Win32_System_Threading" "Win32_System_IO" ];
           }
@@ -30059,10 +30074,10 @@ clients and servers.
       };
       "unicase" = rec {
         crateName = "unicase";
-        version = "2.10.0";
+        version = "2.9.0";
         edition = "2018";
         description = "A case-insensitive wrapper around strings.";
-        sha256 = "13x2h9s4jhch7rknqkqb1pb35irpj00fswy9ssgh0dm0qsnc6z1m";
+        sha256 = "0hh1wrfd7807mfph2q67jsxqgw8hm82xg2fb8ln8cvblkwxbri6v";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -30888,10 +30903,10 @@ Unicode Standard Annex #31.
       };
       "want" = rec {
         crateName = "want";
-        version = "0.3.2";
+        version = "0.3.1";
         edition = "2018";
         description = "Detect when another Future wants a result.";
-        sha256 = "02zdlaqarwm9x3z1l0vm61mv8f6mv0kp4izgnxlfibqhv46xsk7c";
+        sha256 = "03hbfrnvqqdchb5kgxyavb9jabwza0dmh2vw5kg0dq8rxl57d9xz";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -32087,7 +32102,7 @@ dependency.
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -32118,7 +32133,7 @@ dependency.
         dependencies = [
           {
             name = "windows-core";
-            packageId = "windows-core 0.57.0";
+            packageId = "windows-core";
           }
           {
             name = "windows-targets";
@@ -32812,7 +32827,7 @@ dependency.
         };
         resolvedDefaultFeatures = [ "Wdk" "Wdk_System" "Wdk_System_SystemInformation" "Wdk_System_SystemServices" "Wdk_System_Threading" "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_NetworkManagement_Ndis" "Win32_NetworkManagement_NetManagement" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authentication" "Win32_Security_Authentication_Identity" "Win32_Security_Authorization" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Ioctl" "Win32_System_Kernel" "Win32_System_Memory" "Win32_System_Performance" "Win32_System_Power" "Win32_System_ProcessStatus" "Win32_System_Registry" "Win32_System_RemoteDesktop" "Win32_System_Rpc" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_Variant" "Win32_System_WindowsProgramming" "Win32_System_Wmi" "Win32_UI" "Win32_UI_Shell" "default" "std" ];
       };
-      "windows-core 0.57.0" = rec {
+      "windows-core" = rec {
         crateName = "windows-core";
         version = "0.57.0";
         edition = "2021";
@@ -32825,11 +32840,11 @@ dependency.
         dependencies = [
           {
             name = "windows-implement";
-            packageId = "windows-implement 0.57.0";
+            packageId = "windows-implement";
           }
           {
             name = "windows-interface";
-            packageId = "windows-interface 0.57.0";
+            packageId = "windows-interface";
           }
           {
             name = "windows-result";
@@ -32845,47 +32860,7 @@ dependency.
         };
         resolvedDefaultFeatures = [ "default" "std" ];
       };
-      "windows-core 0.62.2" = rec {
-        crateName = "windows-core";
-        version = "0.62.2";
-        edition = "2021";
-        description = "Core type support for COM and Windows";
-        sha256 = "1swxpv1a8qvn3bkxv8cn663238h2jccq35ff3nsj61jdsca3ms5q";
-        libName = "windows_core";
-        dependencies = [
-          {
-            name = "windows-implement";
-            packageId = "windows-implement 0.60.2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "windows-interface";
-            packageId = "windows-interface 0.59.3";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "windows-link";
-            packageId = "windows-link";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "windows-result";
-            packageId = "windows-result 0.4.1";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "windows-strings";
-            packageId = "windows-strings";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "default" = [ "std" ];
-          "std" = [ "windows-result/std" "windows-strings/std" ];
-        };
-        resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "windows-implement 0.57.0" = rec {
+      "windows-implement" = rec {
         crateName = "windows-implement";
         version = "0.57.0";
         edition = "2021";
@@ -32914,35 +32889,7 @@ dependency.
         ];
 
       };
-      "windows-implement 0.60.2" = rec {
-        crateName = "windows-implement";
-        version = "0.60.2";
-        edition = "2021";
-        description = "The implement macro for the Windows crates";
-        sha256 = "1psxhmklzcf3wjs4b8qb42qb6znvc142cb5pa74rsyxm1822wgh5";
-        procMacro = true;
-        libName = "windows_implement";
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.119";
-            usesDefaultFeatures = false;
-            features = [ "parsing" "proc-macro" "printing" "full" "clone-impls" ];
-          }
-        ];
-
-      };
-      "windows-interface 0.57.0" = rec {
+      "windows-interface" = rec {
         crateName = "windows-interface";
         version = "0.57.0";
         edition = "2021";
@@ -32967,34 +32914,6 @@ dependency.
             packageId = "syn 2.0.119";
             usesDefaultFeatures = false;
             features = [ "parsing" "proc-macro" "printing" "full" "derive" "clone-impls" ];
-          }
-        ];
-
-      };
-      "windows-interface 0.59.3" = rec {
-        crateName = "windows-interface";
-        version = "0.59.3";
-        edition = "2021";
-        description = "The interface macro for the Windows crates";
-        sha256 = "0n73cwrn4247d0axrk7gjp08p34x1723483jxjxjdfkh4m56qc9z";
-        procMacro = true;
-        libName = "windows_interface";
-        dependencies = [
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.119";
-            usesDefaultFeatures = false;
-            features = [ "parsing" "proc-macro" "printing" "full" "clone-impls" ];
           }
         ];
 
@@ -33047,25 +32966,6 @@ dependency.
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
-      };
-      "windows-strings" = rec {
-        crateName = "windows-strings";
-        version = "0.5.1";
-        edition = "2021";
-        description = "Windows string types";
-        sha256 = "14bhng9jqv4fyl7lqjz3az7vzh8pw0w4am49fsqgcz67d67x0dvq";
-        libName = "windows_strings";
-        dependencies = [
-          {
-            name = "windows-link";
-            packageId = "windows-link";
-            usesDefaultFeatures = false;
-          }
-        ];
-        features = {
-          "default" = [ "std" ];
-        };
-        resolvedDefaultFeatures = [ "std" ];
       };
       "windows-sys 0.45.0" = rec {
         crateName = "windows-sys";
@@ -33648,7 +33548,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -33897,7 +33797,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_System" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -34157,7 +34057,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_System" "Win32_System_Com" "Win32_System_Threading" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Threading" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -34423,7 +34323,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -34686,7 +34586,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Devices" "Win32_Devices_Communication" "Win32_Foundation" "Win32_Globalization" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Devices" "Win32_Devices_Communication" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";
@@ -35787,10 +35687,10 @@ Used when compiling Rust programs to the component model.
       };
       "zerocopy" = rec {
         crateName = "zerocopy";
-        version = "0.8.61";
+        version = "0.8.59";
         edition = "2021";
         description = "Zerocopy makes zero-cost memory manipulation effortless. We write \"unsafe\" so you don't have to.";
-        sha256 = "0ri8ajsyghsl0fmwc55k4cj4ky042az0z5yvxd0jxhwqrq2vg7w7";
+        sha256 = "1jq0z0rxrmpzfrvkj3z5gb1anaxczzdiv43k67ay6yr2v7rjpybd";
         dependencies = [
           {
             name = "zerocopy-derive";
@@ -35820,10 +35720,10 @@ Used when compiling Rust programs to the component model.
       };
       "zerocopy-derive" = rec {
         crateName = "zerocopy-derive";
-        version = "0.8.61";
+        version = "0.8.59";
         edition = "2021";
         description = "Custom derive for traits from the zerocopy crate";
-        sha256 = "0ncpf1fq0gv8rk4nxivdp32093d90xv75iww0gx09mh1hfi8523h";
+        sha256 = "10pc78vxhr6lqk71yvm1aqv1h2pd6czrqgkc9570hpghya634kxc";
         procMacro = true;
         libName = "zerocopy_derive";
         dependencies = [
@@ -35907,7 +35807,7 @@ Used when compiling Rust programs to the component model.
       };
       "zeroize" = rec {
         crateName = "zeroize";
-        version = "1.9.1";
+        version = "1.9.0";
         edition = "2024";
         description = "Securely clear secrets from memory with a simple trait built on
 stable Rust primitives which guarantee memory is zeroed using an
@@ -35915,7 +35815,7 @@ operation will not be 'optimized away' by the compiler.
 Uses a portable pure Rust implementation that works everywhere,
 even WASM!
 ";
-        sha256 = "0yb8iykihpl3hfw5c4silw2lklpfxajkaa9yj1qw6jsy5hwq8c71";
+        sha256 = "0kpnij2v1ig6g2mhc0bnci0lrdfdhiq40afbc0fahajqc9jiag71";
         authors = [
           "The RustCrypto Project Developers"
         ];

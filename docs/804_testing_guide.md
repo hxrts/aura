@@ -1098,6 +1098,19 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 
 ### Build and Caching
 
+`Cargo.lock` is committed, together with the lockfiles of the excluded
+`toolkit/xtask` and `toolkit/lints` workspaces, so every checkout, CI runner and
+remote host resolves the same dependency graph that the advisory audit and the
+hermetic Nix build were run against. `Cargo.nix` is generated from it by
+crate2nix and is also committed; `just ci-cargo-nix-check` (the `Cargo.nix Sync`
+CI job) regenerates it into a scratch file and fails on any difference. After a
+dependency change, run `cargo update -p <crate>` or edit the manifest, then
+`just generate-cargo-nix`, and commit `Cargo.toml`, `Cargo.lock` and `Cargo.nix`
+in the same change. Pre-commit and the dev scripts use `--locked`, which
+requires that committed lockfile. Lockfile merge conflicts are resolved by
+taking either side and running `cargo update --workspace`, which re-resolves
+only the conflicting entries.
+
 Workspace Clippy, including `just ci-clippy` and `toolkit-clippy-strict`, uses
 Aura's pinned shell Cargo dispatcher. `scripts/toolkit-shell.sh` routes the
 aggregate Clippy command through that dispatcher and enters Aura's Nix shell
@@ -1278,8 +1291,8 @@ The Linux dependency manifest additionally requires Hickory Proto `=0.26.1`:
 RUSTSEC-2026-0118. Keep the backend enabled and validate the Linux harness,
 including its integration-test targets; a macOS build cannot establish this
 target-specific compatibility. Regenerate the tracked `Cargo.nix` after changing
-these dependencies and run `just ci-security-audit`. The ignored `Cargo.lock`
-does not enforce the fixed dependency versions on a fresh checkout.
+these dependencies, commit it together with `Cargo.lock`, and run
+`just ci-security-audit`; `just ci-cargo-nix-check` fails when the two drift.
 
 `patchbay-vm` relies on the explicit harness work and artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
 

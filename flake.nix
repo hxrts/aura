@@ -395,6 +395,8 @@
             auraCargo
             rustToolchain
             rustToolchainNightly
+            # Cargo.nix drift check
+            crate2nix.packages.${system}.default
 
             # Build tools
             pkg-config

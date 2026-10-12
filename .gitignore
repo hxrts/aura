@@ -3,7 +3,6 @@ target/
 /traces
 **/*.rs.bk
 *.pdb
-Cargo.lock
 result
 result-*
 

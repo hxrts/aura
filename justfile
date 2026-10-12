@@ -1272,6 +1272,7 @@ ci-dry-run profile="push":
     add_step "Build Check"                "nix develop --command just ci-build"
     add_step "Clippy Check"               "nix develop --command just ci-clippy"
     add_step "Dependency Advisory Audit"  "nix develop .#ci --command just ci-security-audit"
+    add_step "Cargo.nix Sync"             "nix develop .#ci --command just ci-cargo-nix-check"
     add_step "Security Boundary Policy"   "nix develop --command just ci-security-boundary-policy"
     add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
     add_step "Accept Chain Stack"         "nix develop --command just ci-accept-chain-stack"
@@ -1875,6 +1876,10 @@ lan-test-deep:
 generate-cargo-nix:
     just _nix-dev -- crate2nix generate
     @echo "Run 'nix build .#aura-terminal' to test hermetic build"
+
+# Verify the committed Cargo.nix matches the committed Cargo.lock
+ci-cargo-nix-check:
+    bash scripts/check/cargo-nix-sync.sh
 
 # Build using hermetic Nix build
 build-nix:
