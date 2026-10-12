@@ -38,52 +38,87 @@ case "$lane" in
   *) echo 'unknown compiler cache lane' >&2; exit 2 ;;
 esac
 root="$(cd "$root" && pwd -P)"
-[[ -f "$root/Cargo.toml" ]] || { echo 'no Cargo.toml in root' >&2; exit 2; }
+cleanup_outcome=refused
+cleanup_reason=preflight
+cleanup_before=null
+cleanup_after=null
+cleanup_free_after=null
+cleanup_owns_lock=0
+if [[ -n "${AURA_BUILD_RECEIPT:-}" ]]; then
+  source "$repo_root/scripts/dev/build-receipt.sh"
+fi
+finish_cleanup() {
+  local status=$?
+  if (( cleanup_owns_lock == 1 )); then rmdir "$lock_dir" 2>/dev/null || true; fi
+  if declare -F aura_receipt_record_cleanup >/dev/null; then
+    aura_receipt_record_cleanup "$root" guarded-lane "$lane" "$cleanup_outcome" \
+      "$cleanup_reason" "$status" "$cleanup_before" "$cleanup_after" null "$cleanup_free_after"
+  fi
+}
+trap finish_cleanup EXIT
+refuse_cleanup() { cleanup_reason="$1"; shift; echo "$*" >&2; exit 1; }
+[[ -f "$root/Cargo.toml" ]] || { cleanup_reason=invalid-root; echo 'no Cargo.toml in root' >&2; exit 2; }
 [[ ! -L "$root/target" && ! -L "$root/target/wasm32-unknown-unknown" ]] || {
-  echo 'target path contains a symlink' >&2; exit 1;
+  refuse_cleanup symlink 'target path contains a symlink'
 }
 path="$root/$relative"
 if [[ "$lane" == debug-incremental && -L "$root/target/debug" ]]; then
-  echo 'debug parent is a symlink' >&2; exit 1
+  refuse_cleanup symlink 'debug parent is a symlink'
 fi
 if [[ "$lane" == trybuild* && -L "$root/target/tests" ]]; then
-  echo 'trybuild parent is a symlink' >&2; exit 1
+  refuse_cleanup symlink 'trybuild parent is a symlink'
 fi
-[[ ! -L "$path" ]] || { echo "lane is a symlink: $path" >&2; exit 1; }
-if [[ ! -d "$path" ]]; then echo "No lane at $path"; exit 0; fi
+[[ ! -L "$path" ]] || refuse_cleanup symlink "lane is a symlink: $path"
+if [[ ! -d "$path" ]]; then
+  cleanup_outcome=skipped; cleanup_reason=absent; cleanup_before=0; cleanup_after=0
+  echo "No lane at $path"; exit 0
+fi
+cleanup_outcome=failed
+cleanup_reason=size-measurement
 size="$(du -sk "$path" | awk 'NR == 1 {print $1}')"
+[[ ! "$size" =~ ^[0-9]+$ ]] || cleanup_before="$size"
+cleanup_outcome=refused
+cleanup_reason=preflight
 printf 'Lane=%s mode=%s candidate=%s KiB path=%s\n' "$lane" "$mode" "$size" "$path"
-[[ "$mode" == apply ]] || exit 0
+if [[ "$mode" != apply ]]; then
+  cleanup_outcome=skipped; cleanup_reason=preview; exit 0
+fi
 
-command -v lsof >/dev/null || { echo 'lsof is required to prove this lane is idle' >&2; exit 1; }
+command -v lsof >/dev/null || refuse_cleanup open-file-scan-unavailable 'lsof is required to prove this lane is idle'
 lock_dir="$root/target/.aura-build-budget.lock"
 if [[ -n "$lock_owner" ]]; then
   [[ "$lock_owner" =~ ^[0-9]+$ && "$lock_owner" == "$PPID" && -f "$lock_dir/pid" ]] || {
-    echo 'invalid parent lock owner' >&2; exit 1;
+    refuse_cleanup parent-owner 'invalid parent lock owner'
   }
-  [[ "$(cat "$lock_dir/pid")" == "$lock_owner" ]] || { echo 'target lock belongs to another process' >&2; exit 1; }
+  [[ "$(cat "$lock_dir/pid")" == "$lock_owner" ]] || refuse_cleanup checkout-lock 'target lock belongs to another process'
 else
-  mkdir "$lock_dir" 2>/dev/null || { echo 'another build or prune holds target lock' >&2; exit 1; }
-  trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+  mkdir "$lock_dir" 2>/dev/null || refuse_cleanup checkout-lock 'another build or prune holds target lock'
+  cleanup_owns_lock=1
 fi
 # Only this checkout's builders block it; sibling worktrees build independently.
 source "$repo_root/scripts/dev/scoped-builders.sh"
 builders="$(aura_scoped_processes "$root" 'cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|cargo-kani|kani-driver' "$$")"
-[[ -z "$builders" ]] || { echo "builder active: $builders" >&2; exit 1; }
+[[ -z "$builders" ]] || refuse_cleanup active-builder "builder active: $builders"
 if [[ "$lane" == release || "$lane" == wasm-profile || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
   consumers="$(aura_scoped_processes "$root" 'tool_repl|aura-harness|aura' "$$")"
-  [[ -z "$consumers" ]] || { echo "harness consumer active: $consumers" >&2; exit 1; }
+  [[ -z "$consumers" ]] || refuse_cleanup active-consumer "harness consumer active: $consumers"
 fi
-open_files="$(lsof -n -P 2>/dev/null)" || { echo 'cannot inspect open files' >&2; exit 1; }
+open_files="$(lsof -n -P 2>/dev/null)" || refuse_cleanup open-file-scan-failed 'cannot inspect open files'
 if printf '%s\n' "$open_files" | rg -F "$path"; then
-  echo "lane has open files: $path" >&2
-  exit 1
+  refuse_cleanup open-files "lane has open files: $path"
 fi
 # Inspect again after acquiring the shared lock and checking active users.
-[[ -d "$path" && ! -L "$path" && ! -L "$root/target" ]] || { echo 'lane changed during preflight' >&2; exit 1; }
-[[ ! -L "$root/target/wasm32-unknown-unknown" ]] || { echo 'wasm parent changed during preflight' >&2; exit 1; }
-[[ "$lane" != debug-incremental || ! -L "$root/target/debug" ]] || { echo 'debug parent changed during preflight' >&2; exit 1; }
-[[ "$lane" != trybuild* || ! -L "$root/target/tests" ]] || { echo 'trybuild parent changed during preflight' >&2; exit 1; }
+[[ -d "$path" && ! -L "$path" && ! -L "$root/target" ]] || refuse_cleanup changed-path 'lane changed during preflight'
+[[ ! -L "$root/target/wasm32-unknown-unknown" ]] || refuse_cleanup changed-path 'wasm parent changed during preflight'
+[[ "$lane" != debug-incremental || ! -L "$root/target/debug" ]] || refuse_cleanup changed-path 'debug parent changed during preflight'
+[[ "$lane" != trybuild* || ! -L "$root/target/tests" ]] || refuse_cleanup changed-path 'trybuild parent changed during preflight'
 printf 'Removing whole inactive lane: %s (%s KiB)\n' "$path" "$size"
+cleanup_outcome=failed
+cleanup_reason=removal
 rm -rf -- "$path"
-printf 'Free after: %s KiB\n' "$(df -Pk "$root" | awk 'NR == 2 {print $4}')"
+cleanup_outcome=removed
+cleanup_reason=success
+cleanup_after=0
+cleanup_free_after="$(df -Pk "$root" | awk 'NR == 2 {print $4}' || true)"
+printf 'Free after: %s KiB\n' "$cleanup_free_after"
+[[ "$cleanup_free_after" =~ ^[0-9]+$ ]] || cleanup_free_after=null

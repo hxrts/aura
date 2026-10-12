@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
 # Sourced by build-budget; JSON is data, never sourced or evaluated.
-aura_receipt_update() {
-  local temporary
+aura_receipt_update() (
+  # Each writer owns a short-lived subshell lock. Its EXIT trap is independent
+  # of the build owner's signal/cleanup traps; atomic rename alone would lose
+  # concurrent phase and cleanup updates.
+  local temporary='' write_lock="${AURA_BUILD_RECEIPT}.write-lock" holder attempt acquired=0
+  for attempt in $(seq 1 200); do
+    [[ ! -L "$write_lock" ]] || { echo 'build-receipt: writer lock is a symlink' >&2; return 79; }
+    if mkdir "$write_lock" 2>/dev/null; then acquired=1; break; fi
+    holder="$(cat "$write_lock/pid" 2>/dev/null || true)"
+    if [[ "$holder" =~ ^[0-9]+$ ]] && ! kill -0 "$holder" 2>/dev/null; then
+      # Never reclaim here: competing reclaimers could remove a new owner's
+      # lock. Each build has a fresh receipt directory, so refuse this run.
+      echo 'build-receipt: stopped writer lock retained' >&2
+      return 79
+    fi
+    sleep 0.05
+  done
+  if (( acquired == 0 )); then echo 'build-receipt: receipt writer lock remained busy' >&2; return 79; fi
+  trap '[[ -z "$temporary" ]] || rm -f "$temporary"; rm -f "$write_lock/pid"; rmdir "$write_lock" 2>/dev/null || true' EXIT
+  printf '%s\n' "${BASHPID:-$$}" > "$write_lock/pid"
   temporary="$(mktemp "${AURA_BUILD_RECEIPT}.XXXXXX")" || return
   if jq "$@" "$AURA_BUILD_RECEIPT" > "$temporary"; then
     mv "$temporary" "$AURA_BUILD_RECEIPT"
@@ -9,7 +27,7 @@ aura_receipt_update() {
     rm -f "$temporary"
     return 1
   fi
-}
+)
 
 aura_receipt_init() {
   local checkout="$1" build_lane="$2" directory fingerprint revision identity argv path
@@ -49,7 +67,7 @@ aura_receipt_init() {
         test_inventory:(if $inventory=="" then null else $inventory end)},
       wrapper:{pid:$pid,start_identity:$identity},child:null,command_argv:$argv,
       started_utc:$started,finished_utc:null,current_phase:"admission",active_phase:null,phases:[],
-      command_exit_status:null,cleanup:null,final_exit_status:null}' > "$AURA_BUILD_RECEIPT"
+      command_exit_status:null,cleanup:null,cleanup_events:[],final_exit_status:null}' > "$AURA_BUILD_RECEIPT"
   printf 'Build receipt: %s\n' "$AURA_BUILD_RECEIPT"
 }
 
@@ -61,4 +79,27 @@ aura_receipt_finish() {
     '.final_exit_status=$status | .finished_utc=$finished |
       .last_observed_phase=.current_phase | .current_phase="finished"'
   printf 'Build complete: exit=%s receipt=%s\n' "$exit_status" "$AURA_BUILD_RECEIPT"
+}
+
+# Native cleanup outcomes and size observations are separate facts. A foreign
+# fixture/root must never append to its caller's receipt.
+aura_receipt_record_cleanup() {
+  local event_root="$1" operation="$2" lane="$3" outcome="$4" reason="$5"
+  local status="$6" before="$7" after="$8" free_before="$9" free_after="${10}"
+  [[ -n "${AURA_BUILD_RECEIPT:-}" && -f "$AURA_BUILD_RECEIPT" ]] || return 0
+  jq -e --arg root "$event_root" '.root==$root' "$AURA_BUILD_RECEIPT" >/dev/null || return 0
+  aura_receipt_update --arg stage "${AURA_BUILD_CLEANUP_STAGE:-command}" \
+    --arg operation "$operation" --arg lane "$lane" --arg outcome "$outcome" --arg reason "$reason" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson status "$status" \
+    --argjson before "$before" --argjson after "$after" \
+    --argjson cap "${cap_kib:-null}" \
+    --argjson free_before "$free_before" --argjson free_after "$free_after" \
+    '.cleanup_events += [{stage:$stage,operation:$operation,lane:$lane,
+      outcome:$outcome,reason:$reason,exit_status:$status,at_utc:$at,
+      size_scope:(if $operation=="guarded-lane" then "lane" else "target" end),
+      before_kib:$before,after_kib:$after,
+      target_above_soft_cap:(if $operation=="sweep" and $after!=null and $cap!=null
+        then $after>$cap else null end),
+      reclaimed_kib:(if $before!=null and $after!=null and $before>=$after
+        then $before-$after else null end),free_before_kib:$free_before,free_after_kib:$free_after}]'
 }

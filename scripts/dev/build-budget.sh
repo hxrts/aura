@@ -169,17 +169,36 @@ require_idle() {
 target_has_open_files() {
   local open_files
   if ! command -v lsof >/dev/null; then
+    sweep_skip_reason=open-file-scan-unavailable
     echo 'build-budget: lsof unavailable; treating target as in use' >&2
     return 0
   fi
   if ! open_files="$(lsof -n -P 2>/dev/null)"; then
+    sweep_skip_reason=open-file-scan-failed
     echo 'build-budget: open-file scan failed; treating target as in use' >&2
     return 0
   fi
+  sweep_skip_reason=open-files
   rg -F -q "$root/target/" <<< "$open_files"
 }
 sweep() {
+  local mode="$1" rc=0 before=null after=null outcome=completed reason=success
+  [[ "$mode" == dry ]] || before="$(target_kib strict)" || before=null
+  sweep_original "$mode" || rc=$?
+  [[ "$mode" == dry ]] && return "$rc"
+  after="$(target_kib strict)" || after=null
+  if (( rc == 3 )); then outcome=skipped; reason="$sweep_skip_reason";
+  elif (( rc != 0 )); then
+    outcome=failed; reason="$sweep_failure_reason"
+    [[ "$reason" != active-consumer ]] || outcome=refused
+  fi
+  aura_receipt_record_cleanup "$root" sweep target "$outcome" "$reason" "$rc" "$before" "$after" null null
+  return "$rc"
+}
+sweep_original() {
   local mode="$1" preview release_count rc
+  sweep_skip_reason=unknown
+  sweep_failure_reason=preview
   preview="$(mktemp "${TMPDIR:-/tmp}/aura-sweep-preview.XXXXXX")"
   printf 'Sweep preview: cargo sweep --maxsize %sGiB --dry-run -v .\n' "$cap_gib"
   if (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" --dry-run -v .) > "$preview" 2>&1; then
@@ -196,15 +215,19 @@ sweep() {
   rm -f "$preview"
   [[ "$mode" == dry ]] && return 0
   if (( release_count > 0 || allow_live_harness == 1 )); then
+    if (( release_count > 0 )); then sweep_skip_reason=protected-production;
+    else sweep_skip_reason=live-harness-mode; fi
     echo 'build-budget: preserving production/web caches and live harness artifacts; skipping global sweep' >&2
     return 3
   fi
+  sweep_failure_reason=active-consumer
   require_idle || return $?
   if target_has_open_files; then
     echo 'build-budget: target has open files; skipping global sweep' >&2
     return 3
   fi
   printf 'Sweep: cargo sweep --maxsize %sGiB .\n' "$cap_gib"
+  sweep_failure_reason=cargo-sweep
   (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" .)
 }
 # Default nonincremental builds cannot reuse incremental state. Reclaim that
@@ -268,6 +291,7 @@ printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free
 if (( dry_run == 0 )); then
   source "$repo_root/scripts/dev/build-receipt.sh"
   aura_receipt_init "$root" "$lane" "$@"
+  export AURA_BUILD_CLEANUP_STAGE=pre-admission
   trap 'receipt_status=$?; aura_receipt_finish "$receipt_status"' EXIT
 fi
 printf 'Build policy: CARGO_INCREMENTAL=%s\n' "$CARGO_INCREMENTAL"
@@ -378,6 +402,7 @@ printf 'Build lane=%s command:' "$lane"
 printf ' %q' "$@"
 printf '\n'
 aura_receipt_update '.current_phase="command"'
+export AURA_BUILD_CLEANUP_STAGE=command
 set -m # Give the background build its own process group for bounded shutdown.
 (cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") &
 child_pid=$!
@@ -415,6 +440,7 @@ post_build_target="$(target_kib)"
 
 # The build is done: its post-build sweep never waits for other builders.
 wait_seconds=0
+export AURA_BUILD_CLEANUP_STAGE=post-command
 cache_cleanup=not-run-command-failed
 if (( status == 0 && no_prune == 1 )); then
   cache_cleanup=skipped-no-prune

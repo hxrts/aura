@@ -1136,6 +1136,17 @@ command/final exit statuses, cache cleanup
 observations and artifact paths. Missing metadata and unexecuted phases remain
 unknown; an opaque command's exit does not prove test discovery or execution.
 Read JSON with `jq`; never source or evaluate receipt contents.
+Receipt read/modify/write updates use a bounded writer lock, preserving
+concurrent phase and native-cleanup observations. A stopped writer's lock is
+retained and updates refuse with exit 79; each new build uses a fresh receipt
+directory, so an old lock cannot block a later build.
+The `cleanup_events` array retains pre-admission and post-command operations,
+including native guard refusals, skipped sweeps, raw exits and measured sizes.
+Lane removals reuse the cleaner's lane measurement; sweeps observe target
+sizes. Reclaimed bytes remain separate from command outcomes and are unknown
+when a measurement is unavailable. The `cleanup` summary describes only
+post-command collection, so a failed command can retain successful earlier
+reclamation events.
 
 Within one budgeted lifetime, use `bash scripts/dev/build-phase.sh compile --
 COMMAND...`, followed by `discovery` and `execution` phases with
@@ -1145,7 +1156,11 @@ default pretty text harness output without `--quiet` or `--nocapture` (JSON
 output is unsupported); both require a
 nonempty exact match. The runner executes the command itself and records its
 raw exit separately from inventory validation. The expected inventory is
-selected before command execution; missing tests fail with exit status78.
+selected before command execution; missing tests fail with exit status 78.
+Execution counts include pretty harness `ok` and `FAILED` terminal results,
+with separate passed, failed and ignored counts. An ignored test cannot satisfy
+the required execution inventory. A matching inventory preserves a failing
+command's original exit status, including 101.
 Use a separate `disposal` phase for an actual native shutdown/cleanup command;
 its result remains independent of semantic or compile failure. Completion
 prints the final status and receipt path, so coordinators can inspect one

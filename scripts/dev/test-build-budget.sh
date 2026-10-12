@@ -41,6 +41,14 @@ cat > "$fakebin/du" <<'EOF'
 #!/usr/bin/env bash
 [[ ! -f "$DU_EMPTY_FILE" ]] || exit 1
 size="$(cat "$SIZE_FILE")"
+if [[ "${@: -1}" == "$PROJECT_ROOT/target/debug/incremental" && -f "$INCREMENTAL_SIZE_FILE" ]]; then
+  printf '%s\t%s\n' "$(cat "$INCREMENTAL_SIZE_FILE")" "${@: -1}"
+  exit 0
+fi
+if [[ "${@: -1}" == "$PROJECT_ROOT/target/wasm32-unknown-unknown/debug" && -f "$WASM_SIZE_FILE" ]]; then
+  printf '%s\t%s\n' "$(cat "$WASM_SIZE_FILE")" "${@: -1}"
+  exit 0
+fi
 if [[ -f "$INCREMENTAL_SIZE_FILE" && ! -d "$PROJECT_ROOT/target/debug/incremental" ]]; then
   size=$((size - $(cat "$INCREMENTAL_SIZE_FILE")))
 fi
@@ -225,6 +233,21 @@ touch "$project/target/debug/deps/reusable.rlib"
 expect_status 0 env CARGO_INCREMENTAL=0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" -- \
   sh -c 'test ! -d target/debug/incremental && test -f target/debug/deps/reusable.rlib && test ! -s "$CALLS_FILE"'
 [[ "$(wc -l < "$CALLS_FILE")" -eq 2 ]] # Only the post-build sweep.
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.cleanup_events[0] | .stage=="pre-admission" and .operation=="guarded-lane"
+  and .lane=="debug-incremental" and .outcome=="removed" and .exit_status==0
+  and .before_kib==11534336 and .after_kib==0 and .reclaimed_kib==11534336' "$receipt" >/dev/null
+
+# A failed command must retain positive pre-admission cleanup evidence even
+# though its post-command cleanup summary correctly says not run.
+reset_case
+printf '%s\n' $((17 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((11 * 1024 * 1024)) > "$INCREMENTAL_SIZE_FILE"
+mkdir -p "$project/target/debug/incremental"
+expect_status 37 env CARGO_INCREMENTAL=0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" -- sh -c 'exit 37'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==37 and .cleanup.result=="not-run-command-failed" and
+  any(.cleanup_events[];.stage=="pre-admission" and .outcome=="removed" and .reclaimed_kib==11534336)' "$receipt" >/dev/null
 
 # Sweep success is not proof of reaching the cap: a remaining inactive lane
 # must still be reclaimed, without evicting sibling debug dependencies.
@@ -234,6 +257,11 @@ printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
 mkdir -p "$project/target/wasm32-unknown-unknown/debug"
 expect_status 0 run_budget -- sh -c 'test ! -d target/wasm32-unknown-unknown/debug && test -f target/debug/deps/reusable.rlib'
 rg -q 'successful sweep left target over budget' "$test_root/output"
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e 'any(.cleanup_events[];.operation=="sweep" and .stage=="pre-admission" and
+  .exit_status==0 and .outcome=="completed" and .target_above_soft_cap==true) and
+  any(.cleanup_events[];.operation=="guarded-lane" and .lane=="wasm-debug" and
+  .outcome=="removed" and .before_kib==5242880 and .after_kib==0)' "$receipt" >/dev/null
 
 # Explicit incremental opt-in and loaded incremental files forbid preferential
 # reclamation; existing scoped guards remain authoritative.
@@ -248,6 +276,12 @@ for protection in opt-in open-file; do
   fi
   expect_status 0 env CARGO_INCREMENTAL="$incremental" bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" -- \
     sh -c 'test -d target/debug/incremental'
+  if [[ "$protection" == open-file ]]; then
+    receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+    jq -e 'any(.cleanup_events[];.operation=="guarded-lane" and .reason=="open-files" and
+      .outcome=="refused" and .exit_status==1 and .reclaimed_kib==null) and
+      any(.cleanup_events[];.operation=="sweep" and .reason=="open-files" and .outcome=="skipped" and .exit_status==3)' "$receipt" >/dev/null
+  fi
 done
 
 reset_case

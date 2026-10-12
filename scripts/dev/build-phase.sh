@@ -29,7 +29,7 @@ phase_lock="${AURA_BUILD_RECEIPT}.phase-lock"
 mkdir "$phase_lock" 2>/dev/null || {
   echo 'build-phase: another phase owns this receipt' >&2; exit 2;
 }
-phase_log="$(mktemp "$(dirname "$AURA_BUILD_RECEIPT")/$phase.XXXXXX.log")"
+phase_log="$(mktemp "$(dirname "$AURA_BUILD_RECEIPT")/$phase.XXXXXX")"
 argv="$(jq -cn --args '$ARGS.positional' -- "$@")"
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 expected_json='null'
@@ -77,18 +77,26 @@ cat "$phase_log"
 status="$command_status"
 inventory_result=unknown
 observed='null'
+passed='null'
+failed='null'
+ignored='null'
+if [[ "$phase" == execution && -n "$expected" ]]; then
+  passed="$(sed -n 's/^test \(.*\) \.\.\. ok$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  failed="$(sed -n 's/^test \(.*\) \.\.\. FAILED$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  ignored="$(sed -En 's/^test (.*) \.\.\. ignored(,.*)?$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  observed="$(jq -cn --argjson passed "$passed" --argjson failed "$failed" '$passed+$failed|sort')"
+fi
 if [[ -n "$expected" ]]; then
   if [[ "$phase" == discovery ]]; then
     observed="$(sed -n 's/: test$//p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
-  else
-    observed="$(sed -n 's/^test \(.*\) \.\.\. ok$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
   fi
-  if [[ "$observed" == "$expected_json" && "$observed" != '[]' ]]; then
+  if jq -en --argjson observed "$observed" --argjson expected "$expected_json" \
+    '$observed==$expected and ($observed|length)>0' >/dev/null; then
     inventory_result=matched
   else
     inventory_result=mismatch
     (( status != 0 )) || status=78
-    echo "build-phase: $phase inventory mismatch (or zero discovery/execution); see $phase_log" >&2
+    echo "build-phase: $phase required inventory mismatch; see $phase_log" >&2
   fi
 fi
 aura_receipt_update --arg phase "$phase" --arg log "$phase_log" --arg started "$started" \
@@ -96,10 +104,15 @@ aura_receipt_update --arg phase "$phase" --arg log "$phase_log" --arg started "$
   --argjson command_status "$command_status" --argjson status "$status" \
   --argjson argv "$argv" --argjson expected "$expected_json" --argjson observed "$observed" \
   --argjson child "$observed_child" --argjson runner_pid "$$" --arg identity "$runner_identity" \
+  --argjson passed "$passed" --argjson failed "$failed" --argjson ignored "$ignored" \
   '.phases += [{phase:$phase,command_argv:$argv,log:$log,started_utc:$started,
     runner:{pid:$runner_pid,start_identity:$identity},child:$child,
     finished_utc:$finished,command_exit_status:$command_status,exit_status:$status,
     inventory_result:$inventory,expected_tests:$expected,observed_tests:$observed,
+    passed_tests:$passed,failed_tests:$failed,ignored_tests:$ignored,
+    passed_count:(if $passed==null then null else ($passed|length) end),
+    failed_count:(if $failed==null then null else ($failed|length) end),
+    ignored_count:(if $ignored==null then null else ($ignored|length) end),
     expected_count:(if $expected==null then null else ($expected|length) end),
     observed_count:(if $observed==null then null else ($observed|length) end)}]
     | .active_phase=null'
