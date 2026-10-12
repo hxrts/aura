@@ -147,6 +147,8 @@ The mock runtime bridge implements the native identity/settings `RuntimeBridgeEr
 
 `ManualPhysicalClock` is a shared injected physical-time provider for real runtime/ceremony fixtures. Sleep remains pending until the test explicitly publishes an observation that reaches the original sleep deadline. Tests can publish rollback without masking it. The provider does not advance time during sleep, avoiding background-service loops that silently consume ceremony budgets. Enrollment fixtures must obtain actual setup pins and held generation reservations; test clock control does not authorize registration or activation.
 
+`ManualPhysicalClock::observe_next_relative_sleep` installs one shared, one-shot admission observer across provider clones. An actual relative sleep reports its computed `WindowPosition<PhysicalMillis>` only after enabling its wake notification, once per sleep invocation; an occupied observer slot refuses replacement. The observer does not advance physical time, replace an absolute endpoint, suppress timer failures or acknowledge replay/cleanup. Fixtures may drive that same provider to the reported target and must still await the actual operation's processing acknowledgment. Forward-time refusal assertions read the actual provider after progress rather than introducing an earlier timestamp that could create a new rollback.
+
 `QuiescentClock` drives one shared `ManualPhysicalClock` for multi-agent runtime tests: a driver task advances it in fixed steps, each gated on a tokio sleep, so under a paused tokio clock virtual time moves only when all runtimes are idle.
 
 MockEffects keeps secure records in a distinct typed-location map rather than a forgeable ordinary-key prefix. Initial mutable publication is atomic; immutable publication seals an existing original and rejects replacement, deletion, and key generation. Test fixture reset clears this test-owned state explicitly and does not model a production retirement capability.
@@ -173,6 +175,8 @@ underlying byte inventory proves that configured storage remains encrypted.
 
 ManualPhysicalClock supports one-shot typed observation and sleep faults. Sleep faults wake an already waiting original sleep without advancing physical time or replacing its target. These injections exercise actual required provider boundaries.
 
+`ManualPhysicalClock::script_next_observation` installs one successful observation on the same selected provider, consumed once by an actual `physical_time` read. It refuses an occupied or borrowed override slot. The scripted sample does not change the base clock, notify or advance absolute waits, or replace their original endpoint. Use this seam for a transient required-read rollback while the independently driven timer clock remains unchanged; global rollback through `set_time` and actual timer failure through `fail_next_sleep` remain separate scenarios. Clock-source variation does not reset a budget, clear sticky refusal, establish durable acknowledgment, or authorize enrollment completion.
+
 Configured crypto fidelity tests use `CustomCryptoProbe`, which delegates real
 primitives and can independently fault KDF, Ed25519 generation, signing or
 verification. Ed25519 failures retain the typed `CustomEd25519Fault` operation;
@@ -181,6 +185,12 @@ they do not substitute keys, signatures or verification outcomes.
 `ManualPhysicalClock` registers absolute waits against the supplied fixed endpoint
 without awaiting its injectable clock-read path or advancing time. Actual clock
 notifications drive wakeups; rollback and selected timer failures remain typed.
+Its registered-deadline inventory exposes the earliest live provider wait and
+removes cancelled or completed waits, including duplicate deadlines. The
+one-shot relative-sleep observer reports actual admission, and transient
+scripted reads leave the independently driven clock and original endpoints
+unchanged. Fixture drivers must establish processing acknowledgment separately
+before treating any timer observation as protocol progress.
 Required delayed-registration and native-fault tests run in both the focused
 absolute-time-observation and full VM lifecycle inventories.
 
