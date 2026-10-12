@@ -390,6 +390,22 @@ pub fn resolve_backend_mode(requested: NetworkBackendMode) -> BackendPreflightRe
     }
 }
 
+/// Enter the user namespace that the native patchbay backend requires.
+///
+/// Patchbay refuses to build a lab as real root outside a user namespace, and
+/// the namespace must be entered while the process is still single-threaded,
+/// so call this from `main` before any runtime exists. Idempotent. On hosts
+/// without the native backend it is a no-op.
+pub fn prepare_native_patchbay() -> Result<()> {
+    cfg_if! {
+        if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
+            patchbay::init_userns().context("enter user namespace for native patchbay")
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Construct a concrete backend for the selected mode.
 pub fn build_backend(
     mode: NetworkBackendMode,

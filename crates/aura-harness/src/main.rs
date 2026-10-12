@@ -138,6 +138,10 @@ fn run(args: RunArgs) -> Result<()> {
         .network_backend
         .parse()
         .context("invalid --network-backend value")?;
+    if requested_backend == NetworkBackendMode::Patchbay {
+        // Must precede any thread or runtime creation; see prepare_native_patchbay.
+        aura_harness::network_lab::prepare_native_patchbay()?;
+    }
     let backend_preflight = resolve_backend_mode(requested_backend);
 
     let scenario_config = if let Some(path) = &args.scenario {
