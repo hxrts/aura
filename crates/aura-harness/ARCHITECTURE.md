@@ -229,7 +229,9 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - Keep unsupported capability failures attached to the exact unsupported operation. Do not add back generic backend-cast helpers that hide which contract was actually requested.
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 - Do not add new inventory-backed or shared-flow dependents to `compatibility_step.rs`. If you touch that IR, keep the retention surface limited to `tests/phases/phase3_state_machine.rs` and executor-internal metadata/wait shaping, or delete it instead.
-- The patchbay VM backend uses only its explicit harness work/artifact directories. Do not reintroduce `.qemu-vm` migration or symlink-redirect compatibility paths.
+- The network lab has two backends, `mock` and native `patchbay` (Linux). The retired `patchbay-vm` mode must not come back as a shell-out to patchbay's sim runner; a lab backend launches real Aura instances inside its namespaces or it is not a backend.
+- `ProvisionedLab` owns the lab for the whole run: provisioned in `main` before the coordinator exists, torn down by `finish` after the coordinator is dropped, so namespaces outlive every child. `InstanceNamespace::run_sync` is the only way a child enters a lab namespace (patchbay namespaces are anonymous fds). Packet captures started at provisioning are stopped by `finish` before the lab drops; a capture left running would keep its namespace alive.
+- The backend timeline is built from patchbay's flushed `events.jsonl` plus harness receipts after teardown; anything collected while the lab is alive is provisional and marked so.
 - Matrix-run temp cleanup stays the default, but diagnostics may retain the per-run temp and transient roots by setting `AURA_HARNESS_KEEP_TMP=1`; this changes artifact retention only and must not change scenario semantics.
 
 ## Testing
@@ -260,6 +262,9 @@ cargo test -p aura-harness
 | Holepunch E2E patchbay broken | — | `tests/holepunch/holepunch_e2e_runtime_patchbay.rs` | Covered |
 | Holepunch tier 2 broken | — | `tests/holepunch/holepunch_tier2_patchbay.rs` | Covered |
 | Holepunch stress fails | — | `tests/holepunch/holepunch_tier3_stress.rs` | Covered |
+| Link condition lands on the wrong node | — | `tests/holepunch/holepunch_tier2_patchbay.rs` (`link_conditions_land_on_the_node_that_owns_the_link`), `network_lab::tests` | Covered |
+| Lab timeline misses provisioning or teardown | — | `tests/holepunch/holepunch_tier2_patchbay.rs` (`finished_lab_timeline_covers_provisioning_through_teardown`) | Covered |
+| Restricted-cone NAT or stress presets fail to provision | — | `tests/holepunch/holepunch_tier2_patchbay.rs`, `topology_adapter::impair_value_tests` | Covered |
 | Local loopback contract fails | ObservationUsesAuthoritativeSemanticState | `tests/contract_local_loopback.rs` | Covered |
 | Contract suite fails | SharedFlowExecutionIsSemantic | `tests/contract_suite.rs` | Covered |
 

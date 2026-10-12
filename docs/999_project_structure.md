@@ -566,7 +566,7 @@ Ownership expectation:
 - Artifact synchronization and determinism validation
 - Screen normalization and VT100 terminal emulation for TUI testing
 - Shared semantic contracts from `aura-app` for scenario actions and UI snapshots
-- Backend selection for `mock`, `patchbay`, and `patchbay-vm` holepunch lanes
+- Backend selection for `mock` and `patchbay` holepunch lanes
 - Resource guards and capability checking
 
 Shared UX contract ownership is split intentionally:

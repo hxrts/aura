@@ -115,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
-      - name: Validate patchbay / patchbay-vm pinning
+      - name: Validate patchbay pinning
         run: nix develop --command just ci-holepunch-toolchain-audit
       - name: Upload toolchain audit report
         if: always()

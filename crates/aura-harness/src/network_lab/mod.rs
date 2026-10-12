@@ -12,24 +12,19 @@ pub mod scenario_builder;
 pub mod topology_adapter;
 
 mod patchbay_backend;
-mod vm_backend;
 
 pub use patchbay_backend::PatchbayBackend;
-pub use vm_backend::VmPatchbayBackend;
-
-/// Upstream patchbay revision shared by the native library dependency in this
-/// crate's `Cargo.toml` and the `patchbay-vm` guest runner, so the two lanes
-/// run the same NAT and link-condition semantics. `scripts/ci/holepunch.sh
-/// audit` checks that the two agree. This is the `patchbay-v0.7.0` tag.
-pub const PATCHBAY_PINNED_REV: &str = "5cc60db1eb190360dfcd64eaf2f829bce4072551";
 
 /// Supported network lab backend modes.
+///
+/// `Patchbay` is Linux-only (network namespaces); the `mock` backend records
+/// events without any network. The former `patchbay-vm` mode was retired: it
+/// never ran an Aura process, and Linux coverage comes from a Linux host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkBackendMode {
     Mock,
     Patchbay,
-    PatchbayVm,
 }
 
 impl fmt::Display for NetworkBackendMode {
@@ -37,7 +32,6 @@ impl fmt::Display for NetworkBackendMode {
         match self {
             Self::Mock => f.write_str("mock"),
             Self::Patchbay => f.write_str("patchbay"),
-            Self::PatchbayVm => f.write_str("patchbay-vm"),
         }
     }
 }
@@ -49,9 +43,8 @@ impl FromStr for NetworkBackendMode {
         match value.trim() {
             "mock" => Ok(Self::Mock),
             "patchbay" => Ok(Self::Patchbay),
-            "patchbay-vm" => Ok(Self::PatchbayVm),
             other => Err(anyhow!(
-                "unknown network backend '{other}', expected one of: mock, patchbay, patchbay-vm"
+                "unknown network backend '{other}', expected one of: mock, patchbay"
             )),
         }
     }
@@ -684,24 +677,12 @@ pub fn resolve_backend_mode(requested: NetworkBackendMode) -> BackendPreflightRe
         },
     });
 
-    let vm_available = binary_in_path("patchbay");
-    checks.push(BackendPreflightCheck {
-        name: "patchbay_vm_binary".to_string(),
-        ok: vm_available,
-        details: if vm_available {
-            "patchbay CLI (vm subcommand) found in PATH".to_string()
-        } else {
-            "patchbay CLI not found in PATH".to_string()
-        },
-    });
-
+    // Only an actual fallback is recorded; a run that configures a topology
+    // refuses it (see the harness binary), so this stays a preflight fact.
     let resolved = match requested {
         NetworkBackendMode::Mock => NetworkBackendMode::Mock,
         NetworkBackendMode::Patchbay if native_supported => NetworkBackendMode::Patchbay,
-        NetworkBackendMode::Patchbay if vm_available => NetworkBackendMode::PatchbayVm,
         NetworkBackendMode::Patchbay => NetworkBackendMode::Mock,
-        NetworkBackendMode::PatchbayVm if vm_available => NetworkBackendMode::PatchbayVm,
-        NetworkBackendMode::PatchbayVm => NetworkBackendMode::Mock,
     };
 
     BackendPreflightReport {
@@ -735,7 +716,6 @@ pub fn build_backend(
     match mode {
         NetworkBackendMode::Mock => Ok(Box::new(MockNetworkLabBackend::new(artifact_root))),
         NetworkBackendMode::Patchbay => Ok(Box::new(PatchbayBackend::new(artifact_root))),
-        NetworkBackendMode::PatchbayVm => Ok(Box::new(VmPatchbayBackend::new(artifact_root))),
     }
 }
 
@@ -898,21 +878,6 @@ impl CanNat for MockNetworkLabBackend {}
 impl CanFirewall for MockNetworkLabBackend {}
 impl CanHandoff for MockNetworkLabBackend {}
 impl CanArtifacts for MockNetworkLabBackend {}
-
-fn binary_in_path(binary: &str) -> bool {
-    if binary.contains(std::path::MAIN_SEPARATOR) {
-        return Path::new(binary).exists();
-    }
-
-    std::env::var_os("PATH")
-        .map(|path| {
-            std::env::split_paths(&path).any(|dir| {
-                let candidate = dir.join(binary);
-                candidate.exists()
-            })
-        })
-        .unwrap_or(false)
-}
 
 fn native_patchbay_supported() -> bool {
     cfg_if! {
@@ -1230,14 +1195,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preflight_falls_back_to_vm_or_mock_when_native_unavailable() {
+    async fn preflight_falls_back_to_mock_when_native_unavailable() {
         let report = resolve_backend_mode(NetworkBackendMode::Patchbay);
         assert!(matches!(
             report.resolved,
-            NetworkBackendMode::Patchbay
-                | NetworkBackendMode::PatchbayVm
-                | NetworkBackendMode::Mock
+            NetworkBackendMode::Patchbay | NetworkBackendMode::Mock
         ));
+        assert_eq!(
+            report.checks.len(),
+            1,
+            "native support is the only preflight check"
+        );
+        assert!("patchbay-vm".parse::<NetworkBackendMode>().is_err());
     }
 
     #[tokio::test]

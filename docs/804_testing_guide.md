@@ -176,7 +176,6 @@ Use this lane matrix when selecting harness mode.
 |------|---------|---------|
 | Local deterministic | `mock` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml` |
 | Patchbay relay realism | `patchbay` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml --network-backend patchbay` |
-| Patchbay-vm relay realism | `patchbay-vm` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml --network-backend patchbay-vm` |
 | Browser | Playwright | `just harness-run-browser scenarios/harness/semantic-observation-browser-smoke.toml` |
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot and readiness waits.
@@ -1264,20 +1263,30 @@ cargo run -p aura-harness --bin aura-harness -- \
   run --config configs/harness/local-loopback.toml \
   --network-backend patchbay
 
-# Cross-platform VM runner (macOS/Linux)
-cargo run -p aura-harness --bin aura-harness -- \
-  run --config configs/harness/local-loopback.toml \
-  --network-backend patchbay-vm
+# Real instances inside lab namespaces (Linux; aura built with aura-effects/test-keyring)
+AURA_HARNESS_AURA_BIN=target/debug/aura cargo run -p aura-harness --bin aura-harness \
+  --features patchbay-backend -- \
+  run --config configs/harness/patchbay-lan.toml \
+  --scenario scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml \
+  --network-backend patchbay
 ```
 
-Patchbay is the authoritative NAT-realism backend for holepunch validation. Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+Patchbay is the authoritative NAT-realism backend for holepunch validation and
+runs only on a Linux host with unprivileged user namespaces (ubu1 for this
+project). The former `patchbay-vm` mode is retired: it handed Aura topology
+TOML to patchbay's sim runner and never launched an Aura process. A run config
+with `run.network_topology` provisions a lab and forks each instance that maps
+a `lab_authority` inside its device namespace; such a run refuses backend
+fallback instead of silently running on the host. Multi-instance runs need an
+`aura` built with `aura-effects/test-keyring`, since a production build takes
+one platform keyring lease per OS identity. Keep deterministic non-network
+logic in `mock` backend tests to preserve fast feedback.
 
 The Linux harness pins Patchbay to upstream revision
-`5cc60db1eb190360dfcd64eaf2f829bce4072551` (the `patchbay-v0.7.0` tag). The same
-revision is exported as `aura_harness::network_lab::PATCHBAY_PINNED_REV` and
-passed to `patchbay vm run --patchbay-version`, so the native and VM lanes cannot
-drift; the Nix flake builds that `patchbay` CLI from the same upstream revision
-(the former `hxrts/patchbay` fork is retired, upstream has Apple Silicon support); `scripts/ci/holepunch.sh audit` fails when the two disagree. Patchbay 0.7
+`5cc60db1eb190360dfcd64eaf2f829bce4072551` (the `patchbay-v0.7.0` tag). The Nix
+flake input that builds the `patchbay` CLI (for `patchbay serve` over a lab run
+directory) pins the same revision; `scripts/ci/holepunch.sh audit` fails when
+the two disagree. The former `hxrts/patchbay` fork is retired. Patchbay 0.7
 models NAT as three RFC 4787 behavior tiers (`Open`, `Moderate`, `Strict`) and
 Aura's deployment-named `NatPreset` values map onto them in
 `network_lab::topology_adapter::to_patchbay_nat`:
@@ -1313,7 +1322,12 @@ target-specific compatibility. Regenerate the tracked `Cargo.nix` after changing
 these dependencies, commit it together with `Cargo.lock`, and run
 `just ci-security-audit`; `just ci-cargo-nix-check` fails when the two drift.
 
-The `patchbay-vm` backend runs the upstream `patchbay` CLI (`patchbay vm run`, built by the flake's `patchbay` package) and relies on the explicit harness work and artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
+Lab artifacts land under the run directory: `network_lab_runtime.json` (device,
+namespace and address per authority), `network-lab-artifacts/` with the
+patchbay run directory copy, one `<device>.pcap` per device captured by
+`tcpdump` inside its namespace, and `network_timeline.json`;
+`network_lab_artifacts.json` summarizes them after the lab is torn down.
+`startup_summary.json` records each lab-mapped instance's placement.
 
 ### Backend Resolution
 

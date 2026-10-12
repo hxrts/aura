@@ -26,7 +26,7 @@
     };
     # Patchbay: Network simulation for holepunch testing. Pinned to the same
     # upstream revision as crates/aura-harness/Cargo.toml and
-    # aura_harness::network_lab::PATCHBAY_PINNED_REV (the patchbay-v0.7.0 tag).
+    # scripts/ci/holepunch.sh audit (the patchbay-v0.7.0 tag).
     patchbay = {
       url = "github:n0-computer/patchbay/5cc60db1eb190360dfcd64eaf2f829bce4072551";
       flake = false; # Use as source, not as flake (no packages exported)
@@ -228,7 +228,7 @@
             echo "Cargo.nix regenerated successfully!"
           '';
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-          # Upstream patchbay CLI for the patchbay-vm harness backend.
+          # Upstream patchbay CLI: `patchbay serve` inspects a harness lab run dir.
           patchbay = patchbayCli;
         };
 

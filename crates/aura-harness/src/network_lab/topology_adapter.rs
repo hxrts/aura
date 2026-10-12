@@ -335,7 +335,7 @@ cfg_if! {
     }
 }
 
-/// Serialize topology into TOML for CLI-driven backends (e.g. `patchbay-vm`).
+/// Serialize a topology into the TOML form `load_topology` reads.
 pub fn topology_to_toml(spec: &TopologySpec) -> Result<String> {
     #[derive(serde::Serialize)]
     struct TopologyDoc<'a> {
