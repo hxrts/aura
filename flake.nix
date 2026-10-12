@@ -145,7 +145,7 @@
         patchbayUiDeps = pkgs.fetchNpmDeps {
           name = "patchbay-ui-npm-deps";
           src = "${patchbay}/ui";
-          hash = pkgs.lib.fakeHash;
+          hash = "sha256-Czu0fqb1Kls7sdm1fwEzNIJsAkSXsUK4lmC9iUJN/E4=";
         };
         patchbayCli = pkgs.rustPlatform.buildRustPackage {
             pname = "patchbay";
