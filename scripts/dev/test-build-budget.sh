@@ -25,6 +25,7 @@ export INCREMENTAL_SIZE_FILE="$test_root/incremental-size"
 export WASM_SIZE_FILE="$test_root/wasm-size"
 export DYLINT_SIZE_FILE="$test_root/dylint-size"
 export TRYBUILD_SIZE_FILE="$test_root/trybuild-size"
+export EVICT_ON_SWEEP_FILE="$test_root/evict-on-sweep"
 export AURA_BUILD_TARGET_CAP_GIB=8
 # Cases choose their own waits; a caller's AURA_BUILD_WAIT_SECONDS (gates and
 # ship.sh export one) must not turn an expected refusal into a long wait.
@@ -98,7 +99,10 @@ fi
 if [[ -f "$RACE_ON_PREVIEW_FILE" && " $* " == *' --dry-run '* ]]; then
   printf 'cargo\n' > "$ACTIVE_FILE"
 fi
-[[ ! -f "$FAIL_SWEEP_FILE" ]]
+if [[ -f "$FAIL_SWEEP_FILE" ]]; then exit 1; fi
+if [[ -f "$EVICT_ON_SWEEP_FILE" && " $* " != *' --dry-run '* ]]; then
+  rm -f "$PROJECT_ROOT/target/debug/deps/reusable.rlib"
+fi
 EOF
 chmod +x "$fakebin"/*
 
@@ -106,8 +110,10 @@ reset_case() {
   printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
   printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
   : > "$CALLS_FILE"
-  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE"
+  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE" "$EVICT_ON_SWEEP_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
+  rm -f "$project/target/debug/deps/reusable.rlib"
+  rmdir "$project/target/debug/deps" "$project/target/debug" 2>/dev/null || true
   rm -f "$INCREMENTAL_SIZE_FILE" "$WASM_SIZE_FILE" "$DYLINT_SIZE_FILE" "$TRYBUILD_SIZE_FILE"
 }
 
@@ -128,14 +134,30 @@ expect_status() {
 
 reset_case
 expect_status 0 run_budget -- sh -c 'exit 0'
-[[ "$(wc -l < "$CALLS_FILE")" -eq 2 ]] # Post-build preview, then apply.
+[[ ! -s "$CALLS_FILE" ]] # Healthy under-cap target needs no sweep.
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 [[ "$(awk -F '\t' 'NR == 2 {print NF}' "$project/artifacts/disk-budget/builds.tsv")" -eq 18 ]]
 rg -l 'Build context: lane=test' "$project"/artifacts/disk-budget/report.* >/dev/null
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.final_exit_status==0 and .command_exit_status==0 and .current_phase=="finished"
-  and .phases==[] and .cleanup.result=="attempted" and .child.pid!=null
+  and .phases==[] and .cleanup.result=="skipped-healthy" and .child.pid!=null
   and .artifacts.disk_report!=null' "$receipt" >/dev/null
+
+# A successful build below the soft cap must retain useful dependency objects
+# even when cargo sweep would choose them as old. The hard disk floor is safe.
+reset_case
+export AURA_BUILD_TARGET_CAP_GIB=10
+printf '%s\n' $((9 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((40 * 1024 * 1024)) > "$FREE_FILE"
+mkdir -p "$project/target/debug/deps"
+printf 'reusable\n' > "$project/target/debug/deps/reusable.rlib"
+touch "$EVICT_ON_SWEEP_FILE"
+expect_status 0 run_budget -- sh -c 'test -f target/debug/deps/reusable.rlib'
+[[ ! -s "$CALLS_FILE" && -f "$project/target/debug/deps/reusable.rlib" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.cleanup.result=="skipped-healthy" and .cleanup.target_above_soft_cap==false and
+  all(.cleanup_events[]; .operation!="sweep") and .final_exit_status==0' "$receipt" >/dev/null
+export AURA_BUILD_TARGET_CAP_GIB=8
 
 reset_case
 expect_status 0 env -u CARGO_INCREMENTAL bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --no-prune -- sh -c 'test "$CARGO_INCREMENTAL" = 0'
@@ -207,7 +229,7 @@ mkdir -p "$project/target/release" "$project/target/wasm32-unknown-unknown/debug
 printf 'loaded\n' > "$project/target/release/loaded"
 printf 'stale\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
 printf 'fake 123 %s\n' "$project/target/release/loaded" > "$OPEN_TARGET_FILE"
-expect_status 0 run_budget -- sh -c 'exit 0'
+expect_status 0 run_budget -- sh -c 'printf "%s\n" $((14 * 1024 * 1024)) > "$FREE_FILE"'
 if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
   echo 'open target file was swept' >&2
   exit 1
@@ -221,7 +243,7 @@ touch "$PROTECTED_FILE"
 mkdir -p "$project/target/release" "$project/target/wasm32-unknown-unknown/debug"
 printf 'keep\n' > "$project/target/release/production"
 printf 'stale\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
-expect_status 0 run_budget -- sh -c 'exit 0'
+expect_status 0 run_budget -- sh -c 'printf "%s\n" $((14 * 1024 * 1024)) > "$FREE_FILE"'
 if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
   echo 'protected release cache was swept' >&2
   exit 1
@@ -233,7 +255,7 @@ rg -q 'Protected production/web candidates: 1' "$test_root/output"
 reset_case
 printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
 touch "$PROTECTED_WEB_FILE"
-expect_status 0 run_budget -- sh -c 'exit 0'
+expect_status 0 run_budget -- sh -c 'printf "%s\n" $((14 * 1024 * 1024)) > "$FREE_FILE"'
 if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
   echo 'protected web cache was swept' >&2
   exit 1
@@ -255,7 +277,7 @@ mkdir -p "$project/target/debug/incremental" "$project/target/debug/deps"
 touch "$project/target/debug/deps/reusable.rlib"
 expect_status 0 env CARGO_INCREMENTAL=0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" -- \
   sh -c 'test ! -d target/debug/incremental && test -f target/debug/deps/reusable.rlib && test ! -s "$CALLS_FILE"'
-[[ "$(wc -l < "$CALLS_FILE")" -eq 2 ]] # Only the post-build sweep.
+[[ ! -s "$CALLS_FILE" ]] # Inactive cache suffices; preserve dependencies.
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.cleanup_events[0] | .stage=="pre-admission" and .operation=="guarded-lane"
   and .lane=="debug-incremental" and .outcome=="removed" and .exit_status==0
@@ -277,6 +299,8 @@ reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
 printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
 mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+mkdir -p "$project/target/debug/deps"
+touch "$project/target/debug/deps/reusable.rlib"
 expect_status 0 run_budget -- sh -c 'test ! -d target/wasm32-unknown-unknown/debug && test -f target/debug/deps/reusable.rlib'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e 'all(.cleanup_events[]; .operation!="sweep" or .stage!="pre-admission") and
@@ -497,11 +521,11 @@ done
 # whether it started before the sweep or during its preview, keeps the
 # build's own exit status (it was 76).
 reset_case
-expect_status 0 run_budget -- sh -c 'printf "rustc\n" > "$ACTIVE_FILE"'
+expect_status 0 run_budget -- sh -c 'printf "rustc\n" > "$ACTIVE_FILE"; printf "%s\n" $((14 * 1024 * 1024)) > "$FREE_FILE"'
 rg -q 'post-build sweep skipped because another builder started' "$test_root/output"
 reset_case
 touch "$RACE_ON_PREVIEW_FILE"
-expect_status 0 run_budget -- sh -c 'exit 0'
+expect_status 0 run_budget -- sh -c 'printf "%s\n" $((14 * 1024 * 1024)) > "$FREE_FILE"'
 rg -q 'post-build sweep skipped because another builder started' "$test_root/output"
 reset_case
 expect_status 3 run_budget -- sh -c 'printf "rustc\n" > "$ACTIVE_FILE"; exit 3'

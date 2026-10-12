@@ -440,6 +440,7 @@ child_pid=''
 aura_receipt_update --argjson status "$status" \
   '.command_exit_status=$status | .current_phase="cache-cleanup"'
 post_build_target="$(target_kib)"
+post_build_free="$(free_kib)"
 (( post_build_target > peak_target )) && peak_target="$post_build_target"
 
 # The build is done: its post-build sweep never waits for other builders.
@@ -449,17 +450,16 @@ cache_cleanup=not-run-command-failed
 if (( status == 0 && no_prune == 1 )); then
   cache_cleanup=skipped-no-prune
   echo 'No-prune mode: post-build cache collection skipped'
+elif (( status == 0 && post_build_target <= cap_kib && post_build_free >= min_free_kib )); then
+  cache_cleanup=skipped-healthy
+  echo 'Post-build: target below soft cap and disk floor healthy; retaining reusable artifacts'
 elif (( status == 0 )); then
   # Cleanup is best effort: a sweep skipped because another builder is (or
   # became) active leaves the build's own status (Task 212). Only a genuine
   # sweep failure changes it.
   if idle_now; then
     cache_cleanup=attempted
-    if (( post_build_target > cap_kib )); then
-      recovery_command=recover_cache
-    else
-      recovery_command=sweep
-    fi
+    recovery_command=recover_cache
     if "$recovery_command" apply; then :;
     else
       sweep_status=$?
