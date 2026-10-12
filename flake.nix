@@ -148,6 +148,14 @@
               lockFile = "${patchbay}/Cargo.lock";
             };
             cargoBuildFlags = [ "-p" "patchbay-cli" "--no-default-features" "--features" "vm" ];
+            # Upstream 0.7.0 only compiles patchbay-cli with its default `serve`
+            # feature: vm.rs uses `bail!` in the `not(feature = "serve")` arms
+            # without importing it. `serve` would run npm in the sandbox, so fix
+            # the import here until upstream does.
+            postPatch = ''
+              substituteInPlace patchbay-cli/src/vm.rs \
+                --replace-fail "use anyhow::Result;" "use anyhow::{bail, Result};"
+            '';
             nativeBuildInputs = with pkgs; [ pkg-config ];
             buildInputs = with pkgs; [ openssl ];
             # Skip tests as they require network capabilities
