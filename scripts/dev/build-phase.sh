@@ -81,16 +81,25 @@ passed='null'
 failed='null'
 ignored='null'
 if [[ "$phase" == execution && -n "$expected" ]]; then
-  passed="$(sed -n 's/^test \(.*\) \.\.\. ok$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
-  failed="$(sed -n 's/^test \(.*\) \.\.\. FAILED$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
-  ignored="$(sed -En 's/^test (.*) \.\.\. ignored(,.*)?$/\1/p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  # --nocapture may put diagnostics between a test name and its terminal status.
+  parsed="$(awk -f "$repo_root/scripts/dev/libtest-inventory.awk" "$phase_log")" || parse_status=$?
+  passed="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="passed" {print $2}' | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  failed="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="failed" {print $2}' | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  ignored="$(printf '%s\n' "$parsed" | awk -F '\t' '$1=="ignored" {print $2}' | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
+  # A command failure with only apparent successes (or a successful command
+  # with a failure token) cannot certify those identities as terminal results.
+  if { (( command_status != 0 )) && [[ "$failed" == '[]' ]]; } ||
+     { (( command_status == 0 )) && [[ "$failed" != '[]' ]]; }; then
+    parse_status=78
+    passed='[]'; failed='[]'; ignored='[]'
+  fi
   observed="$(jq -cn --argjson passed "$passed" --argjson failed "$failed" '$passed+$failed|sort')"
 fi
 if [[ -n "$expected" ]]; then
   if [[ "$phase" == discovery ]]; then
     observed="$(sed -n 's/: test$//p' "$phase_log" | jq -Rs 'split("\n") | map(select(length>0)) | sort')"
   fi
-  if jq -en --argjson observed "$observed" --argjson expected "$expected_json" \
+  if [[ "${parse_status:-0}" == 0 ]] && jq -en --argjson observed "$observed" --argjson expected "$expected_json" \
     '$observed==$expected and ($observed|length)>0' >/dev/null; then
     inventory_result=matched
   else

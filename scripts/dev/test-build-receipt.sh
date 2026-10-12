@@ -99,6 +99,46 @@ phase execution --expected-tests "$fixture/failed-expected" -- printf \
 jq -e '.phases[-1] | .inventory_result=="mismatch" and .observed_count==0 and
   .ignored_count==1 and .passed_count==0 and .failed_count==0 and
   .command_exit_status==0 and .exit_status==78' "$AURA_BUILD_RECEIPT" >/dev/null
+# --nocapture writes the test header before diagnostics and the final token
+# later. A panic or summary alone cannot turn a missing terminal into a result.
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
+  'printf "test failed_fixture ... \npanic at original site\nFAILED\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n"; exit 101' || status=$?
+[[ "$status" == 101 ]]
+jq -e '.phases[-1] | .inventory_result=="matched" and .observed_tests==["failed_fixture"] and
+  .failed_tests==["failed_fixture"] and .command_exit_status==101 and .exit_status==101' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- printf \
+  'test failed_fixture ... \npanic at original site\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n' || status=$?
+[[ "$status" == 78 ]]
+jq -e '.phases[-1] | .inventory_result=="mismatch" and .observed_count==0 and .failed_count==0' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- printf \
+  'test failed_fixture ... \ndiagnostic\ntest second ... \nFAILED\n' || status=$?
+[[ "$status" == 78 ]]
+jq -e '.phases[-1].inventory_result=="mismatch"' "$AURA_BUILD_RECEIPT" >/dev/null
+printf 'pass_fixture\n' > "$fixture/pass-expected"
+phase execution --expected-tests "$fixture/pass-expected" -- printf \
+  'test pass_fixture ... \ndiagnostic\nok\n'
+jq -e '.phases[-1] | .inventory_result=="matched" and .passed_tests==["pass_fixture"]' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
+  'printf "test failed_fixture ... \nok\npanic at original site\nFAILED\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n"; exit 101' || status=$?
+[[ "$status" == 101 ]]
+jq -e '.phases[-1] | .inventory_result=="mismatch" and .passed_count==0 and
+  .observed_count==0 and .command_exit_status==101 and .exit_status==101' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
+  'printf "test failed_fixture ... \nok\npanic at original site\n"; exit 101' || status=$?
+[[ "$status" == 101 ]]
+jq -e '.phases[-1] | .inventory_result=="mismatch" and .passed_count==0 and
+  .observed_count==0 and .command_exit_status==101 and .exit_status==101' "$AURA_BUILD_RECEIPT" >/dev/null
+status=0
+phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
+  'printf "test failed_fixture ... \nok\npanic at original site\ntest failed_fixture ... FAILED\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored\n"; exit 101' || status=$?
+[[ "$status" == 101 ]]
+jq -e '.phases[-1] | .inventory_result=="mismatch" and .passed_count==0 and
+  .observed_count==0 and .command_exit_status==101 and .exit_status==101' "$AURA_BUILD_RECEIPT" >/dev/null
 # Hold one read/modify/write at a FIFO while a second native writer contends.
 # Both phase and cleanup appends must survive; an atomic rename is insufficient.
 mkfifo "$fixture/write-gate"
