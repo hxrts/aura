@@ -48,6 +48,8 @@ the task using the existing implementation and validation evidence. Prose-only
 changes do not require rerunning builds or tests. This does not waive pending
 runtime, platform or cross-machine acceptance requirements. Keep the closeout
 record under that task's Work log.
+Before checking a parent task, verify every child acceptance task is complete;
+keep the parent open if any child is incomplete or unverified.
 
 Follow the [simulation validation sequence](805_simulation_guide.md#validation-sequence):
 component checks, complete runtime/app execution in-process, applicable local
