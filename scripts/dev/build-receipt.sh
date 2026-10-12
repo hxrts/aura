@@ -37,7 +37,7 @@ aura_receipt_init() {
     )"
   fi
   identity="$(ps -p "$$" -o lstart= 2>/dev/null || true)"
-  argv="$(jq -cn --args '$ARGS.positional' "$@")"
+  argv="$(jq -cn --args '$ARGS.positional' -- "$@")"
   jq -n --arg root "$checkout" --arg lane "$build_lane" \
     --arg revision "$revision" --arg fingerprint "$fingerprint" \
     --arg identity "$identity" --argjson pid "$$" --argjson argv "$argv" \

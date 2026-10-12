@@ -30,7 +30,7 @@ mkdir "$phase_lock" 2>/dev/null || {
   echo 'build-phase: another phase owns this receipt' >&2; exit 2;
 }
 phase_log="$(mktemp "$(dirname "$AURA_BUILD_RECEIPT")/$phase.XXXXXX.log")"
-argv="$(jq -cn --args '$ARGS.positional' "$@")"
+argv="$(jq -cn --args '$ARGS.positional' -- "$@")"
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 expected_json='null'
 if [[ -n "$expected" ]]; then

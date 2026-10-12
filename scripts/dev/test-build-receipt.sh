@@ -11,7 +11,8 @@ git -C "$fixture" add .gitignore source.rs
 git -C "$fixture" -c core.hooksPath=/dev/null -c commit.gpgsign=false \
   -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial
 source "$repo_root/scripts/dev/build-receipt.sh"
-aura_receipt_init "$fixture" fixture sh -c 'exit 0'
+aura_receipt_init "$fixture" fixture cargo check --locked -p aura-simulator --features 'signals, test'
+jq -e '.command_argv==["cargo","check","--locked","-p","aura-simulator","--features","signals, test"]' "$AURA_BUILD_RECEIPT" >/dev/null
 original="$(jq -r '.source.fingerprint' "$AURA_BUILD_RECEIPT")"
 printf 'new module\n' > "$fixture/new.rs"
 aura_receipt_init "$fixture" fixture sh -c 'exit 0'
@@ -25,7 +26,10 @@ aura_receipt_init "$fixture" fixture sh -c 'exit 0'
 jq -e '.metadata.packages==null and .metadata.features==null and .command_exit_status==null' "$AURA_BUILD_RECEIPT" >/dev/null
 printf 'first\nsecond\n' > "$fixture/expected"
 phase() { bash "$repo_root/scripts/dev/build-phase.sh" "$@"; }
-phase compile -- sh -c 'exit 0'
+phase compile -- sh -c 'test "$1" = --locked && test "$2" = -p && test "$3" = "package with spaces"' sh --locked -p 'package with spaces'
+jq -e '.phases[0].command_argv==["sh","-c",
+  "test \"$1\" = --locked && test \"$2\" = -p && test \"$3\" = \"package with spaces\"",
+  "sh","--locked","-p","package with spaces"]' "$AURA_BUILD_RECEIPT" >/dev/null
 phase discovery --expected-tests "$fixture/expected" -- printf 'second: test\nfirst: test\n'
 phase execution --expected-tests "$fixture/expected" -- printf 'test first ... ok\ntest second ... ok\n'
 status=0
