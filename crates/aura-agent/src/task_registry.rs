@@ -16,10 +16,15 @@ use std::time::Duration;
 use crate::runtime::{
     RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
 };
-use aura_core::effects::task::{CancellationToken, TaskSpawner};
+use aura_core::effects::task::{
+    CancellationToken, LocalRequiredTaskCustody, RequiredTaskCustody, RequiredTaskExit,
+    RequiredTaskSettlement, TaskSpawner,
+};
+
+include!("task_registry/required_cleanup.rs");
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{
-    execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskHandle, TimeoutBudget,
+    execute_with_timeout_budget, AuraError, OwnedShutdownToken, OwnedTaskHandle, TimeoutBudget,
     TimeoutBudgetError, TimeoutRunError,
 };
 use aura_effects::time::PhysicalTimeHandler;
@@ -176,6 +181,11 @@ enum TaskOutcome {
 
 #[derive(Debug)]
 struct TaskMetadata {
+    required_custody: Option<Arc<RetainedRequiredTaskCustody>>,
+    original_exit: Option<TaskOutcome>,
+    cleanup_failure: Option<TaskOutcome>,
+    domain_terminal_failure: Option<AuraError>,
+    execution_disposed: bool,
     abort: futures::future::AbortHandle,
     task_name: String,
     #[cfg(not(target_arch = "wasm32"))]
@@ -1326,7 +1336,9 @@ impl TaskGroup {
                 entry.abort.abort();
                 #[cfg(not(target_arch = "wasm32"))]
                 if let Some(handle) = &entry.handle {
-                    handle.abort();
+                    if entry.required_custody.is_none() {
+                        handle.abort();
+                    }
                 }
                 aborted_tasks.push(format!("{}::{}", group.name, entry.task_name));
                 emit_task_diagnostic(
@@ -1478,6 +1490,7 @@ impl TaskGroup {
         &self,
         task_id: u64,
         task_name: String,
+        required_custody: Option<Arc<RetainedRequiredTaskCustody>>,
     ) -> Result<RegisteredTaskCapability, TaskSupervisionError> {
         let mut tree = self.shared.tree.state.lock();
         let rejection = if self.shared.closing.load(Ordering::Acquire)
@@ -1505,6 +1518,11 @@ impl TaskGroup {
         self.shared.tasks.lock().insert(
             task_id,
             TaskMetadata {
+                required_custody,
+                original_exit: None,
+                cleanup_failure: None,
+                domain_terminal_failure: None,
+                execution_disposed: false,
                 task_name,
                 abort,
                 #[cfg(not(target_arch = "wasm32"))]
@@ -1526,6 +1544,26 @@ impl TaskGroup {
     fn attach_native_handle(&self, task_id: u64, handle: JoinHandle<()>) {
         if let Some(metadata) = self.shared.tasks.lock().get_mut(&task_id) {
             metadata.handle = Some(handle);
+        }
+    }
+
+    fn retain_original_cleanup_failure(&self, task_id: u64, failure: TaskOutcome) {
+        let _tree = self.shared.tree.state.lock();
+        let mut tasks = self.shared.tasks.lock();
+        let entry = tasks
+            .get_mut(&task_id)
+            .expect("original cleanup registration remains owned");
+        entry.cleanup_failure = Some(failure);
+    }
+
+    fn retain_original_execution_exit(&self, task_id: u64, original: &TaskOutcome) {
+        let _tree = self.shared.tree.state.lock();
+        let mut tasks = self.shared.tasks.lock();
+        let entry = tasks
+            .get_mut(&task_id)
+            .expect("original task registration remains owned");
+        if entry.original_exit.is_none() {
+            entry.original_exit = Some(original.clone());
         }
     }
 
@@ -1560,6 +1598,28 @@ impl TaskGroup {
         };
         if let Some(error) = failure {
             self.propagate_failure(error);
+        }
+        {
+            let mut tasks = self.shared.tasks.lock();
+            let entry = tasks
+                .get_mut(&task_id)
+                .expect("original registration remains under tree lock");
+            if entry
+                .required_custody
+                .as_ref()
+                .is_some_and(|custody| !custody.acknowledged())
+            {
+                if entry.original_exit.is_none() {
+                    entry.original_exit = Some(outcome.clone());
+                } else if entry.cleanup_failure.is_none() {
+                    entry.cleanup_failure = Some(outcome);
+                }
+                entry.execution_disposed = true;
+                drop(tasks);
+                drop(tree);
+                self.notify_ancestors();
+                return;
+            }
         }
         self.shared.tasks.lock().remove(&task_id);
         tree.active_tasks -= 1;
@@ -1599,9 +1659,19 @@ impl TaskGroup {
         fut: BoxFuture<'static, Result<(), aura_core::AuraError>>,
         external_token: Option<Arc<dyn CancellationToken>>,
     ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
+        self.spawn_checked_fallible_boxed_with_custody(task_name, fut, external_token, None)
+    }
+
+    fn spawn_checked_fallible_boxed_with_custody(
+        &self,
+        task_name: String,
+        fut: BoxFuture<'static, Result<(), aura_core::AuraError>>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+        required_custody: Option<Arc<RetainedRequiredTaskCustody>>,
+    ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
         let registered = self
-            .register_task(task_id, task_name.clone())
+            .register_task(task_id, task_name.clone(), required_custody.clone())
             .map_err(|source| (task_id, source))?;
         let (scoped, abort_registration) = registered.bind(fut);
         let fut: BoxFuture<'static, Result<(), aura_core::AuraError>> = Box::pin(scoped);
@@ -1642,6 +1712,12 @@ impl TaskGroup {
             .await
             .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
             .unwrap_or(TaskOutcome::Panicked);
+            let outcome = settle_retained_required_cleanup(
+                &mut completion,
+                required_custody.as_ref(),
+                outcome,
+            )
+            .await;
             completion.finish(outcome);
         });
 
@@ -1667,6 +1743,12 @@ impl TaskGroup {
                 .await
                 .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
                 .unwrap_or(TaskOutcome::Panicked);
+                let outcome = settle_retained_required_cleanup(
+                    &mut completion,
+                    required_custody.as_ref(),
+                    outcome,
+                )
+                .await;
                 completion.finish(outcome);
             });
         }
@@ -1709,9 +1791,18 @@ impl TaskGroup {
         fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
         external_token: Option<Arc<dyn CancellationToken>>,
     ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
+        self.spawn_checked_fallible_boxed_local_with_custody(task_name, fut, external_token, None)
+    }
+    fn spawn_checked_fallible_boxed_local_with_custody(
+        &self,
+        task_name: String,
+        fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+        required_custody: Option<Arc<RetainedRequiredTaskCustody>>,
+    ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
         let registered = self
-            .register_task(task_id, task_name.clone())
+            .register_task(task_id, task_name.clone(), required_custody.clone())
             .map_err(|source| (task_id, source))?;
         let (scoped, abort_registration) = registered.bind(fut);
         let fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>> = Box::pin(scoped);
@@ -1743,6 +1834,12 @@ impl TaskGroup {
             .await
             .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
             .unwrap_or(TaskOutcome::Panicked);
+            let outcome = settle_retained_required_cleanup_local(
+                &mut completion,
+                required_custody.as_ref(),
+                outcome,
+            )
+            .await;
             completion.finish(outcome);
         });
 
@@ -1768,6 +1865,12 @@ impl TaskGroup {
                 .await
                 .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
                 .unwrap_or(TaskOutcome::Panicked);
+                let outcome = settle_retained_required_cleanup_local(
+                    &mut completion,
+                    required_custody.as_ref(),
+                    outcome,
+                )
+                .await;
                 completion.finish(outcome);
             });
         }
@@ -1817,6 +1920,39 @@ impl CancellationToken for TaskGroupCancellationToken {
 }
 
 impl TaskSpawner for TaskSupervisor {
+    fn admit_required_custody(
+        &self,
+        name: &'static str,
+        obligation: Box<dyn RequiredTaskCustody>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<
+        Box<dyn aura_core::effects::task::RequiredTaskControl>,
+        aura_core::effects::task::RejectedRequiredTask<dyn RequiredTaskCustody>,
+    > {
+        self.root
+            .spawn_original_required_custody(name.to_owned(), obligation, Some(token))
+            .map(|control| {
+                Box::new(control) as Box<dyn aura_core::effects::task::RequiredTaskControl>
+            })
+            .map_err(RejectedRequiredTaskCustody::into_native)
+    }
+    fn admit_local_required_custody(
+        &self,
+        name: &'static str,
+        obligation: Box<dyn LocalRequiredTaskCustody>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<
+        Box<dyn aura_core::effects::task::RequiredTaskControl>,
+        aura_core::effects::task::RejectedRequiredTask<dyn LocalRequiredTaskCustody>,
+    > {
+        self.root
+            .spawn_original_local_required_custody(name.to_owned(), obligation, Some(token))
+            .map(|control| {
+                Box::new(control) as Box<dyn aura_core::effects::task::RequiredTaskControl>
+            })
+            .map_err(RejectedRequiredTaskCustody::into_local)
+    }
+
     fn spawn_fallible_cancellable(
         &self,
         name: &'static str,
@@ -2852,7 +2988,7 @@ mod registered_task_context_tests {
     ) -> (RegisteredTaskFuture<Pin<Box<F>>>, u64) {
         let id = group.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
         let admitted = group
-            .register_task(id, name.to_string())
+            .register_task(id, name.to_string(), None)
             .expect("actual bounded registration");
         let (future, _abort) = admitted.bind(Box::pin(future));
         (future, id)

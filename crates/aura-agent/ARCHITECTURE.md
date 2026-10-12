@@ -815,6 +815,16 @@ Each supervised tree has one admission lock and bounded registry (1,024 live gro
 
 Root and group active-task observations, bounded idle waits and forced aborts include all descendants. Task completion drops the owned future before removing its registration or waking ancestor drainers. Native abort uses the owned join handle; browser/local cancellation also has an abortable owner boundary. Abort requests retain active bookkeeping until the actual future is dropped, so requesting abort does not authorize releasing profile ownership or claiming idle. Shutdown success proves descendant drain; timeout/abort/failure remains a typed failed outcome, and synchronous shutdown is only a cancellation/abort request. Dropping a supervisor clone does not cancel a still-live supervisor owner.
 
+Required task admission retains the actual native or local domain owner in the
+original registered task metadata. Execution borrows that owner; destroying the
+execution future does not dispose the owner. Cleanup must settle under that same
+registration before disposal removes the entry or drain can acknowledge it.
+Failed or panicked cleanup retains the original execution disposition and concrete
+cleanup cause, and retry uses the accepted noncloneable original control rather
+than a new task or a name lookup. Rejected admission returns the unpolled original
+boxed obligation and concrete native cause. Resource settlement and independent
+domain terminal failure remain separate supervision outcomes.
+
 Native/local regressions cover descendant IO causes and panic health, dropped child handles, resource-drop-before-idle ordering, shutdown/admission races using the real registry, limits and weak-entry pruning, and unpolled rejected futures. Browser execution of these contracts remains a separate platform gate; local Rust coverage does not claim browser runtime validation.
 
 ### Durable enrollment clock ownership
