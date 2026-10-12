@@ -504,6 +504,7 @@ ci-build-cache-policy:
     bash scripts/dev/test-cargo-incremental-default.sh
     bash scripts/dev/test-build-budget.sh
     bash scripts/dev/test-build-receipt.sh
+    bash scripts/dev/test-task-plan.sh
     bash scripts/dev/test-check-staged-rust.sh
     bash scripts/dev/test-prune-ci-cache.sh
     bash scripts/dev/test-prune-inactive-lane.sh

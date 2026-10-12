@@ -88,7 +88,23 @@ if cmp -s "$plan" "$output"; then echo "task $task unchanged; preparation: $scra
 if [[ -s "$archive" ]]; then
   mkdir -p "$plan_dir/task-archives"
   name="task-$task-$(basename "$scratch").md"
-  cp "$archive" "$plan_dir/task-archives/$name"
+  # Archives live one directory below the plan. Relocate inline local links,
+  # including links to an earlier archive when its entry is archived again.
+  awk '
+    {
+      rest=$0; result=""
+      while(match(rest, /\]\([^)]*\)/)) {
+        result=result substr(rest,1,RSTART-1)
+        link=substr(rest,RSTART,RLENGTH)
+        target=substr(link,3,length(link)-3)
+        if(target!="" && target!~/^[/#?]/ && target!~/^[[:alpha:]][[:alnum:]+.-]*:/)
+          link="](../" target ")"
+        result=result link
+        rest=substr(rest,RSTART+RLENGTH)
+      }
+      print result rest
+    }
+  ' "$archive" > "$plan_dir/task-archives/$name"
   # The generated name contains only mktemp characters and the numeric task id.
   sed "s/ARCHIVE_NAME/$name/" "$output" > "$scratch/linked.md"
   mv "$scratch/linked.md" "$output"

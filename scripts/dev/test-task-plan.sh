@@ -4,12 +4,14 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/aura-task-plan-test.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 plan="$fixture/plan.md"
+mkdir -p "$fixture/evidence"
+printf '%s\n' 'Durable original evidence.' > "$fixture/evidence/proof.md"
 cat > "$plan" <<'EOF'
 # Current plan
 - [ ] 1. Preserve complete acceptance.
   - Acceptance: original source and disposal, including all linked evidence.
   - **Work log**
-    - Old receipt one.
+    - Old receipt one. [proof](evidence/proof.md), [remote](https://example.com), [anchor](#scope).
       Continued first receipt.
     - Old receipt two.
     - Current receipt three.
@@ -31,6 +33,10 @@ if rg -q 'Old receipt one' "$plan"; then exit 1; fi
 rg -q 'Old receipt one' "$fixture"/task-archives/*.md
 rg -q 'Continued first receipt' "$fixture"/task-archives/*.md
 rg -q 'Historical receipts:.*task-archives/' "$plan"
+first_archive="$(sed -n 's/.*](\(task-archives\/[^)]*\)).*/\1/p' "$plan")"
+rg -F -q '[proof](../evidence/proof.md)' "$fixture/$first_archive"
+rg -F -q '[remote](https://example.com), [anchor](#scope)' "$fixture/$first_archive"
+[[ -s "$(dirname "$fixture/$first_archive")/../evidence/proof.md" ]]
 backup="$(sed -n 's/.*original backup: //p' "$fixture/archive-result.log")"
 cmp -s "$backup" "$fixture/original.md"
 printf '%s\n' 'New evidence with literal $(do not execute) and `backticks`.' 'Continuation.' > "$fixture/entry.md"
@@ -38,6 +44,11 @@ printf '%s\n' 'New evidence with literal $(do not execute) and `backticks`.' 'Co
 rg -F -q '    - New evidence with literal $(do not execute) and `backticks`.' "$plan"
 rg -q '^      Continuation\.$' "$plan"
 awk '/Current receipt four/ { prior=NR } /New evidence/ { added=NR } /Dependency: task 2/ { boundary=NR } END { exit !(prior<added && added<boundary) }' "$plan"
+"${tool[@]}" archive 1 2 > "$fixture/rearchive-result.log"
+second_archive="$(sed -n 's/.*](\(task-archives\/[^)]*\)).*/\1/p' "$plan")"
+[[ "$first_archive" != "$second_archive" ]]
+rg -F -q "archive](../$first_archive)" "$fixture/$second_archive"
+[[ -s "$(dirname "$fixture/$second_archive")/../$first_archive" ]]
 "${tool[@]}" log 2 "$fixture/entry.md" > "$fixture/new-section-result.log"
 "${tool[@]}" show 2 > "$fixture/show-two.md"
 rg -q '^  - \*\*Work log\*\*$' "$fixture/show-two.md"
