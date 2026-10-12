@@ -104,19 +104,19 @@ cfg_if! {
                 // device table into this crate's `toml::Value` instead of calling
                 // the foreign type's accessors.
                 let value = toml::Value::try_from(value).with_context(|| {
-                    format!("convert patchbay device {} table", device_name)
+                    format!("convert patchbay device {device_name} table")
                 })?;
                 let table = value
                     .as_table()
-                    .ok_or_else(|| anyhow::anyhow!("device {} is not a table", device_name))?;
+                    .ok_or_else(|| anyhow::anyhow!("device {device_name} is not a table"))?;
                 let iface = table
                     .get("eth0")
                     .and_then(toml::Value::as_table)
-                    .ok_or_else(|| anyhow::anyhow!("device {} is missing eth0 table", device_name))?;
+                    .ok_or_else(|| anyhow::anyhow!("device {device_name} is missing eth0 table"))?;
                 let gateway = iface
                     .get("gateway")
                     .and_then(toml::Value::as_str)
-                    .ok_or_else(|| anyhow::anyhow!("device {}.eth0 is missing gateway", device_name))?;
+                    .ok_or_else(|| anyhow::anyhow!("device {device_name}.eth0 is missing gateway"))?;
 
                 let authority_id = device_name.replace("-dev", "");
                 authorities.push(AuthoritySpec {
@@ -125,7 +125,7 @@ cfg_if! {
                     gateway_router: gateway.to_string(),
                     bind_address: "0.0.0.0:0".to_string(),
                     relay_capable: true,
-                    env: Default::default(),
+                    env: BTreeMap::default(),
                 });
 
                 if let Some(impair) = iface.get("impair").and_then(toml::Value::as_str) {

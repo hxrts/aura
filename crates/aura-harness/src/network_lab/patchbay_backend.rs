@@ -209,7 +209,7 @@ impl NetworkLabBackend for PatchbayBackend {
                         let context = runtime
                             .authorities
                             .get(authority_id)
-                            .ok_or_else(|| anyhow!("unknown authority {}", authority_id))?;
+                            .ok_or_else(|| anyhow!("unknown authority {authority_id}"))?;
                         let device = lab
                             .device_by_name(&context.device_name)
                             .ok_or_else(|| anyhow!("device {} not found", context.device_name))?;
@@ -236,7 +236,7 @@ impl NetworkLabBackend for PatchbayBackend {
                         let context = runtime
                             .authorities
                             .get(authority_id)
-                            .ok_or_else(|| anyhow!("unknown authority {}", authority_id))?;
+                            .ok_or_else(|| anyhow!("unknown authority {authority_id}"))?;
                         let device = lab
                             .device_by_name(&context.device_name)
                             .ok_or_else(|| anyhow!("device {} not found", context.device_name))?;
@@ -259,7 +259,7 @@ impl NetworkLabBackend for PatchbayBackend {
                     NetworkEvent::FlushNat { router } => {
                         let router_handle = lab
                             .router_by_name(router)
-                            .ok_or_else(|| anyhow!("router {} not found", router))?;
+                            .ok_or_else(|| anyhow!("router {router} not found"))?;
                         router_handle.flush_nat_state().await?;
 
                         RawEventReceipt {
@@ -275,7 +275,7 @@ impl NetworkLabBackend for PatchbayBackend {
                     NetworkEvent::SetFirewall { router, preset } => {
                         let router_handle = lab
                             .router_by_name(router)
-                            .ok_or_else(|| anyhow!("router {} not found", router))?;
+                            .ok_or_else(|| anyhow!("router {router} not found"))?;
                         let firewall = topology_adapter::to_patchbay_firewall(*preset);
                         router_handle.set_firewall(firewall).await?;
 

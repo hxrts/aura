@@ -137,9 +137,16 @@
         };
 
         # patchbay: unified upstream CLI whose `vm` subcommand drives patchbay
-        # network simulations in a QEMU guest (`patchbay vm run`). Built without
-        # the `serve`/`upload` features so no UI bundle or network fetch is needed.
+        # network simulations in a QEMU guest (`patchbay vm run`), with its
+        # default `serve` (devtools UI) and `upload` features.
         # Only available on Linux (requires QEMU and network namespace support)
+        # The patchbay devtools UI is built by patchbay-server's build script
+        # through npm; prefetch its lockfile so that runs offline in the sandbox.
+        patchbayUiDeps = pkgs.fetchNpmDeps {
+          name = "patchbay-ui-npm-deps";
+          src = "${patchbay}/ui";
+          hash = pkgs.lib.fakeHash;
+        };
         patchbayCli = pkgs.rustPlatform.buildRustPackage {
             pname = "patchbay";
             version = "0.7.0";
@@ -147,16 +154,10 @@
             cargoLock = {
               lockFile = "${patchbay}/Cargo.lock";
             };
-            cargoBuildFlags = [ "-p" "patchbay-cli" "--no-default-features" "--features" "vm" ];
-            # Upstream 0.7.0 only compiles patchbay-cli with its default `serve`
-            # feature: vm.rs uses `bail!` in the `not(feature = "serve")` arms
-            # without importing it. `serve` would run npm in the sandbox, so fix
-            # the import here until upstream does.
-            postPatch = ''
-              substituteInPlace patchbay-cli/src/vm.rs \
-                --replace-fail "use anyhow::Result;" "use anyhow::{bail, Result};"
-            '';
-            nativeBuildInputs = with pkgs; [ pkg-config ];
+            cargoBuildFlags = [ "-p" "patchbay-cli" ];
+            nativeBuildInputs = with pkgs; [ pkg-config nodejs npmHooks.npmConfigHook ];
+            npmDeps = patchbayUiDeps;
+            npmRoot = "ui";
             buildInputs = with pkgs; [ openssl ];
             # Skip tests as they require network capabilities
             doCheck = false;
