@@ -348,7 +348,7 @@ impl InvitationFact {
         }
     }
     /// Decode required journal evidence and check its explicit payload context.
-    /// Schema-1 contextless lifecycle facts stay contextless during replay.
+    /// Current-schema contextless lifecycle facts stay contextless; older schemas are rejected.
     ///
     /// # Errors
     /// Returns decoding failures or an explicit wrapper/payload context mismatch.

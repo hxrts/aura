@@ -40,6 +40,15 @@ the resulting checkpoint, followed by main smoke; a small fixture correction
 does not require restarting every broad lane. Record deferred gates explicitly
 and require their results before declaring the batch complete.
 
+When implementation and its required validation are complete and only
+documentation remains, assign a subagent the bounded documentation closeout.
+It may work in the main checkout on agreed documentation paths while other
+work continues. Review the resulting documentation, integrate it, and close
+the task using the existing implementation and validation evidence. Prose-only
+changes do not require rerunning builds or tests. This does not waive pending
+runtime, platform or cross-machine acceptance requirements. Keep the closeout
+record under that task's Work log.
+
 Follow the [simulation validation sequence](805_simulation_guide.md#validation-sequence):
 component checks, complete runtime/app execution in-process, applicable local
 frontend conformance, checkpoint gates/main smoke, then batched cross-machine

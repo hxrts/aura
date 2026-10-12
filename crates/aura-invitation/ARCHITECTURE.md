@@ -36,9 +36,9 @@ Invitation protocol for establishing relationships between authorities, includin
   lifecycle coordination. A decoded shape never establishes original issuance
   or policy approval. There is one schema implementation across layers.
 
-- Enrollment invitation facts emit schema 2 and continue decoding schema-1
-  canonical DAG-CBOR map payloads. Missing setup bindings remain absent during
-  replay; historical decoding never manufactures response authorization.
+- Invitation facts emit and accept only schema 3 canonical DAG-CBOR payloads.
+  Retired schemas 1–2 and JSON envelopes are rejected. Decoding never
+  manufactures setup bindings or response authorization.
 - Signed setup admission binds nonce/digest, both physical devices, provisional
   invitee, subject, invitation/ceremony, pending epoch, baseline manifest and
   exact-parent verifier inventory digests. Admission signature verification
@@ -160,7 +160,7 @@ See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/1
 
 ### Required invitation fact decoding
 
-Required recovery uses `InvitationFact::try_from_envelope`, which bounds payloads, accepts only supported schema versions 1–2, obeys the declared DAG-CBOR or JSON encoding, and retains structural envelope and original codec errors. `try_from_envelope_in_context` also validates explicit payload context against the relational wrapper. Historical contextless lifecycle records remain contextless. Observational `DomainFact::from_envelope` retains its optional compatibility contract. Domain regressions exercise independent schema-1 enrollment bytes, encoding mismatches, unsupported schemas, malformed payloads, size bounds and typed sources.
+Required recovery uses `InvitationFact::try_from_envelope`, which bounds payloads, accepts only schema 3 and canonical DAG-CBOR encoding, and retains structural envelope and original codec errors. Retired schemas 1–2, future schemas and JSON envelopes are rejected. `try_from_envelope_in_context` also validates an explicit payload context against the relational wrapper; a current-schema contextless variant remains contextless. Observational `DomainFact::from_envelope` returns `None` for invalid envelopes and grants no additional schema compatibility. Domain regressions exercise current-schema round trips, retired/future schemas, encoding mismatches, malformed payloads, size bounds, context mismatches and typed sources.
 
 ### Device-enrollment response contract
 

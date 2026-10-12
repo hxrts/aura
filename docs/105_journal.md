@@ -602,10 +602,11 @@ Locally retained enrollment setup, pending-generation, registration, response, a
 
 ### Required envelope decoding failures
 
-Required fact decoding validates the declared domain, supported schema range,
-payload bound and encoding before consuming a payload. An existing envelope and
-its canonical encoded form have the same validation contract. Malformed declared
-JSON retains the original JSON decoder cause; malformed DAG-CBOR retains the
-original canonical serialization cause. A decode failure is not fact absence.
+Required domain-fact decoding validates the declared domain, exact current schema,
+payload bound and canonical DAG-CBOR encoding before consuming a payload. An
+existing envelope and its canonical encoded form have the same validation
+contract. Retired and future schemas and JSON envelopes are rejected; malformed
+DAG-CBOR retains the original canonical serialization cause. A decode failure is
+not fact absence.
 Successful decoding establishes value shape, not journal commitment or
 canonical entity materialization authority.
