@@ -235,12 +235,12 @@ mod device_id_serde {
     {
         let s = String::deserialize(deserializer)?;
         let bytes = hex::decode(s).map_err(serde::de::Error::custom)?;
-        let mut arr = [0u8; 32];
-        if bytes.len() != 32 {
-            return Err(serde::de::Error::custom("device_id must be 32 bytes"));
+        if !matches!(bytes.len(), 16 | 32) {
+            return Err(serde::de::Error::custom("device_id must be 16 or 32 bytes"));
         }
-        arr.copy_from_slice(&bytes);
-        Ok(DeviceId::new_from_entropy(arr))
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&bytes[..16]);
+        Ok(DeviceId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes)))
     }
 }
 
@@ -278,5 +278,31 @@ impl AgentConfig {
     pub fn with_bootstrap_broker(mut self, config: BootstrapBrokerConfig) -> Self {
         self.bootstrap_broker = config;
         self
+    }
+}
+
+#[cfg(test)]
+mod config_serde_tests {
+    use super::*;
+
+    #[test]
+    fn device_id_round_trips_in_native_config_and_accepts_legacy_width() {
+        let config = AgentConfig::default();
+        let encoded = serde_json::to_value(&config).expect("serialize native config");
+        let decoded: AgentConfig =
+            serde_json::from_value(encoded.clone()).expect("deserialize native config");
+        assert_eq!(decoded.device_id, config.device_id);
+
+        let mut legacy = encoded.clone();
+        legacy["device_id"] = serde_json::Value::String(hex::encode(
+            config.device_id.to_bytes().expect("legacy bytes"),
+        ));
+        let decoded_legacy: AgentConfig =
+            serde_json::from_value(legacy).expect("deserialize legacy width");
+        assert_eq!(decoded_legacy.device_id, config.device_id);
+
+        let mut invalid = encoded;
+        invalid["device_id"] = serde_json::Value::String("00".into());
+        assert!(serde_json::from_value::<AgentConfig>(invalid).is_err());
     }
 }
