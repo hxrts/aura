@@ -15,7 +15,8 @@ case "$command_name" in
 esac
 plan_dir="$(cd "$(dirname "$plan")" && pwd)"
 plan="$plan_dir/$(basename "$plan")"
-scratch="$(mktemp -d "$plan_dir/.task-plan.XXXXXX")"
+mkdir -p "$plan_dir/.task-plan"
+scratch="$(mktemp -d "$plan_dir/.task-plan/entry.XXXXXX")"
 # Retain failed preparation for diagnosis; successful writes retain the backup.
 output="$scratch/plan.md"
 archive="$scratch/evidence.md"
