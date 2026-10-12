@@ -30,6 +30,7 @@ aura-simulator = { path = "../aura-simulator" }
 
 anyhow = { workspace = true }
 cfg-if = "1"
+chrono = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true }

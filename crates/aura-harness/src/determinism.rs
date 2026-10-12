@@ -88,6 +88,7 @@ mod tests {
         RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "seed-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -103,6 +104,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: unique_test_dir("seed-test"),

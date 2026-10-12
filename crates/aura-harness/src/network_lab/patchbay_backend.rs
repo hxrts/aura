@@ -8,7 +8,7 @@ cfg_if! {
     if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
         use anyhow::{anyhow, Context};
         use std::collections::BTreeMap;
-        use super::{topology_adapter, AuthorityNetworkContext};
+        use super::{topology_adapter, AuthorityNetworkContext, LinkTarget};
     }
 }
 
@@ -28,6 +28,8 @@ pub struct PatchbayBackend {
     topology: Option<TopologySpec>,
     #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
     lab: Option<patchbay::Lab>,
+    /// Receipts of every applied event, merged into the timeline artifact.
+    receipts: Vec<RawEventReceipt>,
 }
 
 // `patchbay::Lab` is not `Debug`; report provisioning state instead of the lab.
@@ -52,6 +54,7 @@ impl PatchbayBackend {
             topology: None,
             #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
             lab: None,
+            receipts: Vec::new(),
         }
     }
 }
@@ -80,14 +83,7 @@ cfg_if! {
             fn affected_authorities_for_router(&self, router: &str) -> Vec<String> {
                 self.topology
                     .as_ref()
-                    .map(|topology| {
-                        topology
-                            .authorities
-                            .iter()
-                            .filter(|authority| authority.gateway_router == router)
-                            .map(|authority| authority.authority_id.clone())
-                            .collect()
-                    })
+                    .map(|topology| super::authorities_behind_router(topology, router))
                     .unwrap_or_default()
             }
 
@@ -295,35 +291,54 @@ impl NetworkLabBackend for PatchbayBackend {
                         right_node,
                         condition,
                     } => {
-                        let impair = topology_adapter::to_patchbay_link_condition(*condition);
-                        // Link conditions are set on the device's uplink interface.
-                        // Find which of the two nodes is a device (vs router) and apply there.
-                        let device = lab
-                            .device_by_name(left_node)
-                            .or_else(|| lab.device_by_name(right_node))
-                            .ok_or_else(|| {
-                                anyhow!("no device found among nodes {left_node}, {right_node}")
-                            })?;
-                        device
-                            .iface("eth0")
-                            .ok_or_else(|| anyhow!("eth0 not found on device {left_node}"))?
-                            .set_condition(impair, patchbay::LinkDirection::Both)
-                            .await?;
+                        let target = super::classify_link(self.topology()?, left_node, right_node)?;
+                        let impairment = topology_adapter::to_patchbay_link_impairment(*condition);
+                        match &target {
+                            LinkTarget::DeviceUplink { device_name, .. } => {
+                                let iface = lab
+                                    .device_by_name(device_name)
+                                    .ok_or_else(|| anyhow!("device {device_name} not found"))?
+                                    .iface(super::DEVICE_UPLINK_IFACE)
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "{} not found on device {device_name}",
+                                            super::DEVICE_UPLINK_IFACE
+                                        )
+                                    })?;
+                                match impairment {
+                                    Some(impair) => {
+                                        iface
+                                            .set_condition(impair, patchbay::LinkDirection::Both)
+                                            .await?;
+                                    }
+                                    None => iface.clear_condition(patchbay::LinkDirection::Both).await?,
+                                }
+                            }
+                            LinkTarget::RouterDownlink { downstream_router, .. } => {
+                                lab.router_by_name(downstream_router)
+                                    .ok_or_else(|| anyhow!("router {downstream_router} not found"))?
+                                    .set_downlink_condition(impairment)
+                                    .await?;
+                            }
+                        }
 
                         RawEventReceipt {
                             event_type: "set_link_condition".to_string(),
                             applied_at_ms: super::unix_time_ms(),
-                            affected_authorities: runtime.authorities.keys().cloned().collect(),
+                            affected_authorities: target.affected_authorities(),
                             details: serde_json::json!({
                                 "left_node": left_node,
                                 "right_node": right_node,
                                 "condition": condition,
+                                "target": target,
+                                "cleared": impairment.is_none(),
                                 "applied": true
                             }),
                         }
                     }
                 };
 
+                self.receipts.push(receipt.clone());
                 Ok(receipt)
             } else {
                 let _ = event;
@@ -372,27 +387,28 @@ impl NetworkLabBackend for PatchbayBackend {
                     &mut agent_logs,
                 )?;
 
-                let mut timeline_candidates = Vec::new();
-                Self::collect_paths(
-                    &root,
-                    &|path| {
-                        path.file_name()
-                            .and_then(|name| name.to_str())
-                            .is_some_and(|name| name.contains("events"))
-                    },
-                    &mut timeline_candidates,
+                // Provisional timeline: patchbay flushes events.jsonl only when
+                // the lab drops, so this holds whatever has reached the file so
+                // far plus every harness receipt. `ProvisionedLab::finish`
+                // rebuilds it after teardown.
+                let entries = super::build_network_timeline(
+                    &run_dir.join(super::LAB_EVENTS_FILE),
+                    &self.receipts,
                 )?;
+                let timeline_path = super::write_network_timeline(out_dir, &entries)?;
 
                 let mut metadata = BTreeMap::new();
                 metadata.insert("backend".to_string(), "patchbay".to_string());
                 metadata.insert("source_run_dir".to_string(), run_dir.display().to_string());
+                metadata.insert("timeline_entries".to_string(), entries.len().to_string());
+                metadata.insert("timeline_provisional".to_string(), "true".to_string());
 
                 Ok(ArtifactBundle {
                     root,
                     pcap_files,
                     namespace_dumps,
                     agent_logs,
-                    timeline: timeline_candidates.into_iter().next(),
+                    timeline: Some(timeline_path),
                     metadata,
                 })
             } else {
@@ -404,6 +420,16 @@ impl NetworkLabBackend for PatchbayBackend {
 
     fn backend_mode(&self) -> NetworkBackendMode {
         NetworkBackendMode::Patchbay
+    }
+
+    fn run_dir(&self) -> Option<PathBuf> {
+        cfg_if! {
+            if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
+                self.lab.as_ref().and_then(|lab| lab.run_dir().map(Path::to_path_buf))
+            } else {
+                None
+            }
+        }
     }
 
     fn instance_namespace(&self, authority_id: &str) -> Result<super::InstanceNamespace> {

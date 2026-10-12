@@ -18,6 +18,7 @@ fn tool_api_primitives_control_local_pty_instance() {
     let run_config = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "phase1-tool-api".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -33,6 +34,7 @@ fn tool_api_primitives_control_local_pty_instance() {
             fixed_ports: false,
         },
         instances: vec![InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: temp_root.join("alice-data"),

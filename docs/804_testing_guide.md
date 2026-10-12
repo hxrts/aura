@@ -1308,7 +1308,7 @@ When a scenario fails, triage artifacts in this order.
 
 1. Check `network_backend_preflight.json` to confirm selected backend and fallback reason.
 2. Check `startup_summary.json` and `scenario_report.json` for run context and failing step.
-3. Check `events.json` and backend timeline artifacts for event ordering.
+3. Check `events.json` for harness steps and `network-lab-artifacts/network_timeline.json` for the lab's own event log (provisioning through teardown) merged with each applied network event receipt in time order. Patchbay flushes its log when the lab drops, so the timeline is written by the lab's finish step after instances stop; a bundle whose metadata says `timeline_provisional` was collected while the lab was still alive.
 4. Check namespace and network dumps and pcap files for packet and routing diagnosis.
 5. Check agent logs for authority-local failures and retry state transitions.
 

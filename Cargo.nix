@@ -1892,6 +1892,11 @@ with optional architecture-specific hardware acceleration
             packageId = "cfg-if";
           }
           {
+            name = "chrono";
+            packageId = "chrono";
+            features = [ "serde" ];
+          }
+          {
             name = "clap";
             packageId = "clap";
             usesDefaultFeatures = false;

@@ -759,6 +759,7 @@ mod tests {
     #[test]
     fn backend_handle_constructs_browser_variant() -> Result<()> {
         let config = InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Browser,
             data_dir: PathBuf::from(".tmp/harness/browser-alice"),
@@ -782,7 +783,12 @@ mod tests {
             tunnel: None,
         };
 
-        let backend = BackendHandle::from_config(config, Some(40), Some(120))?;
+        let backend = BackendHandle::from_config(
+            config,
+            Some(40),
+            Some(120),
+            crate::network_lab::InstanceNamespace::host(),
+        )?;
         match backend {
             BackendHandle::Browser(_) => {}
             _ => panic!("expected browser backend"),

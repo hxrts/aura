@@ -454,6 +454,7 @@ dependencies = [
  "aura-harness",
  "aura-simulator",
  "cfg-if",
+ "chrono",
  "clap",
  "ctor",
  "ctrlc",

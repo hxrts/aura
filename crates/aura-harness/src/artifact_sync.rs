@@ -398,6 +398,7 @@ mod tests {
         RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "sync-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -413,6 +414,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "remote-1".to_string(),
                 mode: InstanceMode::Ssh,
                 data_dir: PathBuf::from("/tmp/remote-1"),

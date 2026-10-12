@@ -2250,6 +2250,7 @@ mod tests {
 
     fn test_config() -> InstanceConfig {
         InstanceConfig {
+            lab_authority: None,
             id: "local-test".to_string(),
             mode: InstanceMode::Local,
             data_dir: unique_test_dir("default"),

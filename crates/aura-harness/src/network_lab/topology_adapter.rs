@@ -50,7 +50,7 @@ cfg_if! {
                 let mut table = toml::map::Map::new();
                 table.insert(
                     "default_via".to_string(),
-                    toml::Value::String("eth0".to_string()),
+                    toml::Value::String(super::DEVICE_UPLINK_IFACE.to_string()),
                 );
 
                 let mut iface = toml::map::Map::new();
@@ -58,13 +58,20 @@ cfg_if! {
                     "gateway".to_string(),
                     toml::Value::String(authority.gateway_router.clone()),
                 );
-                if let Some(condition) = find_device_link_condition(spec, authority) {
+                // `Lan` is the unimpaired baseline; leaving `impair` out keeps the
+                // interface free of qdiscs instead of installing an empty one.
+                if let Some(condition) = find_device_link_condition(spec, authority)
+                    .filter(|condition| *condition != LinkConditionPreset::Lan)
+                {
                     iface.insert(
                         "impair".to_string(),
                         toml::Value::String(to_patchbay_impair_token(condition).to_string()),
                     );
                 }
-                table.insert("eth0".to_string(), toml::Value::Table(iface));
+                table.insert(
+                    super::DEVICE_UPLINK_IFACE.to_string(),
+                    toml::Value::Table(iface),
+                );
 
                 device.insert(authority.device_name.clone(), toml::Value::Table(table));
             }
@@ -202,6 +209,17 @@ cfg_if! {
                 patchbay::Nat::Custom(config) => {
                     bail!("custom patchbay NAT config has no Aura NatPreset: {config:?}")
                 }
+            }
+        }
+
+        /// Impairment to apply for `condition`, or `None` for the unimpaired
+        /// `Lan` baseline, which clears any existing qdisc instead.
+        pub fn to_patchbay_link_impairment(
+            condition: LinkConditionPreset,
+        ) -> Option<patchbay::LinkCondition> {
+            match condition {
+                LinkConditionPreset::Lan => None,
+                other => Some(to_patchbay_link_condition(other)),
             }
         }
 

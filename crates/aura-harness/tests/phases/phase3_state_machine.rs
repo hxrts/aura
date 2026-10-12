@@ -122,6 +122,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
     RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "mixed-topology-test".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -138,6 +139,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
         },
         instances: vec![
             InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: PathBuf::from("artifacts/harness/state/test-mixed/alice"),
@@ -161,6 +163,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
                 tunnel: None,
             },
             InstanceConfig {
+                lab_authority: None,
                 id: "bob".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: PathBuf::from("artifacts/harness/state/test-mixed/bob"),

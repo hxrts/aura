@@ -30,6 +30,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
     let run_config = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "phase2-replay".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -107,6 +108,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
 
 fn local_instance(id: &str, data_dir: PathBuf, bind_address: &str) -> InstanceConfig {
     InstanceConfig {
+        lab_authority: None,
         id: id.to_string(),
         mode: InstanceMode::Local,
         data_dir,
@@ -133,6 +135,7 @@ fn local_instance(id: &str, data_dir: PathBuf, bind_address: &str) -> InstanceCo
 
 fn ssh_instance() -> InstanceConfig {
     InstanceConfig {
+        lab_authority: None,
         id: "bob".to_string(),
         mode: InstanceMode::Ssh,
         data_dir: PathBuf::from("/tmp/bob"),

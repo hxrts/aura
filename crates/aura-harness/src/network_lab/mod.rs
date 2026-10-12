@@ -231,6 +231,11 @@ pub trait NetworkLabBackend: Send + Sync {
     async fn apply_event(&mut self, event: NetworkEvent) -> Result<RawEventReceipt>;
     async fn collect_artifacts(&self, out_dir: &Path) -> Result<ArtifactBundle>;
     fn backend_mode(&self) -> NetworkBackendMode;
+    /// Directory where the backend's own run log lives, if it keeps one. Read
+    /// after the backend is dropped to obtain the flushed, complete log.
+    fn run_dir(&self) -> Option<PathBuf> {
+        None
+    }
     /// Namespace an instance process for `authority_id` must be spawned in.
     /// Backends without isolated namespaces return the host namespace.
     fn instance_namespace(&self, authority_id: &str) -> Result<InstanceNamespace> {
@@ -349,6 +354,19 @@ pub struct ProvisionedLab {
     runtime: tokio::runtime::Runtime,
     backend: Box<dyn NetworkLabBackend>,
     lab_runtime: LabRuntime,
+    /// Receipts of every event applied through this lab, for the timeline.
+    receipts: Vec<RawEventReceipt>,
+}
+
+/// Artifacts of a finished lab: the live collection plus the complete timeline
+/// rebuilt from the flushed lab event log after teardown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FinishedLabArtifacts {
+    pub bundle: ArtifactBundle,
+    /// Lab events in the final timeline; zero means the lab wrote no event log.
+    pub lab_event_count: usize,
+    pub harness_event_count: usize,
 }
 
 impl fmt::Debug for ProvisionedLab {
@@ -381,6 +399,7 @@ impl ProvisionedLab {
             runtime,
             backend,
             lab_runtime,
+            receipts: Vec::new(),
         })
     }
 
@@ -405,12 +424,59 @@ impl ProvisionedLab {
     }
 
     pub fn apply_event(&mut self, event: NetworkEvent) -> Result<RawEventReceipt> {
-        self.runtime.block_on(self.backend.apply_event(event))
+        let receipt = self.runtime.block_on(self.backend.apply_event(event))?;
+        self.receipts.push(receipt.clone());
+        Ok(receipt)
     }
 
+    /// Collect artifacts while the lab is alive. The timeline in the returned
+    /// bundle is provisional; see [`Self::finish`].
     pub fn collect_artifacts(&self, out_dir: &Path) -> Result<ArtifactBundle> {
         self.runtime
             .block_on(self.backend.collect_artifacts(out_dir))
+    }
+
+    /// Collect artifacts, tear the lab down, then rebuild the timeline from the
+    /// lab's flushed event log so it covers provisioning through teardown.
+    ///
+    /// Instances must already be stopped: their namespaces disappear here.
+    pub fn finish(self, out_dir: &Path) -> Result<FinishedLabArtifacts> {
+        let mut bundle = self.collect_artifacts(out_dir)?;
+        let lab_events_log = self.backend.run_dir().map(|dir| dir.join(LAB_EVENTS_FILE));
+        let Self {
+            runtime,
+            backend,
+            receipts,
+            ..
+        } = self;
+        // Dropping the backend drops the lab, which flushes events.jsonl and
+        // emits its teardown events. The runtime goes after the lab it served.
+        drop(backend);
+        drop(runtime);
+
+        let mut lab_event_count = 0;
+        if let Some(log) = lab_events_log {
+            let entries = build_network_timeline(&log, &receipts)?;
+            lab_event_count = entries
+                .iter()
+                .filter(|entry| matches!(entry, TimelineEntry::Lab { .. }))
+                .count();
+            // Keep the complete log next to the live copy, which was taken
+            // before the flush and may be empty.
+            if log.exists() {
+                std::fs::copy(&log, bundle.root.join(LAB_EVENTS_FILE))
+                    .with_context(|| format!("copy {}", log.display()))?;
+            }
+            bundle.timeline = Some(write_network_timeline(out_dir, &entries)?);
+            bundle
+                .metadata
+                .insert("timeline_entries".to_string(), entries.len().to_string());
+        }
+        Ok(FinishedLabArtifacts {
+            bundle,
+            lab_event_count,
+            harness_event_count: receipts.len(),
+        })
     }
 }
 
@@ -814,6 +880,235 @@ fn unix_time_ms() -> u64 {
         .unwrap_or_default()
 }
 
+/// Interface name of every lab device's single uplink toward its gateway router.
+/// The topology adapter creates devices with exactly this interface.
+pub const DEVICE_UPLINK_IFACE: &str = "eth0";
+
+/// Where a `LinkSpec` or `SetLinkCondition` lands in the provisioned lab.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum LinkTarget {
+    /// A device and its own gateway router: the condition applies on the
+    /// device's uplink interface and affects only that authority.
+    DeviceUplink {
+        authority_id: String,
+        device_name: String,
+        gateway_router: String,
+    },
+    /// Two adjacent routers: patchbay exposes no per-interface control on
+    /// routers, so the condition applies on the downstream router's downlink
+    /// bridge and affects every authority whose gateway chain passes through
+    /// that router.
+    RouterDownlink {
+        downstream_router: String,
+        upstream_router: String,
+        affected_authorities: Vec<String>,
+    },
+}
+
+impl LinkTarget {
+    pub fn affected_authorities(&self) -> Vec<String> {
+        match self {
+            Self::DeviceUplink { authority_id, .. } => vec![authority_id.clone()],
+            Self::RouterDownlink {
+                affected_authorities,
+                ..
+            } => affected_authorities.clone(),
+        }
+    }
+}
+
+/// Resolve the two endpoints of a link to the node that owns it.
+///
+/// Fails when either endpoint is not a device or router of `spec`, or when the
+/// endpoints are not adjacent (a device with a router that is not its gateway,
+/// or two routers without an upstream relation).
+pub fn classify_link(spec: &TopologySpec, left: &str, right: &str) -> Result<LinkTarget> {
+    let device = |name: &str| {
+        spec.authorities
+            .iter()
+            .find(|authority| authority.device_name == name)
+    };
+    let router = |name: &str| spec.routers.iter().find(|router| router.name == name);
+
+    match (device(left), device(right)) {
+        (Some(_), Some(_)) => bail!(
+            "link {left} <-> {right} joins two devices; devices only link to their gateway router"
+        ),
+        (Some(authority), None) | (None, Some(authority)) => {
+            let router_name = if authority.device_name == left {
+                right
+            } else {
+                left
+            };
+            if router(router_name).is_none() {
+                bail!("link {left} <-> {right}: {router_name} is neither a device nor a router");
+            }
+            if authority.gateway_router != router_name {
+                bail!(
+                    "link {left} <-> {right}: device {} is behind {}, not {router_name}",
+                    authority.device_name,
+                    authority.gateway_router
+                );
+            }
+            Ok(LinkTarget::DeviceUplink {
+                authority_id: authority.authority_id.clone(),
+                device_name: authority.device_name.clone(),
+                gateway_router: authority.gateway_router.clone(),
+            })
+        }
+        (None, None) => {
+            let (Some(left_router), Some(right_router)) = (router(left), router(right)) else {
+                bail!("link {left} <-> {right}: both endpoints must be devices or routers of the topology");
+            };
+            let downstream = if left_router.upstream.as_deref() == Some(right) {
+                left_router
+            } else if right_router.upstream.as_deref() == Some(left) {
+                right_router
+            } else {
+                bail!("link {left} <-> {right}: routers are not adjacent (neither is the other's upstream)");
+            };
+            let upstream = downstream
+                .upstream
+                .clone()
+                .unwrap_or_else(|| "unreachable".to_string());
+            Ok(LinkTarget::RouterDownlink {
+                affected_authorities: authorities_behind_router(spec, &downstream.name),
+                downstream_router: downstream.name.clone(),
+                upstream_router: upstream,
+            })
+        }
+    }
+}
+
+/// Authorities whose gateway chain passes through `router`, in topology order.
+pub fn authorities_behind_router(spec: &TopologySpec, router: &str) -> Vec<String> {
+    let upstream_of = |name: &str| -> Option<&str> {
+        spec.routers
+            .iter()
+            .find(|candidate| candidate.name == name)
+            .and_then(|candidate| candidate.upstream.as_deref())
+    };
+    spec.authorities
+        .iter()
+        .filter(|authority| {
+            let mut hop = Some(authority.gateway_router.as_str());
+            let mut visited = BTreeSet::new();
+            while let Some(current) = hop {
+                if current == router {
+                    return true;
+                }
+                if !visited.insert(current) {
+                    break;
+                }
+                hop = upstream_of(current);
+            }
+            false
+        })
+        .map(|authority| authority.authority_id.clone())
+        .collect()
+}
+
+/// File name of the backend network timeline inside an artifact directory.
+pub const NETWORK_TIMELINE_FILE: &str = "network_timeline.json";
+
+/// File name of patchbay's own event log inside its run directory.
+pub const LAB_EVENTS_FILE: &str = "events.jsonl";
+
+/// One entry of the backend network timeline written as `network_timeline.json`.
+///
+/// Entries are ordered by `recorded_at_ms`. Lab entries come from the lab's own
+/// event log (`events.jsonl`), which patchbay buffers and flushes when the lab
+/// is dropped, so a timeline built while the lab is alive is provisional and
+/// [`ProvisionedLab::finish`] rebuilds it after teardown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "source")]
+pub enum TimelineEntry {
+    /// An event the lab itself emitted (provisioning, link, NAT, firewall,
+    /// teardown). `opid` is the lab's monotone operation id.
+    Lab {
+        recorded_at_ms: u64,
+        opid: u64,
+        event: serde_json::Value,
+    },
+    /// A harness-applied `NetworkEvent` and its receipt.
+    Harness {
+        recorded_at_ms: u64,
+        receipt: RawEventReceipt,
+    },
+}
+
+impl TimelineEntry {
+    pub fn recorded_at_ms(&self) -> u64 {
+        match self {
+            Self::Lab { recorded_at_ms, .. } | Self::Harness { recorded_at_ms, .. } => {
+                *recorded_at_ms
+            }
+        }
+    }
+}
+
+/// Merge the lab's event log with the harness receipts into one ordered timeline.
+///
+/// A missing or empty log yields only the harness entries; a malformed line is
+/// an error, since a partially read log would misrepresent what happened.
+pub fn build_network_timeline(
+    lab_events_log: &Path,
+    receipts: &[RawEventReceipt],
+) -> Result<Vec<TimelineEntry>> {
+    let mut entries: Vec<TimelineEntry> = receipts
+        .iter()
+        .map(|receipt| TimelineEntry::Harness {
+            recorded_at_ms: receipt.applied_at_ms,
+            receipt: receipt.clone(),
+        })
+        .collect();
+
+    if lab_events_log.exists() {
+        let text = std::fs::read_to_string(lab_events_log)
+            .with_context(|| format!("read lab event log {}", lab_events_log.display()))?;
+        for (index, line) in text.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: serde_json::Value = serde_json::from_str(line).with_context(|| {
+                format!("parse lab event {}:{}", lab_events_log.display(), index + 1)
+            })?;
+            let opid = event
+                .get("opid")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| anyhow!("lab event {} has no opid", index + 1))?;
+            let timestamp = event
+                .get("timestamp")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| anyhow!("lab event {opid} has no timestamp"))?;
+            let recorded_at_ms = chrono::DateTime::parse_from_rfc3339(timestamp)
+                .with_context(|| format!("parse lab event {opid} timestamp {timestamp}"))?
+                .timestamp_millis();
+            entries.push(TimelineEntry::Lab {
+                recorded_at_ms: u64::try_from(recorded_at_ms).unwrap_or_default(),
+                opid,
+                event,
+            });
+        }
+    }
+
+    // Stable: lab entries keep opid order among equal timestamps because the
+    // log is appended in opid order.
+    entries.sort_by_key(TimelineEntry::recorded_at_ms);
+    Ok(entries)
+}
+
+/// Write `entries` as `network_timeline.json` under `out_dir` and return its path.
+pub fn write_network_timeline(out_dir: &Path, entries: &[TimelineEntry]) -> Result<PathBuf> {
+    std::fs::create_dir_all(out_dir)
+        .with_context(|| format!("create timeline directory {}", out_dir.display()))?;
+    let path = out_dir.join(NETWORK_TIMELINE_FILE);
+    std::fs::write(&path, serde_json::to_vec_pretty(entries)?)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(path)
+}
+
 /// Validate basic topology-level shape constraints that every backend depends on.
 pub fn validate_runtime_bindings(topology: &TopologySpec) -> Result<()> {
     let router_names: BTreeSet<_> = topology
@@ -889,5 +1184,77 @@ mod tests {
 
         assert_eq!(receipt.details.authority_id, "alice");
         assert_eq!(receipt.details.state, "down");
+    }
+
+    fn chained_topology() -> TopologySpec {
+        let router = |name: &str, upstream: Option<&str>| RouterSpec {
+            name: name.to_string(),
+            nat: NatPreset::Home,
+            upstream: upstream.map(str::to_string),
+            firewall: FirewallPreset::Home,
+        };
+        let authority = |id: &str, gateway: &str| AuthoritySpec {
+            authority_id: id.to_string(),
+            device_name: format!("{id}-dev"),
+            gateway_router: gateway.to_string(),
+            bind_address: "0.0.0.0:0".to_string(),
+            relay_capable: id == "relay",
+            env: BTreeMap::new(),
+        };
+        TopologySpec {
+            name: "chained".to_string(),
+            routers: vec![
+                router("core-dc", None),
+                router("edge-b", Some("core-dc")),
+                router("leaf-c", Some("edge-b")),
+            ],
+            links: Vec::new(),
+            authorities: vec![
+                authority("relay", "core-dc"),
+                authority("bob", "edge-b"),
+                authority("carol", "leaf-c"),
+            ],
+            required_relay_authority: Some("relay".to_string()),
+        }
+    }
+
+    #[test]
+    fn device_link_resolves_to_its_uplink_and_only_that_authority() {
+        let spec = chained_topology();
+        let target = classify_link(&spec, "edge-b", "bob-dev").unwrap();
+        assert_eq!(
+            target,
+            LinkTarget::DeviceUplink {
+                authority_id: "bob".to_string(),
+                device_name: "bob-dev".to_string(),
+                gateway_router: "edge-b".to_string(),
+            }
+        );
+        assert_eq!(target.affected_authorities(), vec!["bob".to_string()]);
+    }
+
+    #[test]
+    fn router_link_resolves_to_downstream_router_and_everything_behind_it() {
+        let spec = chained_topology();
+        let target = classify_link(&spec, "core-dc", "edge-b").unwrap();
+        assert_eq!(
+            target,
+            LinkTarget::RouterDownlink {
+                downstream_router: "edge-b".to_string(),
+                upstream_router: "core-dc".to_string(),
+                affected_authorities: vec!["bob".to_string(), "carol".to_string()],
+            }
+        );
+        let leaf = classify_link(&spec, "leaf-c", "edge-b").unwrap();
+        assert_eq!(leaf.affected_authorities(), vec!["carol".to_string()]);
+    }
+
+    #[test]
+    fn non_adjacent_or_unknown_links_are_rejected() {
+        let spec = chained_topology();
+        assert!(classify_link(&spec, "bob-dev", "core-dc").is_err());
+        assert!(classify_link(&spec, "core-dc", "leaf-c").is_err());
+        assert!(classify_link(&spec, "core-dc", "nowhere").is_err());
+        assert!(classify_link(&spec, "bob-dev", "carol-dev").is_err());
     }
 }

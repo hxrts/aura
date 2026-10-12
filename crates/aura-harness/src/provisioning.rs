@@ -584,6 +584,7 @@ mod tests {
         RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "Provisioning Test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -600,6 +601,7 @@ mod tests {
             },
             instances: vec![
                 InstanceConfig {
+                    lab_authority: None,
                     id: "alice".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from("artifacts/harness/state/alice"),
@@ -623,6 +625,7 @@ mod tests {
                     tunnel: None,
                 },
                 InstanceConfig {
+                    lab_authority: None,
                     id: "browser".to_string(),
                     mode: InstanceMode::Browser,
                     data_dir: PathBuf::from(".tmp/browser/browser"),

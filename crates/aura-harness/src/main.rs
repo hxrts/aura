@@ -243,6 +243,23 @@ fn run(args: RunArgs) -> Result<()> {
         network_lab.as_ref(),
         scenario_config.as_ref(),
     );
+    // The coordinator and every instance are gone by now, on both paths, so
+    // the lab can be torn down and its complete timeline written. A failure
+    // here must not hide the run's own result.
+    if let Some(lab) = network_lab {
+        match lab.finish(&artifact_bundle.run_dir.join("network-lab-artifacts")) {
+            Ok(finished) => {
+                let _ = artifact_bundle.write_json("network_lab_artifacts.json", &finished);
+            }
+            Err(error) => {
+                let payload = serde_json::json!({ "error": error.to_string() });
+                let _ = artifact_bundle.write_json("network_lab_finish_error.json", &payload);
+                if run_result.is_ok() {
+                    return Err(error.context("finish network lab"));
+                }
+            }
+        }
+    }
     if let Err(error) = run_result {
         let attribution = attribute_failure(&error.to_string());
         let failure_payload = serde_json::json!({ "error": error.to_string() });
@@ -342,13 +359,6 @@ fn run_with_artifacts(
     let events = tool_api.event_snapshot();
     let action_log = tool_api.action_log();
     tool_api.stop_all()?;
-    if let Some(lab) = network_lab {
-        // Instances are down; capture pcaps, namespace dumps and the lab's
-        // own run directory before the namespaces are torn down.
-        let lab_artifacts =
-            lab.collect_artifacts(&artifact_bundle.run_dir.join("network-lab-artifacts"))?;
-        artifact_bundle.write_json("network_lab_artifacts.json", &lab_artifacts)?;
-    }
     let post_run_residue_report = check_run_residue(config);
     if !post_run_residue_report.clean {
         artifact_bundle.write_json("post_run_residue_report.json", &post_run_residue_report)?;

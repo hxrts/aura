@@ -1984,6 +1984,7 @@ mod tests {
         let run = RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "startup-order-test".to_string(),
                 pty_rows: Some(10),
                 pty_cols: Some(40),
@@ -2000,6 +2001,7 @@ mod tests {
             },
             instances: vec![
                 InstanceConfig {
+                    lab_authority: None,
                     id: "alpha".to_string(),
                     mode: InstanceMode::Ssh,
                     data_dir: unique_test_dir("alpha"),
@@ -2023,6 +2025,7 @@ mod tests {
                     tunnel: None,
                 },
                 InstanceConfig {
+                    lab_authority: None,
                     id: "beta".to_string(),
                     mode: InstanceMode::Ssh,
                     data_dir: unique_test_dir("beta"),
@@ -2066,6 +2069,7 @@ mod tests {
         let run = RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "busy-port-test".to_string(),
                 pty_rows: Some(10),
                 pty_cols: Some(40),
@@ -2081,6 +2085,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: unique_test_dir("busy-port"),

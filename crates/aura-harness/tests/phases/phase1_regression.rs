@@ -39,6 +39,7 @@ fn two_local_instances_are_controllable() {
     let run_config = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "phase1-regression".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -200,6 +201,7 @@ action = "launch_actors"
 
 fn instance(id: &str, data_dir: std::path::PathBuf, bind_address: &str) -> InstanceConfig {
     InstanceConfig {
+        lab_authority: None,
         id: id.to_string(),
         mode: InstanceMode::Local,
         data_dir,

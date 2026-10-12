@@ -768,6 +768,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -784,6 +785,7 @@ mod tests {
             },
             instances: vec![
                 InstanceConfig {
+                    lab_authority: None,
                     id: "alice".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from("artifacts/harness/state/test/shared"),
@@ -807,6 +809,7 @@ mod tests {
                     tunnel: None,
                 },
                 InstanceConfig {
+                    lab_authority: None,
                     id: "bob".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from("artifacts/harness/state/test/shared"),
@@ -993,6 +996,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "browser-invalid".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -1008,6 +1012,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Browser,
                 data_dir: PathBuf::from(".tmp/browser/alice"),
@@ -1044,6 +1049,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "duplicate-bind".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -1060,6 +1066,7 @@ mod tests {
             },
             instances: vec![
                 InstanceConfig {
+                    lab_authority: None,
                     id: "alice".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from(".tmp/alice"),
@@ -1083,6 +1090,7 @@ mod tests {
                     tunnel: None,
                 },
                 InstanceConfig {
+                    lab_authority: None,
                     id: "bob".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from(".tmp/bob"),
@@ -1122,6 +1130,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "simulator-browser-invalid".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -1137,6 +1146,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "browser".to_string(),
                 mode: InstanceMode::Browser,
                 data_dir: PathBuf::from(".tmp/browser"),
