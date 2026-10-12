@@ -312,6 +312,7 @@
             nftables # nft command for NAT rules
             iptables # iptables-legacy for some nftables compat
             conntrack-tools # conntrack, used by patchbay to flush NAT state
+            tcpdump # per-device packet capture in harness network labs
           ];
 
           shellHook = ''
@@ -455,6 +456,7 @@
             pkgs.nftables
             pkgs.iptables
             pkgs.conntrack-tools
+            pkgs.tcpdump
           ]
           ;
 

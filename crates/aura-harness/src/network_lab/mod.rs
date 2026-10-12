@@ -236,6 +236,11 @@ pub trait NetworkLabBackend: Send + Sync {
     fn run_dir(&self) -> Option<PathBuf> {
         None
     }
+    /// Stop any packet captures the backend started at provisioning so their
+    /// files are complete before artifacts are collected. Idempotent.
+    fn stop_captures(&mut self) -> Result<()> {
+        Ok(())
+    }
     /// Namespace an instance process for `authority_id` must be spawned in.
     /// Backends without isolated namespaces return the host namespace.
     fn instance_namespace(&self, authority_id: &str) -> Result<InstanceNamespace> {
@@ -440,7 +445,8 @@ impl ProvisionedLab {
     /// lab's flushed event log so it covers provisioning through teardown.
     ///
     /// Instances must already be stopped: their namespaces disappear here.
-    pub fn finish(self, out_dir: &Path) -> Result<FinishedLabArtifacts> {
+    pub fn finish(mut self, out_dir: &Path) -> Result<FinishedLabArtifacts> {
+        self.backend.stop_captures()?;
         let mut bundle = self.collect_artifacts(out_dir)?;
         let lab_events_log = self.backend.run_dir().map(|dir| dir.join(LAB_EVENTS_FILE));
         let Self {

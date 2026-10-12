@@ -152,7 +152,7 @@ fn run(args: RunArgs) -> Result<()> {
         None
     };
 
-    let summary = build_startup_summary(&config);
+    let mut summary = build_startup_summary(&config);
     let authoritative_run_dir = config
         .run
         .artifact_dir
@@ -229,6 +229,7 @@ fn run(args: RunArgs) -> Result<()> {
                 &artifact_bundle.run_dir.join("network-lab"),
             )?;
             artifact_bundle.write_json("network_lab_runtime.json", lab.lab_runtime())?;
+            summary.attach_network_lab(&config, &lab)?;
             Some(lab)
         }
         None => None,

@@ -30,6 +30,23 @@ pub struct PatchbayBackend {
     lab: Option<patchbay::Lab>,
     /// Receipts of every applied event, merged into the timeline artifact.
     receipts: Vec<RawEventReceipt>,
+    /// `tcpdump` children, one per device, writing pcaps into the lab run dir.
+    /// They hold their namespaces open, so they must be stopped before the lab
+    /// is dropped; see `stop_captures` and `Drop`.
+    #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+    captures: Vec<(String, std::process::Child)>,
+}
+
+#[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+impl Drop for PatchbayBackend {
+    fn drop(&mut self) {
+        // A capture left running would keep its namespace alive after the lab
+        // is gone. Best effort here; `stop_captures` is the reporting path.
+        for (_, mut child) in self.captures.drain(..) {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 // `patchbay::Lab` is not `Debug`; report provisioning state instead of the lab.
@@ -55,6 +72,8 @@ impl PatchbayBackend {
             #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
             lab: None,
             receipts: Vec::new(),
+            #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+            captures: Vec::new(),
         }
     }
 }
@@ -66,6 +85,46 @@ cfg_if! {
                 self.lab
                     .as_ref()
                     .ok_or_else(|| anyhow!("patchbay backend has not been provisioned"))
+            }
+
+            /// Start one `tcpdump` per device inside its namespace, writing
+            /// `<device>.pcap` into the lab run dir. Skipped, with a lab event
+            /// in the artifacts' metadata, when `tcpdump` is not on PATH.
+            fn start_captures(&mut self, lab: &patchbay::Lab, topology: &TopologySpec) -> Result<()> {
+                let Some(run_dir) = lab.run_dir() else {
+                    return Ok(());
+                };
+                let Ok(tcpdump) = which::which("tcpdump") else {
+                    return Ok(());
+                };
+                for authority in &topology.authorities {
+                    let device = lab.device_by_name(&authority.device_name).ok_or_else(|| {
+                        anyhow!("device {} not found in provisioned lab", authority.device_name)
+                    })?;
+                    let pcap = run_dir.join(format!("{}.pcap", authority.device_name));
+                    // tcpdump's own diagnostics stay next to the capture so a
+                    // failed capture explains itself in the artifact bundle.
+                    let log = std::fs::File::create(
+                        run_dir.join(format!("{}.tcpdump.log", authority.device_name)),
+                    )
+                    .with_context(|| format!("create tcpdump log for {}", authority.device_name))?;
+                    let mut command = std::process::Command::new(&tcpdump);
+                    command
+                        // Flush per packet so a killed capture still has its data.
+                        // No `-Z`: privilege dropping needs initgroups, which the
+                        // user namespace denies, and the Nix tcpdump does not
+                        // drop on its own.
+                        .args(["-i", super::DEVICE_UPLINK_IFACE, "-U", "-w"])
+                        .arg(&pcap)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::from(log));
+                    let child = device.spawn_command_sync(command).with_context(|| {
+                        format!("start packet capture on {}", authority.device_name)
+                    })?;
+                    self.captures.push((authority.device_name.clone(), child));
+                }
+                Ok(())
             }
 
             fn runtime(&self) -> Result<&LabRuntime> {
@@ -181,6 +240,7 @@ impl NetworkLabBackend for PatchbayBackend {
                     backend_mode: NetworkBackendMode::Patchbay,
                     authorities,
                 };
+                self.start_captures(&lab, &topology)?;
                 self.runtime = Some(runtime.clone());
                 self.topology = Some(topology);
                 self.lab = Some(lab);
@@ -420,6 +480,36 @@ impl NetworkLabBackend for PatchbayBackend {
 
     fn backend_mode(&self) -> NetworkBackendMode {
         NetworkBackendMode::Patchbay
+    }
+
+    fn stop_captures(&mut self) -> Result<()> {
+        cfg_if! {
+            if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                let mut failures = Vec::new();
+                for (device, mut child) in self.captures.drain(..) {
+                    // SIGTERM lets tcpdump write its trailer; kill if it ignores us.
+                    let pid = Pid::from_raw(child.id() as i32);
+                    if let Err(error) = kill(pid, Signal::SIGTERM) {
+                        failures.push(format!("{device}: signal capture: {error}"));
+                        let _ = child.kill();
+                    }
+                    match child.wait() {
+                        Ok(status) if status.success() || status.code().is_none() => {}
+                        Ok(status) => failures.push(format!("{device}: tcpdump exited {status}")),
+                        Err(error) => failures.push(format!("{device}: wait capture: {error}")),
+                    }
+                }
+                if failures.is_empty() {
+                    Ok(())
+                } else {
+                    bail!("stop packet captures: {}", failures.join("; "))
+                }
+            } else {
+                Ok(())
+            }
+        }
     }
 
     fn run_dir(&self) -> Option<PathBuf> {

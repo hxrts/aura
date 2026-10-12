@@ -39,9 +39,54 @@ pub struct StartupInstanceSummary {
     pub bind_address: String,
     pub data_dir: String,
     pub browser_artifact_dir: Option<String>,
+    /// Where the instance runs when the run provisions a network lab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lab: Option<StartupLabPlacement>,
+}
+
+/// Network lab placement of one instance: the authority it plays, the device
+/// and namespace its process runs in, and the lab address it binds on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartupLabPlacement {
+    pub authority_id: String,
+    pub device_name: String,
+    pub namespace: String,
+    pub lab_address: Option<String>,
 }
 
 impl StartupSummary {
+    /// Record each lab-mapped instance's device, namespace and lab address.
+    /// Called after provisioning, before instances launch.
+    pub fn attach_network_lab(
+        &mut self,
+        config: &RunConfig,
+        lab: &crate::network_lab::ProvisionedLab,
+    ) -> anyhow::Result<()> {
+        for instance in &config.instances {
+            let Some(authority) = &instance.lab_authority else {
+                continue;
+            };
+            let context = lab.authority_context(authority)?;
+            let namespace = lab.instance_namespace(authority)?;
+            let placement = StartupLabPlacement {
+                authority_id: authority.clone(),
+                device_name: context.device_name.clone(),
+                namespace: namespace.name().unwrap_or("host").to_string(),
+                lab_address: namespace.lab_ipv4().map(|ip| ip.to_string()),
+            };
+            if let Some(summary) = self
+                .instances
+                .iter_mut()
+                .find(|summary| summary.id == instance.id)
+            {
+                summary.bind_address = namespace.rewrite_bind_address(&instance.bind_address)?;
+                summary.lab = Some(placement);
+            }
+        }
+        Ok(())
+    }
+
     pub fn from_run_config(config: &RunConfig) -> Self {
         let instances = config
             .instances
@@ -55,6 +100,7 @@ impl StartupSummary {
                     let (key, value) = entry.split_once('=')?;
                     (key == "AURA_HARNESS_BROWSER_ARTIFACT_DIR").then(|| value.to_string())
                 }),
+                lab: None,
             })
             .collect();
 
