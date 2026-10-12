@@ -100,6 +100,12 @@ cfg_if! {
             let mut authorities = Vec::new();
             let mut links = Vec::new();
             for (device_name, value) in &cfg.device {
+                // patchbay carries its own `toml` major version; re-serialize the
+                // device table into this crate's `toml::Value` instead of calling
+                // the foreign type's accessors.
+                let value = toml::Value::try_from(value).with_context(|| {
+                    format!("convert patchbay device {} table", device_name)
+                })?;
                 let table = value
                     .as_table()
                     .ok_or_else(|| anyhow::anyhow!("device {} is not a table", device_name))?;

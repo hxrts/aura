@@ -18,7 +18,6 @@ use super::{
 };
 
 /// Linux-native Patchbay backend.
-#[derive(Debug)]
 #[cfg_attr(
     not(all(target_os = "linux", feature = "patchbay-backend")),
     allow(dead_code) // Retain the type shape so non-linux/default builds keep the backend API without compiling the linux-only lab implementation.
@@ -29,6 +28,20 @@ pub struct PatchbayBackend {
     topology: Option<TopologySpec>,
     #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
     lab: Option<patchbay::Lab>,
+}
+
+// `patchbay::Lab` is not `Debug`; report provisioning state instead of the lab.
+impl std::fmt::Debug for PatchbayBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("PatchbayBackend");
+        debug
+            .field("artifact_root", &self.artifact_root)
+            .field("runtime", &self.runtime)
+            .field("topology", &self.topology);
+        #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
+        debug.field("lab_provisioned", &self.lab.is_some());
+        debug.finish()
+    }
 }
 
 impl PatchbayBackend {
