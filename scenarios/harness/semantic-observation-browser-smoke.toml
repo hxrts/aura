@@ -26,6 +26,13 @@ control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
+id = "alice-onboarding-semantic-screen"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
 id = "alice-create-account"
 action = "create_account"
 actor = "alice"
@@ -47,6 +54,14 @@ readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
+id = "alice-neighborhood-navigation-selected"
+action = "selection_is"
+actor = "alice"
+list_id = "navigation"
+item_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
 id = "alice-open-settings-via-nav-list"
 action = "navigate"
 actor = "alice"
@@ -58,4 +73,12 @@ id = "alice-settings-visible"
 action = "screen_is"
 actor = "alice"
 screen_id = "settings"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-settings-navigation-selected"
+action = "selection_is"
+actor = "alice"
+list_id = "navigation"
+item_id = "settings"
 timeout_ms = 120000
