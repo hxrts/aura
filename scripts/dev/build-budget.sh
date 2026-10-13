@@ -28,9 +28,9 @@ Usage: build-budget.sh [--root PATH] [--lane NAME] [--dry-run]
                        [--allow-live-harness] [--no-prune] -- COMMAND [ARGS...]
 
 Defaults: per-checkout target soft cap 10 GiB, volume admission floor 15 GiB free
-(after other admitted builds' 4 GiB reservations), emergency floor
+(after other admitted builds' and incoming measured-growth reservations), emergency floor
 5 GiB free. Override with AURA_BUILD_TARGET_CAP_GIB, AURA_BUILD_MIN_FREE_GIB,
-AURA_BUILD_EMERGENCY_FREE_GIB, AURA_BUILD_RESERVE_GIB (integer GiB) and
+AURA_BUILD_EMERGENCY_FREE_GIB, AURA_BUILD_RESERVE_GIB (fallback integer GiB) and
 AURA_BUILD_SHARED_DIR (default ~/.cache/aura-build). Run inside nix develop.
 Cargo output always goes to this checkout's target/ (CARGO_TARGET_DIR is unset).
 Incremental compilation defaults to 0; set CARGO_INCREMENTAL=1 to opt in.
@@ -105,10 +105,43 @@ active_consumers() {
 
 # Volume-wide admission shared by every checkout on this machine. Each
 # admitted build holds a reservation of its expected growth until it exits; a
-# new build is admitted only if free space minus other live reservations stays
-# above the floor. The admission lock is held only while checking and
+# new build is admitted only if free space minus both its measured incoming
+# growth and other live reservations stays above the floor. The admission lock is held only while checking and
 # reserving, never during the build.
 reservation=''
+incoming_reservation_kib=$((reserve_gib * 1024 * 1024))
+estimate_incoming_growth() {
+  local receipt measured largest=-1 legacy_log="$root/artifacts/disk-budget/builds.tsv"
+  # Receipts are written under this checkout and identify the workload lane.
+  # A failed command can still leave artifacts, so its observed peak counts.
+  for receipt in "$root"/artifacts/disk-budget/receipts/run.*/receipt.json; do
+    [[ -f "$receipt" && ! -L "$receipt" ]] || continue
+    measured="$(jq -er --arg root "$root" --arg lane "$lane" \
+      'select(.root==$root and .lane==$lane and
+        (.command_exit_status!=null or .child.pid!=null)) |
+       .disk.measured_growth_kib | select(type=="number" and .>=0) | floor' \
+      "$receipt" 2>/dev/null)" || continue
+    (( measured > largest )) && largest="$measured"
+  done
+  # Older runs recorded the same peaks only in builds.tsv. Match the native or
+  # wasm profile and target triple, then use recent samples as migration data.
+  if (( largest < 0 )) && [[ -f "$legacy_log" && ! -L "$legacy_log" ]]; then
+    measured="$(awk -F '\t' -v profile="$profile" -v triple="$target_triple" '
+      NR>1 && $4==profile && $5==triple && $12~/^[0-9]+$/ && $13~/^[0-9]+$/ &&
+      $14~/^[0-9]+$/ && $15~/^[0-9]+$/ {
+        free_growth=$12-$14; target_growth=$15-$13
+        growth=free_growth>target_growth?free_growth:target_growth
+        if (growth<0) growth=0
+        print growth
+      }' "$legacy_log" | tail -8 | sort -nr | head -1)"
+    [[ "$measured" =~ ^[0-9]+$ ]] && largest="$measured"
+  fi
+  if (( largest >= 0 )); then
+    # One GiB covers sparse peak sampling and gives even a zero-growth command
+    # a useful reservation; the 4 GiB setting remains the cold-start fallback.
+    incoming_reservation_kib=$((largest + 1024 * 1024))
+  fi
+}
 other_reservations_kib() {
   local file pid total=0 kib
   for file in "$shared_dir"/reservations/*; do
@@ -138,15 +171,15 @@ admit_build() {
   printf '%s\n' "$$" > "$lock/pid"
   free="$(free_kib)"
   others="$(other_reservations_kib)"
-  printf 'Admission: free=%s KiB other-reservations=%s KiB reserve=%s GiB floor=%s GiB\n' \
-    "$free" "$others" "$reserve_gib" "$min_free_gib"
-  if (( free - others < min_free_kib )); then
+  printf 'Admission: free=%s KiB other-reservations=%s KiB incoming-reservation=%s KiB floor=%s GiB\n' \
+    "$free" "$others" "$incoming_reservation_kib" "$min_free_gib"
+  if (( free - others - incoming_reservation_kib < min_free_kib )); then
     rm -f "$lock/pid"; rmdir "$lock"
-    echo "build-budget: insufficient headroom: need ${min_free_gib} GiB free after other admitted builds' reservations" >&2
+    echo "build-budget: insufficient headroom: need ${min_free_gib} GiB free after other admitted builds' reservations and incoming measured growth" >&2
     return 1
   fi
   reservation="$shared_dir/reservations/$$"
-  printf '%s\n' $((reserve_gib * 1024 * 1024)) > "$reservation"
+  printf '%s\n' "$incoming_reservation_kib" > "$reservation"
   rm -f "$lock/pid"; rmdir "$lock"
 }
 idle_now() {
@@ -294,8 +327,14 @@ prune_safe_lanes() {
 printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free\n' \
   "$cap_gib" "$min_free_gib" "$emergency_gib"
 if (( dry_run == 0 )); then
+  profile="${AURA_BUILD_PROFILE:-unlabelled}"
+  features="${AURA_BUILD_FEATURES:-unlabelled}"
+  target_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host: / {print $2}' || true)}"
   source "$repo_root/scripts/dev/build-receipt.sh"
   aura_receipt_init "$root" "$lane" "$@"
+  estimate_incoming_growth
+  aura_receipt_update --argjson incoming "$incoming_reservation_kib" \
+    '.admission.incoming_reservation_kib=$incoming'
   export AURA_BUILD_CLEANUP_STAGE=pre-admission
   trap 'receipt_status=$?; aura_receipt_finish "$receipt_status"' EXIT
 fi
@@ -370,6 +409,23 @@ cleanup() {
   fi
   [[ -z "$reservation" ]] || rm -f "$reservation"
   release_checkout_lock
+  # A signal can exit before the normal report path. Retain its observed
+  # drawdown so the next admission does not mistake an interrupted build for
+  # a zero-growth lane.
+  if [[ "${pre_free:-}" =~ ^[0-9]+$ && "${pre_target:-}" =~ ^[0-9]+$ ]]; then
+    local exit_free exit_target
+    exit_free="$(free_kib)"
+    exit_target="$(target_kib)"
+    lowest_free="${lowest_free:-$pre_free}"
+    peak_target="${peak_target:-$pre_target}"
+    (( exit_free < lowest_free )) && lowest_free="$exit_free"
+    (( exit_target > peak_target )) && peak_target="$exit_target"
+    aura_receipt_update --argjson pre_free "$pre_free" --argjson pre_target "$pre_target" \
+      --argjson lowest_free "$lowest_free" --argjson peak_target "$peak_target" \
+      '.disk={pre_free_kib:$pre_free,pre_target_kib:$pre_target,
+        lowest_free_kib:$lowest_free,peak_target_kib:$peak_target,
+        measured_growth_kib:([0,($pre_free-$lowest_free),($peak_target-$pre_target)]|max)}'
+  fi
   aura_receipt_finish "$exit_status"
 }
 trap cleanup EXIT
@@ -404,9 +460,6 @@ until admit_build; do
 done
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-profile="${AURA_BUILD_PROFILE:-unlabelled}"
-features="${AURA_BUILD_FEATURES:-unlabelled}"
-target_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host: / {print $2}' || true)}"
 printf 'Build lane=%s command:' "$lane"
 printf ' %q' "$@"
 printf '\n'
@@ -514,5 +567,10 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n
   "$min_free_gib" "$emergency_gib" "$before_free" "$before_target" \
   "$pre_free" "$pre_target" "$lowest_free" "$peak_target" "$after_free" "$after_target" "$status" >> "$log_path"
 aura_receipt_update --arg disk_log "$log_path" --arg report "${report_path:-}" \
-  '.artifacts={disk_log:$disk_log,disk_report:(if $report=="" then null else $report end)}'
+  --argjson pre_free "$pre_free" --argjson pre_target "$pre_target" \
+  --argjson lowest_free "$lowest_free" --argjson peak_target "$peak_target" \
+  '.artifacts={disk_log:$disk_log,disk_report:(if $report=="" then null else $report end)} |
+   .disk={pre_free_kib:$pre_free,pre_target_kib:$pre_target,
+     lowest_free_kib:$lowest_free,peak_target_kib:$peak_target,
+     measured_growth_kib:([0,($pre_free-$lowest_free),($peak_target-$pre_target)]|max)}'
 exit "$status"

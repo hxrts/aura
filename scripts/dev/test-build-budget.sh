@@ -107,6 +107,8 @@ EOF
 chmod +x "$fakebin"/*
 
 reset_case() {
+  rm -rf "$project/artifacts/disk-budget/receipts"
+  rm -f "$project/artifacts/disk-budget/builds.tsv"
   printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
   printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
   : > "$CALLS_FILE"
@@ -472,6 +474,45 @@ expect_status 0 run_budget --no-prune -- sh -c 'ls "$AURA_BUILD_SHARED_DIR/reser
 [[ "$(wc -l < "$FREE_FILE.during")" -eq 1 ]] # Only this build's own reservation.
 [[ -z "$(ls -A "$AURA_BUILD_SHARED_DIR/reservations")" ]] # Released on exit.
 [[ ! -d "$AURA_BUILD_SHARED_DIR/admission.lock" ]]
+
+# A prior same-lane receipt reserves its observed peak growth for this incoming
+# build. Both free-space drawdown and target growth count; a different lane or
+# malformed receipt cannot change the estimate. Admission must refuse before
+# the command runs and release its lock/reservation on failure.
+reset_case
+mkdir -p "$project/artifacts/disk-budget/receipts/run.prior"
+cat > "$project/artifacts/disk-budget/receipts/run.prior/receipt.json" <<EOF
+{"root":"$project","lane":"test","command_exit_status":0,"disk":{"measured_growth_kib":5242880}}
+EOF
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.growth-ran"'
+[[ ! -e "$FREE_FILE.growth-ran" ]]
+rg -q 'incoming-reservation=6291456 KiB' "$test_root/output"
+[[ -z "$(ls -A "$AURA_BUILD_SHARED_DIR/reservations")" ]]
+printf '%s\n' $((22 * 1024 * 1024)) > "$FREE_FILE"
+expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 6291456'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.incoming_reservation_kib==6291456 and .disk.measured_growth_kib==0' "$receipt" >/dev/null
+
+reset_case
+mkdir -p "$project/artifacts/disk-budget/receipts/run.foreign" "$project/artifacts/disk-budget/receipts/run.bad"
+printf '{"root":"%s","lane":"foreign","command_exit_status":0,"disk":{"measured_growth_kib":10485760}}\n' \
+  "$project" > "$project/artifacts/disk-budget/receipts/run.foreign/receipt.json"
+printf 'corrupt receipt\n' > "$project/artifacts/disk-budget/receipts/run.bad/receipt.json"
+expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 4194304'
+
+# Legacy TSV migration also works with BSD awk: -v assignments are single
+# arguments and a different lane with the same native profile can supply a
+# recent peak until the first structured receipt for this lane is available.
+reset_case
+mkdir -p "$project/artifacts/disk-budget"
+host_triple="$(rustc -vV | awk '/^host: / {print $2}')"
+printf 'start\tfinish\tlane\tprofile\ttriple\tfeatures\tcap\tmin\temergency\tbefore_free\tbefore_target\tpre_free\tpre_target\tlowest_free\tpeak_target\tafter_free\tafter_target\tstatus\n' \
+  > "$project/artifacts/disk-budget/builds.tsv"
+printf 'start\tfinish\tother-native\tunlabelled\t%s\tunlabelled\t8\t15\t5\t20971520\t6291456\t20971520\t6291456\t18874368\t6291456\t18874368\t6291456\t0\n' \
+  "$host_triple" >> "$project/artifacts/disk-budget/builds.tsv"
+expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 3145728'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.incoming_reservation_kib==3145728' "$receipt" >/dev/null
 
 # Task 198: a gate runs under one budgeted hold; a nested budgeted call for
 # the same checkout runs its command inside that hold (no second lock).
