@@ -14,7 +14,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) mode=dry; shift ;;
     --apply) mode=apply; shift ;;
     --lock-owned-by) lock_owner="${2:?missing owner pid}"; shift 2 ;;
-    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|trybuild-host-triple|kani|wasm-debug|wasm-profile|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
+    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|trybuild-host-triple|kani|wasm-debug|wasm-profile|wasm-root-profile|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
   esac
 done
 case "$lane" in
@@ -31,6 +31,8 @@ case "$lane" in
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
   # Cargo [profile.wasm], used by the canonical Dioxus build.
   wasm-profile) relative=target/wasm32-unknown-unknown/wasm ;;
+  # Older Cargo invocations used an unqualified target root for profile.wasm.
+  wasm-root-profile) relative=target/wasm ;;
   wasm-release) relative=target/wasm32-unknown-unknown/wasm-release ;;
   wasm-host-release) relative=target/wasm-release ;;
   dylint) relative=target/dylint ;;
@@ -99,12 +101,17 @@ fi
 source "$repo_root/scripts/dev/scoped-builders.sh"
 builders="$(aura_scoped_processes "$root" 'cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|cargo-kani|kani-driver' "$$")"
 [[ -z "$builders" ]] || refuse_cleanup active-builder "builder active: $builders"
-if [[ "$lane" == release || "$lane" == wasm-profile || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
+if [[ "$lane" == release || "$lane" == wasm-profile || "$lane" == wasm-root-profile || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
   consumers="$(aura_scoped_processes "$root" 'tool_repl|aura-harness|aura' "$$")"
   [[ -z "$consumers" ]] || refuse_cleanup active-consumer "harness consumer active: $consumers"
 fi
 open_files="$(lsof -n -P 2>/dev/null)" || refuse_cleanup open-file-scan-failed 'cannot inspect open files'
-if printf '%s\n' "$open_files" | rg -F "$path"; then
+# Match with POSIX grep, not rg: outside the Nix shell rg may be absent, and a
+# failed pipeline here would read as "no open files" and permit the removal.
+# grep must consume the whole list: under pipefail, `grep -q` exiting on the
+# first match breaks the pipe for printf and turns the match into a failure.
+command -v grep >/dev/null || refuse_cleanup open-file-scan-unavailable 'grep is required to match open files'
+if printf '%s\n' "$open_files" | grep -F -- "$path" >/dev/null; then
   refuse_cleanup open-files "lane has open files: $path"
 fi
 # Inspect again after acquiring the shared lock and checking active users.

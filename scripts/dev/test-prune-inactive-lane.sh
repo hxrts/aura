@@ -69,9 +69,11 @@ expect_status 0 prune --lane wasm-debug --apply
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 [[ -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
 
-for lane in wasm-profile wasm-release wasm-host-release; do
+for lane in wasm-profile wasm-root-profile wasm-release wasm-host-release; do
   if [[ "$lane" == wasm-profile ]]; then
     cache="$project/target/wasm32-unknown-unknown/wasm"
+  elif [[ "$lane" == wasm-root-profile ]]; then
+    cache="$project/target/wasm"
   elif [[ "$lane" == wasm-release ]]; then
     cache="$project/target/wasm32-unknown-unknown/wasm-release"
   else
@@ -109,11 +111,39 @@ expect_status 1 prune --lane wasm-profile --lock-owned-by 0 --apply
 # Missing inspection / inspection failure must not permit deletion.
 missingbin="$test_root/missing-inspector"
 mkdir "$missingbin"
-for tool in bash dirname du awk mkdir rmdir cat ps rg; do
+for tool in bash dirname du awk mkdir rmdir cat ps grep; do
   ln -s "$(command -v "$tool")" "$missingbin/$tool"
 done
 PATH="$missingbin" expect_status 1 prune --lane wasm-profile --apply
-rg -F 'lsof is required to prove this lane is idle' "$test_root/output" >/dev/null
+grep -F 'lsof is required to prove this lane is idle' "$test_root/output" >/dev/null
+[[ -f "$cache/data" ]]
+# The open-file match must not depend on rg: with rg absent and a file open
+# under the lane, apply must still refuse (task 412).
+norgbin="$test_root/no-rg"
+mkdir "$norgbin"
+for tool in bash dirname du awk mkdir rmdir cat grep; do
+  ln -s "$(command -v "$tool")" "$norgbin/$tool"
+done
+ln -s "$fakebin/ps" "$norgbin/ps"
+ln -s "$fakebin/lsof" "$norgbin/lsof"
+# A real lsof scan is hundreds of thousands of lines, far beyond the pipe
+# buffer; the open file comes first so an early-exit matcher would break the
+# pipe for the writer and, under pipefail, turn the match into a failure.
+{ printf '%s\n' "$cache/data"; awk 'BEGIN { for (i = 0; i < 200000; i++) print "proc " i " cwd DIR 1,16 /unrelated/path/" i }'; } > "$OPEN_FILE"
+PATH="$norgbin" expect_status 1 prune --lane wasm-profile --apply
+grep -F 'lane has open files' "$test_root/output" >/dev/null
+[[ -f "$cache/data" ]]
+rm "$OPEN_FILE"
+# A missing grep must refuse rather than read as "no open files".
+nogrepbin="$test_root/no-grep"
+mkdir "$nogrepbin"
+for tool in bash dirname du awk mkdir rmdir cat; do
+  ln -s "$(command -v "$tool")" "$nogrepbin/$tool"
+done
+ln -s "$fakebin/ps" "$nogrepbin/ps"
+ln -s "$fakebin/lsof" "$nogrepbin/lsof"
+PATH="$nogrepbin" expect_status 1 prune --lane wasm-profile --apply
+grep -F 'grep is required to match open files' "$test_root/output" >/dev/null
 [[ -f "$cache/data" ]]
 LSOF_EXIT=44 expect_status 1 prune --lane wasm-profile --apply
 [[ -f "$cache/data" ]]
