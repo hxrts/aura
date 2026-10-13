@@ -73,7 +73,7 @@ impl SecretLifetimeProviderIdentity {
     pub fn new_trusted_provider_identity() -> Self {
         Self(std::sync::Arc::new(()))
     }
-    fn same_owner(&self, other: &Self) -> bool {
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.0, &other.0)
     }
 }

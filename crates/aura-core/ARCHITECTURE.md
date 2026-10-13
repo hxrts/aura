@@ -71,6 +71,13 @@ Single source of truth for domain types and effect trait definitions. Provides f
   It validates one local share without a quorum. Native public packages do not
   encode the threshold; conversion defaults cannot establish policy evidence.
 - Effect trait definitions only (no implementations).
+- `effects::protected_retirement` defines a move-owned whole-profile recovery
+  vocabulary for future immutable-record retirement. A routing reference does
+  not select an owner; a recovered owner takes no caller location, bytes, or
+  expiry. The selected provider must retain exact protected bytes and use its
+  original physical-time source before acknowledging durable expiry cleanup.
+  The contract alone grants no storage deletion authority; backend and domain
+  proof integration remain separate requirements.
 - `ReactiveEffects::ensure_registered` requires atomic per-signal check-and-insert without resetting live values; registration under an existing ID with a different type is an error. Subscription to an unregistered signal fails explicitly.
 - Semilattice laws: monotonic growth (facts), monotonic restriction (capabilities).
 - Context isolation prevents cross-context information flow.

@@ -74,6 +74,7 @@ pub mod ledger; // Event sourcing and audit trails
 pub mod network;
 pub mod noise;
 pub mod profile_storage;
+pub mod protected_retirement;
 pub mod query; // Datalog query effects (bridges Journal + Biscuit + Reactive)
 pub mod random;
 pub mod reactive; // FRP as algebraic effects
