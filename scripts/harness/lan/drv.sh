@@ -5,6 +5,8 @@
 #   drv.sh start <config>        start tool_repl in the background
 #   drv.sh req '<json-no-id>' [timeout-s]
 #                                send a request, print the matching response line
+#   drv.sh req-private           read one complete JSON request from stdin and
+#                                return over the owner-only socket (no REPL log)
 #   drv.sh stop                  shut down the REPL and its children
 #   drv.sh finish success|failed record outcome after evidence capture
 #   drv.sh finalize <token> success|failed
@@ -34,6 +36,8 @@ case "${1:-}" in
 esac
 D=$AURA_E2E_RUN_DIR
 FIFO=$D/repl.in OUT=$D/repl.out PIDF=$D/repl.pid SEQ=$D/repl.seq
+PRIVATE_DIR=$D/private-$AURA_E2E_RUN_TOKEN
+PRIVATE_SOCKET=$PRIVATE_DIR/owner.sock
 IDENTITY=$D/repl.identity.json
 physical_repo="$(pwd -P)"
 RETENTION_ROOT_FILE=$D/retention-root
@@ -226,6 +230,10 @@ start)
   printf '%s\n' "$runs_root" > "$RETENTION_ROOT_FILE"
   printf '%s\n' "$AURA_E2E_RUN_TOKEN" > "$RETENTION_RUN_FILE"
   rm -f "$FIFO" "$OUT"; mkfifo "$FIFO"; echo 0 > "$SEQ"
+  [[ ! -e "$PRIVATE_DIR" && ! -L "$PRIVATE_DIR" ]] || {
+    echo 'private LAN owner directory already exists; use a fresh run token' >&2; exit 1;
+  }
+  mkdir -m 700 "$PRIVATE_DIR"
   export AURA_HARNESS_AURA_BIN="${AURA_HARNESS_AURA_BIN:-$here/aura-wrap.sh}"
   export AURA_HARNESS_RUN_TOKEN="$AURA_E2E_RUN_TOKEN"
   export AURA_HARNESS_WEB_PREBUILT_ONLY=1
@@ -237,8 +245,8 @@ start)
   lan_host=$(grep -o 'bind_address = "[^"]*"' "$2" | cut -d'"' -f2 | cut -d: -f1 | grep -v "^127\." | head -1 || true)
   [ -n "$lan_host" ] && export AURA_HARNESS_WEB_RELAY_HOST="$lan_host"
   # Hold the FIFO open so the REPL never sees EOF.
-  nohup bash -c 'exec 3<>"$1"; exec nice -n 5 "$2" --config "$3" --idle-timeout-ms 0 <&3' \
-    lan-tool-repl "$FIFO" "$AURA_E2E_TOOL_REPL" "$2" \
+  nohup bash -c 'exec 3<>"$1"; exec nice -n 5 "$2" --config "$3" --private-socket "$4" --idle-timeout-ms 0 <&3' \
+    lan-tool-repl "$FIFO" "$AURA_E2E_TOOL_REPL" "$2" "$PRIVATE_SOCKET" \
     >"$OUT" 2>"$D/repl.err" </dev/null 9>&- &
   repl_pid=$!
   birth=$(process_birth "$repl_pid")
@@ -282,6 +290,15 @@ req)
   done
   echo "TIMEOUT id=$n" >&2; exit 1
   ;;
+req-private)
+  [[ -f "$PIDF" && -d "$PRIVATE_DIR" && ! -L "$PRIVATE_DIR" && -O "$PRIVATE_DIR" && -S "$PRIVATE_SOCKET" ]] || {
+    echo 'private LAN owner is not running; request rejected' >&2; exit 1;
+  }
+  verify_repl_identity "$(cat "$PIDF")" || {
+    echo 'private LAN owner identity does not match; request rejected' >&2; exit 1;
+  }
+  exec "$AURA_E2E_TOOL_REPL" --private-request-socket "$PRIVATE_SOCKET"
+  ;;
 stop)
   stop_owned_run
   ;;
@@ -295,5 +312,5 @@ finalize)
   stop_owned_run "$2"
   finish_owned_run "$3" "$2"
   ;;
-*) echo "usage: $0 start <config>|req <json> [timeout]|stop|finish success|failed|finalize <token> success|failed" >&2; exit 2;;
+*) echo "usage: $0 start <config>|req <json> [timeout]|req-private|stop|finish success|failed|finalize <token> success|failed" >&2; exit 2;;
 esac

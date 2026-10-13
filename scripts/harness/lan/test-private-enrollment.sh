@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Isolated private LAN request and redacted receipt fixtures; no live host.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+export AURA_E2E_ROOT="$fixture/checkout" AURA_E2E_RUN_DIR="$fixture/evidence"
+export AURA_E2E_RUN_TOKEN=private-enrollment-fixture AURA_E2E_HOST_ADDR=192.0.2.10
+export AURA_E2E_REMOTE=fixture-host AURA_E2E_REMOTE_ROOT='remote root'
+export FIXTURE_REQUEST="$fixture/request" FIXTURE_ARGS="$fixture/args"
+mkdir -p "$fixture/bin" "$AURA_E2E_ROOT"
+cat > "$fixture/bin/private-driver" <<'DRIVER'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FIXTURE_ARGS"
+cat > "$FIXTURE_REQUEST"
+printf '%s\n' '{"status":"ok","payload":{"setup_code":"private-setup-code-fixture"}}'
+DRIVER
+cat > "$fixture/bin/ssh" <<'SSH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FIXTURE_ARGS"
+cat > "$FIXTURE_REQUEST"
+printf '%s\n' '{"status":"ok","payload":{"setup_code":"private-setup-code-fixture"}}'
+SSH
+chmod +x "$fixture/bin/private-driver" "$fixture/bin/ssh"
+source "$here/lib.sh"
+AURA_E2E_DRV="$fixture/bin/private-driver"
+secret=private-enrollment-code-fixture
+request="{\"method\":\"submit_semantic_command\",\"params\":{\"intent\":{\"ImportDeviceEnrollmentCode\":{\"code\":\"$secret\"}}}}"
+printf '%s\n' "$request" | PATH="$fixture/bin:$PATH" req_private alex-tui 7 > "$fixture/local-response"
+jq -e --arg expected "$secret" '.params.instance_id=="alex-tui" and .params.intent.ImportDeviceEnrollmentCode.code==$expected' "$FIXTURE_REQUEST" >/dev/null
+[[ $(cat "$FIXTURE_ARGS") == req-private ]]
+! rg -Fq "$secret" "$FIXTURE_ARGS" "$fixture/local-response"
+printf '%s\n' "$request" | PATH="$fixture/bin:$PATH" req_private barbara-tui 7 > "$fixture/remote-response"
+jq -e --arg expected "$secret" '.params.instance_id=="barbara-tui" and .params.intent.ImportDeviceEnrollmentCode.code==$expected' "$FIXTURE_REQUEST" >/dev/null
+! rg -Fq "$secret" "$FIXTURE_ARGS" "$fixture/remote-response"
+rg -q 'drv.sh req-private' "$FIXTURE_ARGS"
+
+# Whitelist the exact operation and host acknowledgment while excluding code,
+# diagnostic detail, labels and unrelated snapshot fields.
+mkdir -m 700 "$AURA_E2E_RUN_DIR"
+cat > "$fixture/snapshot" <<'RESPONSE'
+{"status":"ok","payload":{"screen":"private-enrollment-code-fixture","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"failed","failure":{"domain":"transport","code":"unavailable","detail":"private-enrollment-code-fixture"}}],"runtime_events":[{"id":"tui-runtime-fact-private-enrollment-code-fixture","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000002","device_count":2,"code":"private-enrollment-code-fixture"}}],"lists":[{"id":"devices","items":[{"id":"private-enrollment-code-fixture","label":"private-enrollment-code-fixture"}]}],"diagnostic":"private-enrollment-code-fixture"}}
+RESPONSE
+evidence=$(lan_private_receipt barbara-tui ui_state pre-restart < "$fixture/snapshot")
+jq -e '.operations[0]=={id:"device_enrollment",instance_id:"tui-op-device_enrollment-2",state:"failed",failure:{domain:"transport",code:"unavailable"}} and .host_acknowledgments[0]=={device_id:"00000000-0000-4000-8000-000000000002",device_count:2} and .ready==true' "$evidence" >/dev/null
+[[ $(stat -c '%a' "$evidence" 2>/dev/null || stat -f '%Lp' "$evidence") == 600 ]]
+! rg -Fq "$secret" "$evidence"
+! lan_private_receipt barbara-tui ui_state pre-restart < "$fixture/snapshot"
+ln -s "$fixture/snapshot" "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-tui-symlink.json"
+! lan_private_receipt barbara-tui ui_state symlink < "$fixture/snapshot"
+for path in '.status' '.payload.readiness' '.payload.operations[0].id' '.payload.operations[0].instance_id' '.payload.operations[0].state' '.payload.operations[0].failure.domain' '.payload.operations[0].failure.code' '.payload.runtime_events[0].id' '.payload.runtime_events[0].fact.device_id' '.payload.runtime_events[0].fact.device_count'; do
+  jq -c --arg secret "$secret" "$path=\$secret" "$fixture/snapshot" > "$fixture/poisoned"
+  if candidate=$(lan_private_receipt barbara-tui ui_state "bad-$RANDOM" < "$fixture/poisoned"); then
+    if rg -Fq "$secret" "$candidate"; then
+      echo "private receipt leaked secret from $path" >&2; exit 1
+    fi
+  fi
+done
+printf '%s\n' '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2"}},"value":{"code":"private-enrollment-code-fixture"}}}' \
+  | lan_private_receipt barbara-tui submit_semantic_command submitted >/dev/null
+printf '%s\n' '{"status":"ok","payload":{"status":"restarted","message":"private-enrollment-code-fixture"}}' \
+  | lan_private_receipt barbara-tui restart reopened >/dev/null
+! rg -Fq "$secret" "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN" --glob '*.json'
+echo 'LAN private enrollment request and redacted receipt fixtures passed'

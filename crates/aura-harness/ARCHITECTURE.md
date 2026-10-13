@@ -60,6 +60,17 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   evidence. TERM enters the REPL's existing owned shutdown; arbitrary child
   process signalling is forbidden.
 
+- Paired enrollment transfers use the same ToolApi owner over its owner-only
+  Unix socket. The LAN driver verifies the existing REPL process identity
+  before forwarding one stdin request to that socket; the private response
+  returns through the socket and never enters retained `repl.out`. General
+  semantic evidence helpers remain unsuitable for secret-bearing responses.
+  The private evidence helper writes owner-only files and whitelists operation
+  id/instance/state, typed failure domain/code, host acknowledgment, and
+  readiness without copying codes, labels, screen names, device-list IDs, or
+  diagnostic detail. Reopen still requires a fresh
+  authoritative observation after restart.
+
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;
   raw authority IDs, demo autofill and discovery metadata cannot replace the

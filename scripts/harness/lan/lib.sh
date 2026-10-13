@@ -17,6 +17,86 @@ req() { # req <instance> <method> [JSON object fields] [transport timeout second
     timeout "$transport_timeout" "$AURA_E2E_DRV" req "$body" "$transport_timeout"
   fi
 }
+# Private enrollment requests enter the selected ToolApi owner through its
+# socket. The complete JSON body is supplied on stdin; neither request nor
+# response passes through process arguments or retained repl.out.
+req_private() { # req_private <instance> [transport timeout seconds] < request.json
+  local inst=$1 transport_timeout=${2:-60} quoted_root
+  if [ -n "$AURA_E2E_REMOTE" ] && [[ "$inst" == "$AURA_E2E_REMOTE_PREFIX"* ]]; then
+    quoted_root=${AURA_E2E_REMOTE_ROOT//\'/\'\\\'\'}
+    jq -ce --arg instance "$inst" \
+      'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
+       | .params.instance_id=$instance' \
+      | timeout "$transport_timeout" ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
+        "cd '$quoted_root' && scripts/harness/lan/drv.sh req-private"
+  else
+    jq -ce --arg instance "$inst" \
+      'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
+       | .params.instance_id=$instance' \
+      | timeout "$transport_timeout" "$AURA_E2E_DRV" req-private
+  fi
+}
+
+# Whitelist only nonsecret facts required for paired enrollment evidence. The
+# caller passes a private response on stdin; never write the raw response to a
+# file, shell trace or general semantic-evidence helper.
+lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < response.json
+  local instance=$1 method=$2 label=$3 dir target scratch mode
+  case "$instance" in alex-tui|alex-tui2|alex-web|barbara-tui|barbara-tui2|barbara-web) ;; *) return 2;; esac
+  case "$method" in submit_semantic_command|ui_state|wait_for_ui_snapshot_event|restart|get_authority_id) ;; *) return 2;; esac
+  [[ "$label" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || return 2
+  [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || return 2
+  [[ -d "$AURA_E2E_RUN_DIR" && ! -L "$AURA_E2E_RUN_DIR" && -O "$AURA_E2E_RUN_DIR" ]] || return 2
+  dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+  if [[ ! -e "$dir" && ! -L "$dir" ]]; then mkdir -m 700 "$dir" || return; fi
+  [[ -d "$dir" && ! -L "$dir" && -O "$dir" ]] || return 2
+  mode=$(stat -c '%a' "$dir" 2>/dev/null || stat -f '%Lp' "$dir") || return
+  [[ "$mode" == 700 ]] || return 2
+  target="$dir/$instance-$label.json"
+  [[ ! -e "$target" && ! -L "$target" ]] || return 2
+  scratch=$(mktemp "$dir/.receipt.XXXXXX") || return
+  if ! jq -ce --arg instance "$instance" --arg method "$method" '
+    def op_id: type=="string" and test("^tui-op-device_enrollment-[0-9]{1,20}$");
+    def failure:
+      . == null or (type=="object"
+        and (.domain|IN("command","ceremony","invitation","channel_context","transport","delivery","projection","internal"))
+        and (.code|IN("unsupported_command","permission_denied","budget_exceeded","not_member","not_found","invalid_argument","invalid_state","muted","banned","unavailable","command_failed","crypto_failure","serialization_failure","storage_failure","journal_failure","reactive_failure","missing_authoritative_context","contact_link_did_not_converge","channel_bootstrap_unavailable","peer_channel_not_established","delivery_readiness_not_reached","operation_timed_out","ceremony_rejected","ceremony_cancelled","ceremony_choreography_failed","ceremony_runtime_failed","ceremony_superseded","shell_declared_success_illegally","invitation_revoked","invitation_expired","invitation_already_settled","inviter_did_not_confirm","internal_error")));
+    def operation:
+      .id=="device_enrollment" and (.instance_id|op_id)
+      and (.state|IN("idle","submitting","succeeded","failed","cancelled"))
+      and (.failure|failure);
+    def handle: .id=="device_enrollment" and (.instance_id|op_id);
+    def host_ack:
+      (.id|type=="string" and startswith("tui-runtime-fact-"))
+      and .fact.kind=="device_enrollment_accepted"
+      and (.fact.device_id|type=="string" and test("^[0-9a-fA-F-]{36}$"))
+      and (.fact.device_count|type=="number" and .>=1 and .<=16 and .==floor);
+    . as $response
+    | ($response.payload.event.snapshot // $response.payload) as $snapshot
+    | [($snapshot.operations // [])[] | select(.id=="device_enrollment")] as $operations
+    | [($snapshot.runtime_events // [])[] | select(.fact.kind=="device_enrollment_accepted")] as $acks
+    | ($response.payload.handle.ui_operation // null) as $submitted
+    | if ($response.status|IN("ok","error"))
+      and ([$operations[]|operation]|all)
+      and ([$acks[]|host_ack]|all)
+      and ($submitted==null or ($submitted|handle))
+      and ($method!="restart" or ($response.payload.status|IN("restarted",null)))
+      and ($snapshot.readiness==null or ($snapshot.readiness|IN("ready","loading")))
+      then {
+        instance_id:$instance, method:$method, status:$response.status,
+        submitted_operation:(if $submitted==null then null else {id:$submitted.id,instance_id:$submitted.instance_id} end),
+        operations:[$operations[]|{id,instance_id,state,failure:(.failure // null|if .==null then null else {domain,code} end)}],
+        host_acknowledgments:[$acks[]|{device_id:.fact.device_id,device_count:.fact.device_count}],
+        ready:($snapshot.readiness=="ready"),
+        restarted:($method=="restart" and $response.payload.status=="restarted")
+      } else empty end
+  ' > "$scratch"; then rm -f "$scratch"; return 2; fi
+  [[ -s "$scratch" ]] || { rm -f "$scratch"; return 2; }
+  chmod 600 "$scratch" || { rm -f "$scratch"; return 2; }
+  ln "$scratch" "$target" || { rm -f "$scratch"; return 2; }
+  rm -f "$scratch"
+  printf '%s\n' "$target"
+}
 key() { req "$1" send_key "$(jq -cn --arg key "$2" '{key:$key}' | sed 's/^{//;s/}$//')" >/dev/null; }
 keys() { req "$1" send_keys "$(jq -cn --arg keys "$2" '{keys:$keys}' | sed 's/^{//;s/}$//')" 120 >/dev/null; }
 st() { req "$1" ui_state | jq -ce ".payload|${2:-.}"; }

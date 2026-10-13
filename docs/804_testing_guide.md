@@ -1088,15 +1088,25 @@ actors use its URL as clients. Pass those generated config paths as
 `AURA_E2E_LOCAL_CONFIG` and `AURA_E2E_REMOTE_CONFIG` to the owned `batch.sh`
 run. This provisions transport only. The ordinary `drv.sh req`/`lib.sh`
 semantic path still places transferred codes in arguments or retained REPL
-output, so it must not be used for the paired enrollment transfer. A private
-request/response channel with redacted receipts is required before execution.
+output, so it must not be used for the paired enrollment transfer. Send one
+complete JSON request on stdin through `lib.sh`'s `req_private <instance>`;
+the selected driver verifies its REPL owner and forwards the request over that
+owner's `0600` Unix socket. The private response returns on the same socket,
+outside `repl.out` and the general scenario evidence. Keep it in process
+memory, and pass it on stdin to `lan_private_receipt <instance> <method> <label>`.
+That helper writes one owner-only `0600` file per label and refuses an existing
+file or symlink. It validates and retains only exact operation instance/state,
+typed failure domain/code, host acknowledgment, and readiness; free-text
+diagnostics, codes, screen names, and device-list IDs are omitted. Do not print
+or save the raw response.
 Each invitation credential is registered by its own receiver and used only to
 drain that receiver's broker invitation queue; the sender needs the shared
 broker bearer, not the recipient's invitation credential. The signed pending
 enrollment mailbox uses its separate scoped credential and verifier checks.
 `drv.sh start` renders `__HOST_ADDR__` into a token-specific owner-only copy
-under the LAN run directory; that copy and the REPL output remain sensitive
-run state and cannot serve as redacted enrollment evidence.
+under the LAN run directory. Reopen evidence must pair the exact original
+operation/host acknowledgment with an authoritative post-restart readiness,
+authority and device-list observation; a `restarted` status alone is insufficient.
 
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
