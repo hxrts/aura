@@ -1045,6 +1045,37 @@ Run a complete owned batch with `AURA_E2E_REMOTE=user@host scripts/harness/lan/b
 
 `finish-batch.sh <host-or-empty> <checkout> <token> success|failed` delegates to the pinned driver's `finalize` operation. One persistent kernel lock outside the replaceable run directory serializes start, stop, finish and finalization; never unlink its inode while lifecycle users can exist. The driver checks the expected token after Nix bootstrap, binds the process identity to that token plus PID birth, executable and checkout, and retains the same lifecycle owner through shutdown and retention classification. Dead holders release kernel custody automatically; live contention and ambiguous identities fail closed. Background services and read-only process inspection cannot retain the lifecycle descriptor. Isolated retention and batch fixtures cover run replacement during bootstrap, concurrent owners, forced owner death, descriptor inheritance, independent host refusal and interruption. Actual paired-host confirmation remains a separate evidence requirement.
 
+For paired device enrollment, record a fixed-commit manifest before starting the
+batch: local and remote commit, the local smoke receipt, native and web artifact
+hashes, the shared run token on both hosts, each actor's host and process identity, selected broker
+endpoint and bind policy, and the exact test inventory. The ordinary LAN configs
+do not enable a bootstrap broker; its default is disabled. A paired enrollment
+run therefore needs an explicitly provisioned, authenticated broker reachable
+from both hosts. LAN-visible HTTP binding is a development-only opt-in; it is
+not evidence of a production-secure internet route. Keep its bearer and
+invitation retrieval credentials out of committed configs, command arguments,
+URLs, runtime logs and retained scenario snapshots. Do not use `lib.sh`'s
+general `semantic`/`wait_snapshot` evidence capture for secret-bearing setup,
+enrollment and verifier transfers: those helpers retain whole responses and
+snapshots. Capture only redacted operation and transport evidence, and retain
+the original secret values in the owning process or a private transfer channel.
+
+The paired enrollment inventory must prove, in order: a provisional device on
+one host exports its actual signed setup; the other host's issuer consumes that
+exact external setup and emits the original enrollment code, signed manifest
+and independently transferred verifier; the first authenticated enrollment
+envelope reaches the original receiver across host/process boundaries; the
+recipient has no import operation before explicit approval; approval submits
+one exact `device_enrollment` instance; that instance reaches typed success
+only after the recipient's actual host acknowledgment; the adopted authority
+and two devices persist through same-profile restart; and both hosts release
+their owned tasks at batch finalization. A matching authority ID, operation ID
+without instance, broker candidate, code-ready event, or local browser run
+alone cannot replace these assertions. Record typed failure and original
+source on any refusal; keep the original profile and transfer available for a
+permitted retry. The local browser approval/persistence/reopen scenario remains
+separate evidence for browser storage and mounted controls.
+
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
 Shared flows should be authored semantically once, then executed through the harness using either the TUI or browser driver. Do not create a second frontend execution path for MBT or simulator replay. Core shared scenarios should use semantic actions and state-based assertions. Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks except in dedicated low-level driver tests.
