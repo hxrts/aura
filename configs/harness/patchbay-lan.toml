@@ -1,0 +1,46 @@
+schema_version = 1
+
+# Two real TUI instances inside patchbay network namespaces on one home LAN
+# (configs/harness/topologies/single-home-lan.toml). Run on Linux with
+#   AURA_HARNESS_AURA_BIN=target/debug/aura \
+#   aura-harness run --config configs/harness/patchbay-lan.toml \
+#     --scenario scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml \
+#     --network-backend patchbay
+# Each instance binds on its lab device address with the port given here.
+[run]
+name = "patchbay-lan"
+pty_rows = 40
+pty_cols = 120
+seed = 4242
+artifact_dir = "artifacts/harness/patchbay-lan"
+network_topology = "topologies/single-home-lan.toml"
+
+[[instances]]
+id = "alice"
+mode = "local"
+lab_authority = "alice"
+data_dir = "artifacts/harness/state/patchbay-lan/alice"
+device_id = "alice-dev-01"
+bind_address = "0.0.0.0:41001"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433
+
+[[instances]]
+id = "bob"
+mode = "local"
+lab_authority = "bob"
+data_dir = "artifacts/harness/state/patchbay-lan/bob"
+device_id = "bob-dev-01"
+bind_address = "0.0.0.0:41002"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433

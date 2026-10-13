@@ -165,6 +165,7 @@ mod tests {
         let run_config = RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "capability-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -196,6 +197,7 @@ mod tests {
         let run_config = RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "capability-browser-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -226,6 +228,7 @@ mod tests {
         let run_config = RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "semantic-ssh-rejected".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -272,6 +275,7 @@ mod tests {
 
     fn base_instance(id: &str, mode: InstanceMode) -> InstanceConfig {
         InstanceConfig {
+            lab_authority: None,
             id: id.to_string(),
             mode,
             data_dir: PathBuf::from("/tmp/test"),

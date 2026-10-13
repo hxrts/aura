@@ -1322,11 +1322,46 @@ pub enum InputKey {
 #[serde(rename_all = "snake_case")]
 pub enum EnvironmentAction {
     LaunchActors,
-    RestartActor { actor: ActorId },
-    KillActor { actor: ActorId },
-    FaultDelay { actor: ActorId, delay_ms: u64 },
-    FaultLoss { actor: ActorId, loss_percent: u8 },
-    FaultTunnelDrop { actor: ActorId },
+    RestartActor {
+        actor: ActorId,
+    },
+    KillActor {
+        actor: ActorId,
+    },
+    FaultDelay {
+        actor: ActorId,
+        delay_ms: u64,
+    },
+    FaultLoss {
+        actor: ActorId,
+        loss_percent: u8,
+    },
+    FaultTunnelDrop {
+        actor: ActorId,
+    },
+    /// Take the actor's lab device uplink down. Network lab runs only; the
+    /// harness refuses it when no lab is provisioned.
+    NetworkLinkDown {
+        actor: ActorId,
+    },
+    /// Bring the actor's lab device uplink back up.
+    NetworkLinkUp {
+        actor: ActorId,
+    },
+    /// Flush the NAT state of a lab router, by its topology name.
+    NetworkFlushNat {
+        router: String,
+    },
+    /// Switch a lab router's firewall to a named preset.
+    NetworkSetFirewall {
+        router: String,
+        preset: String,
+    },
+    /// Apply a named link condition preset to the actor's device uplink.
+    NetworkSetLinkCondition {
+        actor: ActorId,
+        condition: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

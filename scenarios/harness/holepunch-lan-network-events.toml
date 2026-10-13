@@ -1,0 +1,171 @@
+# Contact link over the single-LAN lab, followed by network events: a NAT
+# flush on the home router, a link toggle and a degraded link on alice. The
+# events are shared-contract environment steps applied through the lab backend;
+# the assertions are the UI readiness of both instances afterwards. This is the
+# scenario the real-instance e2e test runs.
+id = "holepunch-lan-network-events"
+goal = "Link two real instances over the lab, then apply network events and confirm both stay ready."
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-onboarding-visible"
+action = "screen_is"
+actor = "bob"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "AliceUser"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-create-account"
+action = "create_account"
+actor = "bob"
+value = "BobUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-neighborhood-visible"
+action = "screen_is"
+actor = "bob"
+screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-neighborhood-ready"
+action = "readiness_is"
+actor = "bob"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-create-home"
+action = "create_home"
+actor = "alice"
+value = "Alice Home"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-open-contacts"
+action = "open_screen"
+actor = "alice"
+screen_id = "contacts"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-open-contacts"
+action = "open_screen"
+actor = "bob"
+screen_id = "contacts"
+timeout_ms = 3000
+
+[[steps]]
+id = "capture-alice-authority-id"
+action = "capture_current_authority_id"
+actor = "alice"
+name = "alice_authority_id"
+timeout_ms = 3000
+
+[[steps]]
+id = "capture-bob-authority-id"
+action = "capture_current_authority_id"
+actor = "bob"
+name = "bob_authority_id"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-create-contact-invitation"
+action = "create_contact_invitation"
+actor = "bob"
+value = "${alice_authority_id}"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-invitation-code-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "invitation_code_ready"
+name = "invite_code"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-accept-contact-invitation"
+action = "accept_contact_invitation"
+actor = "alice"
+value = "${invite_code}"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-contact-link-ready"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "contact_link_ready"
+timeout_ms = 30000
+
+
+[[steps]]
+id = "flush-nat-home-a"
+action = "network_flush_nat"
+value = "home-a"
+timeout_ms = 5000
+
+[[steps]]
+id = "alice-link-down"
+action = "network_link_down"
+actor = "alice"
+timeout_ms = 5000
+
+[[steps]]
+id = "alice-link-up"
+action = "network_link_up"
+actor = "alice"
+timeout_ms = 5000
+
+[[steps]]
+id = "alice-degraded-link"
+action = "network_set_link_condition"
+actor = "alice"
+value = "wifi_bursty"
+timeout_ms = 5000
+
+[[steps]]
+id = "alice-ready-after-network-events"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-ready-after-network-events"
+action = "readiness_is"
+actor = "bob"
+readiness = "ready"
+timeout_ms = 60000

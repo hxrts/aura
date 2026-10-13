@@ -109,7 +109,16 @@ pub fn validate_topology(spec: &TopologySpec) -> Result<()> {
     ensure_complete_authority_mapping(spec)?;
     ensure_relay_requirement(spec)?;
     validate_graph_connectivity(spec)?;
+    ensure_links_resolve(spec)?;
 
+    Ok(())
+}
+
+/// Every link must join a device to its gateway router or two adjacent routers.
+fn ensure_links_resolve(spec: &TopologySpec) -> Result<()> {
+    for link in &spec.links {
+        super::classify_link(spec, &link.left, &link.right)?;
+    }
     Ok(())
 }
 

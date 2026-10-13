@@ -24,9 +24,11 @@
       url = "github:AeneasVerif/aeneas";
       # Don't follow nixpkgs - Aeneas has specific OCaml/Coq version requirements
     };
-    # Patchbay: Network simulation for holepunch testing
+    # Patchbay: Network simulation for holepunch testing. Pinned to the same
+    # upstream revision as crates/aura-harness/Cargo.toml and
+    # scripts/ci/holepunch.sh audit (the patchbay-v0.7.0 tag).
     patchbay = {
-      url = "github:hxrts/patchbay/hxrts/aura";
+      url = "github:n0-computer/patchbay/5cc60db1eb190360dfcd64eaf2f829bce4072551";
       flake = false; # Use as source, not as flake (no packages exported)
     };
   };
@@ -134,32 +136,37 @@
           };
         };
 
-        # patchbay-vm: QEMU wrapper for running patchbay network simulations
+        # patchbay: unified upstream CLI whose `vm` subcommand drives patchbay
+        # network simulations in a QEMU guest (`patchbay vm run`), with its
+        # default `serve` (devtools UI) and `upload` features.
         # Only available on Linux (requires QEMU and network namespace support)
-        patchbay-vm = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (
-          pkgs.rustPlatform.buildRustPackage {
-            pname = "patchbay-vm";
-            version = "0.1.0";
+        # The patchbay devtools UI is built by patchbay-server's build script
+        # through npm; prefetch its lockfile so that runs offline in the sandbox.
+        patchbayUiDeps = pkgs.fetchNpmDeps {
+          name = "patchbay-ui-npm-deps";
+          src = "${patchbay}/ui";
+          hash = "sha256-Czu0fqb1Kls7sdm1fwEzNIJsAkSXsUK4lmC9iUJN/E4=";
+        };
+        patchbayCli = pkgs.rustPlatform.buildRustPackage {
+            pname = "patchbay";
+            version = "0.7.0";
             src = patchbay;
             cargoLock = {
               lockFile = "${patchbay}/Cargo.lock";
             };
-            cargoBuildFlags = [ "-p" "patchbay-vm" ];
-            nativeBuildInputs = with pkgs; [ pkg-config nodejs ]; # nodejs for patchbay-utils build
+            cargoBuildFlags = [ "-p" "patchbay-cli" ];
+            nativeBuildInputs = with pkgs; [ pkg-config nodejs npmHooks.npmConfigHook ];
+            npmDeps = patchbayUiDeps;
+            npmRoot = "ui";
             buildInputs = with pkgs; [ openssl ];
             # Skip tests as they require network capabilities
             doCheck = false;
-            # npm needs HOME to write logs
-            preBuild = ''
-              export HOME=$(mktemp -d)
-            '';
             meta = with pkgs.lib; {
-              description = "QEMU VM wrapper for patchbay network simulations";
+              description = "Patchbay CLI with the QEMU VM backend for network simulations";
               license = with licenses; [ mit asl20 ];
               platforms = platforms.linux;
             };
-          }
-        );
+          };
 
         # Import generated Cargo.nix with CC crate fix and other overrides
         cargoNix = import ./Cargo.nix {
@@ -220,6 +227,9 @@
             ${crate2nix.packages.${system}.default}/bin/crate2nix generate
             echo "Cargo.nix regenerated successfully!"
           '';
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          # Upstream patchbay CLI: `patchbay serve` inspects a harness lab run dir.
+          patchbay = patchbayCli;
         };
 
         checks = {
@@ -301,6 +311,8 @@
             iproute2 # tc command for traffic control
             nftables # nft command for NAT rules
             iptables # iptables-legacy for some nftables compat
+            conntrack-tools # conntrack, used by patchbay to flush NAT state
+            tcpdump # per-device packet capture in harness network labs
           ];
 
           shellHook = ''
@@ -395,6 +407,8 @@
             auraCargo
             rustToolchain
             rustToolchainNightly
+            # Cargo.nix drift check
+            crate2nix.packages.${system}.default
 
             # Build tools
             pkg-config
@@ -434,7 +448,16 @@
           ++ toolkitSupport.packages
           ++ toolkitCommands
           ++ toolkitSupport.buildInputs
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.chromium pkgs.chromedriver ]
+          # Linux-only: browser harness plus the patchbay network lab tools
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.chromium
+            pkgs.chromedriver
+            pkgs.iproute2
+            pkgs.nftables
+            pkgs.iptables
+            pkgs.conntrack-tools
+            pkgs.tcpdump
+          ]
           ;
 
           shellHook = ''

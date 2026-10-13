@@ -203,6 +203,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
     RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: name.to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -218,6 +219,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             fixed_ports: false,
         },
         instances: vec![InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: PathBuf::from(format!("/tmp/{name}-alice")),
@@ -247,6 +249,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
     RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: name.to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -263,6 +266,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
         },
         instances: vec![
             InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: PathBuf::from(format!("/tmp/{name}-alice")),
@@ -286,6 +290,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
                 tunnel: None,
             },
             InstanceConfig {
+                lab_authority: None,
                 id: "bob".to_string(),
                 mode: InstanceMode::Ssh,
                 data_dir: PathBuf::from("/tmp/contract-ssh-bob"),

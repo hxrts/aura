@@ -97,6 +97,7 @@ mod tests {
     #[test]
     fn address_resolver_rewrites_mapped_tunnel_address() {
         let instance = InstanceConfig {
+            lab_authority: None,
             id: "bob".to_string(),
             mode: InstanceMode::Ssh,
             data_dir: PathBuf::from("/tmp/bob"),

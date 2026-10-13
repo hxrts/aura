@@ -36,6 +36,7 @@ use crate::backend::{
     UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
+use crate::network_lab::InstanceNamespace;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
 use crate::timeouts::blocking_sleep;
 
@@ -361,6 +362,9 @@ pub struct LocalPtyBackend {
     session_generation: u64,
     pty_rows: u16,
     pty_cols: u16,
+    /// Network namespace the TUI child is forked in. Host unless the run maps
+    /// this instance to a network lab device.
+    namespace: InstanceNamespace,
     last_authoritative_screen: Arc<Mutex<Option<String>>>,
     last_refresh_nudge_at: Arc<Mutex<Option<Instant>>>,
 }
@@ -503,6 +507,16 @@ impl LocalPtyBackend {
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
+        Self::new_in_namespace(config, pty_rows, pty_cols, InstanceNamespace::host())
+    }
+
+    /// Like [`Self::new`], but the TUI child is forked inside `namespace`.
+    pub fn new_in_namespace(
+        config: InstanceConfig,
+        pty_rows: Option<u16>,
+        pty_cols: Option<u16>,
+        namespace: InstanceNamespace,
+    ) -> Self {
         Self {
             config,
             state: BackendState::Stopped,
@@ -510,9 +524,15 @@ impl LocalPtyBackend {
             session_generation: 0,
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
+            namespace,
             last_authoritative_screen: Arc::new(Mutex::new(None)),
             last_refresh_nudge_at: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Namespace the child runs in.
+    pub fn namespace(&self) -> &InstanceNamespace {
+        &self.namespace
     }
 
     fn refresh_nudge_due(&self) -> bool {
@@ -1091,9 +1111,32 @@ impl InstanceBackend for LocalPtyBackend {
             #[cfg(test)]
             read_started_tx,
         )?;
-        let child = match pair.slave.spawn_command(command) {
+        // Fork the child from inside the instance namespace: a lab namespace is
+        // only reachable from a thread that already sits in it, so the spawn
+        // itself has to happen there. The slave PTY travels with the closure
+        // and comes back so it is closed on this side as before.
+        let slave = pair.slave;
+        let (slave, spawned) = match self.namespace.run_sync(move || {
+            let spawned = slave.spawn_command(command);
+            Ok((slave, spawned))
+        }) {
+            Ok(result) => result,
+            Err(error) => {
+                ui_snapshot_stop.store(1, Ordering::Release);
+                let _ = ui_snapshot_wake.write_all(&[1]);
+                let _ = ui_snapshot_thread.join();
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to enter namespace {:?} for {}",
+                        self.namespace, self.config.id
+                    )
+                });
+            }
+        };
+        let child = match spawned {
             Ok(child) => child,
             Err(error) => {
+                drop(slave);
                 ui_snapshot_stop.store(1, Ordering::Release);
                 let _ = ui_snapshot_wake.write_all(&[1]);
                 let _ = ui_snapshot_thread.join();
@@ -1101,7 +1144,7 @@ impl InstanceBackend for LocalPtyBackend {
                     .with_context(|| format!("failed to spawn process for {}", self.config.id));
             }
         };
-        drop(pair.slave);
+        drop(slave);
 
         let mut reader = pair
             .master
@@ -2260,6 +2303,7 @@ mod tests {
 
     fn test_config() -> InstanceConfig {
         InstanceConfig {
+            lab_authority: None,
             id: "local-test".to_string(),
             mode: InstanceMode::Local,
             data_dir: unique_test_dir("default"),

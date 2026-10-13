@@ -386,10 +386,24 @@ async fn emit_discovered_peers_signal(
 
     let peers = merge_discovered_peers(rendezvous_peers, bootstrap_candidates, &invited_ids);
 
+    // Path selections are an observation; a failed read leaves them empty.
+    let selected_paths = timeout_runtime_call(
+        &runtime,
+        "emit_discovered_peers_signal",
+        "try_get_selected_peer_paths",
+        Duration::from_millis(5_000),
+        || runtime.try_get_selected_peer_paths(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or_default();
+
     let state = DiscoveredPeersState {
         peers,
         last_updated_ms: timestamp_ms,
         lan_stats,
+        selected_paths,
     };
 
     // Emit the signal

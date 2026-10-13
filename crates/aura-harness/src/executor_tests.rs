@@ -822,6 +822,7 @@ fn compatibility_and_agent_modes_share_same_transition_path() {
     let run = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "executor-test".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -837,6 +838,7 @@ fn compatibility_and_agent_modes_share_same_transition_path() {
             fixed_ports: false,
         },
         instances: vec![InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: temp_root,
@@ -909,6 +911,7 @@ fn repeated_runs_with_same_seed_share_same_report_shape() {
     let run = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "executor-determinism".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -924,6 +927,7 @@ fn repeated_runs_with_same_seed_share_same_report_shape() {
             fixed_ports: false,
         },
         instances: vec![InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: temp_root,
@@ -978,6 +982,7 @@ fn send_chat_command_dismisses_toast_then_sends_slash_command() {
     let run = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "executor-chat-command".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -993,6 +998,7 @@ fn send_chat_command_dismisses_toast_then_sends_slash_command() {
             fixed_ports: false,
         },
         instances: vec![InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: temp_root,
@@ -1167,6 +1173,7 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
     let run = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "executor-send-clipboard".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -1183,6 +1190,7 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
         },
         instances: vec![
             InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: alice_data,
@@ -1206,6 +1214,7 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
                 tunnel: None,
             },
             InstanceConfig {
+                lab_authority: None,
                 id: "bob".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: bob_data,
@@ -1302,6 +1311,7 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
     let run = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "executor-send-clipboard-chunked".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -1318,6 +1328,7 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
         },
         instances: vec![
             InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: alice_data,
@@ -1341,6 +1352,7 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
                 tunnel: None,
             },
             InstanceConfig {
+                lab_authority: None,
                 id: "bob".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: bob_data,

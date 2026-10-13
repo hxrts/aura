@@ -7,7 +7,9 @@
 
 use super::invariant::InvariantViolation;
 use super::state::with_state_mut_validated;
-use aura_core::service::{Route, SelectionState, ServiceFamily};
+use aura_core::service::{
+    EstablishPath, PeerPathKind, Route, SelectedPeerPath, SelectionState, ServiceFamily,
+};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_rendezvous::{DescriptorValidity, RendezvousDescriptor};
 use std::collections::HashMap;
@@ -153,13 +155,48 @@ fn family_sort_key(family: ServiceFamily) -> u8 {
 )]
 pub struct ServiceRegistryService {
     state: RwLock<ServiceRegistryState>,
+    /// Most recent establish path selected per (context, peer). An observation
+    /// shared by the rendezvous handler (which selects) and the manager (which
+    /// reports); it never attests that a channel came up.
+    selected_paths: RwLock<HashMap<(ContextId, AuthorityId), SelectedPeerPath>>,
 }
 
 impl ServiceRegistryService {
     pub fn new() -> Self {
         Self {
             state: RwLock::new(ServiceRegistryState::default()),
+            selected_paths: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Record which establish path was selected toward `peer` in `context_id`.
+    pub async fn record_selected_path(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+        path: &EstablishPath,
+        now_ms: u64,
+    ) {
+        self.selected_paths.write().await.insert(
+            (context_id, peer),
+            SelectedPeerPath {
+                peer,
+                context_id,
+                kind: PeerPathKind::of(path),
+                protocol: path.route.destination.protocol,
+                selected_at_ms: now_ms,
+            },
+        );
+    }
+
+    /// Observed establish-path selections, ordered by context, peer and time.
+    pub async fn list_selected_paths(&self) -> Vec<SelectedPeerPath> {
+        let mut paths: Vec<SelectedPeerPath> =
+            self.selected_paths.read().await.values().cloned().collect();
+        paths.sort_by(|a, b| {
+            (a.context_id, a.peer, a.selected_at_ms).cmp(&(b.context_id, b.peer, b.selected_at_ms))
+        });
+        paths
     }
 
     pub async fn cache_descriptor(&self, descriptor: RendezvousDescriptor) {

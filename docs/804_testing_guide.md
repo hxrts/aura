@@ -190,7 +190,6 @@ Use this lane matrix when selecting harness mode.
 |------|---------|---------|
 | Local deterministic | `mock` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml` |
 | Patchbay relay realism | `patchbay` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml --network-backend patchbay` |
-| Patchbay-vm relay realism | `patchbay-vm` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml --network-backend patchbay-vm` |
 | Browser | Playwright | `just harness-run-browser scenarios/harness/semantic-observation-browser-smoke.toml` |
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot and readiness waits.
@@ -1010,7 +1009,7 @@ Multi-host runs use one harness per host with the same run token. Set `[run] fix
 
 The tracked LAN helpers live in `scripts/harness/lan/`. `configs/harness/lan-host-{a,b}.toml` name each host's LAN address as `__HOST_ADDR__`; `drv.sh start` renders the config with `AURA_E2E_HOST_ADDR` (detected from the primary interface by default), so no address is committed. Build and ship the exact commit's binaries, web bundle and runtime Nix closure from Host A with `ship.sh`; do not build on Air. `fresh.sh <run-token>` starts both drivers, onboards the standard cast and links contacts; `lib.sh` provides the request helpers used by scenario scripts.
 
-Schedule these cross-machine helpers after complete in-process validation, required local frontend coverage, checkpoint gates and main smoke. Batch several declared E2E flows into one owned run; preserve per-flow results and both-host cleanup evidence. A successful LAN flow does not replace deterministic fault, cancellation or restart coverage.
+Schedule these cross-machine helpers after complete in-process validation, required local frontend coverage, checkpoint gates and main smoke. Batch several declared E2E flows into one owned run; preserve per-flow results and both-host cleanup evidence. A successful LAN flow does not replace deterministic fault, cancellation or restart coverage. The patchbay lab (§13) settles one-host transport assertions first: real instances in separate network namespaces behind modeled NATs, link impairment, NAT flushes and link toggles. Only assertions that need real machines, real broadcast domains or independent hosts stay LAN-only.
 
 Run a complete owned batch with `AURA_E2E_REMOTE=user@host scripts/harness/lan/batch.sh <fresh-token> -- bash <checklist.sh> [arguments...]`. It requires matching clean local/remote commits and the complete local smoke marker. Workflow success, failure and interruption all attempt both hosts' exact-token finalization independently, retain shutdown logs and return failure if cleanup refuses ownership. Interruption first cancels and waits for the owned checklist command before finalizing. The command and commit are recorded in `.tmp/lan-checklist-<token>/`; the caller must describe which flows its checklist actually covers.
 
@@ -1197,6 +1196,19 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 
 ### Build and Caching
 
+`Cargo.lock` is committed, together with the lockfiles of the excluded
+`toolkit/xtask` and `toolkit/lints` workspaces, so every checkout, CI runner and
+remote host resolves the same dependency graph that the advisory audit and the
+hermetic Nix build were run against. `Cargo.nix` is generated from it by
+crate2nix and is also committed; `just ci-cargo-nix-check` (the `Cargo.nix Sync`
+CI job) regenerates it into a scratch file and fails on any difference. After a
+dependency change, run `cargo update -p <crate>` or edit the manifest, then
+`just generate-cargo-nix`, and commit `Cargo.toml`, `Cargo.lock` and `Cargo.nix`
+in the same change. Pre-commit and the dev scripts use `--locked`, which
+requires that committed lockfile. Lockfile merge conflicts are resolved by
+taking either side and running `cargo update --workspace`, which re-resolves
+only the conflicting entries.
+
 Workspace Clippy, including `just ci-clippy` and `toolkit-clippy-strict`, uses
 Aura's pinned shell Cargo dispatcher. `scripts/toolkit-shell.sh` routes the
 aggregate Clippy command through that dispatcher and enters Aura's Nix shell
@@ -1346,34 +1358,117 @@ cargo run -p aura-harness --bin aura-harness -- \
   --network-backend mock
 
 # Native Linux Patchbay (requires Linux + userns/capabilities)
+# The Nix shells provide tc, nft and conntrack; patchbay enters a user namespace itself.
 cargo run -p aura-harness --bin aura-harness -- \
   run --config configs/harness/local-loopback.toml \
   --network-backend patchbay
 
-# Cross-platform VM runner (macOS/Linux)
-cargo run -p aura-harness --bin aura-harness -- \
-  run --config configs/harness/local-loopback.toml \
-  --network-backend patchbay-vm
+# Real instances inside lab namespaces (Linux; aura built with aura-effects/test-keyring)
+AURA_HARNESS_AURA_BIN=target/debug/aura cargo run -p aura-harness --bin aura-harness \
+  --features patchbay-backend -- \
+  run --config configs/harness/patchbay-lan.toml \
+  --scenario scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml \
+  --network-backend patchbay
 ```
 
-Patchbay is the authoritative NAT-realism backend for holepunch validation. Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+Patchbay is the authoritative NAT-realism backend for holepunch validation and
+runs only on a Linux host with unprivileged user namespaces (ubu1 for this
+project). The former `patchbay-vm` mode is retired: it handed Aura topology
+TOML to patchbay's sim runner and never launched an Aura process. A run config
+with `run.network_topology` provisions a lab and forks each instance that maps
+a `lab_authority` inside its device namespace; such a run refuses backend
+fallback instead of silently running on the host. Multi-instance runs need an
+`aura` built with `aura-effects/test-keyring`, since a production build takes
+one platform keyring lease per OS identity. Keep deterministic non-network
+logic in `mock` backend tests to preserve fast feedback.
 
 The Linux harness pins Patchbay to upstream revision
-`cecd3b22e23396874169fa12d4441a6bdcaa1de9`, which migrates its DNS implementation
-to Hickory 0.26. Its two lab construction paths use the upstream builder API.
+`5cc60db1eb190360dfcd64eaf2f829bce4072551` (the `patchbay-v0.7.0` tag). The Nix
+flake input that builds the `patchbay` CLI (for `patchbay serve` over a lab run
+directory) pins the same revision; `scripts/ci/holepunch.sh audit` fails when
+the two disagree. The former `hxrts/patchbay` fork is retired. Patchbay 0.7
+models NAT as three RFC 4787 behavior tiers (`Open`, `Moderate`, `Strict`) and
+Aura's deployment-named `NatPreset` values map onto them in
+`network_lab::topology_adapter::to_patchbay_nat`:
+
+| `NatPreset` | patchbay | RFC 4787 behavior | RFC 3489 name |
+|---|---|---|---|
+| `none` | `None` | no translation | public |
+| `full_cone` | `Open` | EIM + EIF | full cone |
+| `restricted` | custom `NatConfig` | EIM + ADF | restricted cone |
+| `home`, `cgnat` | `Moderate` | EIM + APDF | port-restricted cone |
+| `corporate`, `cloud_nat` | `Strict` | EDM (random ports) + APDF | symmetric |
+
+Link conditions: the named presets (`lan`, `wifi`, `wifi_bad`, `mobile4_g`,
+`mobile3_g`, `satellite`) map onto patchbay's presets; `wifi_bursty` adds
+Gilbert-Elliott bursty loss, `mobile4_g_congested` a rate cap with a bounded
+queue so loss emerges from overflow, and `custom` carries explicit
+`latency_ms`, `jitter_ms`, `rate_kbit`, `loss_tenths_pct`, `loss_burst_pkts`
+and `buffer_ms`. The stress presets are for the nightly tier 3 lane, not PR
+gating. Patchbay exposes no per-interface control on routers, so a
+router-to-router link condition applies on the downstream router's downlink
+bridge and its receipt names every authority behind that router.
+Patchbay's `docs/reference/nat-limitations.md` lists what it does not model
+(port-preserving symmetric NAT, sequential allocation, vendor quirks); a passing
+`Strict` scenario is not full carrier coverage. The Linux integration tests
+enable the `patchbay-backend` feature through a self dev-dependency, so
+`cargo test -p aura-harness --test holepunch` exercises the native backend when
+`check_caps` succeeds.
 The Linux dependency manifest additionally requires Hickory Proto `=0.26.1`:
 0.26.0 is affected by RUSTSEC-2026-0119, while 0.25 is also affected by
 RUSTSEC-2026-0118. Keep the backend enabled and validate the Linux harness,
 including its integration-test targets; a macOS build cannot establish this
 target-specific compatibility. Regenerate the tracked `Cargo.nix` after changing
-these dependencies and run `just ci-security-audit`. The ignored `Cargo.lock`
-does not enforce the fixed dependency versions on a fresh checkout.
+these dependencies, commit it together with `Cargo.lock`, and run
+`just ci-security-audit`; `just ci-cargo-nix-check` fails when the two drift.
 
-`patchbay-vm` relies on the explicit harness work and artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
+Network events are scenario steps when a lab is provisioned:
+`network_link_down` / `network_link_up` (actor), `network_flush_nat` (`value` =
+router), `network_set_firewall` (`value` = router, `name` = firewall preset) and
+`network_set_link_condition` (actor, `value` = link condition preset). They are
+environment actions of the shared scenario contract, apply through the lab
+backend, and are recorded in `events.json` and the lab timeline; without a lab
+the step fails rather than being skipped. `holepunch-relay-first.toml` and its
+corporate variant use them after the contact link.
+
+The path the runtime selects toward a peer is observable as the
+`peer_path_selected` runtime event (`RuntimeFact::PeerPathSelected` with
+`relay` or `direct` and the link protocol). It is recorded by
+`aura-rendezvous` when a channel is prepared toward a peer, read through the
+runtime bridge into the discovered-peers signal, and surfaced by the TUI as a
+runtime fact. It records the selection, not that the channel came up, and it
+fires only on rendezvous establishment: a contact link over one LAN segment is
+carried by LAN transport and selects no path, so the single-LAN scenarios do
+not assert it, while the relay-first scenarios assert it after the shared
+channel is joined. Retry generations (`CandidateGeneration`,
+`NetworkGeneration`) are not observable: the `PeerConnectionActor` state
+machine that owns them is not yet driven by the runtime.
+
+Lab artifacts land under the run directory: `network_lab_runtime.json` (device,
+namespace and address per authority), `network-lab-artifacts/` with the
+patchbay run directory copy, one `<device>.pcap` per device captured by
+`tcpdump` inside its namespace, and `network_timeline.json`;
+`network_lab_artifacts.json` summarizes them after the lab is torn down.
+`startup_summary.json` records each lab-mapped instance's placement.
 
 ### Backend Resolution
 
-The harness writes backend resolution details to `artifacts/harness/<run>/network_backend_preflight.json`. Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
+The harness writes backend resolution details to `artifacts/harness/<run>/network_backend_preflight.json`. Coverage has three tiers, and each proves something different:
+
+| Tier | Where | Proves | Does not prove |
+|---|---|---|---|
+| 1 | `aura-testkit` deterministic and property tests | retry-budget and path-selection invariants of `PeerConnectionActor` | anything about sockets or NAT |
+| 2 | `aura-harness` holepunch tests and lab runs (PR gating on Linux) | the lab provisions, applies events and collects artifacts; real `aura` instances in namespaces complete the shared scenarios over modeled NAT and impairment | carrier NAT behavior, cross-machine discovery |
+| 3 | nightly stress and flake detection | the same under repeated flushes, link toggles and the stress presets, attributed per condition | correctness of a single run |
+
+What no tier proves: real carrier or vendor NAT behavior. Patchbay models the
+RFC 4787 behavior classes with nftables and its own
+`docs/reference/nat-limitations.md` lists what that cannot express
+(port-preserving symmetric NAT, sequential port allocation, vendor quirks,
+behavior under load). A passing `corporate`/`strict` cell means symmetric NAT
+with random ports does not punch and the relay path holds, not carrier
+coverage. Real machines, real discovery broadcast domains and independent
+processes remain the two-host LAN batch's assertions.
 
 ### Triaging Failures
 
@@ -1381,7 +1476,7 @@ When a scenario fails, triage artifacts in this order.
 
 1. Check `network_backend_preflight.json` to confirm selected backend and fallback reason.
 2. Check `startup_summary.json` and `scenario_report.json` for run context and failing step.
-3. Check `events.json` and backend timeline artifacts for event ordering.
+3. Check `events.json` for harness steps and `network-lab-artifacts/network_timeline.json` for the lab's own event log (provisioning through teardown) merged with each applied network event receipt in time order. Patchbay flushes its log when the lab drops, so the timeline is written by the lab's finish step after instances stop; a bundle whose metadata says `timeline_provisional` was collected while the lab was still alive.
 4. Check namespace and network dumps and pcap files for packet and routing diagnosis.
 5. Check agent logs for authority-local failures and retry state transitions.
 

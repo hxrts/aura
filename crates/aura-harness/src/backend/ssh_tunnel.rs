@@ -291,6 +291,7 @@ mod tests {
 
     fn ssh_config() -> InstanceConfig {
         InstanceConfig {
+            lab_authority: None,
             id: "ssh-test".to_string(),
             mode: InstanceMode::Ssh,
             data_dir: PathBuf::from("/tmp/aura-harness-ssh"),

@@ -66,6 +66,7 @@ fn one_local_run(name: &str) -> RunConfig {
     RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: name.to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -81,6 +82,7 @@ fn one_local_run(name: &str) -> RunConfig {
             fixed_ports: false,
         },
         instances: vec![InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: PathBuf::from("/tmp/aura-harness-phase5-api"),

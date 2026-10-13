@@ -867,17 +867,17 @@
     "patchbay": {
       "flake": false,
       "locked": {
-        "lastModified": 1772565225,
-        "narHash": "sha256-8JowrPjo9wcwkYsK5rKLGLz1wBzaGknd+LLV70J6W5U=",
-        "owner": "hxrts",
+        "lastModified": 1785160700,
+        "narHash": "sha256-qNaw/SzLWtOHeZGw7pssnUgLdlQXtjE9gmAwyQ2jwdU=",
+        "owner": "n0-computer",
         "repo": "patchbay",
-        "rev": "96e2c2f42628b20c79f5a351d261333964c8959d",
+        "rev": "5cc60db1eb190360dfcd64eaf2f829bce4072551",
         "type": "github"
       },
       "original": {
-        "owner": "hxrts",
-        "ref": "hxrts/aura",
+        "owner": "n0-computer",
         "repo": "patchbay",
+        "rev": "5cc60db1eb190360dfcd64eaf2f829bce4072551",
         "type": "github"
       }
     },

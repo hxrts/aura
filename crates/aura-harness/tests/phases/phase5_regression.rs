@@ -27,6 +27,7 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
     let run_config = RunConfig {
         schema_version: 1,
         run: RunSection {
+            network_topology: None,
             name: "phase5-regression".to_string(),
             pty_rows: Some(40),
             pty_cols: Some(120),
@@ -43,6 +44,7 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
         },
         instances: vec![
             InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: temp.path().join("alice-data"),
@@ -66,6 +68,7 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
                 tunnel: None,
             },
             InstanceConfig {
+                lab_authority: None,
                 id: "bob".to_string(),
                 mode: InstanceMode::Ssh,
                 data_dir: temp.path().join("bob-data"),

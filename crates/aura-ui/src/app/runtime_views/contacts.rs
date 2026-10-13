@@ -213,6 +213,7 @@ mod tests {
             },
         ]);
         let discovered = DiscoveredPeersState {
+            selected_paths: Vec::new(),
             peers: vec![
                 DiscoveredPeer {
                     authority_id: bob,

@@ -18,7 +18,9 @@ use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::failure_attribution::attribute_failure;
 use aura_harness::governance::{self, GovernanceCheck};
-use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
+use aura_harness::network_lab::{
+    load_topology, resolve_backend_mode, NetworkBackendMode, ProvisionedLab,
+};
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::residue_checks::check_run_residue;
@@ -138,6 +140,10 @@ fn run(args: RunArgs) -> Result<()> {
         .network_backend
         .parse()
         .context("invalid --network-backend value")?;
+    if requested_backend == NetworkBackendMode::Patchbay {
+        // Must precede any thread or runtime creation; see prepare_native_patchbay.
+        aura_harness::network_lab::prepare_native_patchbay()?;
+    }
     let backend_preflight = resolve_backend_mode(requested_backend);
 
     let scenario_config = if let Some(path) = &args.scenario {
@@ -146,7 +152,7 @@ fn run(args: RunArgs) -> Result<()> {
         None
     };
 
-    let summary = build_startup_summary(&config);
+    let mut summary = build_startup_summary(&config);
     let authoritative_run_dir = config
         .run
         .artifact_dir
@@ -175,14 +181,89 @@ fn run(args: RunArgs) -> Result<()> {
         }
     };
 
-    let run_result = run_with_artifacts(
+    // The lab outlives the coordinator: instances are stopped inside
+    // run_with_artifacts, and the namespaces go away when this binding drops.
+    let network_lab = match &config.run.network_topology {
+        Some(topology_path) => {
+            if backend_preflight.fallback_used() {
+                let payload = serde_json::json!({
+                    "error": "network topology configured but requested backend unavailable",
+                    "requested": backend_preflight.requested,
+                    "resolved": backend_preflight.resolved,
+                    "checks": backend_preflight.checks,
+                });
+                let _ = artifact_bundle.write_json("network_lab_error.json", &payload);
+                return Err(anyhow!(
+                    "run.network_topology requires the requested --network-backend {}; preflight resolved {} (see network_lab_error.json)",
+                    backend_preflight.requested,
+                    backend_preflight.resolved
+                ));
+            }
+            let topology_path = if topology_path.is_absolute() {
+                topology_path.clone()
+            } else {
+                args.config
+                    .parent()
+                    .map(|dir| dir.join(topology_path))
+                    .unwrap_or_else(|| topology_path.clone())
+            };
+            let topology = load_topology(&topology_path)?;
+            for instance in &config.instances {
+                if let Some(authority) = &instance.lab_authority {
+                    if !topology
+                        .authorities
+                        .iter()
+                        .any(|mapped| mapped.authority_id == *authority)
+                    {
+                        return Err(anyhow!(
+                            "instance {} maps lab_authority {authority}, which is not in topology {}",
+                            instance.id,
+                            topology.name
+                        ));
+                    }
+                }
+            }
+            let lab = ProvisionedLab::provision(
+                backend_preflight.resolved,
+                topology,
+                &artifact_bundle.run_dir.join("network-lab"),
+            )?;
+            artifact_bundle.write_json("network_lab_runtime.json", lab.lab_runtime())?;
+            summary.attach_network_lab(&config, &lab)?;
+            // Placement is evidence even when the run later fails; the success
+            // path rewrites the same file at the end.
+            artifact_bundle.write_json("startup_summary.json", &summary)?;
+            Some(lab)
+        }
+        None => None,
+    };
+
+    let (run_result, network_lab) = run_with_artifacts(
         &config,
         &artifact_bundle,
         &summary,
         &preflight_report,
         &backend_preflight,
+        network_lab,
         scenario_config.as_ref(),
     );
+    // The coordinator and every instance are gone by now, on both paths, so
+    // the lab can be torn down and its complete timeline written. A failure
+    // here must not hide the run's own result.
+    if let Some(lab) = network_lab {
+        match lab.finish(&artifact_bundle.run_dir.join("network-lab-artifacts")) {
+            Ok(finished) => {
+                let _ = artifact_bundle.write_json("network_lab_artifacts.json", &finished);
+            }
+            Err(error) => {
+                let payload = serde_json::json!({ "error": error.to_string() });
+                let _ = artifact_bundle.write_json("network_lab_finish_error.json", &payload);
+                if run_result.is_ok() {
+                    return Err(error.context("finish network lab"));
+                }
+            }
+        }
+    }
     if let Err(error) = run_result {
         let attribution = attribute_failure(&error.to_string());
         let failure_payload = serde_json::json!({ "error": error.to_string() });
@@ -204,15 +285,47 @@ fn run_with_artifacts(
     summary: &aura_harness::tool_api::StartupSummary,
     preflight_report: &PreflightReport,
     backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
+    network_lab: Option<ProvisionedLab>,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
+) -> (Result<()>, Option<ProvisionedLab>) {
+    // The tool API owns the lab while scenarios run so network events can be
+    // scenario steps; it is handed back here for teardown on every path.
+    let coordinator =
+        match HarnessCoordinator::from_run_config_with_lab(config, network_lab.as_ref()) {
+            Ok(coordinator) => coordinator,
+            Err(error) => return (Err(error), network_lab),
+        };
+    let mut tool_api = ToolApi::new(coordinator);
+    if let Some(lab) = network_lab {
+        tool_api.attach_network_lab(lab);
+    }
+    let result = run_with_tool_api(
+        config,
+        artifact_bundle,
+        summary,
+        preflight_report,
+        backend_preflight,
+        scenario_config,
+        &mut tool_api,
+    );
+    let lab = tool_api.take_network_lab();
+    (result, lab)
+}
+
+fn run_with_tool_api(
+    config: &aura_harness::config::RunConfig,
+    artifact_bundle: &ArtifactBundle,
+    summary: &aura_harness::tool_api::StartupSummary,
+    preflight_report: &PreflightReport,
+    backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
+    scenario_config: Option<&aura_harness::config::ScenarioConfig>,
+    tool_api: &mut ToolApi,
 ) -> Result<()> {
     let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
     let seed_bundle = build_seed_bundle(config);
     let mut resource_guard = ResourceGuard::from_run_config(config);
     resource_guard.sample("run_start");
 
-    let coordinator = HarnessCoordinator::from_run_config(config)?;
-    let mut tool_api = ToolApi::new(coordinator);
     if verbose_steps {
         eprintln!("[harness] startup phase=start_all begin");
     }
@@ -248,11 +361,10 @@ fn run_with_artifacts(
     }
 
     let scenario_report = if let Some(scenario) = scenario_config {
-        match execute_with_run_budgets(config, scenario, &mut tool_api) {
+        match execute_with_run_budgets(config, scenario, tool_api) {
             Ok(report) => Some(report),
             Err(error) => {
-                let diagnostics =
-                    collect_failure_diagnostics(config, &mut tool_api, &error.to_string());
+                let diagnostics = collect_failure_diagnostics(config, tool_api, &error.to_string());
                 artifact_bundle.write_json("failure_diagnostics.json", &diagnostics)?;
                 if let Some(step_id) = diagnostics
                     .get("failing_step")

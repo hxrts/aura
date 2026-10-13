@@ -941,6 +941,9 @@ impl RendezvousManager {
         }
         let establish_path = Self::relay_first_initial_path(&descriptor)
             .ok_or(RendezvousManagerError::PeerDescriptorNotFound { peer })?;
+        self.registry
+            .record_selected_path(context_id, peer, &establish_path, now_ms)
+            .await;
 
         // Retrieve identity keys
         let identity = require_active_identity_signing_context(effects, &self.authority_id)
@@ -967,6 +970,12 @@ impl RendezvousManager {
             )
             .await
             .map_err(RendezvousManagerError::ChannelPreparation)
+    }
+
+    /// Observed establish-path selections from the running service; empty when
+    /// the service has not started or nothing has been prepared.
+    pub async fn list_selected_peer_paths(&self) -> Vec<aura_core::service::SelectedPeerPath> {
+        self.registry.list_selected_paths().await
     }
 
     /// Create a channel established fact

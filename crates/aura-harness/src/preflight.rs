@@ -479,6 +479,7 @@ mod tests {
     fn local_only_run() -> RunConfig {
         let temp_root = unique_test_root("local-only");
         let local = InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Local,
             data_dir: temp_root.join("alice"),
@@ -505,6 +506,7 @@ mod tests {
         RunConfig {
             schema_version: 1,
             run: RunSection {
+                network_topology: None,
                 name: "preflight-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),

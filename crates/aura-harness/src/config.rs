@@ -87,6 +87,11 @@ pub struct RunSection {
     /// Multi-host runs need this so peers on different hosts agree on ports.
     #[serde(default)]
     pub fixed_ports: bool,
+    /// Network lab topology (a `TopologySpec` TOML file, relative to the run
+    /// config). When set, instances with `lab_authority` run inside the lab
+    /// device mapped to that authority under `--network-backend patchbay`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_topology: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -114,6 +119,11 @@ pub struct InstanceConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
     pub bind_address: String,
+    /// Authority in `run.network_topology` whose lab device hosts this
+    /// instance. The process is spawned inside that device's network
+    /// namespace and `bind_address` keeps its port on the device address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lab_authority: Option<String>,
     #[serde(default)]
     pub demo_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -358,10 +368,31 @@ impl RunConfig {
         let mut local_data_dirs = HashSet::new();
         let mut local_demo_dirs = HashSet::new();
         let mut reserved_bind_addresses = HashSet::new();
+        let mut lab_authorities = HashSet::new();
 
         for instance in &self.instances {
             if instance.id.trim().is_empty() {
                 bail!("instance id must be non-empty");
+            }
+            if let Some(authority) = &instance.lab_authority {
+                if self.run.network_topology.is_none() {
+                    bail!(
+                        "instance {} sets lab_authority but run.network_topology is not set",
+                        instance.id
+                    );
+                }
+                if !matches!(instance.mode, InstanceMode::Local) {
+                    bail!(
+                        "instance {} sets lab_authority but only local instances run inside lab namespaces",
+                        instance.id
+                    );
+                }
+                if !lab_authorities.insert(authority.clone()) {
+                    bail!(
+                        "lab_authority {authority} is mapped to more than one instance ({})",
+                        instance.id
+                    );
+                }
             }
             let mut components = std::path::Path::new(&instance.id).components();
             if !matches!(components.next(), Some(std::path::Component::Normal(_)))
@@ -737,6 +768,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -753,6 +785,7 @@ mod tests {
             },
             instances: vec![
                 InstanceConfig {
+                    lab_authority: None,
                     id: "alice".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from("artifacts/harness/state/test/shared"),
@@ -776,6 +809,7 @@ mod tests {
                     tunnel: None,
                 },
                 InstanceConfig {
+                    lab_authority: None,
                     id: "bob".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from("artifacts/harness/state/test/shared"),
@@ -962,6 +996,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "browser-invalid".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -977,6 +1012,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "alice".to_string(),
                 mode: InstanceMode::Browser,
                 data_dir: PathBuf::from(".tmp/browser/alice"),
@@ -1013,6 +1049,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "duplicate-bind".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -1029,6 +1066,7 @@ mod tests {
             },
             instances: vec![
                 InstanceConfig {
+                    lab_authority: None,
                     id: "alice".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from(".tmp/alice"),
@@ -1052,6 +1090,7 @@ mod tests {
                     tunnel: None,
                 },
                 InstanceConfig {
+                    lab_authority: None,
                     id: "bob".to_string(),
                     mode: InstanceMode::Local,
                     data_dir: PathBuf::from(".tmp/bob"),
@@ -1091,6 +1130,7 @@ mod tests {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
             run: RunSection {
+                network_topology: None,
                 name: "simulator-browser-invalid".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
@@ -1106,6 +1146,7 @@ mod tests {
                 fixed_ports: false,
             },
             instances: vec![InstanceConfig {
+                lab_authority: None,
                 id: "browser".to_string(),
                 mode: InstanceMode::Browser,
                 data_dir: PathBuf::from(".tmp/browser"),

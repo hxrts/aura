@@ -3,6 +3,7 @@ pub mod playwright_browser;
 pub mod ssh_tunnel;
 
 use crate::config::{InstanceConfig, InstanceMode};
+use crate::network_lab::InstanceNamespace;
 use crate::tool_api::ToolKey;
 use anyhow::{anyhow, bail, Result};
 use aura_app::scenario_contract::IntentAction;
@@ -409,11 +410,19 @@ impl BackendHandle {
         config: InstanceConfig,
         pty_rows: Option<u16>,
         pty_cols: Option<u16>,
+        namespace: InstanceNamespace,
     ) -> Result<Self> {
+        if !namespace.is_host() && !matches!(config.mode, InstanceMode::Local) {
+            bail!(
+                "instance {} cannot run inside lab namespace {:?}: only local instances are namespace-launched",
+                config.id,
+                namespace
+            );
+        }
         match config.mode {
-            InstanceMode::Local => Ok(Self::Local(Box::new(local_pty::LocalPtyBackend::new(
-                config, pty_rows, pty_cols,
-            )))),
+            InstanceMode::Local => Ok(Self::Local(Box::new(
+                local_pty::LocalPtyBackend::new_in_namespace(config, pty_rows, pty_cols, namespace),
+            ))),
             InstanceMode::Browser => Ok(Self::Browser(Box::new(
                 playwright_browser::PlaywrightBrowserBackend::new(config)?,
             ))),
@@ -750,6 +759,7 @@ mod tests {
     #[test]
     fn backend_handle_constructs_browser_variant() -> Result<()> {
         let config = InstanceConfig {
+            lab_authority: None,
             id: "alice".to_string(),
             mode: InstanceMode::Browser,
             data_dir: PathBuf::from(".tmp/harness/browser-alice"),
@@ -773,7 +783,12 @@ mod tests {
             tunnel: None,
         };
 
-        let backend = BackendHandle::from_config(config, Some(40), Some(120))?;
+        let backend = BackendHandle::from_config(
+            config,
+            Some(40),
+            Some(120),
+            crate::network_lab::InstanceNamespace::host(),
+        )?;
         match backend {
             BackendHandle::Browser(_) => {}
             _ => panic!("expected browser backend"),

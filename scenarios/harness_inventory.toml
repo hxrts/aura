@@ -27,6 +27,34 @@ runtime_substrate = "real_runtime"
 notes = "Primary shared device-enrollment/removal scenario."
 
 [[scenario]]
+id = "holepunch-lan-contact-link"
+path = "scenarios/harness/holepunch-lan-contact-link.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Scenario 13 contact phases over the patchbay network lab; see docs/804_testing_guide.md section 13."
+
+[[scenario]]
+id = "holepunch-lan-network-events"
+path = "scenarios/harness/holepunch-lan-network-events.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Contact link over the single-LAN lab plus network event steps; run by the real-instance holepunch e2e test."
+
+[[scenario]]
+id = "holepunch-relay-first"
+path = "scenarios/harness/holepunch-relay-first.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Relay-first contact link across two home NATs with network events; patchbay lab lane, configs/harness/patchbay-double-nat.toml."
+
+[[scenario]]
+id = "holepunch-relay-first-corporate"
+path = "scenarios/harness/holepunch-relay-first-corporate.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Relay-first contact link with bob behind symmetric corporate NAT; patchbay lab lane, configs/harness/patchbay-corporate.toml."
+
+[[scenario]]
 id = "scenario13-mixed-contact-channel-message-e2e"
 path = "scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml"
 classification = "shared"

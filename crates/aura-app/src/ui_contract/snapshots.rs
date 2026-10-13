@@ -173,6 +173,8 @@ pub enum RuntimeEventKind {
     RemoteFactsPulled,
     ChatSignalUpdated,
     AmpChannelTransitionUpdated,
+    /// The runtime selected an establish path (relay or direct) toward a peer.
+    PeerPathSelected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +250,15 @@ pub enum RuntimeFact {
     AmpChannelTransitionUpdated {
         transition: AmpChannelTransitionSnapshot,
     },
+    /// Observation of the establish path the runtime selected toward a peer.
+    /// Records the choice, not that the channel came up.
+    PeerPathSelected {
+        peer_authority_id: String,
+        /// `relay` or `direct`.
+        path: String,
+        /// Link protocol of the selected endpoint, e.g. `tcp`, `web_socket_relay`.
+        protocol: String,
+    },
 }
 
 impl RuntimeFact {
@@ -273,6 +284,7 @@ impl RuntimeFact {
             Self::AmpChannelTransitionUpdated { .. } => {
                 RuntimeEventKind::AmpChannelTransitionUpdated
             }
+            Self::PeerPathSelected { .. } => RuntimeEventKind::PeerPathSelected,
         }
     }
 
@@ -390,6 +402,11 @@ impl RuntimeFact {
                     .unwrap_or("*"),
                 transition.state
             ),
+            Self::PeerPathSelected {
+                peer_authority_id,
+                path,
+                ..
+            } => format!("peer_path_selected:{peer_authority_id}:{path}"),
         }
     }
 
@@ -505,6 +522,15 @@ impl RuntimeFact {
                 active_channel.contains(needle)
                     || channel_count.to_string().contains(needle)
                     || message_count.to_string().contains(needle)
+            }
+            Self::PeerPathSelected {
+                peer_authority_id,
+                path,
+                protocol,
+            } => {
+                peer_authority_id.contains(needle)
+                    || path.contains(needle)
+                    || protocol.contains(needle)
             }
             Self::AmpChannelTransitionUpdated { transition } => {
                 transition.channel.matches_needle(needle)

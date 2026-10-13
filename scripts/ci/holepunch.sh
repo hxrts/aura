@@ -14,16 +14,14 @@ cd "$repo_root"
 prepare() {
   local artifact_dir="$1"
   mkdir -p "$artifact_dir"
-  mkdir -p artifacts/patchbay/work target/patchbay-vm
 }
 
+# Native patchbay needs Linux with user namespaces; elsewhere the tests skip
+# or run against the mock backend and prove nothing about the network.
 run_test() {
   local artifact_dir="$1"
   shift
   AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/${artifact_dir}" \
-    QEMU_VM_WORK_DIR="${PWD}/artifacts/patchbay/work" \
-    CARGO_TARGET_DIR="${PWD}/target/patchbay-vm" \
-    NETSIM_TARGET_DIR="${PWD}/target/patchbay-vm" \
     cargo test -p aura-harness "$@" -q
 }
 
@@ -79,15 +77,24 @@ EOF_MD
     ;;
   audit)
     mkdir -p artifacts/holepunch/weekly
+    # The native library pin in Cargo.toml and the flake input that builds the
+    # patchbay CLI must name the same upstream revision.
+    manifest_revs="$(rg -o -N 'patchbay", rev = "[0-9a-f]{40}"' crates/aura-harness/Cargo.toml | rg -o '[0-9a-f]{40}' | sort -u)"
+    flake_rev="$(rg -o -N 'github:n0-computer/patchbay/[0-9a-f]{40}' flake.nix | rg -o '[0-9a-f]{40}')"
+    if [[ "$(wc -l <<<"$manifest_revs")" -ne 1 || "$manifest_revs" != "$flake_rev" ]]; then
+      echo "patchbay pin mismatch: Cargo.toml=[$manifest_revs] flake.nix=$flake_rev" >&2
+      exit 1
+    fi
     rg -n -F 'name = "patchbay"' Cargo.lock
-    rg -n -F 'source = "git+https://github.com/n0-computer/patchbay?rev=' Cargo.lock
+    rg -n -F "source = \"git+https://github.com/n0-computer/patchbay?rev=$flake_rev" Cargo.lock
     {
       echo "# Holepunch Toolchain Audit"
+      echo "patchbay-pin: $flake_rev"
       echo "cargo-lock-pin: ok"
-      if command -v patchbay-vm >/dev/null 2>&1; then
-        echo "patchbay-vm: $(patchbay-vm --version 2>/dev/null || echo installed)"
+      if command -v patchbay >/dev/null 2>&1; then
+        echo "patchbay-cli: $(patchbay --version 2>/dev/null || echo installed)"
       else
-        echo "patchbay-vm: not installed in runner"
+        echo "patchbay-cli: not installed in runner"
       fi
     } > artifacts/holepunch/weekly/toolchain-audit.md
     ;;

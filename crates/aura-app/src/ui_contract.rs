@@ -35,6 +35,7 @@ pub use rendered_controls::{
 
 pub use projection_observations::{
     observed_chat_projection, observed_contacts_projection, observed_home_modes,
+    observed_peer_paths,
 };
 
 pub use harness_metadata::{

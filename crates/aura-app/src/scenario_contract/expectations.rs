@@ -82,7 +82,12 @@ impl ScenarioAction {
             | Self::Environment(EnvironmentAction::KillActor { actor })
             | Self::Environment(EnvironmentAction::FaultDelay { actor, .. })
             | Self::Environment(EnvironmentAction::FaultLoss { actor, .. })
-            | Self::Environment(EnvironmentAction::FaultTunnelDrop { actor }) => vec![actor],
+            | Self::Environment(EnvironmentAction::FaultTunnelDrop { actor })
+            | Self::Environment(EnvironmentAction::NetworkLinkDown { actor })
+            | Self::Environment(EnvironmentAction::NetworkLinkUp { actor })
+            | Self::Environment(EnvironmentAction::NetworkSetLinkCondition { actor, .. }) => {
+                vec![actor]
+            }
             Self::Ui(UiAction::PasteClipboard {
                 source_actor: Some(actor),
             }) => vec![actor],
@@ -208,6 +213,11 @@ pub enum SemanticActionKind {
     FaultDelay,
     FaultLoss,
     FaultTunnelDrop,
+    NetworkLinkDown,
+    NetworkLinkUp,
+    NetworkFlushNat,
+    NetworkSetFirewall,
+    NetworkSetLinkCondition,
     OpenScreen,
     CreateAccount,
     CreateHome,
@@ -318,6 +328,33 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::FaultTunnelDrop => {
                 ScenarioAction::Environment(EnvironmentAction::FaultTunnelDrop {
                     actor: required(value.actor, "actor", value.action)?,
+                })
+            }
+            SemanticActionKind::NetworkLinkDown => {
+                ScenarioAction::Environment(EnvironmentAction::NetworkLinkDown {
+                    actor: required(value.actor, "actor", value.action)?,
+                })
+            }
+            SemanticActionKind::NetworkLinkUp => {
+                ScenarioAction::Environment(EnvironmentAction::NetworkLinkUp {
+                    actor: required(value.actor, "actor", value.action)?,
+                })
+            }
+            SemanticActionKind::NetworkFlushNat => {
+                ScenarioAction::Environment(EnvironmentAction::NetworkFlushNat {
+                    router: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::NetworkSetFirewall => {
+                ScenarioAction::Environment(EnvironmentAction::NetworkSetFirewall {
+                    router: required(value.value, "value", value.action)?,
+                    preset: required(value.name, "name", value.action)?,
+                })
+            }
+            SemanticActionKind::NetworkSetLinkCondition => {
+                ScenarioAction::Environment(EnvironmentAction::NetworkSetLinkCondition {
+                    actor: required(value.actor, "actor", value.action)?,
+                    condition: required(value.value, "value", value.action)?,
                 })
             }
             SemanticActionKind::OpenScreen => ScenarioAction::Intent(IntentAction::OpenScreen {

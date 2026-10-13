@@ -63,6 +63,7 @@ verify both effective compiler settings without building the workspace.
 | Nix | `nix build` | Hermetic build |
 | Nix | `nix flake check` | Hermetic tests |
 | Nix | `crate2nix generate` | Regenerate after dep changes |
+| Nix | `just ci-cargo-nix-check` | Verify committed `Cargo.nix` matches committed `Cargo.lock` |
 | Dev | `just watch` | Rebuild on changes |
 | Dev | `just clean` | Clean artifacts |
 | Arch | `just check-arch` | Verify architecture compliance |

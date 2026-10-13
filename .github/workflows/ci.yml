@@ -110,6 +110,20 @@ jobs:
           name: ci-fast
           replay-command: nix develop .#ci --command just ci-security-audit
 
+  cargo-nix-sync:
+    name: Cargo.nix Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+      - run: nix develop .#ci --command just ci-cargo-nix-check
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop .#ci --command just ci-cargo-nix-check
+
   user-flow-coverage:
     name: User Flow Coverage
     runs-on: ubuntu-latest

@@ -9,7 +9,7 @@ mod display_clock;
 mod nav_status;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -218,6 +218,8 @@ pub fn use_discovered_peers_subscription(
     let shared: SharedDiscoveredPeers = shared_ref.read().clone();
     let last_lan_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
     let last_lan_count = last_lan_count_ref.read().clone();
+    let last_paths_hash_ref = hooks.use_ref(|| Arc::new(AtomicU64::new(0)));
+    let last_paths_hash = last_paths_hash_ref.read().clone();
     let tasks = app_ctx.tasks();
 
     hooks.use_future({
@@ -247,6 +249,22 @@ pub fn use_discovered_peers_subscription(
                                 &tasks,
                                 tx,
                                 UiUpdate::LanPeersCountChanged(new_count),
+                                UiUpdatePublication::RequiredUnordered,
+                            );
+                        }
+                        // Selected paths are an observation surfaced as runtime
+                        // facts; publish when the set changes.
+                        let paths_hash = {
+                            use std::hash::{Hash, Hasher};
+                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                            peers_state.selected_paths.hash(&mut hasher);
+                            hasher.finish().max(1)
+                        };
+                        if last_paths_hash.swap(paths_hash, Ordering::Relaxed) != paths_hash {
+                            spawn_ui_update(
+                                &tasks,
+                                tx,
+                                UiUpdate::PeerPathsChanged(peers_state.selected_paths),
                                 UiUpdatePublication::RequiredUnordered,
                             );
                         }

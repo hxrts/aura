@@ -30,6 +30,7 @@ aura-simulator = { path = "../aura-simulator" }
 
 anyhow = { workspace = true }
 cfg-if = "1"
+chrono = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true }
@@ -51,7 +52,7 @@ nix = "0.26"
 which = "6"
 ctrlc = { version = "3.4", features = ["termination"] }
 tempfile = { workspace = true }
-patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9", optional = true }
+patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "5cc60db1eb190360dfcd64eaf2f829bce4072551", optional = true }
 
 [dev-dependencies]
 # Test builds use the file-backed credential store, never the real keychain.
@@ -60,7 +61,12 @@ tokio = { workspace = true, features = ["net"] }
 serial_test = "3.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9" }
+# Integration tests exercise the native backend, so the test build of this
+# package enables the feature; the direct `patchbay` dev-dependency serves the
+# holepunch e2e test, which drives `patchbay::Lab` itself.
+aura-harness = { path = ".", features = ["patchbay-backend"] }
+ctor = "1.0"
+patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "5cc60db1eb190360dfcd64eaf2f829bce4072551" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Keep the ignored Cargo.lock from retaining the vulnerable 0.26.0 release.

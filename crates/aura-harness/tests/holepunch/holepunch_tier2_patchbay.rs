@@ -234,3 +234,211 @@ async fn restrictive_firewall_scenario_still_runs_with_relay_available() -> anyh
     assert!(bundle.root.exists());
     Ok(())
 }
+
+#[tokio::test]
+async fn link_conditions_land_on_the_node_that_owns_the_link() -> anyhow::Result<()> {
+    let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
+        "link-owner",
+        NatPreset::Home,
+        NatPreset::Home,
+        FirewallPreset::Home,
+    ))
+    .await?;
+
+    // Device link: applies on alice-dev's uplink and affects only alice.
+    let device_receipt = backend
+        .apply_event(NetworkEvent::SetLinkCondition {
+            left_node: "alice-dev".to_string(),
+            right_node: "home-a".to_string(),
+            condition: LinkConditionPreset::Mobile3G,
+        })
+        .await?;
+    assert_eq!(device_receipt.event_type, "set_link_condition");
+    assert_eq!(
+        device_receipt.affected_authorities,
+        vec!["alice".to_string()]
+    );
+    assert_eq!(device_receipt.details["target"]["kind"], "device_uplink");
+
+    // Router link: applies on edge-b's downlink and affects everything behind it.
+    let router_receipt = backend
+        .apply_event(NetworkEvent::SetLinkCondition {
+            left_node: "home-a".to_string(),
+            right_node: "edge-b".to_string(),
+            condition: LinkConditionPreset::Satellite,
+        })
+        .await?;
+    assert_eq!(router_receipt.affected_authorities, vec!["bob".to_string()]);
+    assert_eq!(router_receipt.details["target"]["kind"], "router_downlink");
+    assert_eq!(
+        router_receipt.details["target"]["downstream_router"],
+        "edge-b"
+    );
+
+    // Lan clears instead of installing an empty qdisc.
+    let cleared = backend
+        .apply_event(NetworkEvent::SetLinkCondition {
+            left_node: "edge-b".to_string(),
+            right_node: "home-a".to_string(),
+            condition: LinkConditionPreset::Lan,
+        })
+        .await?;
+    assert_eq!(cleared.details["cleared"], true);
+
+    // Non-adjacent endpoints are rejected rather than guessed.
+    assert!(backend
+        .apply_event(NetworkEvent::SetLinkCondition {
+            left_node: "bob-dev".to_string(),
+            right_node: "home-a".to_string(),
+            condition: LinkConditionPreset::Wifi,
+        })
+        .await
+        .is_err());
+
+    // While the lab is alive the timeline is provisional: patchbay flushes its
+    // event log on drop, so only the harness receipts are guaranteed here.
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
+    let timeline = bundle.timeline.expect("timeline artifact");
+    let entries: serde_json::Value = serde_json::from_slice(&std::fs::read(&timeline)?)?;
+    let entries = entries.as_array().expect("timeline array");
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry["source"] == "harness")
+            .count(),
+        3,
+        "one harness entry per applied event"
+    );
+    assert_eq!(
+        bundle
+            .metadata
+            .get("timeline_provisional")
+            .map(String::as_str),
+        Some("true")
+    );
+    Ok(())
+}
+
+/// Plain test on purpose: `ProvisionedLab` owns its own runtime, so it cannot
+/// run inside a Tokio test. This is the lane the harness binary uses.
+#[test]
+fn finished_lab_timeline_covers_provisioning_through_teardown() -> anyhow::Result<()> {
+    use aura_harness::network_lab::{ProvisionedLab, TimelineEntry};
+
+    let temp = tempfile::tempdir()?;
+    let artifact_root = std::env::var_os("AURA_HOLEPUNCH_ARTIFACT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| temp.path().to_path_buf())
+        .join("finished-lab");
+    std::fs::create_dir_all(&artifact_root)?;
+    let backend_mode = resolve_backend_mode(NetworkBackendMode::Patchbay).resolved;
+    if backend_mode != NetworkBackendMode::Patchbay {
+        eprintln!("SKIPPED: native patchbay unavailable (resolved {backend_mode})");
+        return Ok(());
+    }
+
+    let mut lab = ProvisionedLab::provision(
+        backend_mode,
+        topology(
+            "finished",
+            NatPreset::Home,
+            NatPreset::Home,
+            FirewallPreset::Home,
+        ),
+        &artifact_root.join("lab"),
+    )?;
+    lab.apply_event(NetworkEvent::FlushNat {
+        router: "edge-b".to_string(),
+    })?;
+    let finished = lab.finish(&artifact_root.join("out"))?;
+
+    assert_eq!(finished.harness_event_count, 1);
+    assert!(
+        finished.lab_event_count > 0,
+        "flushed lab event log feeds the timeline"
+    );
+    let timeline = finished.bundle.timeline.expect("final timeline");
+    let entries: Vec<TimelineEntry> = serde_json::from_slice(&std::fs::read(&timeline)?)?;
+    let kinds: Vec<String> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            TimelineEntry::Lab { event, .. } => event["kind"].as_str().map(str::to_string),
+            TimelineEntry::Harness { .. } => None,
+        })
+        .collect();
+    assert!(
+        kinds.iter().any(|kind| kind == "lab_created"),
+        "timeline starts at provisioning, got {kinds:?}"
+    );
+    assert!(
+        entries
+            .windows(2)
+            .all(|pair| pair[0].recorded_at_ms() <= pair[1].recorded_at_ms()),
+        "timeline is ordered"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn restricted_nat_provisions_and_flushes() -> anyhow::Result<()> {
+    // Restricted cone (EIM + ADF) sits between Home and FullCone; patchbay has
+    // no tier for it, so it provisions as an explicit NAT config.
+    let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
+        "restricted",
+        NatPreset::Restricted,
+        NatPreset::Home,
+        FirewallPreset::Home,
+    ))
+    .await?;
+    let receipt = backend
+        .apply_event(NetworkEvent::FlushNat {
+            router: "home-a".to_string(),
+        })
+        .await?;
+    assert_eq!(receipt.event_type, "nat_flush");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
+    assert!(bundle.root.exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn stress_link_presets_apply_on_device_and_router_links() -> anyhow::Result<()> {
+    let (mut backend, _runtime, _temp, _artifact_root) = provision(topology(
+        "stress-presets",
+        NatPreset::Home,
+        NatPreset::Home,
+        FirewallPreset::Home,
+    ))
+    .await?;
+    let presets = [
+        LinkConditionPreset::WifiBursty,
+        LinkConditionPreset::Mobile4GCongested,
+        LinkConditionPreset::Custom {
+            latency_ms: 80,
+            jitter_ms: 20,
+            rate_kbit: Some(4_000),
+            loss_tenths_pct: 25,
+            loss_burst_pkts: Some(3),
+            buffer_ms: Some(160),
+        },
+    ];
+    for preset in presets {
+        let device = backend
+            .apply_event(NetworkEvent::SetLinkCondition {
+                left_node: "alice-dev".to_string(),
+                right_node: "home-a".to_string(),
+                condition: preset,
+            })
+            .await?;
+        assert_eq!(device.affected_authorities, vec!["alice".to_string()]);
+        let router = backend
+            .apply_event(NetworkEvent::SetLinkCondition {
+                left_node: "home-a".to_string(),
+                right_node: "edge-b".to_string(),
+                condition: preset,
+            })
+            .await?;
+        assert_eq!(router.affected_authorities, vec!["bob".to_string()]);
+    }
+    Ok(())
+}
