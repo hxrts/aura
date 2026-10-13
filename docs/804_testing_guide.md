@@ -1076,6 +1076,21 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
+`scripts/harness/lan/provision-enrollment.sh <fresh-run-token>` prepares the
+broker prerequisite without changing the production default. It writes
+owner-only generated Host A/Host B configs under
+`.tmp/e2e/enrollment-provision-<token>/` and sends the Host B config over SSH
+stdin, keeping credentials out of command arguments. The generated configs
+select fixed ports, one shared random broker bearer, and distinct per-instance
+invitation credentials. Only `alex-tui` hosts the broker at Host A's LAN
+address, with the explicit development-only `AllowLanDevOnly` policy; other
+actors use its URL as clients. Pass those generated config paths as
+`AURA_E2E_LOCAL_CONFIG` and `AURA_E2E_REMOTE_CONFIG` to the owned `batch.sh`
+run. This provisions transport only. The ordinary `drv.sh req`/`lib.sh`
+semantic path still places transferred codes in arguments or retained REPL
+output, so it must not be used for the paired enrollment transfer. A private
+request/response channel with redacted receipts is required before execution.
+
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
 Shared flows should be authored semantically once, then executed through the harness using either the TUI or browser driver. Do not create a second frontend execution path for MBT or simulator replay. Core shared scenarios should use semantic actions and state-based assertions. Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks except in dedicated low-level driver tests.
