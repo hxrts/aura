@@ -110,6 +110,7 @@ impl AppCore {
         let _install = gate.lock().await;
         let mut core = app_core.write().await;
         let had_runtime = core.runtime.take().is_some();
+        core.enrollment_import_admission = None;
         core.hook_install_state = HookInstallState::Stopped;
         had_runtime
     }

@@ -22,8 +22,8 @@ use crate::runtime::services::{
 };
 use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
 use crate::runtime::subsystems::{
-    crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem,
-    VmFragmentId, VmFragmentRegistry,
+    crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, SimulationSharedInbox,
+    TransportSubsystem, VmFragmentId, VmFragmentRegistry,
 };
 use crate::runtime::time_handler::EnhancedTimeHandler;
 use async_trait::async_trait;
@@ -55,7 +55,6 @@ use aura_journal::fact::{
 use aura_mpst::CompositionManifest;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{Biscuit, PublicKey};
-use parking_lot::RwLock;
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
@@ -120,10 +119,13 @@ pub(crate) use crypto::EnrollmentGenerationHistoryError;
 #[cfg(test)]
 pub(crate) use crypto::ParticipantEnvelopeBoundsError;
 pub(crate) use crypto::{
-    held_registration_error, EnrollmentFinalInventoryError,
+    held_registration_error, AcknowledgedApprovedNativeDisposal, AcknowledgedEnrollmentRetirement,
+    ApprovedEnrollmentTreeCustody, EnrollmentFinalInventoryError,
     EnrollmentFinalVerifierInventoryCapability, EnrollmentGenerationCustodyCapability,
-    EnrollmentGenerationReservation, EnrollmentResponsePolicy, EnrollmentTranscriptTreeOwner,
-    HeldEnrollmentRegistrationError, RegisteredEnrollmentGenerationCapability,
+    EnrollmentGenerationReservation, EnrollmentResponsePolicy, EnrollmentRuntimeOrigin,
+    EnrollmentTranscriptTreeOwner, HeldEnrollmentRegistrationError,
+    OriginalAllocationCleanupReceipt, OriginalApprovedNativeAdmission,
+    OriginalEnrollmentAllocationProducer, RegisteredEnrollmentGenerationCapability,
     RequiredSigningParticipantError,
 };
 
@@ -137,12 +139,14 @@ mod flow;
 mod guard;
 mod journal;
 mod network;
+pub(crate) use network::{OriginalEnrollmentReceiveProgress, OriginalEnrollmentSendProgress};
 mod noise;
 mod storage;
 mod sync;
 mod system;
 mod time;
 mod transport;
+pub(crate) use transport::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
 mod tree;
 
 const DEFAULT_WINDOW: u32 = 1024;
@@ -151,6 +155,40 @@ const DEFAULT_CHOREO_FLOW_COST: u32 = 1;
 const CHOREO_FLOW_COST_PER_KB: u32 = 1;
 const AMP_CONTENT_TYPE: &str = "application/aura-amp";
 const TEST_SEED_DERIVATION_DOMAIN: &str = "aura:test-seed:v1";
+
+/// Exact claim from the canonical session-local inbox. Its original bucket
+/// and position survive cancellation, including if the VM opens meanwhile.
+pub(crate) struct UnclaimedChoreographyEnvelopeLease<'a> {
+    effects: &'a AuraEffectSystem,
+    session_id: RuntimeChoreographySessionId,
+    position: usize,
+    envelope: Option<TransportEnvelope>,
+}
+
+impl UnclaimedChoreographyEnvelopeLease<'_> {
+    pub(crate) fn consume(mut self) -> TransportEnvelope {
+        self.envelope.take().expect("claimed choreography frame")
+    }
+}
+
+impl std::ops::Deref for UnclaimedChoreographyEnvelopeLease<'_> {
+    type Target = TransportEnvelope;
+
+    fn deref(&self) -> &Self::Target {
+        self.envelope.as_ref().expect("claimed choreography frame")
+    }
+}
+
+impl Drop for UnclaimedChoreographyEnvelopeLease<'_> {
+    fn drop(&mut self) {
+        if let Some(envelope) = self.envelope.take() {
+            self.effects
+                .choreography_state
+                .write()
+                .return_unclaimed_session_envelope(self.session_id, self.position, envelope);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AuthorizationRuntimeMode {
@@ -294,7 +332,7 @@ pub struct AuraEffectSystem {
     // === Subsystems (grouped related fields) ===
     /// Cryptographic operations subsystem
     crypto: CryptoSubsystem,
-    enrollment_generation_gate: tokio::sync::Mutex<()>,
+    enrollment_generation_gate: Arc<tokio::sync::Mutex<()>>,
     /// Facts received from peers and rejected at ingress (see
     /// [`AuraEffectSystem::admit_peer_fact`]).
     rejected_peer_facts: std::sync::atomic::AtomicU64,
@@ -305,6 +343,17 @@ pub struct AuraEffectSystem {
     message_drops: std::sync::Mutex<MessageDropLog>,
     #[cfg(all(test, not(target_arch = "wasm32")))]
     enrollment_retirement_fault: std::sync::Mutex<Option<u64>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    original_registration_readback_gate:
+        parking_lot::Mutex<Option<crypto::OriginalRegistrationReadbackGate>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    original_allocation_birth_gate: parking_lot::Mutex<Option<crypto::OriginalAllocationBirthGate>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    original_allocation_commit_gate:
+        parking_lot::Mutex<Option<crypto::OriginalRegistrationReadbackGate>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    original_allocation_prewrite_gate:
+        parking_lot::Mutex<Option<crypto::OriginalRegistrationReadbackGate>>,
     /// Network transport subsystem
     transport: TransportSubsystem,
     /// Journal and fact management subsystem
@@ -315,7 +364,7 @@ pub struct AuraEffectSystem {
 
     // === Storage Infrastructure ===
     storage_handler: Arc<RuntimeEncryptedStorage>,
-    tree_handler: PersistentTreeHandler,
+    tree_handler: Arc<PersistentTreeHandler>,
     sync_handler: PersistentSyncHandler,
 
     // === Time Services ===
@@ -1021,7 +1070,7 @@ impl AuraEffectSystem {
         execution_mode: ExecutionMode,
         crypto_seed: Option<[u8; 32]>,
         shared_transport: Option<SharedTransport>,
-        shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
+        shared_inbox: Option<Arc<SimulationSharedInbox>>,
         authority_id: AuthorityId,
         test_filesystem_secure_storage_allowed: bool,
     ) -> Result<Self, crate::core::AgentError> {
@@ -1046,7 +1095,7 @@ impl AuraEffectSystem {
         execution_mode: ExecutionMode,
         crypto_seed: Option<[u8; 32]>,
         shared_transport: Option<SharedTransport>,
-        shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
+        shared_inbox: Option<Arc<SimulationSharedInbox>>,
         authority_id: AuthorityId,
         test_filesystem_secure_storage_allowed: bool,
         selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
@@ -1164,7 +1213,7 @@ impl AuraEffectSystem {
             harness_mode_enabled,
             test_filesystem_secure_storage_allowed,
         )?;
-        #[cfg(unix)]
+        #[cfg(any(unix, target_arch = "wasm32"))]
         let (secure_storage_backend, allocation_lifetime_root) = if profile_owner.is_some()
             && matches!(&secure_storage_backend, ProductionSecureStorageHandler::ProfileOwned(owned) if owned.uses_filesystem_fallback())
         {
@@ -1175,7 +1224,7 @@ impl AuraEffectSystem {
         } else {
             (secure_storage_backend, None)
         };
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, target_arch = "wasm32")))]
         let allocation_lifetime_root = None;
         let secure_storage_handler = Arc::new(secure_storage_backend);
 
@@ -1229,7 +1278,7 @@ impl AuraEffectSystem {
         ));
         let leakage_handler =
             aura_effects::leakage::ProductionLeakageHandler::with_storage(storage_handler.clone());
-        let tree_handler = PersistentTreeHandler::new(storage_handler.clone());
+        let tree_handler = Arc::new(PersistentTreeHandler::new(storage_handler.clone()));
         let sync_handler = PersistentSyncHandler::new(storage_handler.clone());
 
         // === Build TransportSubsystem ===
@@ -1247,8 +1296,12 @@ impl AuraEffectSystem {
         let transport_inbox = shared_inbox.unwrap_or_else(|| {
             shared_transport
                 .as_ref()
-                .map(|shared| shared.inbox_for(authority))
-                .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())))
+                .map(|shared| {
+                    Arc::new(SimulationSharedInbox::from_unbounded_shared_transport(
+                        shared.inbox_for(authority),
+                    ))
+                })
+                .unwrap_or_else(|| Arc::new(SimulationSharedInbox::new()))
         });
         let transport =
             TransportSubsystem::from_parts(transport_handler, transport_inbox, shared_transport);
@@ -1297,12 +1350,20 @@ impl AuraEffectSystem {
             execution_mode,
             harness_mode_enabled,
             crypto,
-            enrollment_generation_gate: tokio::sync::Mutex::new(()),
+            enrollment_generation_gate: Arc::new(tokio::sync::Mutex::new(())),
             rejected_peer_facts: std::sync::atomic::AtomicU64::new(0),
             amp_send_sequencer: aura_protocol::amp::AmpSendSequencer::default(),
             message_drops: std::sync::Mutex::new(MessageDropLog::default()),
             #[cfg(all(test, not(target_arch = "wasm32")))]
             enrollment_retirement_fault: std::sync::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_registration_readback_gate: parking_lot::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_allocation_birth_gate: parking_lot::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_allocation_commit_gate: parking_lot::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_allocation_prewrite_gate: parking_lot::Mutex::new(None),
             transport,
             journal,
             composite,
@@ -1730,6 +1791,39 @@ impl AuraEffectSystem {
         Ok(())
     }
 
+    /// Retire a claimed owner whose VM open never completed. Preserve the
+    /// original session inbox for the admitted-envelope return lease.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "SessionOwnerCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn retire_unfinished_vm_open_owner(
+        &self,
+        capability: &crate::runtime::subsystems::choreography::SessionOwnerCapability,
+    ) -> Result<(), crate::runtime::subsystems::choreography::SessionOwnershipError> {
+        use crate::runtime::subsystems::choreography::SessionOwnershipError;
+        let mut state = self.choreography_state.write();
+        match state.ensure_session_owner(capability.session_id(), capability) {
+            Ok(()) => {}
+            Err(SessionOwnershipError::MissingOwner { .. })
+                if !state.contains_registered_session(capability.session_id()) =>
+            {
+                // The state lock prevents replacement admission while an
+                // orphaned fragment for this session id is released.
+                self.vm_fragment_registry
+                    .write()
+                    .release_session(capability.session_id());
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+        let mut fragments = self.vm_fragment_registry.write();
+        state.cancel_opening_session(capability.session_id());
+        fragments.release_session(capability.session_id());
+        Ok(())
+    }
+
     /// Atomically transfer authoritative ownership for one active runtime choreography session.
     pub(crate) fn transfer_runtime_choreography_session_owner(
         &self,
@@ -1894,18 +1988,32 @@ impl AuraEffectSystem {
                 .map(String::as_str);
             self.transport.flow().allow_readmit(receipt, device);
         }
-        self.queue_runtime_envelope(envelope)
+        if let Some(session_id) = Self::choreography_session_id_from_envelope(&envelope) {
+            // The session notifier tracks inbox content, including returns.
+            self.choreography_state
+                .write()
+                .queue_session_envelope(session_id, envelope);
+            return crate::runtime::subsystems::transport::QueueEnvelopeOutcome::Queued;
+        }
+        self.transport.restore_envelope(envelope)
     }
 
     /// Take a buffered choreography envelope for a session this device has not
     /// opened (see `ChoreographyState::take_unclaimed_session_envelope`).
-    pub(crate) fn take_unclaimed_choreography_envelope(
+    pub(crate) fn take_unclaimed_choreography_envelope_retained(
         &self,
         accept: impl Fn(&TransportEnvelope) -> bool,
-    ) -> Option<TransportEnvelope> {
-        self.choreography_state
+    ) -> Option<UnclaimedChoreographyEnvelopeLease<'_>> {
+        let (session_id, position, envelope) = self
+            .choreography_state
             .write()
-            .take_unclaimed_session_envelope(accept)
+            .take_unclaimed_session_envelope(accept)?;
+        Some(UnclaimedChoreographyEnvelopeLease {
+            effects: self,
+            session_id,
+            position,
+            envelope: Some(envelope),
+        })
     }
 
     /// Record that `peer` was verified reachable at `now_ms`.
@@ -3068,7 +3176,7 @@ impl AuraEffectSystem {
         config: &AgentConfig,
         seed: u64,
         authority_id: AuthorityId,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_inbox: Arc<SimulationSharedInbox>,
     ) -> Result<Self, crate::core::AgentError> {
         let config = Self::normalize_test_config(config.clone())?;
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
@@ -3217,7 +3325,7 @@ impl AuraEffectSystem {
         config: &AgentConfig,
         seed: u64,
         authority_id: AuthorityId,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_inbox: Arc<SimulationSharedInbox>,
     ) -> Result<Self, crate::core::AgentError> {
         Self::simulation_with_shared_inbox(config, seed, authority_id, shared_inbox)
     }
@@ -3403,6 +3511,50 @@ mod tests {
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::SyncEffects;
     use aura_protocol::effects::TreeEffects;
+
+    #[tokio::test]
+    async fn unfinished_vm_retirement_releases_orphan_fragments_after_owner_disappears() {
+        let authority = AuthorityId::from_uuid(uuid::Uuid::from_bytes([0xe1; 16]));
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("effect system");
+        let session_uuid = uuid::Uuid::from_bytes([0xe2; 16]);
+        let roles = vec![aura_protocol::effects::ChoreographicRole::for_authority(
+            authority,
+            aura_protocol::effects::RoleIndex::new(0).expect("role"),
+        )];
+        let owner = effects
+            .start_owned_choreography_session("opening-owner", session_uuid, roles)
+            .await
+            .expect("owner claim");
+        let manifest = CompositionManifest {
+            protocol_name: "orphan-fragment".into(),
+            protocol_namespace: None,
+            protocol_qualified_name: "orphan-fragment".into(),
+            protocol_id: "orphan-fragment".into(),
+            role_names: vec!["Role".into()],
+            required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
+            guard_capabilities: Vec::new(),
+            determinism_policy_ref: None,
+            delegation_constraints: Vec::new(),
+            link_specs: Vec::new(),
+        };
+        effects
+            .claim_vm_fragments_for_manifest(&owner.owner_label, &manifest)
+            .expect("fragment claim");
+        assert_eq!(effects.vm_fragment_snapshot().len(), 1);
+        effects
+            .choreography_state
+            .write()
+            .cancel_session(owner.session_id);
+        effects
+            .retire_unfinished_vm_open_owner(&owner.capability)
+            .expect("already retired owner still clears orphan fragments");
+        assert!(effects.vm_fragment_snapshot().is_empty());
+    }
 
     #[tokio::test]
     async fn simulation_constructor_preserves_seeded_stream_across_actual_subsystem_clones(
@@ -4765,6 +4917,31 @@ pub(crate) struct ThresholdConfigMetadata {
 }
 
 impl ThresholdConfigMetadata {
+    /// Agreement progresses at activation without changing the approved generation.
+    pub(crate) fn pending_generation_digest(&self) -> Result<[u8; 32], AuraError> {
+        let mut canonical = self.clone();
+        canonical.agreement_mode = aura_core::threshold::AgreementMode::Provisional;
+        let bytes = serde_json::to_vec(&canonical).map_err(|source| AuraError::Serialization {
+            message: "encode original pending signing generation".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        Ok(aura_core::hash::hash(&bytes))
+    }
+
+    pub(crate) fn require_activated_pending_generation(
+        &self,
+        expected: [u8; 32],
+    ) -> Result<(), AuraError> {
+        if self.agreement_mode != aura_core::threshold::AgreementMode::ConsensusFinalized
+            || self.pending_generation_digest()? != expected
+        {
+            return Err(AuraError::permission_denied(
+                "activated signing generation differs from original pending commitment",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn contains_participant(
         &self,
         participant: &aura_core::threshold::ParticipantIdentity,
@@ -4801,17 +4978,6 @@ pub(crate) fn enrollment_generation_profile_location(
 ) -> aura_core::effects::SecureStorageLocation {
     aura_core::effects::SecureStorageLocation::with_sub_key(
         "device_enrollment_generation_live_slot_v2",
-        authority.to_string(),
-        epoch.to_string(),
-    )
-}
-
-pub(crate) fn legacy_enrollment_generation_profile_location(
-    authority: &aura_core::AuthorityId,
-    epoch: u64,
-) -> aura_core::effects::SecureStorageLocation {
-    aura_core::effects::SecureStorageLocation::with_sub_key(
-        "device_enrollment_generation_profile_v1",
         authority.to_string(),
         epoch.to_string(),
     )
@@ -4867,3 +5033,6 @@ mod test_namespace_tests {
         Ok(())
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use crypto::InjectedEnrollmentRetirementFailure;

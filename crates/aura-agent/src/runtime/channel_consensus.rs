@@ -308,7 +308,7 @@ impl ChannelConsensusWitness {
         Fut: std::future::Future<Output = Result<bool, AuraError>>,
     {
         let mut processed = 0;
-        while let Ok(envelope) = effects.take_inbound_envelope(|envelope| {
+        while let Ok(envelope) = effects.take_inbound_envelope_retained(|envelope| {
             matches!(
                 decode(envelope),
                 Some(
@@ -319,8 +319,11 @@ impl ChannelConsensusWitness {
         }) {
             processed += 1;
             let Some(message) = decode(&envelope) else {
+                let _ = envelope.consume();
                 continue;
             };
+            let source = envelope.source;
+            let mut intake = Some(envelope);
             let outcome = match message {
                 ChannelConsensusMessage::Execute {
                     scope,
@@ -329,11 +332,12 @@ impl ChannelConsensusWitness {
                 } => {
                     self.execute(
                         effects,
-                        envelope.source,
+                        source,
                         scope,
                         key_epoch,
                         round,
                         &has_standing,
+                        &mut intake,
                     )
                     .await
                 }
@@ -341,13 +345,19 @@ impl ChannelConsensusWitness {
                     consensus_id,
                     commitments,
                 } => {
-                    self.sign(effects, envelope.source, consensus_id, commitments)
-                        .await
+                    // SignRequest can remove an OpenRound and retire its
+                    // single-use nonce at the first await. Its owner consumes
+                    // intake before entering that irreversible state machine.
+                    let _ = intake.take().expect("sign request intake").consume();
+                    self.sign(effects, source, consensus_id, commitments).await
                 }
                 _ => Ok(()),
             };
+            if let Some(lease) = intake.take() {
+                let _ = lease.consume();
+            }
             if let Err(error) = outcome {
-                tracing::warn!(source = %envelope.source, %error, "channel consensus message refused");
+                tracing::warn!(%source, %error, "channel consensus message refused");
             }
         }
         Ok(processed)
@@ -361,6 +371,7 @@ impl ChannelConsensusWitness {
         key_epoch: u64,
         round: ConsensusRound,
         has_standing: &F,
+        intake: &mut Option<super::effects::InboundEnvelopeLease<'_>>,
     ) -> Result<(), AuraError>
     where
         F: Fn(ChannelKeyScope, AuthorityId) -> Fut,
@@ -376,6 +387,10 @@ impl ChannelConsensusWitness {
                 "channel consensus round is not for this epoch's key or its coordinator lacks standing",
             ));
         }
+        // Epoch-key and standing observations are read-only. Cancellation
+        // before this point returns the exact admitted frame. Nonce generation
+        // and OpenRound insertion start witness-owned cryptographic state.
+        let _ = intake.take().expect("execute intake").consume();
         let nonces = witness_commit(&share, effects).await?;
         let commitment = nonces.commitment().clone();
         let consensus_id = round.consensus_id;
@@ -522,6 +537,62 @@ mod tests {
         let prestate =
             Prestate::new(vec![(coordinator, Hash32([6; 32]))], Hash32([8; 32])).unwrap();
         let witness = ChannelConsensusWitness::default();
+        // The real ceremony installed member 1's epoch share. Hold its
+        // standing check after that key load, then cancel before witness
+        // nonce generation or OpenRound insertion.
+        let (_, witness_group, _) = epoch_key(&members[1], scope, 1).await.unwrap();
+        let held_round = ConsensusRound::new(&prestate, &bump, 42, witness_group.threshold)
+            .expect("well-formed epoch round");
+        let held_wire = ChannelConsensusMessage::Execute {
+            scope,
+            key_epoch: 1,
+            round: held_round,
+        };
+        let held_payload = aura_core::util::serialization::to_vec(&held_wire).unwrap();
+        assert!(matches!(
+            members[1].queue_runtime_envelope(TransportEnvelope {
+                source: coordinator,
+                destination: id(&members[1]),
+                context: scope.context,
+                payload: held_payload.clone(),
+                metadata: std::collections::HashMap::from([(
+                    "content-type".to_owned(),
+                    CHANNEL_CONSENSUS_CONTENT_TYPE.to_owned(),
+                )]),
+                receipt: None,
+            }),
+            crate::runtime::subsystems::transport::QueueEnvelopeOutcome::Queued
+        ));
+        let (standing_tx, standing_rx) = tokio::sync::oneshot::channel();
+        let standing_tx = Arc::new(std::sync::Mutex::new(Some(standing_tx)));
+        let held_witness = witness.clone();
+        let held_signal = standing_tx.clone();
+        let mut held_task = tokio::spawn(async move {
+            held_witness
+                .process(&members[1], move |_scope, _from| {
+                    let signal = held_signal.clone();
+                    async move {
+                        if let Some(signal) = signal.lock().unwrap().take() {
+                            let _ = signal.send(());
+                        }
+                        futures::future::pending::<Result<bool, AuraError>>().await
+                    }
+                })
+                .await
+        });
+        tokio::select! {
+            observed = standing_rx => observed.expect("actual standing await reached"),
+            _ = &mut held_task => panic!("witness completed before standing hold"),
+        }
+        held_task.abort();
+        assert!(held_task.await.unwrap_err().is_cancelled());
+        let returned = members[1]
+            .take_inbound_envelope_retained(|envelope| envelope.payload == held_payload)
+            .expect("cancelled Execute returns original admitted frame");
+        assert_eq!(returned.source, coordinator);
+        assert_eq!(returned.payload, held_payload);
+        let _ = returned.consume();
+        assert!(witness.open.lock().await.is_empty());
         let witness_standing = move |_scope: ChannelKeyScope, from: AuthorityId| async move {
             Ok(from == coordinator)
         };

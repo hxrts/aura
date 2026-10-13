@@ -87,6 +87,41 @@ async fn cli_and_rpc_give_identical_responses() -> Result<()> {
     Ok(())
 }
 
+/// A real RPC session must reject a selected recipient equal to the enrolled
+/// account before accepting an untrusted setup code or starting issuance.
+#[tokio::test(start_paused = true)]
+async fn device_enroll_with_shortcut_rpc_rejects_self_recipient() -> Result<()> {
+    let net = SimNet::new();
+    let issuer = net.peer(81).await?;
+    let (mut client, served) = RpcClient::connect(&issuer).await?;
+    let device = aura_core::DeviceId::new_from_entropy([82; 32]);
+    let script = async {
+        let response = client
+            .call(
+                "device_enroll_with_shortcut",
+                json!({
+                    "nickname": "New device",
+                    "setup_code": "untrusted-setup-code",
+                    "recipient": issuer.id.to_string(),
+                    "recipient_device": device.to_string(),
+                    "purpose": "contact",
+                }),
+            )
+            .await?;
+        assert_eq!(response["ok"], false, "{response}");
+        assert_eq!(response["error"]["code"], "invalid_input", "{response}");
+        assert!(response["error"]["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("recipient must be external")));
+        client.shutdown().await?;
+        Ok::<(), anyhow::Error>(())
+    };
+    let (result, server) = tokio::join!(script, served);
+    result?;
+    server?;
+    Ok(())
+}
+
 /// Through RPC only: `a` invites `b` as a contact, then into a new home;
 /// returns the home id once `b` holds the home channel.
 async fn link_and_share_home(

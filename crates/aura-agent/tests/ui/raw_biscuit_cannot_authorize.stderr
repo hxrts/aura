@@ -6,7 +6,7 @@ error[E0308]: mismatched types
    |                    |
    |                    arguments to this method are incorrect
    |
-   = note: expected reference `&VerifiedBiscuitToken`
+   = note: expected reference `&aura_authorization::VerifiedBiscuitToken`
               found reference `&aura_authorization::Biscuit`
 note: method defined here
   --> $WORKSPACE/crates/aura-authorization/src/biscuit_evaluator.rs

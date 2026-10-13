@@ -679,12 +679,22 @@ Possession of retained dealer shares does not authorize a runtime to manufacture
 
 ### Explicit enrollment transcript quorum
 
-Enrollment signing consent identifies one versioned canonical intent containing
-exactly the trust manifest, public version 4 invitation transport, and initial
-version 2 enrollment Request control transcript. Initial Request fields derive
-from that manifest and its transcript digest; consent grants no arbitrary control
-signing authority. Committed and Failed control transcripts require separate
-approval and remain unavailable through this initial intent.
+Enrollment signing intent version 3 declares four ordered domains: the exact
+trust manifest, public version 4 invitation transport, initial version 2
+enrollment Request control transcript, and finite negative terminal policy.
+Initial Request fields derive from that manifest and its transcript digest.
+The version 1 policy binds the same manifest digest and exactly Rejected,
+Cancelled, TimedOut, ChoreographyFailed, RuntimeFailed and Superseded. Public
+validation checks exact version, domain order, manifest, transport and initial
+Request binding; historical or substituted declarations cannot gain consent.
+
+The policy is conditional consent, not an initiation signature or evidence that
+an outcome occurred. Only the original runtime owner may combine its actual
+protected first negative decision with retained approved participant custody to
+sign the matching version 2 Failed control, with no committed operations.
+Committed controls require their separate original protected positive decision
+and participant custody. Neither policy grants arbitrary transcript signing,
+durable membership, current receiver freshness or reconstructed native custody.
 
 The public coordinator accepts the actual typed security transcript. Its canonical
 required encoding must equal the original approved domain bytes before a round
@@ -721,3 +731,15 @@ Birth, read and positive sealing require that genuine original confirmation;
 a permanent legacy wrapping key cannot substitute for this custody. An existing
 original allocation prohibits replacement birth even if envelope publication was
 interrupted before its separate birth anchor was published.
+
+### Enrollment proposal purpose binding
+
+Device epoch proposal transcript version 2 uses domain
+`aura.sync.device-epoch.proposal.v2`. Enrollment purpose binds the exact original
+manifest digest and enrolling device, separately from the existing recipient
+device. Rotation and Removal are distinct purposes. The authenticated proposal
+also binds its participant, epoch, key-package/configuration/public-package
+hashes and encrypted-package binding. A valid signature for another purpose,
+manifest or enrolling device cannot authorize this enrollment. Individual
+participant possession proofs remain distinct from authority quorum signatures
+and original user approval.

@@ -24,11 +24,40 @@
 struct UnownedThresholdContextModeError;
 
 use super::state::with_state_mut_validated;
+
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        pub(super) type EnrollmentOperationFuture<'a, T> = futures::future::LocalBoxFuture<'a, T>;
+    } else {
+        pub(super) type EnrollmentOperationFuture<'a, T> = futures::future::BoxFuture<'a, T>;
+    }
+}
+
 mod device_quorum;
 pub(crate) use device_quorum::DevicePossessionProof;
+pub(super) use device_quorum::OriginalDeviceProposalConsent;
+mod enrollment_peer;
 mod enrollment_quorum_registry;
+#[cfg(test)]
+mod peer_contract_tests;
+pub(super) use enrollment_peer::OriginalEnrollmentPeerNativeProgress;
+pub(crate) use enrollment_quorum_registry::OriginalPreparedIssuerRegistration;
 mod enrollment_transcript_proxy;
 mod enrollment_transcript_signing;
+#[cfg(test)]
+pub(crate) use enrollment_transcript_signing::{
+    OriginalPositiveActorTest, OriginalPositiveActorTestMode,
+};
+mod prepared_issuer_custody;
+pub(super) use enrollment_transcript_signing::{
+    original_participant_actor, EnrollmentTranscriptParticipantIngress,
+    EnrollmentTranscriptSigningError, OriginalEnrollmentTranscriptActor,
+};
+mod conditional_retirement;
+mod positive_terminal;
+pub(crate) use device_quorum::original_device_quorum_response_matches;
+pub(super) use positive_terminal::OriginalPositiveDispatcher;
+pub(crate) use positive_terminal::{OriginalPositivePacket, OriginalPositiveTransport};
 mod enrollment_transcript_wire;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::effects::ThresholdConfigMetadata;
@@ -68,6 +97,17 @@ use aura_signature::threshold_signing_context_transcript_bytes;
 use chacha20poly1305::{
     aead::{Aead, Payload},
     ChaCha20Poly1305, KeyInit, Nonce,
+};
+pub(crate) use conditional_retirement::{
+    OriginalConditionalRetirementTransport, OriginalRetiredConditionalTransport,
+    OriginalRetiredConditionalTransportCustody,
+};
+pub(in crate::runtime::services) use enrollment_transcript_signing::{
+    OriginalConditionalActorExit, OriginalParticipantCompletion,
+    OriginalParticipantCompletionCustody,
+};
+pub(super) use enrollment_transcript_wire::{
+    OriginalConditionalDispatcherExit, OriginalEnrollmentTranscriptDispatcher,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -349,8 +389,12 @@ pub struct ThresholdSigningService {
     runtime_capabilities: RuntimeCapabilityHandler,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("signing service belongs to another runtime effect owner")]
+pub(crate) struct ForeignThresholdSigningRuntime;
+
 struct ThresholdSigningShared {
-    quorum: enrollment_quorum_registry::EnrollmentQuorumRegistry,
+    quorum: Arc<enrollment_quorum_registry::EnrollmentQuorumRegistry>,
     /// Co-signer rounds of device quorum signing (Task 163).
     device_quorum: device_quorum::DeviceQuorumSlots,
     /// Serializes signing-material lifecycle changes across cloned handles.
@@ -410,6 +454,16 @@ impl VerifiedPendingSigningGeneration {
 }
 
 impl ThresholdSigningService {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "ThresholdSigningService", receiver_type = ThresholdSigningService, family = "runtime_helper")]
+    pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        if !std::ptr::eq(self.effects.as_ref(), effects) {
+            return Err(AuraError::PermissionDenied {
+                message: "signing service has another runtime owner".into(),
+                source: Some(Arc::new(ForeignThresholdSigningRuntime)),
+            });
+        }
+        Ok(())
+    }
     /// Export the actual runtime device and one coherent signing-context
     /// snapshot. The read guard prevents context replacement until the signed
     /// request is retained; signing uses that snapshot without reacquiring the
@@ -493,7 +547,7 @@ impl ThresholdSigningService {
         Self {
             effects,
             shared: Arc::new(ThresholdSigningShared {
-                quorum: enrollment_quorum_registry::EnrollmentQuorumRegistry::new(),
+                quorum: Arc::new(enrollment_quorum_registry::EnrollmentQuorumRegistry::new()),
                 device_quorum: device_quorum::DeviceQuorumSlots::default(),
                 transitions: Mutex::new(()),
                 state: RwLock::new(ThresholdSigningState::default()),
@@ -511,7 +565,7 @@ impl ThresholdSigningService {
         Self {
             effects,
             shared: Arc::new(ThresholdSigningShared {
-                quorum: enrollment_quorum_registry::EnrollmentQuorumRegistry::new(),
+                quorum: Arc::new(enrollment_quorum_registry::EnrollmentQuorumRegistry::new()),
                 device_quorum: device_quorum::DeviceQuorumSlots::default(),
                 transitions: Mutex::new(()),
                 state: RwLock::new(ThresholdSigningState::default()),
@@ -3688,7 +3742,14 @@ mod proved_legacy_bootstrap_tests {
                 .expect("actual runtime"),
         );
         AgentRuntimeBridge::new(agent.clone())
-            .bootstrap_signing_keys()
+            .bootstrap_signing_keys(
+                crate::runtime::services::RuntimeServiceContext::test_original(
+                    agent.runtime().tasks(),
+                    agent.runtime().effects(),
+                )
+                .await
+                .startup_window(),
+            )
             .await
             .expect("original bootstrap");
         let effects = agent.runtime().effects();
@@ -4233,11 +4294,62 @@ mod original_stop_window_tests {
 }
 // Local signing material retains the original protected tree allocation.
 
-pub(super) struct ValidatedLocalEnrollmentSigningMaterial<'tree, 'custody, 'owner, 'runtime> {
+enum EnrollmentSigningMaterialCustody {
+    Issuer(
+        Arc<crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<'static, 'static>>,
+    ),
+    Owned(Arc<crate::runtime::effects::ApprovedEnrollmentTreeCustody<'static>>),
+}
+impl EnrollmentSigningMaterialCustody {
+    fn generation(&self) -> &crate::runtime::effects::EnrollmentGenerationCustodyCapability<'_> {
+        match self {
+            Self::Issuer(original) => original.generation(),
+            Self::Owned(original) => original.generation(),
+        }
+    }
+    async fn send_owned_enrollment_round(
+        &self,
+        effects: &AuraEffectSystem,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+        window: &super::enrollment_window::EnrollmentExecutionChild,
+        destination: DeviceId,
+        packet: &aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket,
+    ) -> Result<(), AuraError> {
+        match self {
+            Self::Issuer(original) => {
+                let owner =
+                    crate::runtime::effects::EnrollmentTranscriptTreeOwner::from_original_issuer(
+                        original,
+                    );
+                effects
+                    .send_owned_enrollment_round(&owner, manifest, window, destination, packet)
+                    .await
+            }
+            Self::Owned(original) => {
+                let original = crate::runtime::effects::EnrollmentTranscriptTreeOwner::from_original_participant(original.as_ref());
+                effects
+                    .send_owned_enrollment_round(&original, manifest, window, destination, packet)
+                    .await
+            }
+        }
+    }
+
+    fn require_manifest(
+        &self,
+        effects: &AuraEffectSystem,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> Result<(), AuraError> {
+        match self {
+            Self::Issuer(original) => original.require_manifest(effects, manifest),
+            Self::Owned(original) => original.require_manifest(effects, manifest),
+        }
+    }
+}
+pub(super) struct ValidatedLocalEnrollmentSigningMaterial {
     effects: Arc<AuraEffectSystem>,
-    custody:
-        &'tree crate::runtime::effects::EnrollmentTranscriptTreeOwner<'custody, 'owner, 'runtime>,
+    custody: EnrollmentSigningMaterialCustody,
     device: DeviceId,
+    approved_intent_digest: [u8; 32],
     index: u16,
     threshold: u16,
     ordered_devices: Vec<DeviceId>,
@@ -4247,29 +4359,41 @@ pub(super) struct ValidatedLocalEnrollmentSigningMaterial<'tree, 'custody, 'owne
 }
 
 impl ThresholdSigningService {
-    /// The only local material producer. Inputs retain explicit user consent,
-    /// exact runtime origin and actual original generation custody. No remote
-    /// key/config/message field selects the trusted material.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "EnrollmentTranscriptTreeOwner",
-        family = "runtime_helper"
-    )]
-    pub(super) async fn admit_local_enrollment_transcript_material<
-        'tree,
-        'custody: 'tree,
-        'owner: 'custody,
-        'runtime: 'owner,
-    >(
+    pub(super) async fn admit_original_issuer_enrollment_material(
         &self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
-        custody: &'tree crate::runtime::effects::EnrollmentTranscriptTreeOwner<
-            'custody,
-            'owner,
-            'runtime,
+        custody: Arc<
+            crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<'static, 'static>,
         >,
-    ) -> Result<ValidatedLocalEnrollmentSigningMaterial<'tree, 'custody, 'owner, 'runtime>, AuraError>
-    {
+    ) -> Result<ValidatedLocalEnrollmentSigningMaterial, AuraError> {
+        self.admit_local_enrollment_material_with_custody(
+            approval,
+            EnrollmentSigningMaterialCustody::Issuer(custody),
+        )
+        .await
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalApprovedNativeAdmission",
+        family = "runtime_helper"
+    )]
+    pub(super) async fn admit_original_owned_enrollment_material(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        custody: &crate::runtime::effects::OriginalApprovedNativeAdmission,
+    ) -> Result<ValidatedLocalEnrollmentSigningMaterial, AuraError> {
+        let original = custody.original_authenticated(approval)?;
+        self.admit_local_enrollment_material_with_custody(
+            approval,
+            EnrollmentSigningMaterialCustody::Owned(original),
+        )
+        .await
+    }
+    async fn admit_local_enrollment_material_with_custody(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        custody: EnrollmentSigningMaterialCustody,
+    ) -> Result<ValidatedLocalEnrollmentSigningMaterial, AuraError> {
         let effects = approval.effects();
         custody.require_manifest(effects.as_ref(), approval.manifest())?;
         if !Arc::ptr_eq(&self.effects, effects) {
@@ -4440,6 +4564,7 @@ impl ThresholdSigningService {
         Ok(ValidatedLocalEnrollmentSigningMaterial {
             effects: effects.clone(),
             custody,
+            approved_intent_digest: approval.canonical_intent_digest(),
             device: effects.device_id(),
             index,
             threshold: policy.threshold_k,
@@ -4452,15 +4577,15 @@ impl ThresholdSigningService {
 }
 /// Local approval after protected generation and exact transcript verification.
 /// No wire DTO, deserialization or clone can mint this local grant.
-pub(super) struct ApprovedLocalEnrollmentTranscript<'tree, 'custody, 'owner, 'runtime> {
-    custody:
-        &'tree crate::runtime::effects::EnrollmentTranscriptTreeOwner<'custody, 'owner, 'runtime>,
+pub(super) struct ApprovedLocalEnrollmentTranscript<'tree> {
+    custody: &'tree EnrollmentSigningMaterialCustody,
     effects: Arc<AuraEffectSystem>,
     device: DeviceId,
     index: u16,
     threshold: u16,
     public_package: Vec<u8>,
     domains: [ApprovedEnrollmentTranscriptDomain; 3],
+    approved_intent_digest: [u8; 32],
     local_share: &'tree [u8],
     /// Original sealed participant-local window; no peer clock is accepted.
     original_window: &'tree crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
@@ -4486,9 +4611,7 @@ pub(super) struct ApprovedEnrollmentTranscriptRound<'window> {
 
 // The participant actor is a private child
 // module of this owner, so private material fields need no public secret getters.
-impl<'tree, 'custody, 'owner, 'runtime>
-    ValidatedLocalEnrollmentSigningMaterial<'tree, 'custody, 'owner, 'runtime>
-{
+impl ValidatedLocalEnrollmentSigningMaterial {
     fn approved_rounds<'window>(
         &self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
@@ -4574,26 +4697,20 @@ impl<'tree, 'custody, 'owner, 'runtime>
             participants: participants.clone(),
         }))
     }
+    pub(super) fn original_participant_actor(
+        &self,
+    ) -> (
+        EnrollmentTranscriptParticipantIngress,
+        OriginalEnrollmentTranscriptActor,
+    ) {
+        original_participant_actor(self.device, self.index)
+    }
     /// Exactly the three approved domains; no caller-provided signing message is accepted.
-    fn prepare_manifest_participant<'grant>(
+    pub(super) fn approved_local_transcript<'grant>(
         &'grant self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
         original_window: &'grant crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
-    ) -> Result<
-        (
-            enrollment_transcript_signing::EnrollmentTranscriptParticipantIngress,
-            impl std::future::Future<Output = Result<(), AuraError>>
-                + 'grant
-                + use<'grant, 'tree, 'custody, 'owner, 'runtime>,
-        ),
-        AuraError,
-    >
-    where
-        'runtime: 'owner,
-        'owner: 'custody,
-        'custody: 'tree,
-        'tree: 'grant,
-    {
+    ) -> Result<ApprovedLocalEnrollmentTranscript<'grant>, AuraError> {
         use aura_signature::SecurityTranscript;
         self.custody
             .require_manifest(self.effects.as_ref(), approval.manifest())?;
@@ -4687,7 +4804,7 @@ impl<'tree, 'custody, 'owner, 'runtime>
             hex::encode(request_digest),
         );
         let grant = ApprovedLocalEnrollmentTranscript {
-            custody: self.custody,
+            custody: &self.custody,
             effects: self.effects.clone(),
             device: self.device,
             index: self.index,
@@ -4710,105 +4827,156 @@ impl<'tree, 'custody, 'owner, 'runtime>
                     approval_digest: request_digest,
                 },
             ],
+            approved_intent_digest: approval.canonical_intent_digest(),
             local_share: self.local_share.as_slice(),
             original_window,
         };
-        Ok(enrollment_transcript_signing::admitted_participant(grant))
+        Ok(grant)
     }
 }
 
 impl ThresholdSigningService {
-    pub(crate) async fn prepare_original_quorum_issuer(
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    async fn launch_original_issuer(
         &self,
         agent: Arc<crate::core::AuraAgent>,
         nickname: String,
         setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
-    ) -> Result<aura_app::runtime_bridge::PreparedDeviceEnrollmentSigning, AuraError> {
+        mode: crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode,
+    ) -> Result<Arc<enrollment_quorum_registry::PreparedIssuerEntry>, AuraError> {
         if !Arc::ptr_eq(&self.effects, &agent.runtime().effects()) {
             return Err(AuraError::permission_denied(
                 "prepared issuer belongs to another actual runtime",
             ));
         }
         let capacity = self.shared.quorum.reserve()?;
-        let original_task_id =
-            aura_core::effects::RandomExtendedEffects::random_uuid(self.effects.as_ref()).await;
+        let (launch, launch_observation) =
+            super::enrollment_window::OriginalIssuerLaunchWindow::select(self.effects.clone())
+                .await?;
+        let original_task_id = launch_observation
+            .allocate_task_identity(&self.effects)
+            .await?;
         let group = agent.runtime().tasks().group(format!(
             "enrollment.original-prepared-issuer-{original_task_id}"
         ));
         let (preparation, ready, approved_sender) =
-            crate::runtime_bridge::enrollment_quorum::OriginalIssuerPreparation::owned_channels();
+            crate::runtime_bridge::enrollment_quorum::OriginalIssuerPreparation::owned_channels(
+                mode, launch,
+            );
+        let retained = preparation.retained.clone();
+        let registration = preparation.registration.clone();
+        let ready_sender = preparation.ready.clone();
+        let (start, started) = tokio::sync::oneshot::channel();
         let (completed_sender, completed) = tokio::sync::oneshot::channel();
-        let issuer_task = async move {
-            let bridge = crate::runtime_bridge::AgentRuntimeBridge::new(agent);
-            match bridge
-                .issue_original_device_enrollment(nickname, setup, Some(preparation))
-                .await
-            {
-                Ok(result) => completed_sender.send(Ok(result)).map_err(|_| {
-                    AuraError::invalid("original prepared issuer terminal receiver was cancelled")
-                }),
-                Err(source) => {
-                    let native = AuraError::Internal {
-                        message: "original owned enrollment issuance failed".into(),
-                        source: Some(Arc::new(source)),
-                    };
-                    let _ = completed_sender.send(Err(aura_invitation::enrollment_setup::EnrollmentIssuanceError::at(
-                        aura_invitation::enrollment_setup::EnrollmentIssuanceStage::InvitationExport, native.clone(),
-                    )));
-                    Err(native)
-                }
-            }
+        let completed_result = Arc::new(parking_lot::Mutex::new(None));
+        let task_result = completed_result.clone();
+        let task_ready = ready_sender.clone();
+        let operation = prepared_issuer_custody::OriginalPreparedIssuerOperation {
+            started,
+            agent,
+            nickname,
+            setup,
+            preparation,
+            completed: completed_sender,
+            result: task_result,
+            mode,
+            ready: task_ready,
+        };
+        #[cfg(test)]
+        let resources_observation = Arc::downgrade(&retained);
+        let custody = prepared_issuer_custody::OriginalPreparedIssuerTaskCustody {
+            operation: Some(operation),
+            retained,
+            registration: registration.clone(),
+            effects: self.effects.clone(),
+            first_failure: None,
+            ready: ready_sender,
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let task = group.spawn_local_try_named("enrollment.original-prepared-issuer", issuer_task);
+                let task = group.spawn_original_local_required_custody("enrollment.original-prepared-issuer".into(), Box::new(custody), None)
+                    .map_err(|rejected| prepared_issuer_custody::retain_rejected(rejected.into_local()))?;
             } else {
-                let task = group.spawn_try_named("enrollment.original-prepared-issuer", issuer_task);
+                let task = group.spawn_original_required_custody("enrollment.original-prepared-issuer".into(), Box::new(custody), None)
+                    .map_err(|rejected| prepared_issuer_custody::retain_rejected(rejected.into_native()))?;
             }
         }
-        let ready = match ready.await {
-            Ok(ready) => ready,
-            Err(channel_source) => {
-                // No clock is manufactured for a failure before allocation.
-                // Cancellation/forced-abort remains a failed teardown, never
-                // evidence that the original native profile may be handed off.
-                group.request_cancellation();
-                let primary = match completed.await {
-                    Ok(Err(source)) => AuraError::Internal {
-                        message: "original issuer failed before preparation".into(),
-                        source: Some(Arc::new(source)),
-                    },
-                    _ => AuraError::Internal {
-                        message: "original issuer preparation channel ended".into(),
-                        source: Some(Arc::new(channel_source)),
-                    },
-                };
-                if let Err(source) = group.abort_remaining() {
-                    return Err(AuraError::Internal { message: "original issuer failed before clock admission and could not acknowledge teardown".into(), source: Some(Arc::new(EnrollmentParticipantStartupFailure { primary, teardown: source })) });
-                }
-                return Err(primary);
-            }
-        };
-        let (observed, original_completion, digest) = ready.into_owned_parts();
-        let entry = enrollment_quorum_registry::PreparedIssuerEntry::new(
+        let entry = Arc::new(enrollment_quorum_registry::PreparedIssuerEntry::new(
             capacity,
+            aura_core::CeremonyId::new(format!("preparation:{original_task_id}")),
             aura_guards::GuardContextProvider::authority_id(self.effects.as_ref()),
-            observed.ceremony_id.clone(),
-            digest,
             self.effects.clone(),
-            original_completion,
             approved_sender,
+            ready,
+            launch_observation,
             completed,
+            completed_result,
             group,
             task,
-        );
-        if let Err((primary, entry)) = self.shared.quorum.insert_prepared(entry).await {
-            if let Err(cleanup) = (*entry).cancel_and_drain().await {
+        ));
+        #[cfg(test)]
+        entry.retain_resources_observation_for_test(resources_observation);
+        registration
+            .set(OriginalPreparedIssuerRegistration::new(
+                &entry,
+                &self.shared.quorum,
+            ))
+            .map_err(|_| AuraError::invalid("original prepared registration already installed"))?;
+        if let Err((primary, entry)) = self.shared.quorum.insert_prepared(entry.clone()) {
+            drop(start);
+            if let Err(cleanup) = entry.cancel_and_drain().await {
                 return Err(enrollment_quorum_registry::joined(primary, cleanup));
             }
             return Err(primary);
         }
-        Ok(observed)
+        start
+            .send(())
+            .map_err(|_| AuraError::invalid("original prepared task ended before admission"))?;
+        Ok(entry)
+    }
+
+    pub(crate) async fn prepare_original_quorum_issuer(
+        &self,
+        agent: Arc<crate::core::AuraAgent>,
+        nickname: String,
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<aura_app::runtime_bridge::PreparedDeviceEnrollmentSigning, AuraError> {
+        let entry = self.launch_original_issuer(agent, nickname, setup,
+            crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode::UserApprovedQuorum).await?;
+        entry.receive_initial_ready().await?.into_observed()
+    }
+
+    pub(crate) async fn issue_original_owned_issuer(
+        &self,
+        agent: Arc<crate::core::AuraAgent>,
+        nickname: String,
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<
+        (
+            aura_app::runtime_bridge::DeviceEnrollmentStart,
+            crate::runtime_bridge::OriginalIssuedEnrollmentContinuation,
+        ),
+        AuraError,
+    > {
+        let entry = self
+            .launch_original_issuer(
+                agent,
+                nickname,
+                setup,
+                crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode::SingleSigner,
+            )
+            .await?;
+        match entry.receive_initial_ready().await? {
+            crate::runtime_bridge::enrollment_quorum::OriginalPreparedIssuerReady::Issued => {
+                entry.receive_owned_result().await
+            }
+            _ => Err(AuraError::permission_denied(
+                "ordinary issuer cannot observe quorum approval readiness",
+            )),
+        }
     }
 
     #[aura_macros::capability_boundary(
@@ -4862,39 +5030,85 @@ impl ThresholdSigningService {
     )]
     pub(crate) async fn sign_original_approved_enrollment_domains(
         &self,
-        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
-        custody: &crate::runtime::effects::EnrollmentTranscriptTreeOwner<'_, '_, '_>,
+        approval: Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        custody: Arc<
+            crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<'static, 'static>,
+        >,
         window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+        retained: &mut Option<Arc<tokio::sync::Mutex<OriginalIssuerTranscriptSigningCustody>>>,
     ) -> Result<[Vec<u8>; 3], AuraError> {
         window
             .execute(self.effects.as_ref(), || async {
-                let material = self
-                    .admit_local_enrollment_transcript_material(approval, custody)
-                    .await?;
-                let [manifest_round, transport_round, request_round] =
-                    material.approved_rounds(approval, window)?;
-                let (local_ingress, local_participant) =
-                    material.prepare_manifest_participant(approval, window)?;
-                let mut ingresses = vec![local_ingress];
-                let mut remote_participants = Vec::new();
-                for device in material
-                    .ordered_devices
-                    .iter()
-                    .copied()
-                    .filter(|device| *device != material.device)
-                {
-                    let (ingress, participant) =
-                        material.original_remote_proxy(approval, window, device)?;
-                    ingresses.push(ingress);
-                    remote_participants.push(participant);
+                if retained.is_none() {
+                    *retained = Some(Arc::new(tokio::sync::Mutex::new(
+                        OriginalIssuerTranscriptSigningCustody::new(Arc::clone(&approval)),
+                    )));
                 }
+                let retained = retained
+                    .as_mut()
+                    .ok_or_else(|| AuraError::invalid("original issuer signing custody missing"))?;
+                let mut retained_guard = retained.lock().await;
+                let retained = &mut *retained_guard;
+                if retained.material.is_none() && retained.negative.is_none() {
+                    retained.material = Some(
+                        self.admit_original_issuer_enrollment_material(&approval, custody)
+                            .await?,
+                    );
+                }
+                let material = retained.material.as_ref().ok_or_else(|| {
+                    AuraError::invalid("original issuer initial material already transferred")
+                })?;
+                let [manifest_round, transport_round, request_round] =
+                    material.approved_rounds(&approval, window)?;
+                if retained.local_actor.is_none() {
+                    let (local_ingress, local_actor) =
+                        enrollment_transcript_signing::original_participant_actor(
+                            material.device,
+                            material.index,
+                        );
+                    retained.ingresses.push(local_ingress);
+                    retained.local_actor = Some(local_actor);
+                    for (offset, device) in material
+                        .ordered_devices
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .filter(|(_, device)| *device != material.device)
+                    {
+                        let index = u16::try_from(offset + 1).map_err(|source| {
+                            AuraError::crypto_with_source(
+                                "original proxy roster index",
+                                Arc::new(source),
+                            )
+                        })?;
+                        let (ingress, actor) =
+                            enrollment_transcript_proxy::original_remote_proxy_actor(device, index);
+                        retained.ingresses.push(ingress);
+                        retained.remote_actors.push(actor);
+                    }
+                }
+                let local_participant = retained
+                    .local_actor
+                    .as_mut()
+                    .ok_or_else(|| AuraError::invalid("original local signing actor missing"))?
+                    .run_initial(
+                        material.approved_local_transcript(&approval, window)?,
+                        Arc::clone(&retained.completion),
+                    );
+                let remote_participants = retained
+                    .remote_actors
+                    .iter_mut()
+                    .map(|actor| actor.run_initial(material, &approval, window));
+                let ingresses = &retained.ingresses;
                 let coordinate = async {
-                    let manifest = manifest_round.sign(approval.manifest(), &ingresses).await?;
+                    let manifest = manifest_round.sign(approval.manifest(), ingresses).await?;
                     let transport = transport_round
-                        .sign(approval.transport(), &ingresses)
+                        .sign(approval.transport(), ingresses)
                         .await?;
                     let request = request_round
-                        .sign(approval.initial_request(), &ingresses)
+                        .sign(approval.initial_request(), ingresses)
                         .await?;
                     Ok::<_, AuraError>([manifest, transport, request])
                 };
@@ -4903,6 +5117,21 @@ impl ThresholdSigningService {
                     futures::future::try_join_all(remote_participants),
                     coordinate,
                 )?;
+                let actual = retained.material.take().ok_or_else(|| {
+                    AuraError::invalid("original issuer material missing at transition")
+                })?;
+                match actual.transfer_original_negative(
+                    &approval,
+                    Arc::clone(&retained.completion),
+                    window,
+                ) {
+                    Ok(actual) => retained.negative = Some(actual),
+                    Err(rejected) => {
+                        let (actual, source) = *rejected;
+                        retained.material = Some(actual);
+                        return Err(source);
+                    }
+                }
                 // All original participant/proxy frames are acknowledged before the
                 // caller can consume the held issuer reservation or execution lease.
                 Ok::<_, AuraError>(signatures)
@@ -4918,22 +5147,964 @@ impl ThresholdSigningService {
 }
 // Runtime assembly owns this group and
 // retains each returned move-only actor handle in its bounded service ingress.
+/// Original existing-device peer scope retained by the original participant
+/// holder and entry. Public inventory is observed; this is not an activation
+/// or a negative signing capability.
+pub(in crate::runtime::services) struct OriginalEnrollmentPeerContinuation {
+    approval: Arc<crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent>,
+    original: Arc<crate::runtime::services::enrollment_window::EnrollmentExecutionChild>,
+    native: Option<OriginalEnrollmentPeerNativeInventory>,
+    peer_native: Option<crate::runtime::effects::OriginalApprovedNativeAdmission>,
+    native_progress: OriginalEnrollmentPeerNativeProgress,
+    proposal: Option<aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal>,
+    accepted_at_ms: Option<u64>,
+    acceptance: Option<aura_sync::protocols::device_epoch_rotation::DeviceEpochAcceptance>,
+    commit: Option<aura_sync::protocols::device_epoch_rotation::DeviceEpochCommit>,
+    committed: bool,
+    commit_execution_acknowledged: bool,
+    #[cfg(test)]
+    commit_postread_test: Option<Arc<OriginalPeerCommitPostreadTest>>,
+    #[cfg(test)]
+    positive_actor_test: Option<Arc<OriginalPositiveActorTest>>,
+    pub(super) conditional_retirement: Option<Arc<OriginalRetiredConditionalTransportCustody>>,
+    peer_disposal: Option<crate::runtime::effects::AcknowledgedApprovedNativeDisposal>,
+    positive_terminal_retirement: Option<RetiredOriginalSigningMaterial>,
+    positive_contribution_completed: bool,
+    positive_execution_acknowledged: bool,
+    positive_execution_outcome: enrollment_transcript_signing::ConditionalOutcomeCustody,
+    positive_cleanup_retirement: Option<RetiredOriginalSigningMaterial>,
+    first_failure: Option<AuraError>,
+    changed: Arc<tokio::sync::Notify>,
+    proposal_consent: Option<OriginalDeviceProposalConsent>,
+    proposal_scope:
+        Option<aura_sync::protocols::device_epoch_rotation::DeviceEpochProposalTranscriptPayload>,
+}
+struct OriginalEnrollmentPeerNativeInventory {
+    device: DeviceId,
+    index: u16,
+    ordered_devices: Vec<DeviceId>,
+    public_package: Vec<u8>,
+    baseline_digest: [u8; 32],
+    baseline_count: u32,
+    final_commitment: [u8; 32],
+    baseline: Vec<aura_core::AttestedOp>,
+}
+impl OriginalEnrollmentPeerContinuation {
+    pub(super) fn from_original_root(
+        approval: Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        original: Arc<crate::runtime::services::enrollment_window::EnrollmentExecutionChild>,
+        changed: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        Self {
+            approval,
+            original,
+            native: None,
+            peer_native: None,
+            native_progress: OriginalEnrollmentPeerNativeProgress::default(),
+            proposal: None,
+            accepted_at_ms: None,
+            acceptance: None,
+            commit: None,
+            committed: false,
+            commit_execution_acknowledged: false,
+            #[cfg(test)]
+            commit_postread_test: None,
+            #[cfg(test)]
+            positive_actor_test: None,
+            conditional_retirement: None,
+            peer_disposal: None,
+            positive_terminal_retirement: None,
+            positive_contribution_completed: false,
+            positive_execution_acknowledged: false,
+            positive_execution_outcome:
+                enrollment_transcript_signing::ConditionalOutcomeCustody::default(),
+            positive_cleanup_retirement: None,
+            first_failure: None,
+            changed,
+            proposal_consent: None,
+            proposal_scope: None,
+        }
+    }
+
+    fn retain_original_proposal_consent(
+        &mut self,
+        lookup: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposalTranscriptPayload,
+        consent: &mut Option<OriginalDeviceProposalConsent>,
+    ) -> Result<(), AuraError> {
+        use aura_signature::SecurityTranscript;
+        use aura_sync::protocols::device_epoch_rotation::DeviceEpochProposalPurpose;
+        let native = self.native.as_ref().ok_or_else(|| {
+            AuraError::permission_denied("original peer native inventory not yet retained")
+        })?;
+        let actual = consent
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("actual original proposal consent absent"))?;
+        let manifest = self.approval.manifest();
+        let expected = enrollment_transcript_wire::original_participant_verifier(
+            &native.ordered_devices,
+            &native.public_package,
+            manifest.initiator_device,
+        )?;
+        let scope = actual.require_original_scope(self.approval.effects().as_ref(), &expected)?;
+        let manifest_bytes = manifest.required_transcript_bytes().map_err(|source| {
+            AuraError::crypto_with_source("bind original peer proposal manifest", Arc::new(source))
+        })?;
+        let DeviceEpochProposalPurpose::Enrollment {
+            manifest_digest,
+            enrolling_device_id,
+        } = &scope.purpose
+        else {
+            return Err(AuraError::permission_denied(
+                "peer consent is not enrollment scope",
+            ));
+        };
+        if aura_core::util::serialization::to_vec(&scope)?
+            != aura_core::util::serialization::to_vec(lookup)?
+            || *manifest_digest != aura_core::Hash32::new(aura_core::hash::hash(&manifest_bytes))
+            || *enrolling_device_id != manifest.invitee_device
+            || scope.subject_authority != manifest.subject
+            || scope.ceremony_id != manifest.ceremony
+            || scope.pending_epoch != manifest.pending_epoch
+            || scope.initiator_device_id != manifest.initiator_device
+            || scope.participant_device_id != native.device
+            || scope.public_key_package_hash
+                != aura_core::Hash32::new(manifest.pending_public_key_package_digest)
+            || scope.threshold_config_hash != manifest.pending_threshold_config_digest
+            || native.baseline_digest != manifest.baseline_digest
+            || native.baseline_count != manifest.baseline_count
+            || native.final_commitment != manifest.final_commitment
+        {
+            return Err(AuraError::permission_denied(
+                "proposal consent differs from complete original enrollment scope",
+            ));
+        }
+        if self.proposal_consent.is_some() {
+            return Err(AuraError::permission_denied(
+                "original peer proposal consent already retained",
+            ));
+        }
+        self.proposal_scope = Some(scope);
+        self.proposal_consent = consent.take();
+        Ok(())
+    }
+
+    fn require_proposal(
+        &self,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+    ) -> Result<(), AuraError> {
+        let native = self
+            .native
+            .as_ref()
+            .ok_or_else(|| AuraError::permission_denied("original peer inventory absent"))?;
+        let verifier = enrollment_transcript_wire::original_participant_verifier(
+            &native.ordered_devices,
+            &native.public_package,
+            self.approval.manifest().initiator_device,
+        )?;
+        self.proposal_consent
+            .as_ref()
+            .ok_or_else(|| AuraError::permission_denied("actual original proposal consent absent"))?
+            .require_original_proposal(self.approval.effects().as_ref(), proposal, &verifier)?;
+        if let Some(original) = &self.proposal {
+            if aura_core::util::serialization::to_vec(original)?
+                != aura_core::util::serialization::to_vec(proposal)?
+            {
+                return Err(AuraError::permission_denied(
+                    "original peer proposal already bound differently",
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn retain_failure(&mut self, source: &AuraError) {
+        self.first_failure.get_or_insert_with(|| source.clone());
+        self.changed.notify_waiters();
+    }
+    pub(super) fn dispose_peer_positive_for_cleanup(&mut self) -> Result<(), AuraError> {
+        self.native_progress.retire_positive_for_cleanup(
+            &self.approval,
+            &self.original,
+            &mut self.positive_cleanup_retirement,
+        )
+    }
+    pub(super) fn dispose_peer_native(&mut self) -> Result<(), AuraError> {
+        self.native_progress.dispose_original_material();
+        if self.peer_native.is_none() && self.peer_disposal.is_none() {
+            return Ok(());
+        }
+        if let Some(native) = self.peer_native.take() {
+            match native.dispose_original(&self.approval) {
+                Ok(actual) => self.peer_disposal = Some(actual),
+                Err(rejected) => {
+                    let (native, source) = *rejected;
+                    self.peer_native = Some(native);
+                    return Err(source);
+                }
+            }
+        }
+        let actual = self
+            .peer_disposal
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original peer native disposal absent"))?;
+        actual.require_original(&self.approval)?;
+        if let Some(source) = actual.original_failure() {
+            return Err(source.clone());
+        }
+        self.changed.notify_waiters();
+        Ok(())
+    }
+    pub(super) fn peer_activation_ready(&self) -> Result<bool, AuraError> {
+        if let Some(source) = &self.first_failure {
+            return Err(source.clone());
+        }
+        if !(self.committed && self.peer_disposal.is_some() && self.commit_execution_acknowledged) {
+            return Ok(false);
+        }
+        let disposal = self
+            .peer_disposal
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("peer disposal absent"))?;
+        disposal.require_original(&self.approval)?;
+        if let Some(source) = disposal.original_failure() {
+            return Err(source.clone());
+        }
+        if self.positive_terminal_retirement.is_some() {
+            return Ok(true);
+        }
+        let material = self
+            .native_progress
+            .positive_terminal()
+            .ok_or_else(|| AuraError::invalid("original peer positive owner absent"))?;
+        material.require_original(&self.approval, &self.original)?;
+        Ok(true)
+    }
+    pub(super) async fn finish_original_positive(
+        owner: &super::enrollment_window::OriginalPeerPositiveContinuationOwner,
+        original: &super::enrollment_window::EnrollmentExecutionChild,
+        approval: &Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        actor: &mut OriginalEnrollmentTranscriptActor,
+        dispatcher: &mut OriginalPositiveDispatcher,
+        ingress: &EnrollmentTranscriptParticipantIngress,
+    ) -> Result<(), AuraError> {
+        let mut retained_guard = None;
+        let observed = owner
+            .execute(original, approval, |cell| {
+                let retained_guard = &mut retained_guard;
+                async move {
+                    *retained_guard = Some(cell.lock_owned().await);
+                    let actual = retained_guard
+                        .as_mut()
+                        .ok_or_else(|| AuraError::invalid("original peer lock absent"))?;
+                    let operation = async {
+                        if !actual.peer_activation_ready()? {
+                            return Err(AuraError::invalid("original peer activation unresolved"));
+                        }
+                        #[cfg(test)]
+                        if let Some(test) = actual.positive_actor_test.take() {
+                            actor.install_positive_test(test);
+                        }
+                        if !actual.positive_contribution_completed {
+                            let material =
+                                actual.native_progress.positive_terminal().ok_or_else(|| {
+                                    AuraError::invalid("original peer positive owner absent")
+                                })?;
+                            tokio::try_join!(
+                                actor.run_positive(material, approval, original),
+                                dispatcher.run(material, approval, original, ingress)
+                            )?;
+                            actual.positive_contribution_completed = true;
+                        }
+                        if actual.positive_terminal_retirement.is_none() {
+                            let Self {
+                                native_progress,
+                                positive_terminal_retirement,
+                                ..
+                            } = &mut **actual;
+                            native_progress.retire_positive_for_cleanup(
+                                approval,
+                                original,
+                                positive_terminal_retirement,
+                            )?;
+                        }
+                        Ok::<(), AuraError>(())
+                    }
+                    .await;
+                    if let Err(source) = &operation {
+                        actual.retain_failure(source);
+                    }
+                    operation
+                }
+            })
+            .await;
+        let result = match observed {
+            Ok(observed) => match retained_guard.as_mut() {
+                Some(actual) => actual.positive_execution_outcome.retain(observed),
+                None => Err(AuraError::invalid(
+                    "original peer operation did not acquire its retained cell",
+                )),
+            },
+            Err(source) => Err(source),
+        };
+        if let Some(actual) = retained_guard.as_mut() {
+            match &result {
+                Ok(()) => {
+                    actual.positive_execution_acknowledged = true;
+                    actual.changed.notify_waiters();
+                }
+                Err(source) => actual.retain_failure(source),
+            }
+        }
+        result
+    }
+    #[cfg(test)]
+    pub(super) fn completed_peer_activation(&self) -> Result<bool, AuraError> {
+        if let Some(source) = &self.first_failure {
+            return Err(source.clone());
+        }
+        if !(self.committed && self.peer_disposal.is_some() && self.commit_execution_acknowledged) {
+            return Ok(false);
+        }
+        if !(self.positive_contribution_completed && self.positive_execution_acknowledged) {
+            return Ok(false);
+        }
+        let Some(retired) = &self.positive_terminal_retirement else {
+            return Ok(false);
+        };
+        retired.require_original(&self.approval)?;
+        Ok(true)
+    }
+
+    pub(super) fn retain_original_native_reentry(
+        &mut self,
+        disposal: &mut crate::runtime::effects::AcknowledgedApprovedNativeDisposal,
+    ) -> Result<(), AuraError> {
+        disposal.require_original(&self.approval)?;
+        if self.native.is_none() {
+            return Err(AuraError::permission_denied(
+                "actual original peer baseline absent",
+            ));
+        }
+        if self.peer_native.is_none() {
+            self.peer_native = Some(disposal.prepare_original_peer_reentry(&self.approval)?);
+        }
+        Ok(())
+    }
+
+    pub(super) fn retain_original_native_inventory(
+        &mut self,
+        material: &ValidatedLocalEnrollmentSigningMaterial,
+        baseline: &[aura_core::AttestedOp],
+    ) -> Result<(), AuraError> {
+        material
+            .custody
+            .require_manifest(material.effects.as_ref(), self.approval.manifest())?;
+        if !Arc::ptr_eq(&material.effects, self.approval.effects())
+            || material.approved_intent_digest != self.approval.canonical_intent_digest()
+            || material.device != self.approval.effects().device_id()
+        {
+            return Err(AuraError::permission_denied(
+                "peer inventory differs from original participant",
+            ));
+        }
+        if let Some(native) = &self.native {
+            if native.device != material.device
+                || native.index != material.index
+                || native.ordered_devices != material.ordered_devices
+                || native.public_package != material.public_package
+                || aura_core::util::serialization::to_vec(&native.baseline)?
+                    != aura_core::util::serialization::to_vec(&baseline)?
+            {
+                return Err(AuraError::permission_denied(
+                    "original peer inventory already retained differently",
+                ));
+            }
+            return Ok(());
+        }
+        let manifest = self.approval.manifest();
+        self.native = Some(OriginalEnrollmentPeerNativeInventory {
+            device: material.device,
+            index: material.index,
+            ordered_devices: material.ordered_devices.clone(),
+            public_package: material.public_package.clone(),
+            baseline_digest: manifest.baseline_digest,
+            baseline_count: manifest.baseline_count,
+            final_commitment: manifest.final_commitment,
+            baseline: baseline.to_vec(),
+        });
+        Ok(())
+    }
+}
+
 pub(super) struct StartedEnrollmentManifestParticipant {
     subject: aura_core::AuthorityId,
     ceremony: aura_core::CeremonyId,
     ingress: enrollment_transcript_signing::EnrollmentTranscriptParticipantIngress,
-    task: aura_core::OwnedTaskHandle<u64>,
+    task: crate::task_registry::OriginalRequiredTaskHandle,
     group: crate::task_registry::TaskGroup,
     effects: Arc<AuraEffectSystem>,
     original_window: Arc<crate::runtime::services::enrollment_window::EnrollmentExecutionChild>,
+    peer_continuation: Arc<tokio::sync::Mutex<OriginalEnrollmentPeerContinuation>>,
+}
+
+/// Finite existing-device enrollment admission, distinct from invitee proof and
+/// conditional negative signing. The actual state stays in the original holder.
+pub(crate) struct OriginalEnrollmentPeerAdmission {
+    cell: Arc<tokio::sync::Mutex<OriginalEnrollmentPeerContinuation>>,
+    original: Arc<crate::runtime::services::enrollment_window::EnrollmentExecutionChild>,
+    effects: Arc<AuraEffectSystem>,
+    service: ThresholdSigningService,
+    proposal_digest: [u8; 32],
+}
+impl OriginalEnrollmentPeerAdmission {
+    fn require_proposal(
+        &self,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+    ) -> Result<(), AuraError> {
+        if aura_core::hash::hash(&aura_core::util::serialization::to_vec(proposal)?)
+            != self.proposal_digest
+        {
+            return Err(AuraError::permission_denied(
+                "peer admission proposal changed",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) async fn prepare_acceptance(
+        &self,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+    ) -> Result<aura_sync::protocols::device_epoch_rotation::DeviceEpochAcceptance, AuraError> {
+        self.require_proposal(proposal)?;
+        let mut retained_guard = None;
+        let result = self
+            .original
+            .execute(self.effects.as_ref(), || async {
+                retained_guard = Some(Arc::clone(&self.cell).lock_owned().await);
+                let cell = retained_guard
+                    .as_mut()
+                    .ok_or_else(|| AuraError::invalid("original peer guard absent"))?;
+                let result = async {
+                    cell.require_proposal(proposal)?;
+                    if let Some(source) = &cell.first_failure {
+                        return Err(source.clone());
+                    }
+                    if let Some(actual) = &cell.acceptance {
+                        return Ok(actual.clone());
+                    }
+                    if cell.accepted_at_ms.is_none() {
+                        cell.accepted_at_ms = Some(self.effects.physical_time().await?.ts_ms);
+                    }
+                    let accepted_at = cell
+                        .accepted_at_ms
+                        .ok_or_else(|| AuraError::invalid("original acceptance time absent"))?;
+                    let OriginalEnrollmentPeerContinuation {
+                        peer_native,
+                        approval,
+                        proposal_consent,
+                        native_progress,
+                        acceptance,
+                        ..
+                    } = &mut **cell;
+                    let actual = self
+                        .service
+                        .prepare_original_enrollment_peer_acceptance(
+                            peer_native.as_mut().ok_or_else(|| {
+                                AuraError::invalid("original peer native owner absent")
+                            })?,
+                            approval,
+                            proposal_consent
+                                .as_ref()
+                                .ok_or_else(|| AuraError::invalid("original consent absent"))?,
+                            proposal,
+                            accepted_at,
+                            native_progress,
+                        )
+                        .await?;
+                    *acceptance = Some(actual.clone());
+                    Ok(actual)
+                }
+                .await;
+                if let Err(source) = &result {
+                    cell.retain_failure(source);
+                }
+                result
+            })
+            .await
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "prepare original enrollment peer acceptance",
+                    Arc::new(source),
+                )
+            });
+        if let Err(source) = &result {
+            if let Some(cell) = retained_guard.as_mut() {
+                cell.retain_failure(source);
+            }
+        }
+        result
+    }
+    #[cfg(test)]
+    pub(crate) async fn apply_verified_commit_with_postread_drop_test(
+        &self,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+        commit: &aura_sync::protocols::device_epoch_rotation::DeviceEpochCommit,
+    ) -> Result<(), AuraError> {
+        let test = self.cell.lock().await.commit_postread_test.clone();
+        let Some(test) = test else {
+            return self.apply_verified_commit(proposal, commit).await;
+        };
+        let mut original = Box::pin(self.apply_verified_commit(proposal, commit));
+        tokio::select! {
+            _ = test.entered.notified() => {},
+            result = &mut original => panic!("actual original commit ended before postread gate: {result:?}"),
+        }
+        drop(original);
+        {
+            let actual = self.cell.lock().await;
+            assert!(actual.committed, "real signed commit retained");
+            assert!(
+                actual.peer_disposal.is_some(),
+                "actual native disposal retained"
+            );
+            assert!(!actual.commit_execution_acknowledged);
+            assert!(actual.first_failure.is_none());
+            assert!(!actual.completed_peer_activation()?);
+        }
+        if test.cleanup {
+            let source = AuraError::crypto_with_source(
+                "actual peer execution cancelled by test",
+                test.cleanup_source.clone(),
+            );
+            self.cell.lock().await.retain_failure(&source);
+            test.release.notify_one();
+            let observer = test
+                .disposal
+                .lock()
+                .expect("original disposal observation lock")
+                .take()
+                .expect("actual original disposal observer");
+            let disposed = observer.await_disposal().await;
+            let aura_core::effects::task::RequiredTaskExit::Failed(actual_source) =
+                disposed.outcome()
+            else {
+                panic!(
+                    "expected original failed execution, got {:?}",
+                    disposed.outcome()
+                );
+            };
+            let mut native: Option<&(dyn std::error::Error + 'static)> = Some(&actual_source);
+            let mut found = false;
+            while let Some(actual) = native {
+                if let Some(actual) = actual.downcast_ref::<OriginalPeerCleanupCancellation>() {
+                    found = std::ptr::eq(actual, test.cleanup_source.as_ref());
+                    break;
+                }
+                native = actual.source();
+            }
+            assert!(
+                found,
+                "same concrete cancellation source retained through required disposal"
+            );
+            {
+                let actual = self.cell.lock().await;
+                assert!(actual.committed && actual.peer_disposal.is_some());
+                assert!(actual.native_progress.positive_terminal().is_none());
+                actual
+                    .positive_cleanup_retirement
+                    .as_ref()
+                    .expect("actual cleanup retirement")
+                    .require_original(&actual.approval)?;
+                assert!(actual.positive_terminal_retirement.is_none());
+                assert!(actual.completed_peer_activation().is_err());
+                assert!(!actual.commit_execution_acknowledged);
+            }
+            test.completed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            test.cleanup_completed.notify_one();
+            eprintln!("original positive cleanup regression: actual material retired by SAME required holder; original Committed decision unchanged; no positive completion");
+            return Err(source);
+        }
+        test.release.notify_one();
+        self.apply_verified_commit(proposal, commit).await?;
+        {
+            let actual = self.cell.lock().await;
+            assert!(actual.commit_execution_acknowledged);
+            assert!(actual.committed && actual.peer_disposal.is_some());
+            assert!(actual.native_progress.positive_terminal().is_some());
+            assert!(
+                !actual.completed_peer_activation()?,
+                "positive terminal owner still retained"
+            );
+        }
+        test.completed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        eprintln!("original peer postread Drop regression: actual commit/disposal retained unresolved; SAME admission reentry validated commit ACK; positive terminal owner remains retained");
+        Ok(())
+    }
+    pub(crate) async fn apply_verified_commit(
+        &self,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+        commit: &aura_sync::protocols::device_epoch_rotation::DeviceEpochCommit,
+    ) -> Result<(), AuraError> {
+        self.require_proposal(proposal)?;
+        let mut retained_guard = None;
+        let result = self
+            .original
+            .execute(self.effects.as_ref(), || async {
+                retained_guard = Some(Arc::clone(&self.cell).lock_owned().await);
+                let cell = retained_guard
+                    .as_mut()
+                    .ok_or_else(|| AuraError::invalid("original peer guard absent"))?;
+                let result = async {
+                    cell.require_proposal(proposal)?;
+                    if let Some(source) = &cell.first_failure {
+                        return Err(source.clone());
+                    }
+                    if let Some(original) = &cell.commit {
+                        if aura_core::util::serialization::to_vec(original)?
+                            != aura_core::util::serialization::to_vec(commit)?
+                        {
+                            return Err(AuraError::permission_denied(
+                                "original peer commit changed",
+                            ));
+                        }
+                    } else {
+                        cell.commit = Some(commit.clone());
+                    }
+                    if !cell.committed {
+                        let OriginalEnrollmentPeerContinuation {
+                            peer_native,
+                            approval,
+                            proposal_consent,
+                            native_progress,
+                            conditional_retirement,
+                            ..
+                        } = &mut **cell;
+                        let retirement = conditional_retirement.as_deref().ok_or_else(|| {
+                            AuraError::invalid("actual conditional retirement absent")
+                        })?;
+                        retirement.require_original_window(&self.original)?;
+                        self.service
+                            .apply_original_enrollment_peer_commit(
+                                peer_native.as_mut().ok_or_else(|| {
+                                    AuraError::invalid("original peer native owner absent")
+                                })?,
+                                approval,
+                                proposal_consent
+                                    .as_ref()
+                                    .ok_or_else(|| AuraError::invalid("original consent absent"))?,
+                                proposal,
+                                commit,
+                                retirement,
+                                &self.original,
+                                native_progress,
+                            )
+                            .await?;
+                        native_progress
+                            .positive_terminal()
+                            .ok_or_else(|| {
+                                AuraError::invalid("actual positive terminal material absent")
+                            })?
+                            .require_original(approval, &self.original)?;
+                        cell.committed = true;
+                    }
+                    cell.dispose_peer_native()?;
+                    #[cfg(test)]
+                    if !cell.commit_execution_acknowledged {
+                        if let Some(test) = &cell.commit_postread_test {
+                            test.arm();
+                        }
+                    }
+                    Ok(())
+                }
+                .await;
+                if let Err(source) = &result {
+                    cell.retain_failure(source);
+                }
+                result
+            })
+            .await
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "apply original enrollment peer commit",
+                    Arc::new(source),
+                )
+            });
+        if let Some(cell) = retained_guard.as_mut() {
+            match &result {
+                Ok(()) => {
+                    cell.commit_execution_acknowledged = true;
+                    cell.changed.notify_waiters();
+                }
+                Err(source) => cell.retain_failure(source),
+            }
+        }
+        result
+    }
+}
+
+impl ThresholdSigningService {
+    #[cfg(test)]
+    pub(crate) async fn install_original_peer_commit_postread_test(
+        &self,
+        subject: aura_core::AuthorityId,
+        ceremony: &aura_core::CeremonyId,
+        test: Arc<OriginalPeerCommitPostreadTest>,
+    ) -> Result<(), AuraError> {
+        let (cell, original, effects) = self.shared.quorum.original_peer_continuation(
+            subject,
+            ceremony,
+            self.effects.device_id(),
+        )?;
+        if test.cleanup {
+            *test
+                .disposal
+                .lock()
+                .expect("original disposal observation lock") =
+                Some(self.shared.quorum.original_peer_disposal_for_test(
+                    subject,
+                    ceremony,
+                    self.effects.device_id(),
+                )?);
+        }
+        original
+            .execute(effects.as_ref(), || async {
+                let mut actual = cell.lock().await;
+                assert!(actual.commit_postread_test.is_none());
+                actual.commit_postread_test = Some(test);
+                Ok::<(), AuraError>(())
+            })
+            .await
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "install original postread observation",
+                    Arc::new(source),
+                )
+            })
+    }
+    #[cfg(test)]
+    pub(crate) async fn install_original_positive_actor_test(
+        &self,
+        subject: aura_core::AuthorityId,
+        ceremony: &aura_core::CeremonyId,
+        test: Arc<OriginalPositiveActorTest>,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, AuraError> {
+        let (cell, original, effects) = self.shared.quorum.original_peer_continuation(
+            subject,
+            ceremony,
+            self.effects.device_id(),
+        )?;
+        let disposal = self.shared.quorum.original_peer_disposal_for_test(
+            subject,
+            ceremony,
+            self.effects.device_id(),
+        )?;
+        original
+            .execute(effects.as_ref(), || async {
+                let mut actual = cell.lock().await;
+                assert!(actual.positive_actor_test.is_none());
+                actual.positive_actor_test = Some(test);
+                Ok::<(), AuraError>(())
+            })
+            .await
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "install actual positive actor test",
+                    Arc::new(source),
+                )
+            })?;
+        Ok(disposal)
+    }
+    #[cfg(test)]
+    pub(crate) async fn assert_original_positive_actor_cleanup(
+        &self,
+        subject: aura_core::AuthorityId,
+        ceremony: &aura_core::CeremonyId,
+    ) {
+        let (cell, _, _) = self
+            .shared
+            .quorum
+            .original_peer_continuation(subject, ceremony, self.effects.device_id())
+            .expect("same retained failed peer cell");
+        let actual = cell.lock().await;
+        assert!(actual.committed && actual.commit_execution_acknowledged);
+        assert!(actual.peer_disposal.is_some());
+        assert!(actual.first_failure.is_some());
+        assert!(actual.native_progress.positive_terminal().is_none());
+        actual
+            .positive_cleanup_retirement
+            .as_ref()
+            .expect("actual original positive cleanup retirement")
+            .require_original(&actual.approval)
+            .unwrap();
+        assert!(actual.positive_terminal_retirement.is_none());
+        assert!(!actual.positive_contribution_completed && !actual.positive_execution_acknowledged);
+        assert!(actual.completed_peer_activation().is_err());
+    }
+    pub(crate) async fn admit_original_enrollment_peer(
+        &self,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+    ) -> Result<OriginalEnrollmentPeerAdmission, AuraError> {
+        let (cell, original, effects) = self.shared.quorum.original_peer_continuation(
+            proposal.subject_authority,
+            &proposal.ceremony_id,
+            self.effects.device_id(),
+        )?;
+        if !Arc::ptr_eq(&effects, &self.effects) {
+            return Err(AuraError::permission_denied(
+                "original peer runtime changed",
+            ));
+        }
+        let mut retained_guard = None;
+        let result = original
+            .execute(effects.as_ref(), || async {
+                retained_guard = Some(Arc::clone(&cell).lock_owned().await);
+                let actual = retained_guard
+                    .as_mut()
+                    .ok_or_else(|| AuraError::invalid("original peer guard absent"))?;
+                let result = async {
+                    actual.require_proposal(proposal)?;
+                    if let Some(source) = &actual.first_failure {
+                        return Err(source.clone());
+                    }
+                    if actual.proposal.is_none() {
+                        actual.proposal = Some(proposal.clone());
+                    }
+                    let OriginalEnrollmentPeerContinuation {
+                        approval,
+                        peer_native,
+                        ..
+                    } = &mut **actual;
+                    peer_native
+                        .as_mut()
+                        .ok_or_else(|| AuraError::invalid("original peer archive seed absent"))?
+                        .acquire_original(approval)
+                        .await
+                }
+                .await;
+                if let Err(source) = &result {
+                    actual.retain_failure(source);
+                }
+                result
+            })
+            .await
+            .map_err(|source| {
+                AuraError::crypto_with_source("admit original enrollment peer", Arc::new(source))
+            });
+        if let Err(source) = &result {
+            if let Some(actual) = retained_guard.as_mut() {
+                actual.retain_failure(source);
+            }
+        }
+        drop(retained_guard);
+        result?;
+        Ok(OriginalEnrollmentPeerAdmission {
+            cell,
+            original,
+            effects,
+            service: self.clone(),
+            proposal_digest: aura_core::hash::hash(&aura_core::util::serialization::to_vec(
+                proposal,
+            )?),
+        })
+    }
+}
+
+impl ThresholdSigningService {
+    pub(crate) fn verify_original_enrollment_peer_possession(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+        device: DeviceId,
+        claimed: &DevicePossessionProof,
+        message: &[u8],
+    ) -> Result<(), AuraError> {
+        issued.require_runtime_owner(self.effects.as_ref())?;
+        original.require_issued_notice_owner(issued)?;
+        let manifest = issued.manifest();
+        let root = manifest
+            .final_inventory
+            .iter()
+            .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
+            .ok_or_else(|| {
+                AuraError::permission_denied("original enrollment root verifier absent")
+            })?;
+        let devices = root
+            .participants
+            .iter()
+            .map(|participant| match participant {
+                ParticipantIdentity::Device(device) => Ok(*device),
+                _ => Err(AuraError::permission_denied(
+                    "original enrollment roster is not device scoped",
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let index = devices
+            .iter()
+            .position(|candidate| *candidate == device)
+            .and_then(|offset| u16::try_from(offset + 1).ok())
+            .ok_or_else(|| {
+                AuraError::permission_denied("peer absent from original enrolled roster")
+            })?;
+        if claimed.epoch != root.epoch
+            || claimed.index != index
+            || claimed.package_digest != aura_core::Hash32::from_bytes(&root.public_key_package)
+        {
+            return Err(AuraError::permission_denied(
+                "peer possession differs from original enrollment policy",
+            ));
+        }
+        let verifier = enrollment_transcript_wire::original_participant_verifier(
+            &devices,
+            &root.public_key_package,
+            device,
+        )?;
+        aura_core::crypto::participant_proof::verify_participant_key_proof(
+            message,
+            &claimed.proof,
+            &verifier,
+            aura_core::effects::crypto::SigningMode::Threshold,
+        )
+    }
+
+    pub(super) async fn retain_original_enrollment_proposal_consent(
+        &self,
+        scope: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposalTranscriptPayload,
+        consent: &mut Option<OriginalDeviceProposalConsent>,
+    ) -> Result<(), AuraError> {
+        let (cell, original, effects) = self.shared.quorum.original_peer_continuation(
+            scope.subject_authority,
+            &scope.ceremony_id,
+            self.effects.device_id(),
+        )?;
+        if !Arc::ptr_eq(&effects, &self.effects) {
+            return Err(AuraError::permission_denied(
+                "original peer entry belongs to another runtime",
+            ));
+        }
+        original
+            .execute(effects.as_ref(), || async {
+                cell.lock()
+                    .await
+                    .retain_original_proposal_consent(scope, consent)
+            })
+            .await
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "retain actual original peer proposal consent",
+                    Arc::new(source),
+                )
+            })
+    }
 }
 
 impl StartedEnrollmentManifestParticipant {
-    async fn cancel_and_drain(self) -> Result<(), AuraError> {
-        tracing::debug!(
-            task_id = *self.task.handle_id(),
-            "Cancel original approved signing participant"
-        );
+    async fn cancel_and_drain(mut self) -> Result<(), AuraError> {
+        use aura_core::effects::task::RequiredTaskControl;
+        self.task.request_cancel();
         let result = self
             .original_window
             .shutdown_owned_group(self.effects.as_ref(), &self.group)
@@ -4977,58 +6148,34 @@ impl ThresholdSigningService {
             approval.manifest().ceremony,
             self.effects.device_id()
         ));
-        let effects = self.effects.clone();
         // Clock admission precedes native custody acquisition. It cannot mint
         // signing authority and cannot accept a reconstructed caller budget.
-        let original = Arc::new(crate::runtime::services::enrollment_window::EnrollmentExecutionChild::approved_signing(
-            self.effects.clone(), &approval,
-        ).await?);
-        let readiness_window = Arc::clone(&original);
+        let root =
+            crate::runtime::services::enrollment_window::EnrollmentExecutionRoot::approved_signing(
+                self.effects.clone(),
+                approval,
+                &actor_group,
+            )
+            .await?;
+
         let (ready_sender, ready_receiver) = tokio::sync::oneshot::channel();
-        let participant_task = async move {
-            let mut ready_sender = Some(ready_sender);
-            let outcome = async {
-                let custody = original.execute(
-                    effects.as_ref(),
-                    || effects.acquire_approved_enrollment_tree_custody(&approval),
-                ).await.map_err(|source| AuraError::Crypto {
-                    message: "original approved participant custody acquisition failed".into(),
-                    source: Some(Arc::new(source)),
-                })?;
-                let owner = crate::runtime::effects::EnrollmentTranscriptTreeOwner::from_original_participant(&custody);
-                let material = original.execute(
-                    effects.as_ref(),
-                    || service.admit_local_enrollment_transcript_material(&approval, &owner),
-                ).await.map_err(|source| AuraError::Crypto {
-                    message: "original approved participant material admission failed".into(),
-                    source: Some(Arc::new(source)),
-                })?;
-                let (ingress, participant) = material.prepare_manifest_participant(&approval, &original)?;
-                let sender = ready_sender.take().ok_or_else(|| AuraError::Crypto {
-                    message: "original approved readiness sender already retired".into(),
-                    source: Some(Arc::new(enrollment_transcript_signing::EnrollmentTranscriptSigningError::ResponseCancelled)),
-                })?;
-                sender.send(Ok(ingress.clone()))
-                    .map_err(|_| AuraError::Crypto {
-                        message: "original approved participant readiness receiver cancelled".into(),
-                        source: Some(Arc::new(enrollment_transcript_signing::EnrollmentTranscriptSigningError::ResponseCancelled)),
-                    })?;
-                // All actual native custody remains in this owned actor frame.
-                let dispatcher = material.dispatch_original_participant(&approval, &original, &ingress);
-                tokio::try_join!(participant, dispatcher).map(|_| ())
-            }.await;
-            if let Err(original) = &outcome {
-                if let Some(sender) = ready_sender.take() {
-                    let _ = sender.send(Err(original.clone()));
-                }
-            }
-            outcome
-        };
+        let retained =
+            crate::runtime::services::enrollment_window::OriginalSigningTaskCustody::admit(
+                root,
+                service,
+                ready_sender,
+            );
+        let peer_continuation = retained.peer_continuation();
+        let readiness_window = retained.peer_original_window();
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let task = actor_group.spawn_local_try_named("enrollment.approved-manifest-participant", participant_task);
+                let task = actor_group.spawn_original_local_required_custody(
+                    "enrollment.approved-manifest-participant".into(), Box::new(retained), None,
+                ).map_err(|rejected| retain_rejected_signing_custody(rejected.into_local()))?;
             } else {
-                let task = actor_group.spawn_try_named("enrollment.approved-manifest-participant", participant_task);
+                let task = actor_group.spawn_original_required_custody(
+                    "enrollment.approved-manifest-participant".into(), Box::new(retained), None,
+                ).map_err(|rejected| retain_rejected_signing_custody(rejected.into_native()))?;
             }
         }
         let readiness = readiness_window
@@ -5085,6 +6232,7 @@ impl ThresholdSigningService {
             group: actor_group,
             effects: self.effects.clone(),
             original_window: readiness_window,
+            peer_continuation,
         })
     }
 }
@@ -5108,5 +6256,1496 @@ impl std::fmt::Display for EnrollmentParticipantStartupFailure {
 impl std::error::Error for EnrollmentParticipantStartupFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.primary)
+    }
+}
+
+#[derive(thiserror::Error)]
+#[error("original approved signing custody admission failed")]
+struct RejectedSigningTaskCustody<T: ?Sized + Send> {
+    #[source]
+    source: AuraError,
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    retained: parking_lot::Mutex<Box<T>>,
+}
+impl<T: ?Sized + Send> std::fmt::Debug for RejectedSigningTaskCustody<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RejectedSigningTaskCustody")
+    }
+}
+#[allow(
+    clippy::disallowed_types,
+    reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+)]
+fn retain_rejected_signing_custody<T: ?Sized + Send + 'static>(
+    rejected: aura_core::effects::task::RejectedRequiredTask<T>,
+) -> AuraError {
+    AuraError::Internal {
+        message: "admit original approved signing custody".into(),
+        source: Some(Arc::new(RejectedSigningTaskCustody {
+            source: rejected.source,
+            retained: parking_lot::Mutex::new(rejected.obligation),
+        })),
+    }
+}
+
+pub(super) struct RetiredOriginalSigningMaterial {
+    effects: Arc<AuraEffectSystem>,
+    approved_intent_digest: [u8; 32],
+    device: DeviceId,
+}
+impl RetiredOriginalSigningMaterial {
+    pub(super) fn require_original(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+            || self.device != approval.effects().device_id()
+        {
+            return Err(AuraError::permission_denied(
+                "original signing material disposal owner mismatch",
+            ));
+        }
+        Ok(())
+    }
+}
+impl ValidatedLocalEnrollmentSigningMaterial {
+    pub(super) fn retire_original(
+        mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<RetiredOriginalSigningMaterial, Box<(Self, AuraError)>> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+        {
+            return Err(Box::new((
+                self,
+                AuraError::permission_denied("original signing material retirement owner mismatch"),
+            )));
+        }
+        if let Err(source) = self
+            .custody
+            .require_manifest(self.effects.as_ref(), approval.manifest())
+        {
+            return Err(Box::new((self, source)));
+        }
+        use zeroize::Zeroize;
+        self.local_share.zeroize();
+        let actual = RetiredOriginalSigningMaterial {
+            effects: Arc::clone(&self.effects),
+            approved_intent_digest: self.approved_intent_digest,
+            device: self.device,
+        };
+        drop(self);
+        Ok(actual)
+    }
+}
+
+#[cfg(test)]
+impl ThresholdSigningService {
+    pub(crate) async fn original_prepared_issuer_probe_for_test(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<enrollment_quorum_registry::OriginalPreparedIssuerProbe, AuraError> {
+        Ok(self
+            .shared
+            .quorum
+            .take_for_original_approval(approval)
+            .await?
+            .probe_for_test())
+    }
+    pub(crate) async fn launch_original_prepared_probe_for_test(
+        &self,
+        agent: Arc<crate::core::AuraAgent>,
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<enrollment_quorum_registry::OriginalPreparedIssuerProbe, AuraError> {
+        Ok(self.launch_original_issuer(agent, "Original allocation custody".into(), setup,
+            crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode::UserApprovedQuorum).await?.probe_for_test())
+    }
+    pub(crate) async fn launch_original_single_signer_probe_for_test(
+        &self,
+        agent: Arc<crate::core::AuraAgent>,
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<enrollment_quorum_registry::OriginalPreparedIssuerProbe, AuraError> {
+        Ok(self
+            .launch_original_issuer(
+                agent,
+                "Original single-signer custody".into(),
+                setup,
+                crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode::SingleSigner,
+            )
+            .await?
+            .probe_for_test())
+    }
+    pub(crate) async fn cancel_original_prepared_for_test(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        self.shared
+            .quorum
+            .take_for_original_approval(approval)
+            .await?
+            .cancel_and_drain()
+            .await
+    }
+}
+
+/// Finite old-policy material retained for the actual committed control only.
+/// This custody carries no arbitrary transcript or membership permission.
+pub(super) struct OriginalPositiveTerminalSigningMaterial {
+    effects: Arc<AuraEffectSystem>,
+    approved_intent_digest: [u8; 32],
+    device: DeviceId,
+    index: u16,
+    threshold: u16,
+    ordered_devices: Vec<DeviceId>,
+    public_package: Vec<u8>,
+    local_share: zeroize::Zeroizing<Vec<u8>>,
+    original_window: super::enrollment_window::OriginalConditionalSigningWindowIdentity,
+    origin: OriginalPositiveTerminalOrigin,
+}
+enum OriginalPositiveTerminalOrigin {
+    Issuer {
+        original: std::sync::Weak<
+            crate::runtime::services::ceremony_tracker::RegisteredEnrollmentWindowCapability,
+        >,
+        decision_digest: [u8; 32],
+    },
+    Peer(Box<OriginalPeerPositiveActivationReceipt>),
+}
+struct OriginalPeerPositiveActivationReceipt {
+    proposal: aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+    commit: aura_sync::protocols::device_epoch_rotation::DeviceEpochCommit,
+    acceptance: aura_sync::protocols::device_epoch_rotation::DeviceEpochAcceptance,
+}
+impl OriginalPositiveTerminalSigningMaterial {
+    pub(super) fn retire_original(
+        mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<RetiredOriginalSigningMaterial, Box<(Self, AuraError)>> {
+        if let Err(source) = self.require_original(approval, child) {
+            return Err(Box::new((self, source)));
+        }
+        use zeroize::Zeroize;
+        self.local_share.zeroize();
+        let retired = RetiredOriginalSigningMaterial {
+            effects: Arc::clone(&self.effects),
+            approved_intent_digest: self.approved_intent_digest,
+            device: self.device,
+        };
+        drop(self);
+        Ok(retired)
+    }
+
+    pub(super) fn require_original(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), AuraError> {
+        self.original_window.require_child(child)?;
+        let parents = approval.manifest().final_inventory().map_err(|source| {
+            AuraError::crypto_with_source(
+                "original positive terminal native policy",
+                Arc::new(source),
+            )
+        })?;
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+            || self.device != self.effects.device_id()
+            || parents.len() != 1
+            || parents[0].public_key_package != self.public_package
+            || self
+                .ordered_devices
+                .get(usize::from(self.index.saturating_sub(1)))
+                != Some(&self.device)
+            || self.local_share.is_empty()
+            || self.threshold < 2
+        {
+            return Err(AuraError::permission_denied(
+                "original positive terminal material differs from retained native owner",
+            ));
+        }
+        if let OriginalPositiveTerminalOrigin::Peer(actual) = &self.origin {
+            let hash = aura_sync::protocols::device_epoch_rotation::device_epoch_proposal_hash(
+                &actual.proposal,
+            )?;
+            if actual.proposal.subject_authority != approval.manifest().subject
+                || actual.proposal.ceremony_id != approval.manifest().ceremony
+                || actual.proposal.pending_epoch != approval.manifest().pending_epoch
+                || actual.proposal.participant_device_id != self.device
+                || actual.acceptance.proposal_hash != hash
+                || actual.commit.proposal_hash != hash
+                || actual.commit.new_epoch != approval.manifest().pending_epoch
+            {
+                return Err(AuraError::permission_denied(
+                    "positive terminal material lacks its actual peer activation",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The same issuer actors, conditional material and original signing sessions.
+/// Physical native guard disposal is separate from final share retirement.
+pub(crate) struct OriginalIssuerTranscriptSigningCustody {
+    approval: Arc<crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent>,
+    material: Option<ValidatedLocalEnrollmentSigningMaterial>,
+    negative: Option<OriginalNegativeTerminalSigningMaterial>,
+    material_retirement: Option<RetiredOriginalSigningMaterial>,
+    completion: Arc<OriginalParticipantCompletionCustody>,
+    local_actor: Option<enrollment_transcript_signing::OriginalEnrollmentTranscriptActor>,
+    remote_actors: Vec<enrollment_transcript_proxy::OriginalEnrollmentTranscriptProxy>,
+    ingresses: Vec<enrollment_transcript_signing::EnrollmentTranscriptParticipantIngress>,
+    device_quorum_sessions: Vec<device_quorum::OriginalDeviceQuorumSigningSession>,
+    positive_control: positive_terminal::OriginalPositiveControlState,
+    positive_terminal: Option<OriginalPositiveTerminalSigningMaterial>,
+    positive_cleanup_retirement: Option<RetiredOriginalSigningMaterial>,
+    device_quorum_failure: Option<AuraError>,
+    retirement_calls: Vec<enrollment_transcript_signing::RetainedParticipantCall<()>>,
+    retirement_started: bool,
+    retirement_completed: bool,
+    retirement_operation: Option<Result<(), AuraError>>,
+    retirement_validation:
+        Option<Result<aura_core::time::PhysicalTime, aura_core::TimeoutBudgetError>>,
+    retirement_first_failure: Option<AuraError>,
+    terminal_request: Option<Arc<OriginalNegativeTerminalRequest>>,
+    terminal_started: bool,
+    terminal_signature: Option<Vec<u8>>,
+    terminal_operation: Option<Result<(), AuraError>>,
+    terminal_validation:
+        Option<Result<aura_core::time::PhysicalTime, aura_core::TimeoutBudgetError>>,
+    terminal_first_failure: Option<AuraError>,
+}
+impl OriginalIssuerTranscriptSigningCustody {
+    fn new(
+        approval: Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+    ) -> Self {
+        Self {
+            approval,
+            material: None,
+            negative: None,
+            material_retirement: None,
+            completion: Arc::new(OriginalParticipantCompletionCustody::fresh()),
+            local_actor: None,
+            remote_actors: Vec::new(),
+            ingresses: Vec::new(),
+            device_quorum_sessions: Vec::new(),
+            positive_control: positive_terminal::OriginalPositiveControlState::default(),
+            positive_terminal: None,
+            positive_cleanup_retirement: None,
+            device_quorum_failure: None,
+            retirement_calls: Vec::new(),
+            retirement_started: false,
+            retirement_completed: false,
+            retirement_operation: None,
+            retirement_validation: None,
+            retirement_first_failure: None,
+            terminal_request: None,
+            terminal_started: false,
+            terminal_signature: None,
+            terminal_operation: None,
+            terminal_validation: None,
+            terminal_first_failure: None,
+        }
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "EnrollmentActivationCapability", receiver_type = OriginalIssuerTranscriptSigningCustody, family = "runtime_helper")]
+    pub(crate) fn retire_original_conditional_for_activation<'a>(
+        &'a mut self,
+        issued: &'a crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &'a super::enrollment_window::EnrollmentExecutionChild,
+        activation: &'a super::ceremony_tracker::EnrollmentActivationCapability<'a>,
+    ) -> EnrollmentOperationFuture<'a, Result<(), AuraError>> {
+        Box::pin(async move {
+            issued.require_runtime_owner(self.approval.effects().as_ref())?;
+            child.require_issued_notice_owner(issued)?;
+            activation.require_effects(self.approval.effects().as_ref())?;
+            if activation.ceremony_id() != &self.approval.manifest().ceremony {
+                return Err(AuraError::permission_denied(
+                    "conditional retirement activation differs from original ceremony",
+                ));
+            }
+            activation
+                .require_generation(
+                    self.approval.manifest().subject,
+                    self.approval.manifest().pending_epoch,
+                )
+                .await?;
+            if let Some(source) = &self.retirement_first_failure {
+                return Err(source.clone());
+            }
+            if self.retirement_completed {
+                return self
+                    .material_retirement
+                    .as_ref()
+                    .ok_or_else(|| AuraError::invalid("original material retirement absent"))?
+                    .require_original(&self.approval);
+            }
+            self.require_original_issued_control(issued, child)?;
+            if self.terminal_request.is_some() || self.terminal_started || self.retirement_started {
+                return Err(AuraError::permission_denied(
+                    "original conditional retirement is occupied or unresolved",
+                ));
+            }
+            if self.retirement_calls.is_empty() {
+                self.retirement_calls = self
+                    .ingresses
+                    .iter()
+                    .map(|_| enrollment_transcript_signing::RetainedParticipantCall::retire())
+                    .collect();
+            }
+            self.retirement_started = true;
+            let material = self
+                .negative
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("original conditional material absent"))?;
+            let local = self
+                .local_actor
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original conditional actor absent"))?;
+            let remotes = &mut self.remote_actors;
+            let calls = &mut self.retirement_calls;
+            let ingresses = &self.ingresses;
+            let approval = &self.approval;
+            let observed = child
+                .execute_original_negative_terminal(material, approval, || async {
+                    let admit = async {
+                        futures::future::try_join_all(
+                            calls
+                                .iter_mut()
+                                .zip(ingresses)
+                                .map(|(call, ingress)| call.admit(ingress)),
+                        )
+                        .await?;
+                        Ok::<(), AuraError>(())
+                    };
+                    let actor = async {
+                        match local.run_negative(material, approval, child).await? {
+                            OriginalConditionalActorExit::PositiveRetirement => Ok(()),
+                            _ => Err(AuraError::permission_denied(
+                                "negative actor cannot acknowledge positive retirement",
+                            )),
+                        }
+                    };
+                    let proxies = async {
+                        futures::future::try_join_all(remotes.iter_mut().map(|proxy| {
+                            proxy.run_retirement(material, approval, child, activation)
+                        }))
+                        .await?;
+                        Ok::<(), AuraError>(())
+                    };
+                    futures::try_join!(admit, actor, proxies)?;
+                    Ok(())
+                })
+                .await?;
+            self.retirement_operation = observed.operation;
+            self.retirement_validation = Some(observed.validation);
+            let settled = match (
+                &self.retirement_operation,
+                self.retirement_validation.as_ref(),
+            ) {
+                (Some(Ok(())), Some(Ok(_))) => Ok(()),
+                (Some(Err(source)), _) => Err(source.clone()),
+                (_, Some(Err(source))) => Err(source.clone().into()),
+                _ => Err(AuraError::permission_denied(
+                    "original conditional retirement remains unresolved",
+                )),
+            };
+            if let Err(source) = settled {
+                self.retirement_first_failure = Some(source.clone());
+                return Err(source);
+            }
+            let actual = self
+                .negative
+                .take()
+                .ok_or_else(|| AuraError::invalid("original conditional material absent"))?;
+            match actual.retire_original(&self.approval) {
+                Ok(actual) => self.material_retirement = Some(actual),
+                Err(rejected) => {
+                    let (actual, source) = *rejected;
+                    self.negative = Some(actual);
+                    self.retirement_first_failure = Some(source.clone());
+                    return Err(source);
+                }
+            }
+            let result = (|| {
+                let local = self
+                    .local_actor
+                    .as_mut()
+                    .ok_or_else(|| AuraError::invalid("original local actor absent"))?;
+                local.acknowledge_conditional_material_retirement(
+                    self.material_retirement
+                        .as_ref()
+                        .ok_or_else(|| AuraError::invalid("original material retirement absent"))?,
+                    &self.approval,
+                )?;
+                for call in &mut self.retirement_calls {
+                    call.observe_ready_reply()?;
+                }
+                Ok::<(), AuraError>(())
+            })();
+            if let Err(source) = result {
+                self.retirement_first_failure = Some(source.clone());
+                return Err(source);
+            }
+            self.retirement_completed = true;
+            Ok(())
+        })
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", receiver_type = OriginalIssuerTranscriptSigningCustody, family = "runtime_helper")]
+    pub(crate) async fn sign_original_device_quorum(
+        &mut self,
+        service: &ThresholdSigningService,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+        context: SigningContext,
+    ) -> Result<ThresholdSignature, AuraError> {
+        self.require_original_issued_control(issued, child)?;
+        if !Arc::ptr_eq(&service.effects, self.approval.effects())
+            || context.authority != self.approval.manifest().subject
+        {
+            return Err(AuraError::permission_denied(
+                "quorum session differs from original enrollment runtime",
+            ));
+        }
+        if let Some(source) = &self.device_quorum_failure {
+            return Err(source.clone());
+        }
+        let index = match self
+            .device_quorum_sessions
+            .iter()
+            .position(|session| session.require_context(&context).is_ok())
+        {
+            Some(index) => index,
+            None => {
+                if self.device_quorum_sessions.len() >= 64 {
+                    return Err(AuraError::permission_denied(
+                        "original enrollment quorum session capacity",
+                    ));
+                }
+                self.device_quorum_sessions.push(
+                    device_quorum::OriginalDeviceQuorumSigningSession::new(context),
+                );
+                self.device_quorum_sessions.len() - 1
+            }
+        };
+        let session = &mut self.device_quorum_sessions[index];
+        let result = child
+            .execute(service.effects.as_ref(), || session.run(service))
+            .await
+            .map_err(|source| AuraError::Internal {
+                message: "original enrollment device quorum execution".into(),
+                source: Some(Arc::new(source)),
+            });
+        if let Err(source) = &result {
+            self.device_quorum_failure = Some(source.clone());
+        }
+        result
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalEnrollmentPositiveDecisionReceipt", receiver_type = OriginalIssuerTranscriptSigningCustody, family = "runtime_helper")]
+    pub(crate) fn retain_original_positive_terminal(
+        &mut self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+        receipt: &crate::runtime::services::ceremony_tracker::OriginalEnrollmentPositiveDecisionReceipt,
+    ) -> Result<(), AuraError> {
+        self.require_original_issued_control(issued, child)?;
+        receipt.require_original_control(issued)?;
+        if self.positive_terminal.is_some() {
+            return Ok(());
+        }
+        let fence = receipt
+            .committed_ops()
+            .last()
+            .ok_or_else(|| AuraError::invalid("actual original committed fence absent"))?;
+        let context =
+            SigningContext::self_tree_op(self.approval.manifest().subject, fence.op.clone());
+        let session = self
+            .device_quorum_sessions
+            .iter_mut()
+            .find(|session| session.require_context(&context).is_ok())
+            .ok_or_else(|| {
+                AuraError::permission_denied("actual original completed fence quorum owner absent")
+            })?;
+        self.positive_terminal = Some(session.take_original_positive_terminal(
+            &self.approval,
+            issued,
+            child,
+            receipt,
+        )?);
+        Ok(())
+    }
+
+    pub(crate) fn require_initial_transfer(&self) -> Result<(), AuraError> {
+        self.negative
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original conditional material transition missing"))?
+            .require_original(&self.approval)
+    }
+    pub(crate) fn require_original_issued_control(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), AuraError> {
+        issued.require_runtime_owner(self.approval.effects().as_ref())?;
+        use aura_signature::SecurityTranscript;
+        if issued
+            .manifest()
+            .required_transcript_bytes()
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "encode original conditional issued control",
+                    Arc::new(source),
+                )
+            })?
+            != self
+                .approval
+                .manifest()
+                .required_transcript_bytes()
+                .map_err(|source| {
+                    AuraError::crypto_with_source(
+                        "encode original conditional approved manifest",
+                        Arc::new(source),
+                    )
+                })?
+        {
+            return Err(AuraError::permission_denied(
+                "conditional signing control differs from original approval",
+            ));
+        }
+        if let Some(material) = self.negative.as_ref() {
+            material.require_original(&self.approval)?;
+            material.require_original_window(child)
+        } else {
+            self.material_retirement
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("original conditional material missing"))?
+                .require_original(&self.approval)
+        }
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "original_terminal_issuer_signing_resources", receiver_type = OriginalIssuerTranscriptSigningCustody, family = "runtime_helper")]
+    pub(crate) fn retire_original_issuer_resources(
+        &mut self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+        decision: super::enrollment_window::OriginalIssuerResourceDecision,
+    ) -> Result<OriginalIssuerSigningResourceRetirement, AuraError> {
+        self.require_original_issued_control(issued, child)?;
+        decision.require_original(issued, child)?;
+        if matches!(
+            decision,
+            super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected
+        ) {
+            self.retire_original_positive_for_cleanup(child)?;
+            self.retire_original_for_cleanup()?;
+        }
+        if self.negative.is_some() || self.material.is_some() {
+            return Err(AuraError::permission_denied(
+                "committed resource cleanup still owns initial signing material",
+            ));
+        }
+        self.material_retirement
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("committed conditional material retirement missing"))?
+            .require_original(&self.approval)?;
+        let identity = child.retain_original_conditional_identity(&self.approval)?;
+        self.retire_original_positive_for_cleanup(child)?;
+        Ok(OriginalIssuerSigningResourceRetirement {
+            approval: Arc::clone(&self.approval),
+            identity,
+        })
+    }
+    pub(crate) fn retire_original_positive_for_cleanup(
+        &mut self,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), AuraError> {
+        if let Some(actor) = self.local_actor.as_mut() {
+            actor.dispose_original_positive_nonces();
+        }
+        for session in &mut self.device_quorum_sessions {
+            session.dispose_local_secrets();
+        }
+        if let Some(actual) = &self.positive_cleanup_retirement {
+            actual.require_original(&self.approval)?;
+            if self.positive_terminal.is_some() {
+                return Err(AuraError::permission_denied(
+                    "issuer positive owner reappeared after cleanup retirement",
+                ));
+            }
+            return Ok(());
+        }
+        if let Some(actual) = self.positive_terminal.take() {
+            match actual.retire_original(&self.approval, child) {
+                Ok(actual) => self.positive_cleanup_retirement = Some(actual),
+                Err(rejected) => {
+                    let (actual, source) = *rejected;
+                    self.positive_terminal = Some(actual);
+                    return Err(source);
+                }
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn retire_original_for_cleanup(&mut self) -> Result<(), AuraError> {
+        if self.positive_terminal.is_some() {
+            return Err(AuraError::permission_denied(
+                "positive terminal cleanup requires original registered child",
+            ));
+        }
+        for session in &mut self.device_quorum_sessions {
+            session.dispose_local_secrets();
+        }
+        if let Some(actual) = self.material.take() {
+            match actual.retire_original(&self.approval) {
+                Ok(actual) => self.material_retirement = Some(actual),
+                Err(rejected) => {
+                    let (actual, source) = *rejected;
+                    self.material = Some(actual);
+                    return Err(source);
+                }
+            }
+        }
+        if let Some(actual) = self.negative.take() {
+            match actual.retire_original(&self.approval) {
+                Ok(actual) => self.material_retirement = Some(actual),
+                Err(rejected) => {
+                    let (actual, source) = *rejected;
+                    self.negative = Some(actual);
+                    return Err(source);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalEnrollmentNegativeDecisionReceipt",
+        receiver_type = OriginalIssuerTranscriptSigningCustody,
+        family = "runtime_helper"
+    )]
+    pub(crate) fn sign_original_negative_terminal<'a>(
+        &'a mut self,
+        issued: Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+        child: &'a super::enrollment_window::EnrollmentExecutionChild,
+        decision: &'a super::ceremony_tracker::OriginalEnrollmentNegativeDecisionReceipt,
+    ) -> EnrollmentOperationFuture<'a, Result<Vec<u8>, AuraError>> {
+        Box::pin(async move {
+            self.require_original_issued_control(&issued, child)?;
+            decision.require_original_control(&issued)?;
+            if let Some(source) = &self.terminal_first_failure {
+                return Err(source.clone());
+            }
+            if self.terminal_request.is_none() {
+                self.terminal_request = Some(Arc::new(
+                    OriginalNegativeTerminalRequest::from_original_decision(
+                        Arc::clone(&self.approval),
+                        issued,
+                        decision,
+                    )?,
+                ));
+            }
+            let request = self
+                .terminal_request
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("original terminal request missing"))?;
+            request.require_original_decision()?;
+            if request.kind != decision.kind()
+                || request.decision_digest != decision.decision_digest()
+            {
+                return Err(AuraError::permission_denied(
+                    "original terminal decision changed",
+                ));
+            }
+            if self.terminal_started {
+                if matches!(&self.terminal_operation, Some(Ok(())))
+                    && matches!(&self.terminal_validation, Some(Ok(_)))
+                {
+                    return self
+                        .terminal_signature
+                        .clone()
+                        .ok_or_else(|| AuraError::invalid("original terminal signature missing"));
+                }
+                return Err(AuraError::permission_denied(
+                    "original terminal signing remains unresolved",
+                ));
+            }
+            let material = self
+                .negative
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("original conditional material missing"))?;
+            request.require_material(material)?;
+            let participants = material
+                .ordered_devices
+                .iter()
+                .enumerate()
+                .map(|(offset, device)| {
+                    u16::try_from(offset + 1)
+                        .map(|index| (*device, index))
+                        .map_err(|source| {
+                            AuraError::crypto_with_source(
+                                "original negative roster index",
+                                Arc::new(source),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let key = aura_core::TrustedPublicKey::active(
+                aura_core::TrustedKeyDomain::AuthorityThreshold,
+                Some(self.approval.manifest().final_epoch),
+                material.verifying_key.clone(),
+                aura_core::Hash32(aura_core::hash::hash(&material.verifying_key)),
+            );
+            let policy =
+                aura_protocol::public_transcript_signing::PublicTranscriptSigningPolicy::checked(
+                    &request.transcript,
+                    &material.public_package,
+                    &key,
+                    material.threshold,
+                    &participants,
+                )?;
+            self.terminal_started = true;
+            let signature_slot = &mut self.terminal_signature;
+            let ingresses = &self.ingresses;
+            let local = self
+                .local_actor
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original local actor missing"))?;
+            let remotes = &mut self.remote_actors;
+            let approval = &self.approval;
+            let observed =
+                child
+                    .execute_original_negative_terminal(material, approval, || async {
+                        let coordinate =
+                            async {
+                                futures::future::try_join_all(ingresses.iter().map(|ingress| {
+                                    ingress.begin_negative_terminal(Arc::clone(request))
+                                }))
+                                .await?;
+                                let signature =
+                        aura_protocol::public_transcript_signing::sign_public_transcript(
+                            material.effects.as_ref(),
+                            policy,
+                            |device, index| async move {
+                                ingresses
+                                    .iter()
+                                    .find(|entry| entry.matches_original_participant(device, index))
+                                    .ok_or_else(|| {
+                                        AuraError::invalid("original negative participant missing")
+                                    })?
+                                    .commitment()
+                                    .await
+                            },
+                            |device, index, package| async move {
+                                ingresses
+                                    .iter()
+                                    .find(|entry| entry.matches_original_participant(device, index))
+                                    .ok_or_else(|| {
+                                        AuraError::invalid("original negative participant missing")
+                                    })?
+                                    .share(package)
+                                    .await
+                            },
+                        )
+                        .await?;
+                                *signature_slot = Some(signature);
+                                Ok::<(), AuraError>(())
+                            };
+                        tokio::try_join!(
+                            local.run_negative(material, approval, child),
+                            futures::future::try_join_all(
+                                remotes
+                                    .iter_mut()
+                                    .map(|proxy| proxy.run_negative(material, approval, child))
+                            ),
+                            coordinate
+                        )?;
+                        Ok::<(), AuraError>(())
+                    })
+                    .await?;
+            if let Some(Err(source)) = &observed.operation {
+                self.terminal_first_failure
+                    .get_or_insert_with(|| source.clone());
+            }
+            if let Err(source) = &observed.validation {
+                self.terminal_first_failure.get_or_insert_with(|| {
+                    AuraError::crypto_with_source(
+                        "original negative signing validation",
+                        Arc::new(source.clone()),
+                    )
+                });
+            }
+            self.terminal_operation = observed.operation;
+            self.terminal_validation = Some(observed.validation);
+            if let Some(source) = &self.terminal_first_failure {
+                return Err(source.clone());
+            }
+            if !matches!(self.terminal_operation, Some(Ok(()))) {
+                return Err(AuraError::invalid("original negative signing interrupted"));
+            }
+            self.terminal_signature
+                .clone()
+                .ok_or_else(|| AuraError::invalid("original terminal signature missing"))
+        })
+    }
+
+    pub(crate) fn require_original_terminal_message(
+        &self,
+        message: &[u8],
+    ) -> Result<(), AuraError> {
+        let request = self
+            .terminal_request
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original terminal request missing"))?;
+        if request.message()? != message {
+            return Err(AuraError::permission_denied(
+                "terminal frame differs from actual approved negative request",
+            ));
+        }
+        Ok(())
+    }
+}
+pub(super) struct OriginalNegativeTerminalSigningMaterial {
+    effects: Arc<AuraEffectSystem>,
+    device: DeviceId,
+    approved_intent_digest: [u8; 32],
+    index: u16,
+    threshold: u16,
+    ordered_devices: Vec<DeviceId>,
+    public_package: Vec<u8>,
+    verifying_key: Vec<u8>,
+    local_share: zeroize::Zeroizing<Vec<u8>>,
+    negative_terminal_policy:
+        aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
+    completion: Arc<OriginalParticipantCompletionCustody>,
+    original_window: super::enrollment_window::OriginalConditionalSigningWindowIdentity,
+}
+
+pub(crate) use enrollment_transcript_wire::OriginalConditionalPacket;
+
+/// Borrowed transport execution rooted in the actual transferred share owner.
+/// A missing request permits only pre-decision observation, never emission.
+pub(crate) struct OriginalConditionalTransport<'owner> {
+    material: &'owner OriginalNegativeTerminalSigningMaterial,
+    approval: &'owner Arc<
+        crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    >,
+    child: &'owner super::enrollment_window::EnrollmentExecutionChild,
+    request: Option<&'owner enrollment_transcript_wire::AdmittedNegativeTerminalRequest>,
+    readiness: Option<&'owner crate::runtime::effects::AcknowledgedApprovedNativeDisposal>,
+}
+impl OriginalNegativeTerminalSigningMaterial {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalNegativeTerminalSigningMaterial", receiver_type = OriginalNegativeTerminalSigningMaterial, family = "runtime_helper")]
+    fn conditional_transport<'owner>(
+        &'owner self,
+        approval: &'owner Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        child: &'owner super::enrollment_window::EnrollmentExecutionChild,
+        request: Option<&'owner enrollment_transcript_wire::AdmittedNegativeTerminalRequest>,
+    ) -> Result<OriginalConditionalTransport<'owner>, AuraError> {
+        self.require_original(approval)?;
+        self.require_original_window(child)?;
+        if let Some(request) = request {
+            request.require_material(self)?;
+        }
+        Ok(OriginalConditionalTransport {
+            material: self,
+            approval,
+            child,
+            request,
+            readiness: None,
+        })
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "AcknowledgedApprovedNativeDisposal", receiver_type = OriginalNegativeTerminalSigningMaterial, family = "runtime_helper")]
+    pub(super) fn readiness_transport<'owner>(
+        &'owner self,
+        approval: &'owner Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        child: &'owner super::enrollment_window::EnrollmentExecutionChild,
+        disposal: &'owner crate::runtime::effects::AcknowledgedApprovedNativeDisposal,
+    ) -> Result<OriginalConditionalTransport<'owner>, AuraError> {
+        disposal.require_original(approval)?;
+        if let Some(source) = disposal.original_failure() {
+            return Err(source.clone());
+        }
+        let mut actual = self.conditional_transport(approval, child, None)?;
+        actual.readiness = Some(disposal);
+        Ok(actual)
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "AcknowledgedApprovedNativeDisposal", receiver_type = OriginalNegativeTerminalSigningMaterial, family = "runtime_helper")]
+    pub(super) async fn produce_original_conditional_readiness(
+        &self,
+        approval: &Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+        disposal: &crate::runtime::effects::AcknowledgedApprovedNativeDisposal,
+        retained: &mut Option<
+            aura_protocol::transcript_round_packet::ParticipantProvenConditionalReadiness,
+        >,
+    ) -> Result<(), AuraError> {
+        use aura_signature::SecurityTranscript;
+        let owner = self.readiness_transport(approval, child, disposal)?;
+        let manifest = approval.manifest();
+        if self.device == manifest.initiator_device {
+            return Err(AuraError::permission_denied(
+                "native participant readiness cannot replace coordinator reservation disposition",
+            ));
+        }
+        let statement = aura_protocol::transcript_round_packet::ConditionalReadinessAttestation {
+            version: 1,
+            approved_intent_digest: approval.canonical_intent_digest(),
+            manifest_digest: aura_core::hash::hash(&manifest.required_transcript_bytes().map_err(
+                |source| {
+                    AuraError::crypto_with_source(
+                        "encode original readiness manifest",
+                        Arc::new(source),
+                    )
+                },
+            )?),
+            coordinator: manifest.initiator_device,
+            participant: self.device,
+            locator: owner.receive_locator(manifest.initiator_device)?,
+        };
+        let expected = enrollment_transcript_wire::original_participant_verifier(
+            &self.ordered_devices,
+            &self.public_package,
+            self.device,
+        )?;
+        if let Some(actual) = retained.as_ref() {
+            if aura_core::util::serialization::to_vec(&actual.statement)?
+                != aura_core::util::serialization::to_vec(&statement)?
+            {
+                return Err(AuraError::permission_denied(
+                    "retained readiness differs from original native participant",
+                ));
+            }
+            return actual.verify_exact_participant(&expected);
+        }
+        let bytes = statement.required_transcript_bytes().map_err(|source| {
+            AuraError::crypto_with_source("encode original native readiness", Arc::new(source))
+        })?;
+        let possession_proof = self
+            .effects
+            .sign_participant_key_proof(&bytes, &self.local_share, SigningMode::Threshold)
+            .await?;
+        let actual =
+            aura_protocol::transcript_round_packet::ParticipantProvenConditionalReadiness {
+                statement,
+                possession_proof,
+            };
+        actual.verify_exact_participant(&expected)?;
+        *retained = Some(actual);
+        Ok(())
+    }
+}
+impl<'material> OriginalConditionalTransport<'material> {
+    pub(crate) fn original_effects_origin(&self) -> std::sync::Weak<AuraEffectSystem> {
+        Arc::downgrade(self.approval.effects())
+    }
+    pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        if !std::ptr::eq(self.material.effects.as_ref(), effects) {
+            return Err(AuraError::permission_denied(
+                "conditional transport belongs to another runtime",
+            ));
+        }
+        self.material.require_original(self.approval)?;
+        self.material.require_original_window(self.child)
+    }
+    pub(crate) fn receive_locator(&self, peer: DeviceId) -> Result<[u8; 32], AuraError> {
+        self.require_effects(self.material.effects.as_ref())?;
+        let manifest = self.approval.manifest();
+        let coordinator = manifest.initiator_device;
+        if peer == self.material.device || !self.material.ordered_devices.contains(&peer) {
+            return Err(AuraError::permission_denied(
+                "conditional transport peer differs from retained roster",
+            ));
+        }
+        let participant = if self.material.device == coordinator {
+            peer
+        } else {
+            if peer != coordinator {
+                return Err(AuraError::permission_denied(
+                    "conditional participant route lacks original coordinator",
+                ));
+            }
+            self.material.device
+        };
+        Ok(aura_core::hash::hash(
+            &aura_core::util::serialization::to_vec(&(
+                "aura.enrollment.conditional-transport-locator.v1",
+                self.approval.canonical_intent_digest(),
+                manifest.subject,
+                &manifest.ceremony,
+                &manifest.invitation,
+                coordinator,
+                participant,
+            ))?,
+        ))
+    }
+    pub(crate) fn validate_send(
+        &self,
+        destination: DeviceId,
+        packet: &OriginalConditionalPacket,
+    ) -> Result<(AuthorityId, [u8; 32], Vec<u8>), AuraError> {
+        let locator = self.receive_locator(destination)?;
+        match packet {
+            OriginalConditionalPacket::Ready(actual) => {
+                use aura_signature::SecurityTranscript;
+                let disposal = self.readiness.ok_or_else(|| {
+                    AuraError::permission_denied("readiness send lacks actual native disposal")
+                })?;
+                disposal.require_original(self.approval)?;
+                if let Some(source) = disposal.original_failure() {
+                    return Err(source.clone());
+                }
+                let manifest = self.approval.manifest();
+                let statement = &actual.statement;
+                if destination != manifest.initiator_device
+                    || self.material.device == destination
+                    || statement.version != 1
+                    || statement.approved_intent_digest != self.approval.canonical_intent_digest()
+                    || statement.manifest_digest
+                        != aura_core::hash::hash(&manifest.required_transcript_bytes().map_err(
+                            |source| {
+                                AuraError::crypto_with_source(
+                                    "encode original readiness binding",
+                                    Arc::new(source),
+                                )
+                            },
+                        )?)
+                    || statement.coordinator != destination
+                    || statement.participant != self.material.device
+                    || statement.locator != locator
+                {
+                    return Err(AuraError::permission_denied(
+                        "readiness packet differs from actual disposed original participant",
+                    ));
+                }
+                let expected = enrollment_transcript_wire::original_participant_verifier(
+                    &self.material.ordered_devices,
+                    &self.material.public_package,
+                    self.material.device,
+                )?;
+                actual.verify_exact_participant(&expected)?;
+            }
+            _ => self
+                .request
+                .ok_or_else(|| {
+                    AuraError::permission_denied("conditional send lacks actual admitted decision")
+                })?
+                .require_packet(self.material, packet, destination)?,
+        }
+        let bytes = aura_core::util::serialization::to_vec(packet)?;
+        if bytes.len() > aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::MAXIMUM_WIRE_BYTES {
+            return Err(AuraError::invalid("conditional packet exceeds original wire bound"));
+        }
+        Ok((self.approval.manifest().subject, locator, bytes))
+    }
+    /// Decode bounded canonical data. Remote decision admission remains separate.
+    pub(crate) fn decode_received(
+        &self,
+        bytes: &[u8],
+    ) -> Result<OriginalConditionalPacket, AuraError> {
+        self.require_effects(self.material.effects.as_ref())?;
+        if bytes.len() > aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::MAXIMUM_WIRE_BYTES {
+            return Err(AuraError::invalid("conditional packet exceeds original wire bound"));
+        }
+        let packet: OriginalConditionalPacket = aura_core::util::serialization::from_slice(bytes)?;
+        if aura_core::util::serialization::to_vec(&packet)? != bytes {
+            return Err(AuraError::invalid("conditional packet is not canonical"));
+        }
+        match &packet {
+            OriginalConditionalPacket::RetirementRequest(actual) => {
+                aura_protocol::transcript_round_packet::CoordinatorProvenConditionalRetirementRequest::decode_bounded(&aura_core::util::serialization::to_vec(actual)?)?;
+            }
+            OriginalConditionalPacket::RetirementAcknowledgment(actual) => {
+                aura_protocol::transcript_round_packet::ParticipantProvenConditionalRetirementAcknowledgment::decode_bounded(&aura_core::util::serialization::to_vec(actual)?)?;
+            }
+            OriginalConditionalPacket::Ready(actual) => {
+                aura_protocol::transcript_round_packet::ParticipantProvenConditionalReadiness::decode_bounded(&aura_core::util::serialization::to_vec(actual)?)?;
+            }
+            OriginalConditionalPacket::Decision(actual) => {
+                aura_protocol::transcript_round_packet::CoordinatorProvenNegativeDecision::decode_bounded(&aura_core::util::serialization::to_vec(actual)?)?;
+            }
+            OriginalConditionalPacket::Round(actual) => {
+                aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::decode_bounded(&aura_core::util::serialization::to_vec(actual)?)?;
+            }
+        }
+        Ok(packet)
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalConditionalTransport", receiver_type = OriginalConditionalTransport, family = "runtime_helper")]
+    pub(crate) async fn execute<'owner, T, F, Fut>(
+        &'owner self,
+        operation: F,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'owner OriginalConditionalTransport<'material>,
+            T,
+            AuraError,
+        >,
+        AuraError,
+    >
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, AuraError>>,
+    {
+        let actual = self
+            .child
+            .execute_original_negative_terminal(self.material, self.approval, operation)
+            .await?;
+        Ok(aura_core::time::timeout::NegativeCleanupExecution {
+            primary: self,
+            operation: actual.operation,
+            validation: actual.validation,
+        })
+    }
+}
+impl ValidatedLocalEnrollmentSigningMaterial {
+    pub(super) fn transfer_original_negative(
+        self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        completion: Arc<OriginalParticipantCompletionCustody>,
+        original_window: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<OriginalNegativeTerminalSigningMaterial, Box<(Self, AuraError)>> {
+        let validation = (|| {
+            self.custody
+                .require_manifest(self.effects.as_ref(), approval.manifest())?;
+            completion.original()?.require_original(approval)?;
+            approval
+                .negative_terminal_policy()
+                .require_manifest(approval.manifest())?;
+            if !Arc::ptr_eq(&self.effects, approval.effects())
+                || self.approved_intent_digest != approval.canonical_intent_digest()
+                || self.device != approval.effects().device_id()
+            {
+                return Err(AuraError::permission_denied(
+                    "original negative material transfer owner mismatch",
+                ));
+            }
+            Ok(())
+        })();
+        if let Err(source) = validation {
+            return Err(Box::new((self, source)));
+        }
+        let original_window = match original_window.retain_original_conditional_identity(approval) {
+            Ok(actual) => actual,
+            Err(source) => return Err(Box::new((self, source))),
+        };
+        let Self {
+            effects,
+            custody,
+            device,
+            approved_intent_digest,
+            index,
+            threshold,
+            ordered_devices,
+            public_package,
+            verifying_key,
+            local_share,
+        } = self;
+        let actual = OriginalNegativeTerminalSigningMaterial {
+            effects,
+            device,
+            approved_intent_digest,
+            index,
+            threshold,
+            ordered_devices,
+            public_package,
+            verifying_key,
+            local_share,
+            negative_terminal_policy: approval.negative_terminal_policy().clone(),
+            completion,
+            original_window,
+        };
+        drop(custody);
+        Ok(actual)
+    }
+}
+impl OriginalNegativeTerminalSigningMaterial {
+    pub(super) fn require_original(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+            || self.device != approval.effects().device_id()
+            || self.negative_terminal_policy != *approval.negative_terminal_policy()
+        {
+            return Err(AuraError::permission_denied(
+                "original negative signing material owner mismatch",
+            ));
+        }
+        self.completion.original()?.require_original(approval)
+    }
+    pub(super) fn require_original_window(
+        &self,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), AuraError> {
+        self.original_window.require_child(child)
+    }
+    pub(super) fn retire_original(
+        mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<RetiredOriginalSigningMaterial, Box<(Self, AuraError)>> {
+        if let Err(source) = self.require_original(approval) {
+            return Err(Box::new((self, source)));
+        }
+        use zeroize::Zeroize;
+        self.local_share.zeroize();
+        Ok(RetiredOriginalSigningMaterial {
+            effects: Arc::clone(&self.effects),
+            approved_intent_digest: self.approved_intent_digest,
+            device: self.device,
+        })
+    }
+}
+
+/// A locally admitted conditional request from the actual protected first decision.
+/// Public transcript shape alone cannot construct this signing authority.
+pub(super) struct OriginalNegativeTerminalRequest {
+    original: std::sync::Weak<super::ceremony_tracker::RegisteredEnrollmentWindowCapability>,
+    issued:
+        std::sync::Weak<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+    approval: Arc<crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent>,
+    effects: Arc<AuraEffectSystem>,
+    approved_intent_digest: [u8; 32],
+    policy: aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
+    kind: aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind,
+    decision_digest: [u8; 32],
+    transcript: aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalTranscript,
+    message: Vec<u8>,
+    retirement_location: SecureStorageLocation,
+    approval_digest: [u8; 32],
+}
+impl OriginalNegativeTerminalRequest {
+    fn from_original_decision(
+        approval: Arc<
+            crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        >,
+        issued: Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+        decision: &super::ceremony_tracker::OriginalEnrollmentNegativeDecisionReceipt,
+    ) -> Result<Self, AuraError> {
+        use aura_signature::SecurityTranscript;
+        issued.require_runtime_owner(approval.effects().as_ref())?;
+        approval
+            .negative_terminal_policy()
+            .require_manifest(issued.manifest())?;
+        if issued
+            .manifest()
+            .required_transcript_bytes()
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "encode actual negative control manifest",
+                    Arc::new(source),
+                )
+            })?
+            != approval
+                .manifest()
+                .required_transcript_bytes()
+                .map_err(|source| {
+                    AuraError::crypto_with_source(
+                        "encode original approved negative manifest",
+                        Arc::new(source),
+                    )
+                })?
+        {
+            return Err(AuraError::permission_denied(
+                "negative request differs from original approved manifest",
+            ));
+        }
+        let original = decision.original_owner_for_control(&issued)?;
+        let kind = decision.kind();
+        if !approval
+            .negative_terminal_policy()
+            .outcomes()
+            .contains(&kind)
+        {
+            return Err(AuraError::permission_denied(
+                "original decision is outside approved negative policy",
+            ));
+        }
+        let transcript = aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalTranscript::from_manifest(approval.manifest(), kind)?;
+        let message = transcript.required_transcript_bytes().map_err(|source| {
+            AuraError::crypto_with_source(
+                "encode canonical original negative control",
+                Arc::new(source),
+            )
+        })?;
+        let decision_digest = decision.decision_digest();
+        let (approval_digest, retirement_location) =
+            enrollment_transcript_wire::negative_domain_binding(
+                &approval,
+                decision_digest,
+                kind,
+                &message,
+            )?;
+        Ok(Self {
+            original,
+            issued: Arc::downgrade(&issued),
+            effects: Arc::clone(approval.effects()),
+            approved_intent_digest: approval.canonical_intent_digest(),
+            policy: approval.negative_terminal_policy().clone(),
+            kind,
+            decision_digest,
+            transcript,
+            message,
+            retirement_location,
+            approval_digest,
+            approval,
+        })
+    }
+    fn require_original_decision(&self) -> Result<(), AuraError> {
+        let original = self.original.upgrade().ok_or_else(|| {
+            AuraError::permission_denied("original negative decision owner was lost")
+        })?;
+        let issued = self.issued.upgrade().ok_or_else(|| {
+            AuraError::permission_denied("original negative control owner was lost")
+        })?;
+        let retained = original.original_negative_decision(&issued)?;
+        if retained.kind() != self.kind || retained.decision_digest() != self.decision_digest {
+            return Err(AuraError::permission_denied(
+                "negative request original decision changed",
+            ));
+        }
+        issued.require_runtime_owner(self.effects.as_ref())?;
+        self.policy.require_manifest(issued.manifest())
+    }
+    pub(super) fn require_material(
+        &self,
+        material: &OriginalNegativeTerminalSigningMaterial,
+    ) -> Result<(), AuraError> {
+        self.require_original_decision()?;
+        material.require_original(&self.approval)?;
+        if !Arc::ptr_eq(&self.effects, &material.effects)
+            || self.approved_intent_digest != material.approved_intent_digest
+            || self.policy != material.negative_terminal_policy
+        {
+            return Err(AuraError::permission_denied(
+                "negative request differs from retained signing material",
+            ));
+        }
+        Ok(())
+    }
+    pub(super) fn message(&self) -> Result<&[u8], AuraError> {
+        self.require_original_decision()?;
+        Ok(&self.message)
+    }
+    pub(super) fn retirement_location(&self) -> &SecureStorageLocation {
+        &self.retirement_location
+    }
+    pub(super) fn approval_digest(&self) -> [u8; 32] {
+        self.approval_digest
+    }
+}
+
+/// Scoped observation only: no enrollment authority or synthetic material.
+#[cfg(test)]
+pub(crate) struct OriginalPeerCommitPostreadTest {
+    clock: aura_testkit::time::ManualPhysicalClock,
+    armed: std::sync::atomic::AtomicBool,
+    armed_once: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+    completed: std::sync::atomic::AtomicBool,
+    cleanup: bool,
+    cleanup_source: Arc<OriginalPeerCleanupCancellation>,
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    disposal: std::sync::Mutex<Option<crate::task_registry::OriginalRequiredTaskDisposalObserver>>,
+    cleanup_completed: tokio::sync::Notify,
+}
+#[cfg(test)]
+impl OriginalPeerCommitPostreadTest {
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    pub(crate) fn new(clock: aura_testkit::time::ManualPhysicalClock, cleanup: bool) -> Self {
+        Self {
+            clock,
+            armed: false.into(),
+            armed_once: false.into(),
+            entered: tokio::sync::Notify::default(),
+            release: tokio::sync::Notify::default(),
+            completed: false.into(),
+            cleanup,
+            cleanup_source: Arc::new(OriginalPeerCleanupCancellation),
+            disposal: std::sync::Mutex::default(),
+            cleanup_completed: tokio::sync::Notify::default(),
+        }
+    }
+    fn arm(&self) {
+        if !self
+            .armed_once
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    pub(crate) async fn await_cleanup_completed(&self) {
+        self.cleanup_completed.notified().await;
+    }
+    pub(crate) fn assert_completed(&self) {
+        assert!(self.completed.load(std::sync::atomic::Ordering::SeqCst));
+    }
+}
+#[cfg(test)]
+#[async_trait::async_trait]
+impl aura_core::effects::PhysicalTimeEffects for OriginalPeerCommitPostreadTest {
+    async fn physical_time(
+        &self,
+    ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        self.clock.physical_time().await
+    }
+    async fn sleep_ms(&self, duration: u64) -> Result<(), aura_core::effects::TimeError> {
+        self.clock.sleep_ms(duration).await
+    }
+    async fn wait_until_physical_deadline(
+        &self,
+        endpoint: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        self.clock.wait_until_physical_deadline(endpoint).await
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, thiserror::Error)]
+#[error("original peer cleanup injected cancellation")]
+struct OriginalPeerCleanupCancellation;
+
+/// Actual old signing-secret retirement, independent of a control signature.
+pub(crate) struct OriginalIssuerSigningResourceRetirement {
+    approval: Arc<crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent>,
+    identity: super::enrollment_window::OriginalConditionalSigningWindowIdentity,
+}
+impl OriginalIssuerSigningResourceRetirement {
+    pub(super) fn require_original(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), AuraError> {
+        issued.require_runtime_owner(self.approval.effects().as_ref())?;
+        self.identity.require_child(child)?;
+        self.approval
+            .negative_terminal_policy()
+            .require_manifest(issued.manifest())
     }
 }

@@ -262,14 +262,15 @@ impl InvitationDeviceEnrollmentHandler {
     pub(super) async fn execute_device_enrollment_initiator_owned(
         &self,
         effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
+        retained: Arc<super::enrollment_trust::RetainedEnrollmentVmControl>,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
         budget: crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
-    ) -> AgentResult<Option<enrollment_vm_admission::IssuerEnrollmentTerminalReceipt>> {
-        let retained = Arc::new(
-            super::enrollment_trust::RetainedEnrollmentVmControl::load(effects.clone(), invitation)
-                .await?,
-        );
+        retirement_destination: Arc<
+            crate::handlers::invitation_service::OriginalIssuerTerminalDestination,
+        >,
+    ) -> AgentResult<super::IssuerEnrollmentTerminalOutcome> {
+        retained.require_runtime_owner(effects.as_ref())?;
+        budget.require_issued_notice_owner(&retained)?;
         budget
             .bind_registered_notice_control(&retained)
             .map_err(AgentError::from)?;
@@ -312,25 +313,45 @@ impl InvitationDeviceEnrollmentHandler {
             // failure rather than wait for a settlement that never comes.
             Err(error) => {
                 if enrollment_cancelled(&ceremony_runner, &retained.manifest().ceremony).await {
-                    return super::enrollment_terminal_notice::publish_cancelled_settlement(
+                    let source = match error {
+                        AgentError::Aura(source) => source,
+                        source => aura_core::AuraError::Internal {
+                            message: "original cancelled VM teardown failed".into(),
+                            source: Some(Arc::new(source)),
+                        },
+                    };
+                    retirement_destination.retain_original_retirement_failure(source.clone());
+                    let settled = Err::<(), _>(source.clone());
+                    super::enrollment_terminal_notice::publish_original_cancelled_settlement(
                         &ceremony_runner,
                         &retained.manifest().ceremony,
-                        Err(error),
+                        &settled,
                     )
                     .await;
+                    return Err(AgentError::from(source));
                 }
                 return Err(error);
             }
         };
         let (receipt, cancelled) = outcome;
         if let Some(receipt) = receipt {
-            return Ok(Some(receipt));
+            return Ok(super::IssuerEnrollmentTerminalOutcome::Committed(receipt));
         }
         let Some(cancelled) = cancelled else {
             return Err(AgentError::invalid(
                 "enrollment ended without original terminal custody",
             ));
         };
+        let cancelled_terminal = retirement_destination.retain_cancelled_terminal(
+            super::OriginalIssuerCancellationTerminal {
+                cancellation: cancelled,
+                issued: retained.clone(),
+            },
+        )?;
+        #[cfg(test)]
+        retirement_destination
+            .await_cancelled_notice_gate_for_test()
+            .await;
         // Sign while the cancelled generation is held, then release it so a
         // new enrollment is not refused while an unanswered notice retries.
         // The cancel call awaits this settlement before it returns.
@@ -339,23 +360,40 @@ impl InvitationDeviceEnrollmentHandler {
                 &effects,
                 &retained,
                 &ceremony_runner,
-                &cancelled,
+                &cancelled_terminal.cancellation,
                 &budget,
             )
             .await?;
-            ceremony_runner
-                .retire_failed_enrollment_generation(&retained.manifest().ceremony)
-                .await
-                .map_err(AgentError::from)?;
-            Ok::<_, AgentError>(notice)
+            let notice = retirement_destination.retain_original_cancelled_notice(notice)?;
+            budget
+                .retire_original_cancelled_generation(
+                    &effects,
+                    &cancelled_terminal,
+                    &retirement_destination,
+                    &ceremony_runner,
+                )
+                .await?;
+            Ok::<_, AgentError>((notice, cancelled_terminal))
         }
-        .await;
-        let notice = super::enrollment_terminal_notice::publish_cancelled_settlement(
+        .await
+        .map_err(|source| {
+            let source = match source {
+                AgentError::Aura(source) => source,
+                source => aura_core::AuraError::Internal {
+                    message: "original cancelled enrollment settlement failed".into(),
+                    source: Some(Arc::new(source)),
+                },
+            };
+            retirement_destination.retain_original_retirement_failure(source.clone());
+            source
+        });
+        super::enrollment_terminal_notice::publish_original_cancelled_settlement(
             &ceremony_runner,
             &retained.manifest().ceremony,
-            settled,
+            &settled,
         )
-        .await?;
+        .await;
+        let (notice, cancelled_terminal) = settled.map_err(AgentError::from)?;
         loop {
             let attempt = budget
                 .execute(effects.as_ref(), || {
@@ -372,7 +410,11 @@ impl InvitationDeviceEnrollmentHandler {
                     budget.map_run_error("signed enrollment cancellation notice", source)
                 });
             match finish_enrollment_vm_slot(attempt, slot.take()).await {
-                Ok(()) => return Ok(None),
+                Ok(()) => {
+                    return Ok(super::IssuerEnrollmentTerminalOutcome::Cancelled(
+                        cancelled_terminal,
+                    ));
+                }
                 Err(error)
                     if enrollment_notice_peer_unreachable(&error, retained.manifest().subject) =>
                 {
@@ -554,16 +596,24 @@ impl InvitationDeviceEnrollmentHandler {
                                     ceremony_runner.record_verified_enrollment_response(*verified).await.map_err(AgentError::from)?;
                                 }
                                 super::enrollment_trust::VerifiedEnrollmentResponseDispositionCapability::Refused(verified) => {
+                                    #[cfg(test)]
+                                    eprintln!("enrollment rejection stage: record verified original refusal");
                                     ceremony_runner.record_verified_enrollment_rejection(verified).await.map_err(AgentError::from)?;
+                                    #[cfg(test)]
+                                    eprintln!("enrollment rejection stage: durable refusal recorded");
                                 }
                             }
+                            #[cfg(test)]
+                            eprintln!("enrollment rejection stage: begin actual terminal receipt");
                             let confirm = enrollment_vm_admission::sign_terminal_receipt(
                                 effects.clone(),
                                 retained.clone(),
                                 budget,
-                                &ceremony_runner,
                             )
-                            .await?;
+                            .await;
+                            #[cfg(test)]
+                            eprintln!("enrollment rejection stage: terminal receipt result {:?}", confirm.as_ref().map(|_| ()));
+                            let confirm = confirm?;
                             budget
                                 .remaining_ms(effects.as_ref())
                                 .await

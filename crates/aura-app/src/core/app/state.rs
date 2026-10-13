@@ -26,6 +26,8 @@ pub struct AppCore {
     pub(super) active_home_selection: Option<ChannelId>,
     pub(super) authoritative_semantic_facts: Vec<AuthoritativeSemanticFact>,
     pub(super) runtime: Option<Arc<dyn RuntimeBridge>>,
+    pub(super) enrollment_import_admission:
+        Option<crate::workflows::invitation::EnrollmentImportAdmission>,
     pub(super) runtime_attachment_spent: bool,
     pub(super) reactive: ReactiveHandler,
     /// Last reactive revision copied into each observed view cell.
@@ -57,6 +59,11 @@ impl AppCore {
         self.account_id = AccountId::from_bytes(hash::hash(&authority.to_bytes()));
         self.reactive = runtime.reactive_handler();
         self.projection_revisions.clear();
+        self.enrollment_import_admission = Some(
+            crate::workflows::invitation::EnrollmentImportAdmission::from_attached_runtime(
+                runtime.clone(),
+            ),
+        );
         self.runtime = Some(runtime);
         self.runtime_attachment_spent = true;
         Ok(())
@@ -80,6 +87,7 @@ impl AppCore {
             active_home_selection: None,
             authoritative_semantic_facts: Vec::new(),
             runtime: None,
+            enrollment_import_admission: None,
             runtime_attachment_spent: false,
             reactive,
             projection_revisions: HashMap::new(),
@@ -101,6 +109,11 @@ impl AppCore {
         app.authority = Some(authority_id);
         app.account_id = AccountId::from_bytes(hash::hash(&authority_id.to_bytes()));
         app.reactive = runtime.reactive_handler();
+        app.enrollment_import_admission = Some(
+            crate::workflows::invitation::EnrollmentImportAdmission::from_attached_runtime(
+                runtime.clone(),
+            ),
+        );
         app.runtime = Some(runtime);
         app.runtime_attachment_spent = true;
         Ok(app)
@@ -121,6 +134,7 @@ impl AppCore {
             active_home_selection: None,
             authoritative_semantic_facts: Vec::new(),
             runtime: None,
+            enrollment_import_admission: None,
             runtime_attachment_spent: false,
             reactive,
             projection_revisions: HashMap::new(),
@@ -130,6 +144,13 @@ impl AppCore {
             navigation_projection_gate: Arc::new(async_lock::Mutex::new(())),
             hook_install_state: HookInstallState::Stopped,
         })
+    }
+
+    /// Project the finite original import admission from this attached app.
+    pub fn enrollment_import_admission(
+        &self,
+    ) -> Option<&crate::workflows::invitation::EnrollmentImportAdmission> {
+        self.enrollment_import_admission.as_ref()
     }
 
     /// Return the stable app-owned account identifier for this core instance.

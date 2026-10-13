@@ -157,23 +157,31 @@ where
         .map_err(|error| AuraError::internal(format!("time error: {error}")))?
         .ts_ms;
     let mut processed = 0;
-    let mut held = Vec::new();
-    while let Ok(envelope) = effects.take_inbound_envelope(|envelope| decode(envelope).is_some()) {
+    let mut held = super::effects::DeferredInboundEnvelopeReturns::new();
+    while let Ok(mut envelope) =
+        effects.take_inbound_envelope_retained(|envelope| decode(envelope).is_some())
+    {
         processed += 1;
         let source = envelope.source;
         match decode(&envelope) {
             Some(DeviceKeyMessage::Request { scope }) => {
                 if is_known_peer(source, scope).await? {
+                    let _ = envelope.consume();
                     announce_device_key(effects, source).await?;
                 } else {
                     // A ceremony peer's own join may not have synced here
                     // yet; answer once its standing is observed (Task 196).
-                    match super::channel_key_ceremony::hold_for_standing(envelope, now_ms) {
-                        Some(envelope) => held.push(envelope),
-                        None => tracing::warn!(
+                    if super::channel_key_ceremony::hold_for_standing(
+                        envelope.envelope_mut(),
+                        now_ms,
+                    ) {
+                        held.push(envelope);
+                    } else {
+                        tracing::warn!(
                             %source,
                             "device key request from an unknown peer refused"
-                        ),
+                        );
+                        let _ = envelope.consume();
                     }
                 }
             }
@@ -188,8 +196,10 @@ where
                 let scope = requested_scope(effects, source).await?;
                 if authority != source || !is_known_peer(source, scope).await? {
                     tracing::warn!(%source, %authority, "device key announcement refused");
+                    let _ = envelope.consume();
                     continue;
                 }
+                let _ = envelope.consume();
                 record_verified_device_key(
                     effects,
                     &super::channel_key_ceremony::VerifiedDeviceKey {
@@ -200,13 +210,13 @@ where
                 )
                 .await?;
             }
-            None => {}
+            None => {
+                let _ = envelope.consume();
+            }
         }
     }
     // Requeue after draining, so one round never takes a held request twice.
-    for envelope in held {
-        effects.requeue_envelope(envelope);
-    }
+    drop(held);
     Ok(processed)
 }
 
@@ -277,6 +287,148 @@ mod tests {
 
     fn id(effects: &AuraEffectSystem) -> AuthorityId {
         aura_guards::GuardContextProvider::authority_id(effects)
+    }
+
+    #[tokio::test]
+    async fn deferred_requests_keep_full_inbox_capacity_and_order_after_cancel() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        let effects = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let me = id(&effects);
+        let mut expected = Vec::new();
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            let (payload, content_type) = if index < 2 {
+                (
+                    aura_core::util::serialization::to_vec(&DeviceKeyMessage::Request {
+                        scope: None,
+                    })
+                    .expect("encode request"),
+                    DEVICE_KEY_CONTENT_TYPE,
+                )
+            } else {
+                (vec![index as u8], "application/aura-unrelated")
+            };
+            expected.push(payload.clone());
+            assert_eq!(
+                effects.queue_runtime_envelope(TransportEnvelope {
+                    source: AuthorityId::new_from_entropy([index as u8; 32]),
+                    destination: me,
+                    context: aura_core::types::identifiers::ContextId::new_from_entropy([5; 32]),
+                    payload,
+                    metadata: std::collections::HashMap::from([
+                        ("content-type".to_string(), content_type.to_string()),
+                        ("test-index".to_string(), index.to_string()),
+                    ]),
+                    receipt: None,
+                }),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        assert_eq!(
+            process_device_key_messages(&effects, |_peer, _scope| async { Ok(false) })
+                .await
+                .expect("defer unknown requests"),
+            2
+        );
+        let borrowed = effects
+            .take_inbound_envelope_retained(|envelope| decode(envelope).is_some())
+            .expect("borrow deferred request");
+        assert_eq!(borrowed.payload, expected[0]);
+        assert_eq!(
+            effects.queue_runtime_envelope(TransportEnvelope {
+                source: me,
+                destination: me,
+                context: aura_core::types::identifiers::ContextId::new_from_entropy([5; 32]),
+                payload: vec![99],
+                metadata: std::collections::HashMap::new(),
+                receipt: None,
+            }),
+            QueueEnvelopeOutcome::DroppedOverflow
+        );
+        drop(borrowed);
+        let mut actual = Vec::new();
+        let mut actual_indices = Vec::new();
+        for _ in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            let envelope = effects
+                .take_inbound_envelope(|_| true)
+                .expect("original frame remains");
+            actual_indices.push(
+                envelope
+                    .metadata
+                    .get("test-index")
+                    .expect("original marker")
+                    .parse::<usize>()
+                    .expect("marker index"),
+            );
+            actual.push(envelope.payload);
+        }
+        assert_eq!(actual, expected);
+        assert_eq!(
+            actual_indices,
+            (0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)).collect::<Vec<_>>()
+        );
+
+        // Cancel while the second policy check is pending. The first request
+        // is already deferred, so both leases must return in original order.
+        let request =
+            aura_core::util::serialization::to_vec(&DeviceKeyMessage::Request { scope: None })
+                .expect("encode request");
+        for index in 0..3 {
+            assert_eq!(
+                effects.queue_runtime_envelope(TransportEnvelope {
+                    source: AuthorityId::new_from_entropy([index as u8; 32]),
+                    destination: me,
+                    context: aura_core::types::identifiers::ContextId::new_from_entropy([5; 32]),
+                    payload: if index < 2 { request.clone() } else { vec![3] },
+                    metadata: std::collections::HashMap::from([
+                        (
+                            "content-type".to_string(),
+                            if index < 2 {
+                                DEVICE_KEY_CONTENT_TYPE
+                            } else {
+                                "application/aura-unrelated"
+                            }
+                            .to_string(),
+                        ),
+                        ("test-index".to_string(), index.to_string()),
+                    ]),
+                    receipt: None,
+                }),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let checked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut processing = Box::pin(process_device_key_messages(&effects, {
+            let checked = checked.clone();
+            move |_peer, _scope| {
+                let checked = checked.clone();
+                async move {
+                    if checked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                        Ok(false)
+                    } else {
+                        std::future::pending::<Result<bool, AuraError>>().await
+                    }
+                }
+            }
+        }));
+        assert!(matches!(
+            futures::poll!(processing.as_mut()),
+            std::task::Poll::Pending
+        ));
+        assert_eq!(checked.load(std::sync::atomic::Ordering::SeqCst), 2);
+        drop(processing);
+        let restored: Vec<_> = (0..3)
+            .map(|_| {
+                effects
+                    .take_inbound_envelope(|_| true)
+                    .expect("cancelled request returned")
+                    .metadata["test-index"]
+                    .parse::<usize>()
+                    .expect("marker index")
+            })
+            .collect();
+        assert_eq!(restored, vec![0, 1, 2]);
     }
 
     /// Task 164 step 3: a member fetches a known peer's device key over the

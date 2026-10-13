@@ -117,6 +117,21 @@ pub fn render(response: &Response) -> CliOutput {
         Response::CeremonyStarted { ceremony_id } => {
             out.kv("Ceremony started", ceremony_id);
         }
+        Response::DeviceEnrollmentStarted {
+            ceremony_id,
+            enrollment_code,
+            manifest_code,
+            initiator_verifier_code,
+        } => {
+            out.kv("Ceremony started", ceremony_id);
+            out.kv("Enrollment code", enrollment_code);
+            if let Some(code) = manifest_code {
+                out.kv("Manifest transfer", code);
+            }
+            if let Some(code) = initiator_verifier_code {
+                out.kv("Initiator verifier", code);
+            }
+        }
         Response::CeremonyStatus(c) => {
             out.section("Ceremony");
             out.kv("Id", &c.ceremony_id);

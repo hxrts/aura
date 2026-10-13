@@ -14,8 +14,19 @@
 use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
 
 mod accept;
+mod bootstrap_batch;
+pub use bootstrap_batch::{
+    receive_bootstrap_invitation_batch, BootstrapBatchAdmissionRefusal, BootstrapBatchCompleted,
+    BootstrapBatchFailure, BootstrapBatchFailureReason, BootstrapBatchObservation,
+    BootstrapBatchOutcome, BootstrapEnrollmentPrefillHost,
+};
 mod create;
 mod device_enrollment;
+mod enrollment_import_owner;
+pub use enrollment_import_owner::{
+    EnrollmentImportAdmission, EnrollmentImportAdmissionRefusal, EnrollmentImportHandoffError,
+    EnrollmentImportObservation,
+};
 mod export;
 mod followups;
 mod import;
@@ -90,7 +101,8 @@ pub use create::{
 };
 pub use device_enrollment::{
     accept_device_enrollment_invitation, import_device_enrollment_with_terminal_status,
-    DeviceEnrollmentImportCompleted,
+    DeviceEnrollmentImportCompleted, EnrollmentImportHostFuture, EnrollmentImportHostPolicy,
+    PreparedEnrollmentHostCommit,
 };
 pub(in crate::workflows) use export::export_invitation_runtime;
 pub use export::{
@@ -99,8 +111,9 @@ pub use export::{
 pub use followups::run_post_contact_accept_followups;
 pub(in crate::workflows) use import::pending_invitation_info_by_id;
 pub use import::{
-    import_invitation, import_invitation_details, import_invitation_details_with_terminal_status,
-    list_invitations, list_pending_invitations,
+    import_bootstrap_invitation_in_original_window, import_invitation, import_invitation_details,
+    import_invitation_details_with_terminal_status, list_invitations, list_pending_invitations,
+    BootstrapImportFailure,
 };
 #[cfg(feature = "signals")]
 pub(in crate::workflows) use pending_accept::run_post_channel_accept_followups;
@@ -2295,7 +2308,10 @@ mod tests {
     #[tokio::test]
     async fn direct_and_import_acceptance_entries_each_settle_one_terminal() {
         let authority = AuthorityId::new_from_entropy([125u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let supervisor = aura_testkit::task_custody::SupervisedTaskTestkit::new();
+        let mut runtime = crate::runtime_bridge::OfflineRuntimeBridge::new(authority);
+        runtime.use_test_task_spawner(supervisor.owned_spawner());
+        let runtime = Arc::new(runtime);
         runtime.set_accept_invitation_result(Err(crate::core::IntentError::service_error(
             "enrollment acceptance refused",
         )
@@ -2339,13 +2355,16 @@ mod tests {
         );
 
         let instance = OperationInstanceId("device-enrollment-import-terminal".to_string());
-        let outcome = device_enrollment::import_device_enrollment_with_terminal_status(
+        let outcome = enrollment_import_owner::test_support::run(
             &app_core,
             "not-an-enrollment-code".to_string(),
             None,
             Some(instance.clone()),
+            crate::workflows::invitation::EnrollmentImportHostPolicy::RuntimeOnly,
         )
         .await;
+        let custody_report = enrollment_import_owner::test_support::drain(&supervisor).await;
+        assert!(custody_report.domain_failure.is_some());
         assert!(
             outcome.result.is_err(),
             "missing manifest pin must fail import"

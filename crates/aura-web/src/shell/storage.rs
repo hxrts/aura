@@ -127,6 +127,16 @@ impl WebStorageScope {
         format!("{}{}", self.prefix, WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX)
     }
 
+    pub(crate) fn authority_account_config_key(
+        &self,
+        authority_id: aura_core::AuthorityId,
+    ) -> String {
+        format!(
+            "{}{}_{}",
+            self.prefix, WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX, authority_id
+        )
+    }
+
     pub(crate) fn demo_tablet_enrollment_code_key(&self) -> String {
         format!("{}demo_tablet_enrollment_code", self.prefix)
     }

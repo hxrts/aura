@@ -10,7 +10,9 @@ mod sync;
 pub use ceremony::{
     BootstrapCandidateInfo, BootstrapCandidateOrigin, CeremonyFailureReason, CeremonyKind,
     CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart,
-    EnrollmentManifestTransferCodes, KeyRotationCeremonyStatus, PreparedDeviceEnrollmentSigning,
+    EnrollmentManifestTransferCodes, IssuedDeviceEnrollmentStart, KeyRotationCeremonyStatus,
+    OriginalEnrollmentPostCompletion, PostEnrollmentShortcutPurpose,
+    PostEnrollmentShortcutSelection, PreparedDeviceEnrollmentSigning,
 };
 pub use delivery::{OutboundDeliveryFailureCause, OutboundMessageDeliveryFailure};
 pub use invitation::{

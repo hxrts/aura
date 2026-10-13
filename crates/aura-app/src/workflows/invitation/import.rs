@@ -38,6 +38,151 @@ pub async fn import_invitation_details(
     import_invitation_details_with_budget(&runtime, code, &budget).await
 }
 
+/// Select one original receiver window before fetching a bootstrap batch.
+pub async fn prepare_bootstrap_invitation_batch(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) -> Result<TimeoutBudget, AuraError> {
+    workflow_timeout_budget(runtime, INVITATION_RUNTIME_OPERATION_TIMEOUT)
+        .await
+        .map_err(Into::into)
+}
+
+/// Check routing observations only; this does not verify or approve an invitation.
+pub fn require_bootstrap_invitation_purpose(
+    code: &str,
+    expected: aura_core::invitation::InvitationPurpose,
+) -> Result<(), AuraError> {
+    let (observed, _) = aura_invitation::shareable::ShareableInvitation::from_code_with_proof(code)
+        .map_err(|source| AuraError::Invalid {
+            message: "Decode received bootstrap invitation".into(),
+            source: Some(Arc::new(source)),
+        })?;
+    if observed.invitation_type.purpose() != expected {
+        return Err(AuraError::invalid(
+            "Received bootstrap purpose does not match the canonical invitation payload",
+        ));
+    }
+    Ok(())
+}
+
+/// Import a received bootstrap invitation through the selected runtime under
+/// its original batch window. A purpose label only selects a workflow; it
+/// cannot substitute for canonical runtime verification or enrollment approval.
+#[derive(Debug)]
+pub struct BootstrapImportFailure {
+    primary: AuraError,
+    observation: AuraError,
+}
+impl BootstrapImportFailure {
+    /// Concrete operation failure observed before the final clock read.
+    pub fn primary(&self) -> &AuraError {
+        &self.primary
+    }
+    /// Actual later selected-provider failure, retained independently.
+    pub fn observation(&self) -> &AuraError {
+        &self.observation
+    }
+}
+impl std::fmt::Display for BootstrapImportFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "bootstrap import failed: {}", self.primary)
+    }
+}
+impl std::error::Error for BootstrapImportFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.primary)
+    }
+}
+
+/// Import through the selected runtime under the original batch window.
+pub async fn import_bootstrap_invitation_in_original_window(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    code: &str,
+    expected: aura_core::invitation::InvitationPurpose,
+    original: &TimeoutBudget,
+) -> Result<InvitationHandle, AuraError> {
+    let mut first_failure = None;
+    let mut observation_failure = None;
+    let result = import_bootstrap_invitation_retained(
+        runtime,
+        code,
+        expected,
+        original,
+        &mut first_failure,
+        &mut observation_failure,
+    )
+    .await;
+    match (first_failure, observation_failure) {
+        (Some(primary), Some(observation)) => Err(AuraError::Internal {
+            message: "bootstrap import and final observation failed".into(),
+            source: Some(Arc::new(BootstrapImportFailure {
+                primary,
+                observation,
+            })),
+        }),
+        (Some(source), None) => Err(source),
+        (None, _) => result,
+    }
+}
+
+pub(super) async fn import_bootstrap_invitation_retained(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    code: &str,
+    expected: aura_core::invitation::InvitationPurpose,
+    original: &TimeoutBudget,
+    first_failure: &mut Option<AuraError>,
+    observation_failure: &mut Option<AuraError>,
+) -> Result<InvitationHandle, AuraError> {
+    use aura_core::invitation::InvitationPurpose;
+    if expected == InvitationPurpose::DeviceEnrollment {
+        return Err(AuraError::permission_denied(
+            "Bootstrap enrollment requires the explicit approved enrollment workflow",
+        ));
+    }
+    require_bootstrap_invitation_purpose(code, expected)?;
+    let child = crate::workflows::runtime::workflow_child_timeout_budget(
+        runtime,
+        original,
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+    )
+    .await?;
+    execute_with_runtime_timeout_budget(runtime, &child, || async {
+        let result = runtime
+            .import_invitation(code)
+            .await
+            .map(InvitationHandle::new)
+            .map_err(|source| {
+                AuraError::from(super::super::error::runtime_call(
+                    "import bootstrap invitation",
+                    crate::runtime_bridge::RuntimeBridgeError::from(source),
+                ))
+            })
+            .and_then(|imported| {
+                if imported.info().invitation_type.purpose() != expected {
+                    return Err(AuraError::permission_denied(
+                        "Verified runtime invitation does not match the received bootstrap purpose",
+                    ));
+                }
+                Ok(imported)
+            });
+        if let Err(source) = &result {
+            first_failure.get_or_insert_with(|| source.clone());
+        }
+        result
+    })
+    .await
+    .map_err(|error| match error {
+        TimeoutRunError::Operation(source) => source,
+        TimeoutRunError::Timeout(source) => {
+            let source: AuraError = source.into();
+            if first_failure.is_some() {
+                *observation_failure = Some(source.clone());
+            }
+            source
+        }
+    })
+}
+
 /// Import within the original caller-owned window without starting a new one.
 pub(super) async fn import_invitation_details_with_budget(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,

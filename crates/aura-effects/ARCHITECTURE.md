@@ -166,13 +166,22 @@ just check-arch
 
 ### Profile ownership adapter and immutable publication
 
-`profile_storage` owns only OS resource lifetime mechanics. The Unix adapter uses a private stable flock inode held by one non-Clone descriptor; the lock file is never removed. This is cooperative local-filesystem exclusivity, not adversarial path protection or a product transaction. Native fallback secure immutable publication encrypts and syncs staging bytes, publishes with an atomic hard link that cannot replace an existing record, and syncs namespace ancestors. Crashes leave absent or complete encrypted records; orphan staging files do not imply admission. Browser, non-Unix and platform keyring unsupported capabilities fail through typed errors until actual backend transactions exist. Real process contention/crash tests and encrypted publication failpoint tests are in `tests/profile_storage_process.rs`, `tests/secure_immutable_publication.rs`, and `secure.rs`.
+`profile_storage` owns only OS resource lifetime mechanics. The Unix adapter uses a private stable flock inode held by one non-Clone descriptor; the lock file is never removed. This is cooperative local-filesystem exclusivity, not adversarial path protection or a product transaction. Native fallback secure immutable publication encrypts and syncs staging bytes, publishes with an atomic hard link that cannot replace an existing record, and syncs namespace ancestors. Crashes leave absent or complete encrypted records; orphan staging files do not imply admission. Unsupported non-Unix and platform keyring capabilities fail through typed errors until actual backend transactions exist. Real process contention/crash tests and encrypted publication failpoint tests are in `tests/profile_storage_process.rs`, `tests/secure_immutable_publication.rs`, and `secure.rs`.
 
 ### Production owner construction and browser backend scope
 
 Production assembly accepts the concrete adapter-produced `OwnedProfileLease`, whose fields remain private. A custom core trait guard does not establish cross-process ownership; compile-fail docs guard this distinction. Every exposed secure backend clone and its encrypted-storage writers retain the actual Arc owner. Backend acquisition precedes wrapping-key and signing-state construction. A backend clone can intentionally extend the lease lifetime after runtime shutdown; another process remains Busy until all writers release.
 
 Browser acquisition uses actual origin-scoped Web Locks and an adapter-owned release acknowledgement. The release signal remains owned by the token; a narrow adapter promise observes broker completion/rejection. This is infrastructure resource lifetime, not a product task or lifecycle publisher. Single-thread wasm is supported; atomics/thread-enabled wasm remains explicitly unsupported until cross-worker release ownership is implemented. IndexedDB immutable publication uses one strict-durability readwrite transaction; wrapping-key first creation also rechecks and adds inside one transaction. Historical plaintext secure localStorage namespaces are rejected before crypto initialization and are not automatically migrated/deleted.
+
+The selected browser secure writer may transfer its one-shot allocation
+lifetime root only with the matching Web Lock profile lease. Its bounded,
+protected inventory is encrypted under that selected writer and committed by
+strict IndexedDB raw-ciphertext compare-and-swap before an allocation is
+returned. Reopen reads the authenticated original inventory, including retired
+decisions; a foreign lease, duplicate root claim, damaged record or external
+conflict fails closed rather than starting a fresh inventory or reissuing a
+secret. This local lease and inventory grant no enrollment or peer authority.
 
 Native platform keyring entries share namespaces across filesystem profiles. Owned Unix production construction additionally retains one service-wide descriptor lease under a fixed OS-user-bound namespace. The original selected profile lease caches that exact service lease across sanctioned runtime reassembly; unrelated profiles cannot simultaneously write the shared service. Raw platform adapters reject IO before this private custody is attached. The existing keyring service and key addresses remain unchanged. Configured platform records are not silently replaced by fresh filesystem state. Native filesystem fallback remains subject to its existing explicit test/harness construction policy; this incremental owner patch does not declare that fallback a platform credential store. Atomic multi-record profile handoff and live two-tab/process restart scenarios remain separate required integration gates.
 
@@ -267,8 +276,8 @@ as well as original ledger birth, marker, readiness and handoff seals. Missing
 live evidence fails closed; it does not trigger migration or reinitialization.
 This local custody proof grants no peer or identity trust.
 
-Native keyring and browser providers require their own transactional lifetime
-backend; absence is a typed unavailable result. Unknown staging artifacts and
+Native keyring and other unsupported providers require their own transactional
+lifetime backend; absence is a typed unavailable result. Unknown staging artifacts and
 corrupt legacy records fail closed. Provider ACK/tombstones do not prove physical
 or backup erasure or detection of a complete filesystem backup rollback.
 

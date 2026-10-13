@@ -4,8 +4,9 @@ use crate::handlers::rendezvous_identity::{
     require_active_identity_signing_context, require_identity_keys,
     require_issued_identity_signing_context,
 };
+use aura_core::effects::CryptoExtendedEffects;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
-use aura_core::AuraError;
+use aura_core::{AuraError, TrustedKeyDomain, TrustedPublicKey};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum IssuedInvitationIdentityError {
@@ -44,6 +45,417 @@ struct OriginalIdentityRecord {
     invitation_digest: [u8; 32],
     epoch: u64,
     public_key: [u8; 32],
+}
+
+/// A separate retained sender proof for an invitation issued by the native
+/// device quorum. It cannot be interpreted as an Ed25519 identity key.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct OriginalQuorumProofRecord {
+    version: u16,
+    authority: AuthorityId,
+    device: DeviceId,
+    invitation: InvitationId,
+    invitation_digest: [u8; 32],
+    recipient: AuthorityId,
+    recipient_device: DeviceId,
+    epoch: u64,
+    group_key: [u8; 32],
+    code: String,
+}
+
+impl OriginalQuorumProofRecord {
+    /// Constructed only after the immutable issuer-owned record and its exact
+    /// invitation binding have been checked; wire proof bytes cannot mint it.
+    fn retained_verification_key(&self) -> TrustedPublicKey {
+        TrustedPublicKey::active(
+            TrustedKeyDomain::AuthorityThreshold,
+            Some(self.epoch),
+            self.group_key.to_vec(),
+            aura_core::Hash32(aura_core::hash::hash(&self.group_key)),
+        )
+    }
+}
+
+/// Only the active native threshold-signing service can mint this capability.
+/// Its fields are private so a reserved id or decoded wire proof cannot be
+/// substituted for the verified original issuance.
+pub(crate) struct VerifiedQuorumInvitationIssuance {
+    runtime_owner: Arc<AuraEffectSystem>,
+    original: OriginalQuorumProofRecord,
+}
+
+impl VerifiedQuorumInvitationIssuance {
+    pub(crate) fn code(&self) -> &str {
+        &self.original.code
+    }
+
+    pub(crate) async fn sign(
+        effects: Arc<AuraEffectSystem>,
+        signing: &crate::runtime::services::threshold_signing::ThresholdSigningService,
+        reserved: &ReservedInvitationIssuance,
+        invitation: &Invitation,
+        recipient_device: DeviceId,
+        transport: &ShareableInvitationTransportMetadata,
+    ) -> AgentResult<Self> {
+        signing.require_effects(effects.as_ref())?;
+        if !reserved.owns_effects(effects.as_ref())
+            || reserved.issuer_binding() != (effects.runtime_authority_id(), effects.device_id())
+            || reserved.invitation_id() != &invitation.invitation_id
+            || reserved.created_at_ms() != invitation.created_at
+            || invitation.sender_id != effects.runtime_authority_id()
+            || invitation.receiver_id == invitation.sender_id
+            || !matches!(
+                invitation.invitation_type,
+                InvitationType::Contact { .. } | InvitationType::Guardian { .. }
+            )
+            || transport.sender_device_id != Some(effects.device_id())
+        {
+            return Err(invalid(IssuedInvitationIdentityError::Binding));
+        }
+        let mut shareable = ShareableInvitation::from(invitation);
+        shareable.version = ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION;
+        let context = shareable
+            .quorum_signing_context(invitation.receiver_id, recipient_device, transport)
+            .map_err(|source| {
+                AgentError::invalid(format!("invalid quorum invitation intent: {source}"))
+            })?;
+        let signature = signing.sign_with_device_quorum(context.clone()).await?;
+        if signature.signer_count < 2
+            || signature.signature.len() != ShareableInvitation::SENDER_PROOF_SIGNATURE_BYTES
+        {
+            return Err(AgentError::invalid(
+                "invitation lacks a native threshold quorum signature",
+            ));
+        }
+        use aura_core::effects::ThresholdSigningEffects;
+        let retained_state = signing
+            .threshold_state(&invitation.sender_id)
+            .await
+            .ok_or_else(|| AgentError::invalid("native threshold state is unavailable"))?;
+        let retained_package = signing
+            .public_key_package(&invitation.sender_id)
+            .await
+            .ok_or_else(|| AgentError::invalid("native threshold verifier is unavailable"))?;
+        if retained_state.threshold < 2
+            || retained_state.epoch != signature.epoch
+            || retained_package != signature.public_key_package
+        {
+            return Err(AgentError::invalid(
+                "signed invitation differs from retained native threshold policy",
+            ));
+        }
+        let package = frost_ed25519::keys::PublicKeyPackage::deserialize(&retained_package)
+            .map_err(|source| {
+                AgentError::invalid(format!("invalid retained native group package: {source}"))
+            })?;
+        let group_key = package.verifying_key().serialize();
+        let trusted_key = TrustedPublicKey::active(
+            TrustedKeyDomain::AuthorityThreshold,
+            Some(retained_state.epoch),
+            group_key.to_vec(),
+            aura_core::Hash32(aura_core::hash::hash(&group_key)),
+        );
+        let transcript =
+            aura_signature::threshold_signing_context_transcript_bytes(&context, signature.epoch)
+                .map_err(|source| {
+                AgentError::invalid(format!("invalid quorum invitation transcript: {source}"))
+            })?;
+        if !effects
+            .frost_verify(&transcript, &signature.signature, trusted_key.bytes())
+            .await?
+        {
+            return Err(AgentError::invalid(
+                "invitation quorum proof did not verify",
+            ));
+        }
+        let code = shareable
+            .to_quorum_signed_code(
+                invitation.receiver_id,
+                recipient_device,
+                ShareableInvitationSenderProof {
+                    scheme: ShareableInvitation::CONTACT_GUARDIAN_QUORUM_SCHEME.into(),
+                    public_key: group_key.to_vec(),
+                    signature: signature.signature,
+                    sender_device_id: transport.sender_device_id,
+                    key_epoch: Some(signature.epoch),
+                },
+                transport.clone(),
+            )
+            .map_err(|source| {
+                AgentError::invalid(format!("invalid signed quorum invitation: {source}"))
+            })?;
+        Ok(Self {
+            runtime_owner: effects,
+            original: OriginalQuorumProofRecord {
+                version: 1,
+                authority: invitation.sender_id,
+                device: reserved.issuer_binding().1,
+                invitation: invitation.invitation_id.clone(),
+                invitation_digest: digest(invitation)?,
+                recipient: invitation.receiver_id,
+                recipient_device,
+                epoch: signature.epoch,
+                group_key,
+                code,
+            },
+        })
+    }
+
+    pub(crate) async fn retain(
+        self,
+        reserved: &ReservedInvitationIssuance,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        let effects = self.runtime_owner.as_ref();
+        if !reserved.owns_effects(effects)
+            || reserved.invitation_id() != &self.original.invitation
+            || self.original.invitation != invitation.invitation_id
+            || self.original.invitation_digest != digest(invitation)?
+            || self.original.authority != effects.runtime_authority_id()
+            || self.original.device != effects.device_id()
+            || self.original.recipient != invitation.receiver_id
+        {
+            return Err(invalid(IssuedInvitationIdentityError::Binding));
+        }
+        let bytes = serde_json::to_vec(&self.original).map_err(|source| {
+            AgentError::Aura(AuraError::Serialization {
+                message: "encode original quorum invitation proof".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        let address = SecureStorageLocation::with_sub_key(
+            "issued_invitation_quorum_v1",
+            invitation.sender_id.to_string(),
+            invitation.invitation_id.to_string(),
+        );
+        effects
+            .secure_store_immutable(
+                &address,
+                &bytes,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await?;
+        Ok(())
+    }
+}
+
+pub(crate) struct IssuedQuorumInvitationCapability<'runtime> {
+    sender: SenderOwnership<'runtime>,
+    original: OriginalQuorumProofRecord,
+}
+
+pub(crate) enum IssuedSenderProofCapability<'runtime> {
+    Solo(IssuedInvitationIdentityCapability<'runtime>),
+    Quorum(IssuedQuorumInvitationCapability<'runtime>),
+}
+
+impl IssuedSenderProofCapability<'_> {
+    pub(crate) fn invitation(&self) -> &Invitation {
+        match self {
+            Self::Solo(issued) => issued.invitation(),
+            Self::Quorum(issued) => issued.invitation(),
+        }
+    }
+}
+
+#[aura_macros::capability_boundary(category = "capability_gated",
+    capability = "issued_sender_proof", capability_type = IssuedSenderProofCapability,
+    family = "proof_issuer")]
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+pub(crate) async fn select_original_sender_proof<'runtime>(
+    effects: &'runtime AuraEffectSystem,
+    selector: &InvitationId,
+) -> AgentResult<IssuedSenderProofCapability<'runtime>> {
+    let invitation = super::required_channel_read::created_required(
+        effects,
+        effects.runtime_authority_id(),
+        selector,
+    )
+    .await
+    .map_err(AgentError::from)?;
+    let quorum_address = SecureStorageLocation::with_sub_key(
+        "issued_invitation_quorum_v1",
+        invitation.sender_id.to_string(),
+        invitation.invitation_id.to_string(),
+    );
+    if effects.secure_exists(&quorum_address).await? {
+        let original = read_quorum(effects, &invitation).await?;
+        return Ok(IssuedSenderProofCapability::Quorum(
+            IssuedQuorumInvitationCapability {
+                sender: SenderOwnership::Borrowed {
+                    effects,
+                    invitation,
+                },
+                original,
+            },
+        ));
+    }
+    let original = read_original(effects, &invitation).await?;
+    Ok(IssuedSenderProofCapability::Solo(
+        IssuedInvitationIdentityCapability {
+            sender: SenderOwnership::Borrowed {
+                effects,
+                invitation,
+            },
+            original,
+        },
+    ))
+}
+
+impl IssuedQuorumInvitationCapability<'_> {
+    pub(crate) fn invitation(&self) -> &Invitation {
+        match &self.sender {
+            SenderOwnership::Owned(sender) => sender.invitation(),
+            SenderOwnership::Borrowed { invitation, .. } => invitation,
+        }
+    }
+
+    pub(crate) fn require_runtime_owner(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        let owns_runtime = match &self.sender {
+            SenderOwnership::Owned(sender) => {
+                std::ptr::eq(sender.runtime_owner().as_ref(), effects)
+            }
+            SenderOwnership::Borrowed { effects: owner, .. } => std::ptr::eq(*owner, effects),
+        };
+        if !owns_runtime
+            || self.original.authority != effects.runtime_authority_id()
+            || self.original.device != effects.device_id()
+        {
+            return Err(invalid(IssuedInvitationIdentityError::Binding));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn epoch(&self) -> u64 {
+        self.original.epoch
+    }
+
+    pub(crate) fn group_key(&self) -> &[u8; 32] {
+        &self.original.group_key
+    }
+
+    pub(crate) fn recipient_device(&self) -> DeviceId {
+        self.original.recipient_device
+    }
+
+    pub(crate) async fn verify_response_transcript(
+        &self,
+        effects: &AuraEffectSystem,
+        context: &aura_core::threshold::SigningContext,
+        epoch: u64,
+        signature: &[u8],
+    ) -> AgentResult<()> {
+        self.require_runtime_owner(effects)?;
+        if epoch != self.original.epoch {
+            return Err(invalid(IssuedInvitationIdentityError::Binding));
+        }
+        let trusted_key = self.original.retained_verification_key();
+        if !aura_signature::verify_threshold_signing_context_transcript(
+            effects,
+            context,
+            epoch,
+            signature,
+            trusted_key.bytes(),
+        )
+        .await
+        .map_err(|source| {
+            AgentError::invalid(format!("verify retained quorum response: {source}"))
+        })? {
+            return Err(AgentError::invalid(
+                "retained quorum response signature did not verify",
+            ));
+        }
+        Ok(())
+    }
+}
+
+async fn read_quorum(
+    effects: &AuraEffectSystem,
+    invitation: &Invitation,
+) -> AgentResult<OriginalQuorumProofRecord> {
+    if invitation.sender_id != effects.runtime_authority_id()
+        || !matches!(
+            invitation.invitation_type,
+            InvitationType::Contact { .. } | InvitationType::Guardian { .. }
+        )
+    {
+        return Err(invalid(IssuedInvitationIdentityError::Binding));
+    }
+    let address = SecureStorageLocation::with_sub_key(
+        "issued_invitation_quorum_v1",
+        invitation.sender_id.to_string(),
+        invitation.invitation_id.to_string(),
+    );
+    if !effects.secure_exists(&address).await? {
+        return Err(invalid(IssuedInvitationIdentityError::Missing));
+    }
+    let bytes = effects
+        .secure_retrieve(&address, &[SecureStorageCapability::Read])
+        .await?;
+    if bytes.len() > 16 * 1024 {
+        return Err(invalid(IssuedInvitationIdentityError::Oversized));
+    }
+    let original: OriginalQuorumProofRecord = serde_json::from_slice(&bytes).map_err(|source| {
+        AgentError::Aura(AuraError::Serialization {
+            message: "decode required original quorum invitation proof".into(),
+            source: Some(Arc::new(source)),
+        })
+    })?;
+    if original.version != 1
+        || original.authority != invitation.sender_id
+        || original.device != effects.device_id()
+        || original.invitation != invitation.invitation_id
+        || original.invitation_digest != digest(invitation)?
+        || original.recipient != invitation.receiver_id
+        || original.recipient == original.authority
+        || original.group_key == [0; 32]
+    {
+        return Err(invalid(IssuedInvitationIdentityError::Binding));
+    }
+    let (shareable, proof, transport) =
+        ShareableInvitation::from_code_with_proof_and_transport(&original.code)
+            .map_err(|_| invalid(IssuedInvitationIdentityError::Binding))?;
+    let recipient = ShareableInvitation::quorum_recipient_from_code(&original.code)
+        .map_err(|_| invalid(IssuedInvitationIdentityError::Binding))?;
+    let recipient_device = ShareableInvitation::recipient_device_from_code(&original.code)
+        .map_err(|_| invalid(IssuedInvitationIdentityError::Binding))?;
+    let proof = proof.ok_or_else(|| invalid(IssuedInvitationIdentityError::Binding))?;
+    if shareable.version != ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION
+        || shareable.invitation_id != invitation.invitation_id
+        || shareable.sender_id != invitation.sender_id
+        || shareable.context_id != Some(invitation.context_id)
+        || shareable.invitation_type != invitation.invitation_type
+        || shareable.expires_at != invitation.expires_at
+        || shareable.message != invitation.message
+        || recipient != Some(original.recipient)
+        || recipient_device != Some(original.recipient_device)
+        || transport.sender_device_id != Some(original.device)
+        || proof.key_epoch != Some(original.epoch)
+        || proof.public_key.as_slice() != original.group_key
+    {
+        return Err(invalid(IssuedInvitationIdentityError::Binding));
+    }
+    let context = shareable
+        .quorum_signing_context(original.recipient, original.recipient_device, &transport)
+        .map_err(|_| invalid(IssuedInvitationIdentityError::Binding))?;
+    let trusted_key = original.retained_verification_key();
+    if !aura_signature::verify_threshold_signing_context_transcript(
+        effects,
+        &context,
+        original.epoch,
+        &proof.signature,
+        trusted_key.bytes(),
+    )
+    .await
+    .map_err(|source| AgentError::invalid(format!("verify retained quorum invitation: {source}")))?
+    {
+        return Err(invalid(IssuedInvitationIdentityError::Binding));
+    }
+    Ok(original)
 }
 
 /// This token retains required sender storage custody; raw public keys and
@@ -336,6 +748,200 @@ pub(crate) async fn export_owned_invitation_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn orphaned_quorum_record_cannot_select_sender_without_required_fact() {
+        let (_config, effects, handler, _existing) = actual_sender(247).await;
+        let reserved = handler.reserve_invitation_issuance(&effects).await.unwrap();
+        let recipient = AuthorityId::new_from_entropy([247; 32]);
+        let invitation = Invitation {
+            invitation_id: reserved.invitation_id().clone(),
+            context_id: default_context_id_for_authority(effects.runtime_authority_id()),
+            sender_id: effects.runtime_authority_id(),
+            receiver_id: recipient,
+            invitation_type: InvitationType::Guardian {
+                subject_authority: effects.runtime_authority_id(),
+            },
+            status: InvitationStatus::Pending,
+            created_at: reserved.created_at_ms(),
+            expires_at: None,
+            message: None,
+            receiver_nickname: None,
+        };
+        // Simulate a later guard/commit failure after immutable proof retention.
+        // The record is deliberately test-authored; no production constructor
+        // accepts this data as authorization without the required sender fact.
+        let orphan = OriginalQuorumProofRecord {
+            version: 1,
+            authority: invitation.sender_id,
+            device: effects.device_id(),
+            invitation: invitation.invitation_id.clone(),
+            invitation_digest: digest(&invitation).unwrap(),
+            recipient,
+            recipient_device: DeviceId::new_from_entropy([246; 32]),
+            epoch: 7,
+            group_key: [8; 32],
+            code: "orphaned-test-proof".to_owned(),
+        };
+        let address = SecureStorageLocation::with_sub_key(
+            "issued_invitation_quorum_v1",
+            invitation.sender_id.to_string(),
+            invitation.invitation_id.to_string(),
+        );
+        effects
+            .secure_store_immutable(
+                &address,
+                &serde_json::to_vec(&orphan).unwrap(),
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .unwrap();
+        assert!(
+            select_original_sender_proof(effects.as_ref(), &invitation.invitation_id)
+                .await
+                .is_err(),
+            "orphaned proof cannot create sender authorization"
+        );
+        assert!(
+            handler
+                .created_invitation_required(effects.clone(), &invitation.invitation_id)
+                .await
+                .is_err(),
+            "orphaned proof cannot materialize a canonical invitation"
+        );
+        let reissued = handler.reserve_invitation_issuance(&effects).await.unwrap();
+        assert_ne!(
+            reissued.invitation_id(),
+            reserved.invitation_id(),
+            "a new issuance cannot collide with the orphaned reservation"
+        );
+    }
+
+    #[tokio::test]
+    async fn quorum_capability_cannot_fall_through_to_channel_issuance() {
+        let (_config, effects, handler, _existing) = actual_sender(245).await;
+        let reserved = handler.reserve_invitation_issuance(&effects).await.unwrap();
+        let recipient = AuthorityId::new_from_entropy([244; 32]);
+        let kind = InvitationType::Channel {
+            home_id: ChannelId::from_bytes([243; 32]),
+            nickname_suggestion: None,
+            bootstrap: None,
+            home: false,
+        };
+        let invitation = Invitation {
+            invitation_id: reserved.invitation_id().clone(),
+            context_id: default_context_id_for_authority(effects.runtime_authority_id()),
+            sender_id: effects.runtime_authority_id(),
+            receiver_id: recipient,
+            invitation_type: kind.clone(),
+            status: InvitationStatus::Pending,
+            created_at: reserved.created_at_ms(),
+            expires_at: None,
+            message: None,
+            receiver_nickname: None,
+        };
+        // The test authors an opaque value only to exercise the downstream
+        // fail-closed boundary; production can mint it only through sign().
+        let proof = VerifiedQuorumInvitationIssuance {
+            runtime_owner: effects.clone(),
+            original: OriginalQuorumProofRecord {
+                version: 1,
+                authority: invitation.sender_id,
+                device: effects.device_id(),
+                invitation: invitation.invitation_id.clone(),
+                invitation_digest: digest(&invitation).unwrap(),
+                recipient,
+                recipient_device: DeviceId::new_from_entropy([242; 32]),
+                epoch: 7,
+                group_key: [8; 32],
+                code: "test-only-proof".to_owned(),
+            },
+        };
+        let invitation_id = reserved.invitation_id().clone();
+        assert!(
+            handler
+                .prepare_reserved_invitation_with_proof(
+                    effects.clone(),
+                    reserved,
+                    recipient,
+                    kind,
+                    None,
+                    Some(invitation.context_id),
+                    None,
+                    None,
+                    Some(proof),
+                )
+                .await
+                .is_err(),
+            "unsupported kind must refuse before guard effects or facts"
+        );
+        assert!(
+            handler
+                .created_invitation_required(effects, &invitation_id)
+                .await
+                .is_err(),
+            "an unsupported quorum kind cannot publish an invitation"
+        );
+    }
+
+    #[tokio::test]
+    async fn original_quorum_issuance_refuses_solo_policy_before_storage_or_fact() {
+        let (_config, effects, handler, _existing) = actual_sender(248).await;
+        let recipient = AuthorityId::new_from_entropy([248; 32]);
+        let signer = ThresholdSigningService::new(effects.clone());
+        for invitation_type in [
+            InvitationType::Contact { nickname: None },
+            InvitationType::Guardian {
+                subject_authority: effects.runtime_authority_id(),
+            },
+        ] {
+            let reserved = handler.reserve_invitation_issuance(&effects).await.unwrap();
+            let invitation = Invitation {
+                invitation_id: reserved.invitation_id().clone(),
+                context_id: default_context_id_for_authority(effects.runtime_authority_id()),
+                sender_id: effects.runtime_authority_id(),
+                receiver_id: recipient,
+                invitation_type,
+                status: InvitationStatus::Pending,
+                created_at: reserved.created_at_ms(),
+                expires_at: None,
+                message: None,
+                receiver_nickname: None,
+            };
+            assert!(
+                VerifiedQuorumInvitationIssuance::sign(
+                    effects.clone(),
+                    &signer,
+                    &reserved,
+                    &invitation,
+                    DeviceId::new_from_entropy([249; 32]),
+                    &transport(effects.as_ref()),
+                )
+                .await
+                .is_err(),
+                "solo policy cannot mint a quorum-issued capability"
+            );
+            let address = SecureStorageLocation::with_sub_key(
+                "issued_invitation_quorum_v1",
+                invitation.sender_id.to_string(),
+                invitation.invitation_id.to_string(),
+            );
+            assert!(
+                !effects.secure_exists(&address).await.unwrap(),
+                "refusal cannot retain an issued proof"
+            );
+            assert!(
+                handler
+                    .created_invitation_required(effects.clone(), &invitation.invitation_id)
+                    .await
+                    .is_err(),
+                "refusal cannot publish an invitation fact"
+            );
+        }
+    }
 
     #[test]
     fn issued_binding_admits_only_the_open_contact_receiver_transition() {

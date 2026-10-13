@@ -6,7 +6,7 @@
 
 use aura_core::crypto::{single_signer::SingleSignerPublicKeyPackage, tree_signing};
 use aura_core::effects::CryptoEffects;
-use aura_core::threshold::{SigningContext, ThresholdSignature};
+use aura_core::threshold::{SignableOperation, SigningContext, ThresholdSignature};
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::{
     AttestedOp, AuraError, AuthorityId, DeviceId, Hash32, TrustedKeyDomain, TrustedPublicKey,
@@ -22,6 +22,10 @@ use serde::{Deserialize, Serialize};
 const DEVICE_EPOCH_KEY_PACKAGE_ENCRYPTION_PROTOCOL_VERSION: u8 = 1;
 const DEVICE_EPOCH_KEY_PACKAGE_KDF_DOMAIN: &[u8] = b"aura.sync.device-epoch.key-package.v1";
 
+/// Current outer signing-context domain for exact proposal consent.
+pub const DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN: &str =
+    "aura.sync.device_epoch_rotation.proposal.v2";
+
 /// The initiating ceremony type for one device-scoped epoch rotation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeviceEpochRotationKind {
@@ -30,11 +34,35 @@ pub enum DeviceEpochRotationKind {
     Removal,
 }
 
+/// Signed proposal scope. Enrollment always binds its original manifest and
+/// the enrolling device, independently of the existing recipient device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum DeviceEpochProposalPurpose {
+    Rotation,
+    Enrollment {
+        manifest_digest: Hash32,
+        enrolling_device_id: DeviceId,
+    },
+    Removal,
+}
+
+impl DeviceEpochProposalPurpose {
+    #[must_use]
+    pub fn kind(&self) -> DeviceEpochRotationKind {
+        match self {
+            Self::Rotation => DeviceEpochRotationKind::Rotation,
+            Self::Enrollment { .. } => DeviceEpochRotationKind::Enrollment,
+            Self::Removal => DeviceEpochRotationKind::Removal,
+        }
+    }
+}
+
 /// Proposal sent from the initiating device to one participant device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceEpochProposal {
     pub ceremony_id: CeremonyId,
-    pub kind: DeviceEpochRotationKind,
+    pub purpose: DeviceEpochProposalPurpose,
     pub subject_authority: AuthorityId,
     pub pending_epoch: u64,
     pub initiator_device_id: DeviceId,
@@ -107,10 +135,11 @@ pub struct DeviceEpochCommit {
     pub attested_epoch_op: Option<AttestedOp>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceEpochProposalTranscriptPayload {
     pub ceremony_id: CeremonyId,
-    pub kind: DeviceEpochRotationKind,
+    pub purpose: DeviceEpochProposalPurpose,
     pub subject_authority: AuthorityId,
     pub pending_epoch: u64,
     pub initiator_device_id: DeviceId,
@@ -136,12 +165,13 @@ impl<'a> DeviceEpochProposalTranscript<'a> {
 impl SecurityTranscript for DeviceEpochProposalTranscript<'_> {
     type Payload = DeviceEpochProposalTranscriptPayload;
 
-    const DOMAIN_SEPARATOR: &'static str = "aura.sync.device-epoch.proposal";
+    const DOMAIN_SEPARATOR: &'static str = "aura.sync.device-epoch.proposal.v2";
+    const SCHEMA_VERSION: u16 = 2;
 
     fn transcript_payload(&self) -> Self::Payload {
         DeviceEpochProposalTranscriptPayload {
             ceremony_id: self.proposal.ceremony_id.clone(),
-            kind: self.proposal.kind,
+            purpose: self.proposal.purpose.clone(),
             subject_authority: self.proposal.subject_authority,
             pending_epoch: self.proposal.pending_epoch,
             initiator_device_id: self.proposal.initiator_device_id,
@@ -153,6 +183,63 @@ impl SecurityTranscript for DeviceEpochProposalTranscript<'_> {
             proposed_at_ms: self.proposal.proposed_at_ms,
         }
     }
+}
+
+/// Decode bounded current proposal data for matching an actual local consent.
+/// Neither decoding nor canonical encoding grants admission or approval.
+pub fn decode_device_epoch_proposal_signing_context(
+    context: &SigningContext,
+) -> Result<DeviceEpochProposalTranscriptPayload, AuraError> {
+    let SignableOperation::Message { domain, payload } = &context.operation else {
+        return Err(AuraError::invalid(
+            "device epoch proposal requires a message context",
+        ));
+    };
+    if domain != DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN || payload.len() > 16_384 {
+        return Err(AuraError::invalid(
+            "device epoch proposal context domain or size",
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ObservedProposalEnvelope {
+        domain_separator: String,
+        schema_version: u16,
+        payload: DeviceEpochProposalTranscriptPayload,
+    }
+    let envelope: ObservedProposalEnvelope = aura_core::util::serialization::from_slice(payload)
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "decode device epoch proposal transcript",
+                std::sync::Arc::new(source),
+            )
+        })?;
+    if envelope.domain_separator != DeviceEpochProposalTranscript::DOMAIN_SEPARATOR
+        || envelope.schema_version != DeviceEpochProposalTranscript::SCHEMA_VERSION
+        || envelope.payload.subject_authority != context.authority
+    {
+        return Err(AuraError::invalid(
+            "device epoch proposal transcript binding",
+        ));
+    }
+    let canonical =
+        aura_core::util::serialization::to_vec(&aura_signature::TranscriptEnvelope::new(
+            DeviceEpochProposalTranscript::DOMAIN_SEPARATOR,
+            DeviceEpochProposalTranscript::SCHEMA_VERSION,
+            &envelope.payload,
+        ))
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "encode device epoch proposal transcript",
+                std::sync::Arc::new(source),
+            )
+        })?;
+    if canonical != *payload {
+        return Err(AuraError::invalid(
+            "noncanonical device epoch proposal transcript",
+        ));
+    }
+    Ok(envelope.payload)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -743,6 +830,93 @@ mod tests {
     };
     use aura_signature::threshold_signing_context_transcript_bytes;
 
+    #[test]
+    fn proposal_consent_decoder_requires_current_canonical_bound_scope() {
+        let authority = AuthorityId::new_from_entropy([81; 32]);
+        let scope = DeviceEpochProposalTranscriptPayload {
+            ceremony_id: CeremonyId::new("proposal-consent-decoder"),
+            purpose: DeviceEpochProposalPurpose::Enrollment {
+                manifest_digest: Hash32::from_bytes(&[82]),
+                enrolling_device_id: DeviceId::new_from_entropy([83; 32]),
+            },
+            subject_authority: authority,
+            pending_epoch: 4,
+            initiator_device_id: DeviceId::new_from_entropy([84; 32]),
+            participant_device_id: DeviceId::new_from_entropy([85; 32]),
+            key_package_hash: Hash32::from_bytes(&[86]),
+            threshold_config_hash: Hash32::from_bytes(&[87]),
+            public_key_package_hash: Hash32::from_bytes(&[88]),
+            encrypted_key_package_binding_hash: Hash32::from_bytes(&[89]),
+            proposed_at_ms: 5000,
+        };
+        let envelope = aura_signature::TranscriptEnvelope::new(
+            DeviceEpochProposalTranscript::DOMAIN_SEPARATOR,
+            DeviceEpochProposalTranscript::SCHEMA_VERSION,
+            scope,
+        );
+        let encode =
+            |value: &aura_signature::TranscriptEnvelope<DeviceEpochProposalTranscriptPayload>| {
+                aura_core::util::serialization::to_vec(value).expect("canonical proposal scope")
+            };
+        let decode = |authority, domain: &str, bytes| {
+            decode_device_epoch_proposal_signing_context(&SigningContext::message(
+                authority,
+                domain.to_owned(),
+                bytes,
+            ))
+        };
+        let bytes = encode(&envelope);
+        let decoded = decode(
+            authority,
+            DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN,
+            bytes.clone(),
+        )
+        .expect("current canonical scope");
+        assert_eq!(decoded.purpose, envelope.payload.purpose);
+        assert_eq!(
+            decoded.participant_device_id,
+            envelope.payload.participant_device_id
+        );
+        assert!(decode(
+            authority,
+            "aura.sync.device_epoch_rotation.proposal.v1",
+            bytes.clone()
+        )
+        .is_err());
+        assert!(decode(
+            AuthorityId::new_from_entropy([90; 32]),
+            DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN,
+            bytes.clone()
+        )
+        .is_err());
+        let mut obsolete = envelope.clone();
+        obsolete.schema_version = 1;
+        assert!(decode(
+            authority,
+            DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN,
+            encode(&obsolete)
+        )
+        .is_err());
+        obsolete.schema_version = 2;
+        obsolete.domain_separator = "aura.sync.device-epoch.proposal.v1".to_owned();
+        assert!(decode(
+            authority,
+            DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN,
+            encode(&obsolete)
+        )
+        .is_err());
+        assert!(decode(authority, DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN, vec![0xff]).is_err());
+        assert!(decode(
+            authority,
+            DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN,
+            vec![0; 16_385]
+        )
+        .is_err());
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(decode(authority, DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN, trailing).is_err());
+    }
+
     fn test_encrypted_key_package(recipient_device_id: DeviceId) -> EncryptedDeviceEpochKeyPackage {
         EncryptedDeviceEpochKeyPackage {
             protocol_version: DEVICE_EPOCH_KEY_PACKAGE_ENCRYPTION_PROTOCOL_VERSION,
@@ -786,7 +960,7 @@ mod tests {
     fn device_epoch_rotation_transcripts_bind_epoch_and_participant() {
         let proposal = DeviceEpochProposal {
             ceremony_id: CeremonyId::new("device-epoch-1"),
-            kind: DeviceEpochRotationKind::Rotation,
+            purpose: DeviceEpochProposalPurpose::Rotation,
             subject_authority: AuthorityId::new_from_entropy([2u8; 32]),
             pending_epoch: 10,
             initiator_device_id: DeviceId::new_from_entropy([3u8; 32]),
@@ -848,7 +1022,10 @@ mod tests {
         );
         let mut proposal = DeviceEpochProposal {
             ceremony_id: CeremonyId::new("device-epoch-signed"),
-            kind: DeviceEpochRotationKind::Rotation,
+            purpose: DeviceEpochProposalPurpose::Enrollment {
+                manifest_digest: Hash32::from_bytes(&[38]),
+                enrolling_device_id: DeviceId::new_from_entropy([39; 32]),
+            },
             subject_authority: authority,
             pending_epoch: 9,
             initiator_device_id: DeviceId::new_from_entropy([33u8; 32]),
@@ -871,7 +1048,7 @@ mod tests {
         let transcript = DeviceEpochProposalTranscript::new(&proposal);
         let signing_context = aura_core::threshold::SigningContext::message(
             authority,
-            "aura.sync.device_epoch_rotation.proposal".to_string(),
+            "aura.sync.device_epoch_rotation.proposal.v2".to_string(),
             transcript
                 .transcript_bytes()
                 .expect("proposal transcript bytes"),
@@ -893,7 +1070,7 @@ mod tests {
         let verified = verify_device_epoch_authority_signature(
             &crypto,
             authority,
-            "aura.sync.device_epoch_rotation.proposal",
+            "aura.sync.device_epoch_rotation.proposal.v2",
             &DeviceEpochProposalTranscript::new(&proposal),
             &proposal.authority_signature,
             &trusted_public_key_package,
@@ -902,6 +1079,30 @@ mod tests {
         .await
         .expect("verify proposal authority signature");
         assert!(verified);
+        for substituted_purpose in [
+            DeviceEpochProposalPurpose::Rotation,
+            DeviceEpochProposalPurpose::Enrollment {
+                manifest_digest: Hash32::from_bytes(&[40]),
+                enrolling_device_id: DeviceId::new_from_entropy([39; 32]),
+            },
+            DeviceEpochProposalPurpose::Enrollment {
+                manifest_digest: Hash32::from_bytes(&[38]),
+                enrolling_device_id: DeviceId::new_from_entropy([40; 32]),
+            },
+        ] {
+            proposal.purpose = substituted_purpose;
+            assert!(!verify_device_epoch_authority_signature(
+                &crypto,
+                authority,
+                DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN,
+                &DeviceEpochProposalTranscript::new(&proposal),
+                &proposal.authority_signature,
+                &trusted_public_key_package,
+                0,
+            )
+            .await
+            .expect("substituted scope verification"));
+        }
     }
 
     #[tokio::test]
@@ -961,7 +1162,7 @@ mod tests {
         let verified = verify_device_epoch_authority_signature(
             &crypto,
             authority,
-            "aura.sync.device_epoch_rotation.proposal",
+            "aura.sync.device_epoch_rotation.proposal.v2",
             &DeviceEpochCommitTranscript::new(&commit),
             &commit.authority_signature,
             &trusted_public_key_package,

@@ -7,8 +7,7 @@ use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{TransportEnvelope, MAX_TRANSPORT_PAYLOAD_BYTES};
 use aura_core::effects::{
-    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
-    TransportEffects, TransportError,
+    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects, TransportError,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 #[cfg(not(target_arch = "wasm32"))]
@@ -145,7 +144,7 @@ impl NetworkCoreEffects for AuraEffectSystem {
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {
         self.restore_flow_windows().await;
-        let taken = TransportEffects::receive_envelope(self).await;
+        let taken = self.receive_envelope_retained().await;
         self.flush_flow_checkpoints().await;
         let envelope = match taken {
             Ok(env) => env,
@@ -158,16 +157,15 @@ impl NetworkCoreEffects for AuraEffectSystem {
         };
 
         let Some(content_type) = envelope.metadata.get("content-type") else {
-            self.requeue_envelope(envelope);
             return Err(NetworkError::NoMessage);
         };
 
         if content_type != NETWORK_CONTENT_TYPE {
-            self.requeue_envelope(envelope);
             return Err(NetworkError::NoMessage);
         }
 
-        Ok((network_source_id(&envelope), envelope.payload))
+        let source = network_source_id(&envelope);
+        Ok((source, envelope.consume().payload))
     }
 }
 
@@ -730,13 +728,13 @@ impl AuraEffectSystem {
         // Wait a bounded time so lockstep peers (sync) can answer before we give up.
         self.restore_flow_windows().await;
         for _ in 0..RECEIVE_FROM_POLLS {
-            let taken = self.take_inbound_envelope(|env| {
+            let taken = self.take_inbound_envelope_retained(|env| {
                 env.metadata.get("content-type").map(String::as_str) == Some(content_type)
                     && network_source_id(env) == peer_id
             });
             self.flush_flow_checkpoints().await;
             match taken {
-                Ok(envelope) => return Ok(envelope.payload),
+                Ok(envelope) => return Ok(envelope.consume().payload),
                 Err(TransportError::NoMessage) => {}
                 Err(source) => return Err(configured_network_ingress_error(source)),
             }
@@ -775,7 +773,411 @@ const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
 /// Storage prefix for persisted flow receive windows (work/8.md Task 54).
 const FLOW_WINDOW_STORAGE_PREFIX: &str = "flow_window/recv/";
 
+/// Retained transport progress for one exact enrollment packet. This cursor
+/// observes transport work; it grants neither signing nor delivery authority.
+#[derive(Default)]
+pub(crate) struct OriginalEnrollmentSendProgress {
+    origin: Option<std::sync::Weak<AuraEffectSystem>>,
+    binding: Option<[u8; 32]>,
+    started: bool,
+    completed: bool,
+    first_failure: Option<aura_core::AuraError>,
+}
+
+pub(crate) struct OriginalEnrollmentReceiveProgress<Packet> {
+    origin: Option<std::sync::Weak<AuraEffectSystem>>,
+    locator: Option<[u8; 32]>,
+    packet: Option<Packet>,
+    first_failure: Option<aura_core::AuraError>,
+}
+impl<Packet> Default for OriginalEnrollmentReceiveProgress<Packet> {
+    fn default() -> Self {
+        Self {
+            origin: None,
+            locator: None,
+            packet: None,
+            first_failure: None,
+        }
+    }
+}
+impl<Packet> OriginalEnrollmentReceiveProgress<Packet> {
+    /// Taking wire data grants no admitted decision or signature authority.
+    pub(crate) fn take_packet(&mut self) -> Option<Packet> {
+        self.packet.take()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("original enrollment send started without an observed completion")]
+struct OriginalEnrollmentSendUnresolved;
+
 impl AuraEffectSystem {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalConditionalRetirementTransport",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn send_original_conditional_retirement_request<'a, 'material, 'activation>(
+        &self,
+        owner: &'a crate::runtime::services::threshold_signing::OriginalConditionalRetirementTransport<'material, 'activation>,
+        destination: aura_core::DeviceId,
+        packet: &crate::runtime::services::threshold_signing::OriginalConditionalPacket,
+        progress: &mut OriginalEnrollmentSendProgress,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'a crate::runtime::services::threshold_signing::OriginalConditionalRetirementTransport<
+                'material,
+                'activation,
+            >,
+            (),
+            aura_core::AuraError,
+        >,
+        aura_core::AuraError,
+    > {
+        owner.require_effects(self)?;
+        self.bind_original_enrollment_origin(
+            owner.original_effects_origin(),
+            &mut progress.origin,
+        )?;
+        let (subject, locator, payload) = owner.validate_send(destination, packet)?;
+        owner
+            .execute(|| {
+                self.send_original_enrollment_packet_once(
+                    "application/aura-approved-enrollment-conditional-v1",
+                    subject,
+                    destination,
+                    locator,
+                    payload,
+                    progress,
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalRetiredConditionalTransport",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn send_original_retired_conditional_enrollment_packet<'a, 'custody>(
+        &self,
+        owner: &'a crate::runtime::services::threshold_signing::OriginalRetiredConditionalTransport<
+            'custody,
+        >,
+        destination: aura_core::DeviceId,
+        packet: &crate::runtime::services::threshold_signing::OriginalConditionalPacket,
+        progress: &mut OriginalEnrollmentSendProgress,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'a crate::runtime::services::threshold_signing::OriginalRetiredConditionalTransport<
+                'custody,
+            >,
+            (),
+            aura_core::AuraError,
+        >,
+        aura_core::AuraError,
+    > {
+        owner.require_effects(self)?;
+        self.bind_original_enrollment_origin(
+            owner.original_effects_origin(),
+            &mut progress.origin,
+        )?;
+        let (subject, locator, payload) = owner.validate_send(destination, packet)?;
+        owner
+            .execute(|| {
+                self.send_original_enrollment_packet_once(
+                    "application/aura-approved-enrollment-conditional-v1",
+                    subject,
+                    destination,
+                    locator,
+                    payload,
+                    progress,
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalConditionalTransport",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn send_original_conditional_enrollment_packet<'a, 'material>(
+        &self,
+        owner: &'a crate::runtime::services::threshold_signing::OriginalConditionalTransport<
+            'material,
+        >,
+        destination: aura_core::DeviceId,
+        packet: &crate::runtime::services::threshold_signing::OriginalConditionalPacket,
+        progress: &mut OriginalEnrollmentSendProgress,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'a crate::runtime::services::threshold_signing::OriginalConditionalTransport<
+                'material,
+            >,
+            (),
+            aura_core::AuraError,
+        >,
+        aura_core::AuraError,
+    > {
+        owner.require_effects(self)?;
+        self.bind_original_enrollment_origin(
+            owner.original_effects_origin(),
+            &mut progress.origin,
+        )?;
+        let (subject, locator, payload) = owner.validate_send(destination, packet)?;
+        owner
+            .execute(|| {
+                self.send_original_enrollment_packet_once(
+                    "application/aura-approved-enrollment-conditional-v1",
+                    subject,
+                    destination,
+                    locator,
+                    payload,
+                    progress,
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalConditionalTransport",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn receive_original_conditional_enrollment_packet<'a, 'material>(
+        &self,
+        owner: &'a crate::runtime::services::threshold_signing::OriginalConditionalTransport<
+            'material,
+        >,
+        peer: aura_core::DeviceId,
+        progress: &mut OriginalEnrollmentReceiveProgress<
+            crate::runtime::services::threshold_signing::OriginalConditionalPacket,
+        >,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'a crate::runtime::services::threshold_signing::OriginalConditionalTransport<
+                'material,
+            >,
+            (),
+            aura_core::AuraError,
+        >,
+        aura_core::AuraError,
+    > {
+        owner.require_effects(self)?;
+        self.bind_original_enrollment_origin(
+            owner.original_effects_origin(),
+            &mut progress.origin,
+        )?;
+        let locator = owner.receive_locator(peer)?;
+        owner
+            .execute(|| {
+                self.receive_original_enrollment_packet_once(
+                    "application/aura-approved-enrollment-conditional-v1",
+                    locator,
+                    progress,
+                    |payload| owner.decode_received(payload),
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalPositiveTransport",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn send_original_positive_enrollment_packet<'a, 'material>(
+        &self,
+        owner: &'a crate::runtime::services::threshold_signing::OriginalPositiveTransport<
+            'material,
+        >,
+        destination: aura_core::DeviceId,
+        packet: &crate::runtime::services::threshold_signing::OriginalPositivePacket,
+        progress: &mut OriginalEnrollmentSendProgress,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'a crate::runtime::services::threshold_signing::OriginalPositiveTransport<'material>,
+            (),
+            aura_core::AuraError,
+        >,
+        aura_core::AuraError,
+    > {
+        owner.require_effects(self)?;
+        self.bind_original_enrollment_origin(
+            owner.original_effects_origin(),
+            &mut progress.origin,
+        )?;
+        let (subject, locator, payload) = owner.validate_send(destination, packet)?;
+        owner
+            .execute(|| {
+                self.send_original_enrollment_packet_once(
+                    "application/aura-approved-enrollment-positive-v1",
+                    subject,
+                    destination,
+                    locator,
+                    payload,
+                    progress,
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalPositiveTransport",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn receive_original_positive_enrollment_packet<'a, 'material>(
+        &self,
+        owner: &'a crate::runtime::services::threshold_signing::OriginalPositiveTransport<
+            'material,
+        >,
+        peer: aura_core::DeviceId,
+        progress: &mut OriginalEnrollmentReceiveProgress<
+            crate::runtime::services::threshold_signing::OriginalPositivePacket,
+        >,
+    ) -> Result<
+        aura_core::time::timeout::NegativeCleanupExecution<
+            &'a crate::runtime::services::threshold_signing::OriginalPositiveTransport<'material>,
+            (),
+            aura_core::AuraError,
+        >,
+        aura_core::AuraError,
+    > {
+        owner.require_effects(self)?;
+        self.bind_original_enrollment_origin(
+            owner.original_effects_origin(),
+            &mut progress.origin,
+        )?;
+        let locator = owner.receive_locator(peer)?;
+        owner
+            .execute(|| {
+                self.receive_original_enrollment_packet_once(
+                    "application/aura-approved-enrollment-positive-v1",
+                    locator,
+                    progress,
+                    |payload| owner.decode_received(payload),
+                )
+            })
+            .await
+    }
+
+    fn bind_original_enrollment_origin(
+        &self,
+        original: std::sync::Weak<AuraEffectSystem>,
+        origin: &mut Option<std::sync::Weak<AuraEffectSystem>>,
+    ) -> Result<(), aura_core::AuraError> {
+        let retained = origin.get_or_insert(original);
+        let actual = retained.upgrade().ok_or_else(|| {
+            aura_core::AuraError::permission_denied(
+                "original enrollment transport runtime was lost",
+            )
+        })?;
+        if !std::ptr::eq(self, actual.as_ref()) {
+            return Err(aura_core::AuraError::permission_denied(
+                "enrollment transport cursor belongs to another physical runtime",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn send_original_enrollment_packet_once(
+        &self,
+        content_type: &str,
+        subject: aura_core::AuthorityId,
+        destination_device: aura_core::DeviceId,
+        locator: [u8; 32],
+        payload: Vec<u8>,
+        progress: &mut OriginalEnrollmentSendProgress,
+    ) -> Result<(), aura_core::AuraError> {
+        let binding = aura_core::hash::hash(&aura_core::util::serialization::to_vec(&(
+            "aura.enrollment.original-packet-send.v1",
+            content_type,
+            subject,
+            destination_device,
+            locator,
+            aura_core::hash::hash(&payload),
+        ))?);
+        if progress.binding.is_some_and(|original| original != binding) {
+            return Err(aura_core::AuraError::permission_denied(
+                "enrollment send cursor belongs to another original packet",
+            ));
+        }
+        progress.binding = Some(binding);
+        if progress.completed {
+            return Ok(());
+        }
+        if progress.started {
+            return Err(progress.first_failure.clone().unwrap_or_else(|| {
+                aura_core::AuraError::Network {
+                    message: "original enrollment transport remains unresolved".into(),
+                    source: Some(std::sync::Arc::new(OriginalEnrollmentSendUnresolved)),
+                }
+            }));
+        }
+        progress.started = true;
+        let outcome = self
+            .send_original_enrollment_packet(
+                subject,
+                destination_device,
+                locator,
+                content_type,
+                payload,
+            )
+            .await;
+        match outcome {
+            Ok(()) => {
+                // Deposit before the enclosing original-window postvalidation.
+                progress.completed = true;
+                Ok(())
+            }
+            Err(source) => {
+                progress.first_failure.get_or_insert_with(|| source.clone());
+                Err(source)
+            }
+        }
+    }
+
+    async fn receive_original_enrollment_packet_once<Packet>(
+        &self,
+        content_type: &str,
+        locator: [u8; 32],
+        progress: &mut OriginalEnrollmentReceiveProgress<Packet>,
+        decode: impl FnOnce(&[u8]) -> Result<Packet, aura_core::AuraError>,
+    ) -> Result<(), aura_core::AuraError> {
+        if progress.locator.is_some_and(|original| original != locator) {
+            return Err(aura_core::AuraError::permission_denied(
+                "enrollment receive cursor belongs to another original route",
+            ));
+        }
+        progress.locator = Some(locator);
+        if progress.packet.is_some() {
+            return Ok(());
+        }
+        if let Some(source) = &progress.first_failure {
+            return Err(source.clone());
+        }
+        let result = async {
+            let payload = self
+                .receive_original_enrollment_packet(locator, content_type)
+                .await?;
+            decode(&payload)
+        }
+        .await;
+        match result {
+            Ok(packet) => {
+                // Keep consumed data before the owner's postvalidation can await.
+                progress.packet = Some(packet);
+                Ok(())
+            }
+            Err(source) => {
+                progress.first_failure.get_or_insert_with(|| source.clone());
+                Err(source)
+            }
+        }
+    }
+
     /// Original native tree custody authorizes addressing only current sibling
     /// members. Packet proof verification and local approval remain independent.
     pub(crate) async fn send_owned_enrollment_round(
@@ -802,29 +1204,70 @@ impl AuraEffectSystem {
             if payload.len() > aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::MAXIMUM_WIRE_BYTES {
                 return Err(aura_core::AuraError::invalid("owned signing packet exceeds its wire bound"));
             }
-            let context = default_context_id_for_authority(manifest.subject);
-            // The deterministic transport obeys the same charge-before-send
-            // contract; no Testing branch skips the guard receipt.
-            let charged = aura_core::effects::FlowBudgetEffects::charge_flow(
-                self, &context, &manifest.subject, aura_core::FlowCost::new(1),
-            ).await?;
-            let mut metadata = HashMap::new();
-            metadata.insert("content-type".into(), "application/aura-approved-enrollment-round-v1".into());
-            metadata.insert("aura-destination-device-id".into(), destination_device.to_string());
-            metadata.insert(SOURCE_DEVICE_METADATA_KEY.into(), self.device_id().to_string());
-            metadata.insert("aura-enrollment-round-session".into(), hex::encode(packet.packet.session));
-            send_guarded_transport_envelope(self, TransportEnvelope {
-                destination: manifest.subject, source: self.authority_id, context, payload, metadata,
-                receipt: Some(aura_core::effects::transport::TransportReceipt {
-                    context: charged.ctx, src: charged.src, dst: charged.dst,
-                    epoch: charged.epoch.value(), cost: charged.cost.value(), nonce: charged.nonce.value(),
-                    prev: charged.prev.0, sig: charged.sig.into_bytes(),
-                }),
-            }).await.map_err(|source| aura_core::AuraError::Network {
-                message: "emit original guarded enrollment round".into(), source: Some(std::sync::Arc::new(source)),
-            })
+            self.send_original_enrollment_packet(
+                manifest.subject, destination_device, packet.packet.session,
+                "application/aura-approved-enrollment-round-v1", payload,
+            ).await
         }).await.map_err(|source| aura_core::AuraError::Network {
             message: "original sealed enrollment send window".into(), source: Some(std::sync::Arc::new(source)),
+        })
+    }
+
+    // Only validated owner adapters call this transport primitive. Addressing
+    // fields here are not an admission or signing authority.
+    async fn send_original_enrollment_packet(
+        &self,
+        subject: aura_core::AuthorityId,
+        destination_device: aura_core::DeviceId,
+        session: [u8; 32],
+        content_type: &str,
+        payload: Vec<u8>,
+    ) -> Result<(), aura_core::AuraError> {
+        let context = default_context_id_for_authority(subject);
+        // The deterministic transport obeys the same charge-before-send
+        // contract; no Testing branch skips the guard receipt.
+        let charged = aura_core::effects::FlowBudgetEffects::charge_flow(
+            self,
+            &context,
+            &subject,
+            aura_core::FlowCost::new(1),
+        )
+        .await?;
+        let mut metadata = HashMap::new();
+        metadata.insert("content-type".into(), content_type.into());
+        metadata.insert(
+            "aura-destination-device-id".into(),
+            destination_device.to_string(),
+        );
+        metadata.insert(
+            SOURCE_DEVICE_METADATA_KEY.into(),
+            self.device_id().to_string(),
+        );
+        metadata.insert("aura-enrollment-round-session".into(), hex::encode(session));
+        send_guarded_transport_envelope(
+            self,
+            TransportEnvelope {
+                destination: subject,
+                source: self.authority_id,
+                context,
+                payload,
+                metadata,
+                receipt: Some(aura_core::effects::transport::TransportReceipt {
+                    context: charged.ctx,
+                    src: charged.src,
+                    dst: charged.dst,
+                    epoch: charged.epoch.value(),
+                    cost: charged.cost.value(),
+                    nonce: charged.nonce.value(),
+                    prev: charged.prev.0,
+                    sig: charged.sig.into_bytes(),
+                }),
+            },
+        )
+        .await
+        .map_err(|source| aura_core::AuraError::Network {
+            message: "emit original guarded enrollment round".into(),
+            source: Some(std::sync::Arc::new(source)),
         })
     }
 
@@ -839,33 +1282,91 @@ impl AuraEffectSystem {
         aura_core::AuraError,
     > {
         window.execute(self, || async {
-            let session_locator = hex::encode(session);
-            loop {
-                let notify = self.transport.inbox_notify(self.authority_id);
-                let arrival = notify.notified();
-                tokio::pin!(arrival);
-                arrival.as_mut().enable();
-                match self.take_inbound_envelope(|envelope|
-                    envelope.metadata.get("content-type").is_some_and(|kind| kind == "application/aura-approved-enrollment-round-v1")
-                    && envelope.metadata.get("aura-enrollment-round-session") == Some(&session_locator)
-                ) {
-                    Ok(envelope) => return aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::decode_bounded(&envelope.payload),
-                    Err(TransportError::NoMessage) => {},
-                    Err(source) => return Err(aura_core::AuraError::Network { message: "original signing inbox failure".into(), source: Some(std::sync::Arc::new(source)) }),
-                }
-                match self.receive_configured_envelope().await {
-                    Ok(envelope) => {
-                        if matches!(self.queue_runtime_envelope(envelope), crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow) {
-                            return Err(aura_core::AuraError::Network { message: "owned signing ingress capacity exceeded".into(), source: Some(std::sync::Arc::new(TransportError::IngressCapacityExceeded { capacity: u64::from(crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY) })) });
-                        }
-                    },
-                    Err(TransportError::NoMessage) => self.wait_for_transport_arrival(arrival).await.map_err(aura_core::AuraError::from)?,
-                    Err(source) => return Err(aura_core::AuraError::Network { message: "original configured signing ingress failure".into(), source: Some(std::sync::Arc::new(source)) }),
-                }
-            }
+            let payload = self.receive_original_enrollment_packet(
+                session, "application/aura-approved-enrollment-round-v1",
+            ).await?;
+            aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::decode_bounded(&payload)
         }).await.map_err(|source| aura_core::AuraError::Network {
             message: "original sealed enrollment receive window".into(), source: Some(std::sync::Arc::new(source)),
         })
+    }
+
+    async fn receive_original_enrollment_packet(
+        &self,
+        session: [u8; 32],
+        content_type: &str,
+    ) -> Result<Vec<u8>, aura_core::AuraError> {
+        let session_locator = hex::encode(session);
+        self.receive_matching_signing_envelope(|envelope| {
+            envelope
+                .metadata
+                .get("content-type")
+                .is_some_and(|kind| kind == content_type)
+                && envelope.metadata.get("aura-enrollment-round-session") == Some(&session_locator)
+        })
+        .await
+        .map(|envelope| envelope.payload)
+    }
+
+    /// Observe the original quorum session's response as untrusted data.
+    /// The retained session owns validation and the original execution window.
+    pub(crate) async fn receive_original_device_quorum_response(
+        &self,
+        session: [u8; 32],
+        participant: aura_core::DeviceId,
+        sequence: u8,
+    ) -> Result<TransportEnvelope, aura_core::AuraError> {
+        self.receive_matching_signing_envelope(|envelope| {
+            crate::runtime::services::threshold_signing::original_device_quorum_response_matches(
+                envelope,
+                session,
+                participant,
+                sequence,
+            )
+        })
+        .await
+    }
+
+    /// Observe one matching signing frame without consuming other sessions.
+    /// The caller owns the original deadline and retains the consumed result;
+    /// inbox readiness grants no signing or protocol-completion authority.
+    async fn receive_matching_signing_envelope(
+        &self,
+        matches: impl Fn(&TransportEnvelope) -> bool,
+    ) -> Result<TransportEnvelope, aura_core::AuraError> {
+        loop {
+            let notify = self.transport.inbox_notify(self.authority_id);
+            let arrival = notify.notified();
+            tokio::pin!(arrival);
+            arrival.as_mut().enable();
+            match self.take_inbound_envelope(&matches) {
+                Ok(envelope) => return Ok(envelope),
+                Err(TransportError::NoMessage) => {}
+                Err(source) => {
+                    return Err(aura_core::AuraError::Network {
+                        message: "original signing inbox failure".into(),
+                        source: Some(std::sync::Arc::new(source)),
+                    })
+                }
+            }
+            match self.receive_configured_envelope().await {
+                Ok(envelope) => {
+                    if matches!(self.queue_runtime_envelope(envelope), crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow) {
+                            return Err(aura_core::AuraError::Network { message: "owned signing ingress capacity exceeded".into(), source: Some(std::sync::Arc::new(TransportError::IngressCapacityExceeded { capacity: u64::from(crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY) })) });
+                        }
+                }
+                Err(TransportError::NoMessage) => self
+                    .wait_for_transport_arrival(arrival)
+                    .await
+                    .map_err(aura_core::AuraError::from)?,
+                Err(source) => {
+                    return Err(aura_core::AuraError::Network {
+                        message: "original configured signing ingress failure".into(),
+                        source: Some(std::sync::Arc::new(source)),
+                    })
+                }
+            }
+        }
     }
 }
 
@@ -963,6 +1464,57 @@ mod tests {
         let alice_fx = build(format!("flow-alice-{}", seeds.0), alice, shared.clone());
         let bob_fx = build(format!("flow-bob-{}", seeds.1), bob, shared);
         (alice, alice_fx, bob, bob_fx)
+    }
+
+    #[tokio::test]
+    async fn cancelled_borrowed_receive_restores_original_at_full_inbox_capacity() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        let effects = AuraEffectSystem::simulation_for_named_test(
+            &production_config_for_tests(),
+            "cancelled-borrowed-network-receive",
+        )
+        .expect("isolated local transport runtime");
+        let authority = effects.authority_id;
+        let frame = |index: u8| TransportEnvelope {
+            source: AuthorityId::new_from_entropy([index; 32]),
+            destination: authority,
+            context: default_context_id_for_authority(authority),
+            payload: vec![index],
+            metadata: std::collections::HashMap::new(),
+            receipt: None,
+        };
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            assert_eq!(
+                effects.queue_runtime_envelope(frame(index as u8)),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let borrowed = effects
+            .receive_envelope_retained()
+            .await
+            .expect("original frame");
+        assert_eq!(borrowed.payload, [0]);
+        assert_eq!(effects.transport.inbox_len(), 255);
+        assert_eq!(
+            effects.queue_runtime_envelope(frame(42)),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "new arrival cannot consume the cancellation return slot"
+        );
+        drop(borrowed);
+        assert_eq!(effects.transport.inbox_len(), 256);
+        assert_eq!(effects.transport.inbox().read()[0].payload, [0]);
+        assert!(matches!(
+            effects.receive().await,
+            Err(NetworkError::NoMessage)
+        ));
+        assert_eq!(effects.transport.inbox_len(), 256);
+        assert_eq!(
+            effects.transport.inbox().read()[0].payload,
+            [0],
+            "the actual network consumer returns the unrelated original frame in order"
+        );
     }
 
     // Task 54: an allowance override is a committed relational fact. It

@@ -35,6 +35,20 @@ impl TrustedKeyResolutionService {
         Self::default()
     }
 
+    /// Whether this runtime already holds any independent authority-level
+    /// sender trust for `authority`, including a rotated or revoked epoch.
+    /// A revoked key still makes the sender known and must never downgrade a
+    /// new invitation to untrusted bootstrap/self-certified handling.
+    #[must_use]
+    pub fn has_retained_authority_trust(&self, authority: AuthorityId) -> bool {
+        let registry = self.read_registry();
+        registry
+            .authority_threshold
+            .keys()
+            .any(|(known_authority, _)| *known_authority == authority)
+            || registry.guardians.contains_key(&authority)
+    }
+
     /// Register an authority threshold key for a specific epoch.
     ///
     /// Older active epochs for the same authority are marked rotated.

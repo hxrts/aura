@@ -148,7 +148,7 @@ pub(crate) fn apply_harness_command(
     state: &mut TuiState,
     command: HarnessUiCommand,
     semantic_inputs: TuiSemanticInputs<'_>,
-) -> Result<Vec<TuiCommand>, String> {
+) -> Result<Vec<TuiCommand>, crate::tui::harness_state::HarnessSubmissionFailure> {
     match command {
         HarnessUiCommand::Ping => Ok(Vec::new()),
         HarnessUiCommand::RefreshAccount => Ok(vec![TuiCommand::HarnessRefreshAccount]),
@@ -282,10 +282,13 @@ pub(crate) fn apply_harness_command(
             }
             unsupported => Err(format!(
                 "list {unsupported:?} cannot be activated through the TUI harness command"
-            )),
+            )
+            .into()),
         },
         HarnessUiCommand::ExportDeviceEnrollmentSetup => {
-            Err("setup export requires the app workflow command owner".to_string())
+            Err("setup export requires the app workflow command owner"
+                .to_string()
+                .into())
         }
         HarnessUiCommand::CreateAccount { account_name } => {
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::CreateAccount {
@@ -304,8 +307,11 @@ pub(crate) fn apply_harness_command(
                 name: channel_name,
                 topic: None,
                 members: Vec::new(),
-                threshold_k: ThresholdK::new(1)
-                    .map_err(|error| format!("invalid default channel threshold: {error}"))?,
+                threshold_k: ThresholdK::new(1).map_err(|error| {
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::msg(error).context("invalid default channel threshold"),
+                    )
+                })?,
             })])
         }
         HarnessUiCommand::SelectHome { home_id } => {
@@ -353,7 +359,7 @@ pub(crate) fn apply_harness_command(
                 .iter()
                 .position(|authority| authority.id == authority_id)
             else {
-                return Err(format!("authority {authority_id} is not visible"));
+                return Err(format!("authority {authority_id} is not visible").into());
             };
             state.current_authority_index = selected_index;
             if state
@@ -365,7 +371,12 @@ pub(crate) fn apply_harness_command(
             }
             let authority_id = authority_id
                 .parse::<aura_core::AuthorityId>()
-                .map_err(|error| format!("invalid authority id {authority_id}: {error}"))?;
+                .map_err(|error| {
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(error)
+                            .context(format!("invalid authority id {authority_id}")),
+                    )
+                })?;
             Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::SwitchAuthority { authority_id },
             )])
@@ -376,7 +387,10 @@ pub(crate) fn apply_harness_command(
             let receiver_id = receiver_authority_id
                 .parse::<aura_core::AuthorityId>()
                 .map_err(|error| {
-                    format!("invalid authority id {receiver_authority_id}: {error}")
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(error)
+                            .context(format!("invalid authority id {receiver_authority_id}")),
+                    )
                 })?;
             Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::CreateInvitation {
@@ -403,10 +417,18 @@ pub(crate) fn apply_harness_command(
         } => {
             let authority_id = authority_id
                 .parse::<aura_core::AuthorityId>()
-                .map_err(|error| format!("invalid authority id: {error}"))?;
+                .map_err(|error| {
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(error).context("invalid authority id"),
+                    )
+                })?;
             channel_id
                 .parse::<aura_core::ChannelId>()
-                .map_err(|error| format!("invalid channel id: {error}"))?;
+                .map_err(|error| {
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(error).context("invalid channel id"),
+                    )
+                })?;
             Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::InviteActorToChannel {
                     authority_id,
@@ -434,7 +456,7 @@ pub(crate) fn apply_harness_command(
                 .iter()
                 .any(|candidate| candidate.id == channel_id);
             if !channel_visible {
-                return Err(format!("channel list item {channel_id} is not visible"));
+                return Err(format!("channel list item {channel_id} is not visible").into());
             }
             state.router.go_to(Screen::Chat);
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::SelectChannel {

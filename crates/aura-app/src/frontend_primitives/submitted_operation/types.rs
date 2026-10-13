@@ -8,6 +8,48 @@ use futures::FutureExt;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 
+// Match the existing native/local task-custody split. Browser publication is
+// synchronous and must retain local owners without pretending they are Send.
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        /// Original local custody retained through browser publication.
+        pub type SubmittedTerminalCustody = Box<dyn std::any::Any>;
+    } else {
+        /// Original sendable custody retained through native publication.
+        pub type SubmittedTerminalCustody = Box<dyn Send>;
+    }
+}
+
+/// Original terminal intent transferred to a publisher before observation.
+/// Retained custody is released only at that publisher's actual acknowledgment.
+pub struct SubmittedTerminalIntent {
+    pub operation_id: OperationId,
+    pub instance_id: OperationInstanceId,
+    pub causality: Option<SemanticOperationCausality>,
+    pub status: SemanticOperationStatus,
+    pub retained: Option<SubmittedTerminalCustody>,
+}
+
+/// Publication evidence has an explicit scope; none is a protocol/storage proof.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubmittedTerminalAcknowledgmentScope {
+    ChannelAccepted,
+    ControllerApplied,
+    ComponentObserved,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmittedTerminalAcknowledgment {
+    pub operation_id: OperationId,
+    pub instance_id: OperationInstanceId,
+    pub scope: SubmittedTerminalAcknowledgmentScope,
+}
+
+pub type SubmittedTerminalObservation = futures::future::BoxFuture<
+    'static,
+    Result<SubmittedTerminalAcknowledgment, aura_core::AuraError>,
+>;
+
 #[async_trait]
 pub trait SubmittedOperationPublisher: Clone + Send + Sync + 'static {
     async fn publish_dispatched(
@@ -17,15 +59,11 @@ pub trait SubmittedOperationPublisher: Clone + Send + Sync + 'static {
         kind: SemanticOperationKind,
     );
 
-    async fn publish_terminal(
-        &self,
-        operation_id: &OperationId,
-        instance_id: &OperationInstanceId,
-        causality: Option<SemanticOperationCausality>,
-        status: SemanticOperationStatus,
-    );
+    /// Synchronously retain the exact intent; the returned future only observes.
+    fn publish_terminal(&self, intent: SubmittedTerminalIntent) -> SubmittedTerminalObservation;
 
-    fn publish_drop_failure(
+    /// Release the original publication registration after recipient acceptance.
+    fn relinquish(
         &self,
         operation_id: &OperationId,
         instance_id: &OperationInstanceId,

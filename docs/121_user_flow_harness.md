@@ -168,6 +168,19 @@ across terminal and browser surfaces.
 
 An enrollment signing intent is identification data. Receiving, displaying, or
 parsing it does not approve signing. Local consent binds the original runtime and
-exact three-domain intent; historical consent cannot be upgraded to new control
-authority. A pending code-issuance outcome is distinct from committed enrollment
+exact v3 four-domain intent, including its finite conditional negative terminal
+policy. Historical consent cannot be upgraded to new control authority; the
+policy alone cannot establish a negative decision or terminal success. A pending
+code-issuance outcome is distinct from committed enrollment
 and activation, and shared scenarios cannot infer the latter from code export.
+When a shared scenario performs setup and then imports enrollment under the same
+operation ID for one actor, it captures the setup operation instance before
+import and requires a different instance for terminal completion. For an actor
+with no prior enrollment operation, the scenario establishes that absence before
+import and then observes that actor's own successful operation. Neither a prior
+setup success nor another actor's result establishes import success.
+An operation wait first requires the selected actor's semantic snapshot to
+contain the requested operation ID and state, with a fresh instance when one
+was specified. If that actor also has a matching submitted handle, the wait
+additionally requires the handle's exact instance and state; a handle alone
+cannot supply missing snapshot evidence.

@@ -1,13 +1,6 @@
 //! Actual renderer-backed onboarding observations. No DOM lookup or timer is
-//! permitted here: mounted events supply nodes and the audited renderer future
-//! flushes its edits synchronously before yielding back to its poll owner.
-use std::{
-    cell::RefCell,
-    future::Future,
-    pin::Pin,
-    rc::Rc,
-    task::{Context, Poll},
-};
+//! permitted here: the renderer supplies the node and post-flush commit event.
+use std::{cell::RefCell, rc::Rc};
 
 use aura_app::ui::contract::{
     ControlId, ControlRenderCapture, ControlRenderSource, RenderedControlLayout,
@@ -73,14 +66,15 @@ struct RegisteredNode {
 struct RendererRegistry {
     observer: std::rc::Weak<RefCell<ObserverState>>,
     controller: Option<std::sync::Arc<aura_ui::UiController>>,
-    snapshot: Option<UiSnapshot>,
     nodes: Vec<std::rc::Weak<RefCell<RegisteredNode>>>,
+    current: std::rc::Weak<RendererFrame>,
 }
 struct RendererFrame {
     controller: std::sync::Arc<aura_ui::UiController>,
     receipt: Option<aura_ui::RendererCaptureReceipt>,
     snapshot: UiSnapshot,
     registry: Rc<RefCell<RendererRegistry>>,
+    committed: std::cell::Cell<bool>,
     disposed: std::cell::Cell<bool>,
 }
 impl RendererFrame {
@@ -117,7 +111,7 @@ impl RendererFrame {
         }
     }
     fn publish_if_complete(&self) -> bool {
-        if self.disposed.get() {
+        if self.disposed.get() || !self.committed.get() {
             return false;
         }
         let Some(receipt) = self.receipt.as_ref() else {
@@ -155,40 +149,17 @@ impl RendererFrame {
 struct ObserverState {
     registry: std::rc::Weak<RefCell<RendererRegistry>>,
     pending: Option<aura_ui::RendererCaptureReceipt>,
+    pending_snapshot: Option<UiSnapshot>,
     active: Option<Rc<RendererFrame>>,
     unsupported: bool,
     measuring: bool,
-    polling: bool,
-    asset_observer: Option<BrowserAssetObserver>,
     layout_listeners: Vec<BrowserLayoutListener>,
     resize_observer: Option<BrowserResizeObserver>,
-    #[cfg(test)]
-    next_resize: Option<(web_sys::Element, futures::channel::oneshot::Sender<bool>)>,
     #[cfg(test)]
     next_scroll: Option<(
         web_sys::EventTarget,
         futures::channel::oneshot::Sender<bool>,
     )>,
-}
-/// Fail closed on stylesheet URL replacement, including devtools asset reloads.
-/// This guard observes assets only; it never infers a renderer commit.
-struct BrowserAssetObserver {
-    observer: web_sys::MutationObserver,
-    _callback: wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>,
-}
-impl Drop for BrowserAssetObserver {
-    fn drop(&mut self) {
-        self.observer.disconnect();
-    }
-}
-fn stylesheet_changed(records: &js_sys::Array) -> bool {
-    use wasm_bindgen::JsCast;
-    records.iter().any(|record| {
-        let record: web_sys::MutationRecord = record.unchecked_into();
-        record
-            .target()
-            .is_some_and(|node| node.node_name() == "LINK")
-    })
 }
 struct BrowserResizeObserver {
     observer: web_sys::ResizeObserver,
@@ -214,6 +185,9 @@ impl Drop for BrowserLayoutListener {
         );
     }
 }
+fn invalidate_current_layout(owner: &Rc<RefCell<ObserverState>>) {
+    capture_owner_layout(owner.clone());
+}
 thread_local! {
     // Observed lookup only. The actual root/config retains the sole owner.
     static ACTIVE_RENDERER_OBSERVATION: RefCell<std::rc::Weak<RefCell<ObserverState>>> = RefCell::new(std::rc::Weak::new());
@@ -233,16 +207,15 @@ pub(crate) fn capture_current_layout() -> bool {
     capture_owner_layout(owner)
 }
 fn capture_owner_layout(owner: Rc<RefCell<ObserverState>>) -> bool {
-    BrowserRendererObserver(owner.clone()).check_asset_mutations();
     let active = {
         let mut state = owner.borrow_mut();
-        if state.unsupported || state.measuring || state.polling {
+        if state.unsupported || state.measuring || state.pending.is_some() {
             return false;
         }
         let Some(active) = state.active.clone() else {
             return false;
         };
-        if active.disposed.get() {
+        if active.disposed.get() || !active.committed.get() {
             return false;
         }
         if active.controller.is_delivering_ui_snapshot() {
@@ -265,21 +238,6 @@ fn capture_owner_layout(owner: Rc<RefCell<ObserverState>>) -> bool {
 pub(crate) struct BrowserRendererObserver(Rc<RefCell<ObserverState>>);
 impl BrowserRendererObserver {
     #[cfg(test)]
-    pub(super) fn observe_next_resize(
-        &self,
-        target: web_sys::Element,
-    ) -> futures::channel::oneshot::Receiver<bool> {
-        let (sender, receiver) = futures::channel::oneshot::channel();
-        assert!(self
-            .0
-            .borrow_mut()
-            .next_resize
-            .replace((target, sender))
-            .is_none());
-        receiver
-    }
-
-    #[cfg(test)]
     pub(super) fn observe_next_scroll(
         &self,
         target: web_sys::EventTarget,
@@ -301,68 +259,9 @@ impl BrowserRendererObserver {
             use wasm_bindgen::JsCast;
             let weak = Rc::downgrade(&self.0);
             let callback = wasm_bindgen::closure::Closure::wrap(Box::new(
-                move |records: js_sys::Array, _: web_sys::MutationObserver| {
-                    if stylesheet_changed(&records) {
-                        if let Some(owner) = weak.upgrade() {
-                            owner.borrow_mut().unsupported = true;
-                            BrowserRendererObserver(owner).revoke();
-                        }
-                    }
-                },
-            )
-                as Box<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>);
-            let guard = web_sys::MutationObserver::new(callback.as_ref().unchecked_ref()).and_then(
-                |observer| {
-                    let options = web_sys::MutationObserverInit::new();
-                    options.set_attributes(true);
-                    options.set_subtree(true);
-                    options.set_attribute_filter(&js_sys::Array::of1(&"href".into()));
-                    let document = web_sys::window()
-                        .and_then(|window| window.document())
-                        .ok_or_else(|| {
-                            wasm_bindgen::JsValue::from_str("missing renderer document")
-                        })?;
-                    observer.observe_with_options(&document, &options)?;
-                    Ok(BrowserAssetObserver {
-                        observer,
-                        _callback: callback,
-                    })
-                },
-            );
-            match guard {
-                Ok(guard) => self.0.borrow_mut().asset_observer = Some(guard),
-                Err(_) => self.0.borrow_mut().unsupported = true,
-            }
-        }
-        {
-            use wasm_bindgen::JsCast;
-            let weak = Rc::downgrade(&self.0);
-            let callback = wasm_bindgen::closure::Closure::wrap(Box::new(
-                move |entries: js_sys::Array, _: web_sys::ResizeObserver| {
+                move |_: js_sys::Array, _: web_sys::ResizeObserver| {
                     if let Some(owner) = weak.upgrade() {
-                        let captured = capture_owner_layout(owner.clone());
-                        #[cfg(test)]
-                        {
-                            let notification = {
-                                let mut state = owner.borrow_mut();
-                                if state.next_resize.as_ref().is_some_and(|(expected, _)| {
-                                    entries.iter().any(|entry| {
-                                        let entry: web_sys::ResizeObserverEntry =
-                                            entry.unchecked_into();
-                                        entry.target() == *expected
-                                    })
-                                }) {
-                                    state.next_resize.take()
-                                } else {
-                                    None
-                                }
-                            };
-                            if let Some((_, sender)) = notification {
-                                let _ = sender.send(captured);
-                            }
-                        }
-                        #[cfg(not(test))]
-                        let _ = (captured, entries);
+                        invalidate_current_layout(&owner);
                     }
                 },
             )
@@ -430,113 +329,81 @@ impl BrowserRendererObserver {
             }
         }
     }
-    /// Own every poll of the unmodified renderer, including descendant-only work.
-    /// The pinned 0.7.4 non-hydrating renderer flushes all edits and mounted
-    /// callbacks synchronously before its next suspension. A poll may contain
-    /// multiple batches; only its final rendered state is published.
-    pub(crate) fn run(
-        &self,
-        dom: VirtualDom,
-        config: dioxus_web::Config,
-    ) -> impl Future<Output = ()> + 'static {
-        ObservedRendererFuture {
-            renderer: Box::pin(async move { dioxus_web::run(dom, config).await }),
-            observer: self.clone(),
-        }
+    pub(crate) fn config(&self, config: dioxus::web::Config) -> dioxus::web::Config {
+        let observer = self.clone();
+        config.render_batch_observer(Rc::new(move |phase| observer.observe(phase)))
     }
-    fn revoke(&self) {
-        let active = {
-            let mut state = self.0.borrow_mut();
-            state.pending = None;
-            state.active.take()
-        };
-        if let Some(active) = active {
-            active.dispose();
-        }
-    }
-    fn before_poll(&self) {
-        self.0.borrow_mut().polling = true;
-        self.revoke();
-        let controller = self
-            .0
-            .borrow()
-            .registry
-            .upgrade()
-            .and_then(|registry| registry.borrow().controller.clone());
-        if let Some(controller) = controller {
-            let pending = controller.begin_renderer_capture();
-            self.0.borrow_mut().pending = pending;
-        }
-    }
-    fn after_poll(&self) {
-        // MutationObserver delivery is asynchronous. Drain pending records here
-        // so a hot-reloaded stylesheet cannot be acknowledged before its guard.
-        self.check_asset_mutations();
-        let (registry, pending) = {
-            let mut state = self.0.borrow_mut();
-            state.polling = false;
-            if state.unsupported {
+    fn observe(&self, phase: dioxus::web::RenderBatchPhase) {
+        use dioxus::web::RenderBatchPhase;
+        if matches!(
+            phase,
+            RenderBatchPhase::HydrationUnavailable | RenderBatchPhase::ExternalMutationUnavailable
+        ) {
+            let active = {
+                let mut state = self.0.borrow_mut();
+                state.unsupported = true;
                 state.pending = None;
-                return;
+                state.pending_snapshot = None;
+                state.active.take()
+            };
+            if let Some(active) = active {
+                active.dispose();
             }
-            (state.registry.upgrade(), state.pending.take())
-        };
-        let Some(registry) = registry else { return };
-        let (Some(controller), Some(snapshot)) = ({
-            let registry = registry.borrow();
-            (registry.controller.clone(), registry.snapshot.clone())
-        }) else {
+            return;
+        }
+        if self.0.borrow().unsupported {
+            return;
+        }
+        let Some(registry) = self.0.borrow().registry.upgrade() else {
             return;
         };
-        let receipt = pending.or_else(|| controller.begin_renderer_capture());
-        let frame = Rc::new(RendererFrame {
-            controller,
-            receipt,
-            snapshot,
-            registry: registry.clone(),
-            disposed: std::cell::Cell::new(false),
-        });
-        self.0.borrow_mut().active = Some(frame.clone());
-        frame.publish_if_complete();
-    }
-    fn check_asset_mutations(&self) {
-        let records = self
-            .0
-            .borrow()
-            .asset_observer
-            .as_ref()
-            .map(|guard| guard.observer.take_records());
-        if records.as_ref().is_some_and(stylesheet_changed) {
-            self.0.borrow_mut().unsupported = true;
-            self.revoke();
+        let Some(controller) = registry.borrow().controller.clone() else {
+            return;
+        };
+        match phase {
+            RenderBatchPhase::BeforeRender => {
+                // The ready UI shell can rerender without rerendering its
+                // enclosing observed frame. Capture the authoritative model
+                // source for this exact renderer batch, before any child work.
+                let snapshot = controller.semantic_model_snapshot();
+                let pending = controller.begin_renderer_capture();
+                let active = {
+                    let mut state = self.0.borrow_mut();
+                    state.pending = pending;
+                    state.pending_snapshot = Some(snapshot);
+                    state.active.take()
+                };
+                if let Some(active) = active {
+                    active.dispose();
+                }
+            }
+            RenderBatchPhase::BeforeCommit => {
+                let Some(snapshot) = self.0.borrow_mut().pending_snapshot.take() else {
+                    return;
+                };
+                let pending = self.0.borrow_mut().pending.take();
+                let receipt = pending.or_else(|| controller.begin_renderer_capture());
+                let frame = Rc::new(RendererFrame {
+                    controller,
+                    receipt,
+                    snapshot,
+                    registry: registry.clone(),
+                    committed: std::cell::Cell::new(false),
+                    disposed: std::cell::Cell::new(false),
+                });
+                registry.borrow_mut().current = Rc::downgrade(&frame);
+                self.0.borrow_mut().active = Some(frame);
+            }
+            RenderBatchPhase::Committed => {
+                let active = self.0.borrow().active.clone();
+                if let Some(active) = active {
+                    active.committed.set(true);
+                    active.publish_if_complete();
+                }
+            }
+            RenderBatchPhase::HydrationUnavailable
+            | RenderBatchPhase::ExternalMutationUnavailable => unreachable!(),
         }
-    }
-}
-
-/// Poll boundaries are deliberately broader than edit batches. Pending means
-/// the audited renderer has finished its synchronous flush, not browser paint
-/// or app/protocol completion. Drop revokes evidence before renderer teardown.
-struct ObservedRendererFuture<F> {
-    renderer: Pin<Box<F>>,
-    observer: BrowserRendererObserver,
-}
-impl<F: Future<Output = ()>> Future for ObservedRendererFuture<F> {
-    type Output = ();
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let this = self.get_mut();
-        this.observer.before_poll();
-        let result = this.renderer.as_mut().poll(cx);
-        if result.is_pending() {
-            this.observer.after_poll();
-        } else {
-            this.observer.revoke();
-        }
-        result
-    }
-}
-impl<F> Drop for ObservedRendererFuture<F> {
-    fn drop(&mut self) {
-        self.observer.revoke();
     }
 }
 
@@ -544,15 +411,13 @@ pub(crate) fn launch_observed(root: fn() -> Element) {
     let observer = BrowserRendererObserver::default();
     let mut dom = VirtualDom::new(root);
     observer.install_context(&mut dom);
-    crate::task_owner::shared_web_task_owner()
-        .spawn_local_cancellable(observer.run(dom, dioxus_web::Config::new()));
+    dioxus::web::launch::launch_virtual_dom(dom, observer.config(dioxus::web::Config::new()));
 }
 
-/// Bind the semantic source actually rendered by this owner. Renderer polls
-/// cover descendant work even when this component remains memoized.
+/// Bind the semantic source actually rendered by this owner. Renderer callbacks
+/// cover every batch, including child-only local updates with this owner memoized.
 #[component]
 pub(super) fn ObservedRendererFrame(
-    snapshot: UiSnapshot,
     controller: std::sync::Arc<aura_ui::UiController>,
     children: Element,
 ) -> Element {
@@ -569,7 +434,6 @@ pub(super) fn ObservedRendererFrame(
     {
         let mut registry = registry.borrow_mut();
         registry.controller = Some(controller);
-        registry.snapshot = Some(snapshot);
         registry.observer = Rc::downgrade(&observer.0);
     }
     observer.0.borrow_mut().registry = Rc::downgrade(&registry);
@@ -584,6 +448,7 @@ pub(super) fn ObservedRendererFrame(
             {
                 state.registry = std::rc::Weak::new();
                 state.pending = None;
+                state.pending_snapshot = None;
                 let active = state.active.take();
                 drop(state);
                 if let Some(active) = active {
@@ -636,6 +501,10 @@ fn register_control(
                 registration.node = Some(node.clone());
                 drop(registration);
                 refresh_resize_targets(&registry);
+                let current = registry.borrow().current.upgrade();
+                if let Some(frame) = current {
+                    frame.publish_if_complete();
+                }
             }
         }),
     }

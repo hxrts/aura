@@ -124,13 +124,20 @@ impl ChatCallbacks {
                         .as_ref()
                         .and_then(|metadata| metadata.semantic_operation.clone())
                     {
-                        let owner = crate::tui::semantic_lifecycle::submit_local_terminal_operation(
-                            ctx.app_core_raw().clone(),
-                            ctx.tasks(),
-                            tx.clone(),
-                            semantic.operation_id,
-                            semantic.kind,
-                        );
+                        let owner =
+                            match crate::tui::semantic_lifecycle::submit_local_terminal_operation(
+                                ctx.app_core_raw().clone(),
+                                ctx.tasks(),
+                                tx.clone(),
+                                semantic.operation_id,
+                                semantic.kind,
+                            ) {
+                                Ok(owner) => owner,
+                                Err(source) => {
+                                    emit_error_toast(&tx, "chat", source.to_string()).await;
+                                    return;
+                                }
+                            };
                         match report.feedback.terminal_settlement.clone() {
                             Some(aura_app::ui::workflows::slash_commands::SlashCommandTerminalSettlement::Succeeded) => {
                                 owner.succeed().await;

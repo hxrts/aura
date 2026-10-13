@@ -399,49 +399,12 @@ impl SettingsCallbacks {
                 aura_app::ui::contract::EnrollmentManifestTransferInput,
             >,
                   operation: WorkflowHandoffOperationOwner| {
-                let persist_ctx = ctx.clone();
-                spawn_handoff_workflow_callback_with_success(
+                super::spawn_enrollment_import_callback(
                     ctx.clone(),
                     tx.clone(),
+                    code,
+                    manifest_transfer,
                     operation,
-                    WorkflowHandoffSpec::new(
-                        SemanticOperationTransferScope::ImportDeviceEnrollment,
-                        "devices",
-                        "Import device enrollment failed",
-                        "import device enrollment workflow",
-                    ),
-                    move |app_core, instance| async move {
-                        aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
-                        &app_core,code,manifest_transfer,instance).await
-                    },
-                    move |tx, completion| async move {
-                        if let Err(error) = persist_ctx
-                            .persist_completed_enrollment_identity(&completion)
-                            .await
-                        {
-                            tracing::error!(error=%error,"Accepted enrollment profile persistence failed");
-                            send_ui_update_required(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "devices",
-                                    format!(
-                                        "Enrollment accepted; profile persistence failed: {error}"
-                                    ),
-                                )),
-                            )
-                            .await;
-                            return;
-                        }
-                        send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "devices",
-                                "Device enrollment invitation accepted",
-                            )),
-                        )
-                        .await;
-                    },
                 );
             },
         )

@@ -4,6 +4,10 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
+`SimulationEnvironmentFactory` names its shared inbox through an associated
+type. The factory transfers one typed owner to each simulated runtime; Layer 1
+does not define inbox storage or return-capacity policy.
+
 `invitation` owns the canonical invitation wire/cache schema and setup binding.
 These serializable values are observations, not issuance, admission, original
 policy approval or journal-commit evidence. Feature capability policy stays in
@@ -210,6 +214,8 @@ The public profile effect trait is an infrastructure adapter interface, not an u
 
 Timeout budgets retain their original deadline and share a latched physical-clock high-water observation across clones and child budgets. Rollback after progress is a typed required-clock failure, even when the new observation remains above the start. Timer exhaustion and rollback survive validated serialization; legacy records lacking observation state fail closed. Nonblocking observation contention is a separate ownership fault. Snapshot and expiration updates acquire the same short-lived guards atomically and never hold guards across await.
 
+A required absolute timer on the selected provider may report a direct or source-wrapped `TimeError::PhysicalClockRollback`. Deadline arbitration records that authentic rollback in the original budget's shared history before returning the original `TimeSourceUnavailable` error with its native source unchanged, including when work is ready and the timer is repolled. Publication does not wait for the snapshot mutex; contended snapshots cannot discard the witness or revive positive execution. Later validation and serialization merge the retained witness without replacing an earlier rollback latch or reducing the high-water mark. Clones, children and validated restored snapshots therefore continue to refuse after forward clock progress. This in-memory retention is not a durable domain acknowledgment; independent negative cleanup retains its own original authorized budget.
+
 ### Required observation acknowledgment
 
 The terminal acknowledgment boundary forwards the actual generic checkpoint receipt to synchronous publication under the original observation lease. The receipt need not clone or deserialize. It does not establish domain authority: the sealed caller must retain its required original receipt before returning Ready when cancellation of the entire helper could otherwise drop local custody.
@@ -365,3 +371,20 @@ and cancellation drops the losing work and any unexposed acknowledgment.
 register-before-own-queue-check contract prevents lost arrivals and preserves
 selected-provider custody. `ReceiveReadinessUnsupported` is an explicit refusal,
 not a default adapter. See docs/111 "Receive readiness".
+
+### Original checkpoint execution receipts
+
+`time::timeout::CheckpointExecution<T, E, A>` separates the actual operation
+result, actual final checkpoint receipt, first observation/checkpoint failure and
+independent final selected-provider validation. `Finished` retains the operation
+result even when the domain operation failed; `Unresolved` and `Negative` retain
+any completed result and the actual `CheckpointAttempt`. The preoperation receipt
+is discarded and cannot acknowledge postoperation durability. Gate acquisition,
+reads, work and callbacks share the original absolute endpoint; an expired
+callback is not restarted. These pure outcomes mint no negative cleanup owner.
+The consuming runtime domain root retains that authority. See
+`docs/122_ownership_model.md` and `docs/804_testing_guide.md`.
+
+The foundational `crypto::verified_biscuit::VerifiedBiscuitToken` is the single raw Biscuit signature-chain verification producer. `Cap` uses this typed integrity evidence for decoding and attenuation block counts without depending upward on authorization. Stored roots support capability algebra, not independent issuer trust; authorization selects its own configured root. Existing meet/order semantics and conservative bottom on failed nonidentical-token comparison remain unchanged.
+
+`Cap` retains explicit Clone/equality/serde for capability attenuation and journal replication under a documented security exception reviewed before release. Serialization transfers bearer material and does not authenticate its stored issuer root. Manual Debug redacts token and root buffers; owned copies implement Zeroize and ZeroizeOnDrop. Exported serialization buffers have their own lifetime and are not cleared by dropping the Cap.

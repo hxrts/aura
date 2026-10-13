@@ -65,7 +65,7 @@ pub struct PersistentTreeHandler {
     ops_cache: RwLock<Vec<AttestedOp>>,
     /// Whether we've loaded from storage yet
     initialized: AtomicBool,
-    mutation_gate: async_lock::Mutex<()>,
+    mutation_gate: Arc<async_lock::Mutex<()>>,
 }
 
 /// Exclusive current-tree decision custody. It excludes local tree writers,
@@ -75,8 +75,29 @@ pub struct PersistentTreeHandler {
 /// let _ = TreeDecisionLease { guard: () };
 /// ```
 pub struct TreeDecisionLease<'a> {
-    owner: &'a PersistentTreeHandler,
-    _guard: async_lock::MutexGuard<'a, ()>,
+    owner: TreeDecisionOrigin<'a>,
+    _guard: TreeDecisionGuard<'a>,
+}
+enum TreeDecisionOrigin<'a> {
+    Borrowed(&'a PersistentTreeHandler),
+    Owned(Arc<PersistentTreeHandler>),
+}
+impl std::ops::Deref for TreeDecisionOrigin<'_> {
+    type Target = PersistentTreeHandler;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(owner) => owner,
+            Self::Owned(owner) => owner,
+        }
+    }
+}
+enum TreeDecisionGuard<'a> {
+    Borrowed {
+        _guard: async_lock::MutexGuard<'a, ()>,
+    },
+    Owned {
+        _guard: async_lock::MutexGuardArc<()>,
+    },
 }
 
 impl TreeDecisionLease<'_> {
@@ -124,8 +145,19 @@ impl PersistentTreeHandler {
     /// lease is held would recursively wait and must be avoided.
     pub async fn lock_decision(&self) -> TreeDecisionLease<'_> {
         TreeDecisionLease {
-            owner: self,
-            _guard: self.mutation_gate.lock().await,
+            owner: TreeDecisionOrigin::Borrowed(self),
+            _guard: TreeDecisionGuard::Borrowed {
+                _guard: self.mutation_gate.lock().await,
+            },
+        }
+    }
+    /// Retain this exact handler and its existing mutation lock in a move-owned
+    /// participant. This neither reacquires nor reconstructs a held lease.
+    pub async fn lock_owned_decision(self: &Arc<Self>) -> TreeDecisionLease<'static> {
+        let guard = self.mutation_gate.lock_arc().await;
+        TreeDecisionLease {
+            owner: TreeDecisionOrigin::Owned(Arc::clone(self)),
+            _guard: TreeDecisionGuard::Owned { _guard: guard },
         }
     }
     /// Create a new persistent tree handler (synchronous, lazy loading).
@@ -136,7 +168,7 @@ impl PersistentTreeHandler {
             storage,
             ops_cache: RwLock::new(Vec::new()),
             initialized: AtomicBool::new(false),
-            mutation_gate: async_lock::Mutex::new(()),
+            mutation_gate: Arc::new(async_lock::Mutex::new(())),
         }
     }
 
@@ -149,7 +181,7 @@ impl PersistentTreeHandler {
             storage,
             ops_cache: RwLock::new(ops_cache),
             initialized: AtomicBool::new(true),
-            mutation_gate: async_lock::Mutex::new(()),
+            mutation_gate: Arc::new(async_lock::Mutex::new(())),
         })
     }
 
@@ -588,6 +620,30 @@ mod tests {
         replacement
             .await
             .expect("writer progresses after decision release");
+    }
+
+    #[tokio::test]
+    async fn owned_decision_lease_retains_original_handler_and_excludes_replacement() {
+        let handler = Arc::new(PersistentTreeHandler::new(Arc::new(TestStorage::default())));
+        let original = Arc::downgrade(&handler);
+        let lease = handler.lock_owned_decision().await;
+        drop(handler);
+        let retained = original.upgrade().expect("lease retains actual handler");
+        assert!(std::ptr::eq(retained.as_ref(), &*lease.owner));
+        {
+            let replacement = retained.replace_ops(&[]);
+            tokio::pin!(replacement);
+            assert!(futures::poll!(&mut replacement).is_pending());
+            drop(lease);
+            replacement
+                .await
+                .expect("same writer progresses after owned decision release");
+        }
+        drop(retained);
+        assert!(
+            original.upgrade().is_none(),
+            "owned lease must not leak handler"
+        );
     }
 
     #[derive(Debug, Default)]

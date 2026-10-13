@@ -47,7 +47,8 @@ pub enum SecretLifetimeState {
 /// Private provider objects implement this infrastructure boundary. A custom
 /// implementation controls only its own backend. Real production providers do
 /// not expose this object or accept capabilities created for another object.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait SecretLifetimeBackend: Send + Sync {
     /// Observe original routing identity without changing custody.
     fn reference(&self) -> &SecretAllocationReference;
@@ -77,7 +78,8 @@ impl SecretLifetimeProviderIdentity {
     }
 }
 /// Owned whole-profile recovery, never an existing-record selector API.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ProfileSecretLifetimeBackend: Send + Sync {
     /// Original concrete physical provider-owner identity, never a routing ID.
     fn provider_identity(&self) -> &SecretLifetimeProviderIdentity;

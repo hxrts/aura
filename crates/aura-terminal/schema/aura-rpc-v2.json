@@ -4,6 +4,14 @@
     "oneOf": [
       {
         "$defs": {
+          "EnrollmentShortcutRole": {
+            "description": "Purpose of an explicitly selected post-enrollment shortcut.",
+            "enum": [
+              "contact",
+              "guardian"
+            ],
+            "type": "string"
+          },
           "ExportFormat": {
             "description": "Format of `chat export`.",
             "oneOf": [
@@ -1672,6 +1680,47 @@
             "type": "object"
           },
           {
+            "description": "Start enrollment and deliver a fresh signed invitation to an explicitly\nselected external broker recipient after positive enrollment.",
+            "properties": {
+              "method": {
+                "const": "device_enroll_with_shortcut",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "nickname": {
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "$ref": "#/$defs/EnrollmentShortcutRole"
+                  },
+                  "recipient": {
+                    "type": "string"
+                  },
+                  "recipient_device": {
+                    "type": "string"
+                  },
+                  "setup_code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "nickname",
+                  "setup_code",
+                  "recipient",
+                  "recipient_device",
+                  "purpose"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
             "description": "Cancel a key-rotation ceremony.",
             "properties": {
               "method": {
@@ -2961,6 +3010,46 @@
               },
               "type": {
                 "const": "ceremony_started",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  },
+                  "enrollment_code": {
+                    "type": "string"
+                  },
+                  "initiator_verifier_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "manifest_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "ceremony_id",
+                  "enrollment_code"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "device_enrollment_started",
                 "type": "string"
               }
             },

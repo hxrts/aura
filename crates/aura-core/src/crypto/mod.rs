@@ -31,3 +31,5 @@ pub use hpke::{HpkeKeyPair, HpkePrivateKey, HpkePublicKey};
 
 // Single-signer types (for 1-of-1 scenarios)
 pub use single_signer::{SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage};
+
+pub mod verified_biscuit;

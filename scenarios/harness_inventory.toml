@@ -116,3 +116,10 @@ path = "scenarios/harness/shared-settings-parity.toml"
 classification = "shared"
 runtime_substrate = "real_runtime"
 notes = "Parity scenario for shared Settings flow."
+
+[[scenario]]
+id = "web-conformance-enrollment-approved-transfer-reopen"
+path = "scenarios/harness/web-conformance-enrollment-approved-transfer-reopen.toml"
+classification = "web_conformance"
+runtime_substrate = "real_runtime"
+notes = "Browser-only mounted modal approval of Scenario 12's real signed transfer, host persistence, and same-profile reopen."

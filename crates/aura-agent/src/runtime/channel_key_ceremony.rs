@@ -354,43 +354,50 @@ where
         .map_err(|error| AuraError::internal(format!("time error: {error}")))?
         .ts_ms;
     let mut outcomes = Vec::new();
-    let mut deferred = Vec::new();
+    let mut deferred = super::effects::DeferredInboundEnvelopeReturns::new();
     let mut ready: Vec<(u64, ChannelKeyInvite)> = Vec::new();
-    while let Ok(envelope) = effects.take_inbound_envelope(is_invite_envelope) {
+    while let Ok(mut envelope) = effects.take_inbound_envelope_retained(is_invite_envelope) {
         let invite = match admit_invite(me, &envelope) {
             Ok(invite) => invite,
             Err(error) => {
                 tracing::warn!(source = %envelope.source, %error, "channel key invite refused");
+                let _ = envelope.consume();
                 continue;
             }
         };
-        if !has_standing(invite.clone()).await? {
+        let has_coordinator_standing = match has_standing(invite.clone()).await {
+            Ok(standing) => standing,
+            Err(error) => {
+                deferred.push(envelope);
+                return Err(error);
+            }
+        };
+        if !has_coordinator_standing {
             // The coordinator's own join may not have synced here yet (a
             // late joiner sees the invite before the roster facts). Hold the
             // invite until standing is observed, for at most the
             // coordinator's attempt window, rather than refusing the only
             // invite (Task 196).
-            match hold_for_standing(envelope, now_ms) {
-                Some(held) => {
-                    tracing::debug!(
-                        coordinator = %invite.coordinator,
-                        "channel key invite waits for the coordinator's standing"
-                    );
-                    deferred.push(held);
-                }
-                None => tracing::warn!(
+            if hold_for_standing(envelope.envelope_mut(), now_ms) {
+                tracing::debug!(
+                    coordinator = %invite.coordinator,
+                    "channel key invite waits for the coordinator's standing"
+                );
+                deferred.push(envelope);
+            } else {
+                tracing::warn!(
                     coordinator = %invite.coordinator,
                     "channel key invite from a coordinator without standing refused"
-                ),
+                );
+                let _ = envelope.consume();
             }
             continue;
         }
         ready.push((held_since_ms(&envelope).unwrap_or(now_ms), invite));
+        let _ = envelope.consume();
     }
     // Requeue after draining, so one round never takes a deferred invite twice.
-    for envelope in deferred {
-        effects.requeue_envelope(envelope);
-    }
+    drop(deferred);
     // A coordinator re-invites after an attempt that timed out while its
     // standing was unobserved here; of the invites for one channel epoch,
     // run only the most recently received. An older one names a ceremony its
@@ -424,18 +431,15 @@ pub(crate) const STANDING_HOLD_MS: u64 = CEREMONY_MAX_POLLS as u64 * 50;
 /// Hold `envelope` (from a peer whose standing this member has not yet
 /// observed) for a later round, or `None` once it has waited out the
 /// coordinator's attempt window and is refused.
-pub(crate) fn hold_for_standing(
-    mut envelope: TransportEnvelope,
-    now_ms: u64,
-) -> Option<TransportEnvelope> {
+pub(crate) fn hold_for_standing(envelope: &mut TransportEnvelope, now_ms: u64) -> bool {
     let held_since = held_since_ms(&envelope).unwrap_or(now_ms);
     if now_ms.saturating_sub(held_since) >= STANDING_HOLD_MS {
-        return None;
+        return false;
     }
     envelope
         .metadata
         .insert(HELD_SINCE_METADATA.to_string(), held_since.to_string());
-    Some(envelope)
+    true
 }
 
 fn held_since_ms(envelope: &TransportEnvelope) -> Option<u64> {
@@ -487,6 +491,87 @@ mod tests {
             context: ContextId::new_from_entropy([91; 32]),
             channel: ChannelId::from_bytes([92; 32]),
         }
+    }
+
+    #[tokio::test]
+    async fn deferred_invites_keep_full_inbox_capacity_and_order_after_cancel() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        let effects = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let me = aura_guards::GuardContextProvider::authority_id(effects.as_ref());
+        let coordinator = AuthorityId::new_from_entropy([77; 32]);
+        let mut expected = Vec::new();
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            let (source, payload, content_type) = if index < 2 {
+                let invite = ChannelKeyInvite::new(
+                    scope(),
+                    (index + 1) as u64,
+                    coordinator,
+                    [coordinator, me],
+                )
+                .expect("valid invite");
+                (
+                    coordinator,
+                    aura_core::util::serialization::to_vec(&invite).expect("encode invite"),
+                    CHANNEL_KEY_INVITE_CONTENT_TYPE,
+                )
+            } else {
+                (
+                    AuthorityId::new_from_entropy([index as u8; 32]),
+                    vec![index as u8],
+                    "application/aura-unrelated",
+                )
+            };
+            expected.push(payload.clone());
+            assert_eq!(
+                effects.queue_runtime_envelope(TransportEnvelope {
+                    source,
+                    destination: me,
+                    context: scope().context,
+                    payload,
+                    metadata: std::collections::HashMap::from([(
+                        "content-type".to_string(),
+                        content_type.to_string(),
+                    )]),
+                    receipt: None,
+                }),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        assert!(
+            process_channel_key_invites(&effects, |_invite| async { Ok(false) }, 1)
+                .await
+                .expect("defer invites")
+                .is_empty()
+        );
+        let borrowed = effects
+            .take_inbound_envelope_retained(is_invite_envelope)
+            .expect("borrow deferred invite");
+        assert_eq!(borrowed.payload, expected[0]);
+        assert_eq!(
+            effects.queue_runtime_envelope(TransportEnvelope {
+                source: coordinator,
+                destination: me,
+                context: scope().context,
+                payload: vec![99],
+                metadata: std::collections::HashMap::new(),
+                receipt: None,
+            }),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "cancelled processing retains the original return slot"
+        );
+        drop(borrowed);
+        let mut actual = Vec::new();
+        for _ in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            actual.push(
+                effects
+                    .take_inbound_envelope(|_| true)
+                    .expect("every original frame remains")
+                    .payload,
+            );
+        }
+        assert_eq!(actual, expected);
     }
 
     /// Task 164 step 1: a coordinator invites the channel's members over

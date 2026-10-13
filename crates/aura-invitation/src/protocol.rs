@@ -157,6 +157,13 @@ pub struct GuardianConfirm {
     pub relationship_id: Option<CeremonyRelationshipId>,
     /// Principal signature created only after verifying the guardian response.
     pub signature: Vec<u8>,
+    /// Native issuer quorum epoch for a v3 invitation. Legacy confirmations
+    /// omit this and retain their original solo proof semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quorum_epoch: Option<u64>,
+    /// Exact invited device bound to a v3 confirmation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_device_id: Option<DeviceId>,
 }
 
 /// Device enrollment invitation request (adds a device to an account authority).
@@ -884,6 +891,8 @@ mod tests {
                     .unwrap_or_else(|error| panic!("valid relationship id: {error}")),
             ),
             signature: vec![1, 2, 3],
+            quorum_epoch: None,
+            recipient_device_id: None,
         };
 
         let bytes = to_vec(&confirm).unwrap();

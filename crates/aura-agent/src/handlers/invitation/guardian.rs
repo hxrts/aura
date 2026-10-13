@@ -307,11 +307,57 @@ impl RequiredGuardianConfirmationVerificationCapability<'_> {
 async fn verify_guardian_confirmation_required(
     effects: &AuraEffectSystem,
     original: &RequiredGuardianConfirmationVerificationCapability<'_>,
-    signature: &[u8],
+    confirm: &GuardianConfirm,
 ) -> AgentResult<bool> {
     let bytes = guardian_transcript(&guardian_confirmation_payload(&original.invitation))?;
+    if original.stored.shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION {
+        let epoch = original
+            .stored
+            .sender_proof_epoch
+            .ok_or_else(|| AgentError::invalid("imported quorum Guardian lacks original epoch"))?;
+        let source_device = original.stored.sender_proof_device.ok_or_else(|| {
+            AgentError::invalid("imported quorum Guardian lacks original issuer device")
+        })?;
+        if confirm.quorum_epoch != Some(epoch)
+            || confirm.recipient_device_id != Some(effects.device_id())
+        {
+            return Err(AgentError::invalid(
+                "quorum Guardian confirmation changed original route or epoch",
+            ));
+        }
+        let context = aura_core::threshold::SigningContext::invitation_response(
+            original.invitation.sender_id,
+            original.invitation.invitation_id.clone(),
+            original.invitation.receiver_id,
+            confirm.recipient_device_id,
+            source_device,
+            aura_core::threshold::InvitationResponseKind::GuardianConfirmation,
+            aura_core::hash::hash(&bytes),
+        )
+        .ok_or_else(|| AgentError::invalid("invalid quorum Guardian confirmation intent"))?;
+        return aura_signature::verify_threshold_signing_context_transcript(
+            effects,
+            &context,
+            epoch,
+            &confirm.signature,
+            original.original_sender_key(effects)?,
+        )
+        .await
+        .map_err(|source| {
+            AgentError::invalid(format!("verify quorum Guardian confirmation: {source}"))
+        });
+    }
+    if confirm.quorum_epoch.is_some() || confirm.recipient_device_id.is_some() {
+        return Err(AgentError::invalid(
+            "solo Guardian confirmation carries quorum metadata",
+        ));
+    }
     effects
-        .ed25519_verify(&bytes, signature, original.original_sender_key(effects)?)
+        .ed25519_verify(
+            &bytes,
+            &confirm.signature,
+            original.original_sender_key(effects)?,
+        )
         .await
         .map_err(|source| guardian_crypto_failure("verify original Guardian confirmation", source))
 }
@@ -412,11 +458,59 @@ async fn guardian_recovery_keypair(
 
 /// Verify a guardian's signed acceptance and record its recovery key so the
 /// guardian can later take part in guardian setup and recovery.
-struct RequiredGuardianPossessionVerificationCapability<'owner, 'runtime> {
-    issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability<'runtime>,
+pub(super) trait GuardianIssuedProof {
+    fn invitation(&self) -> &Invitation;
+    fn public_key(&self) -> [u8; 32];
+    fn require_runtime_owner(&self, effects: &AuraEffectSystem) -> AgentResult<()>;
+}
+
+impl GuardianIssuedProof for super::issued_identity::IssuedInvitationIdentityCapability<'_> {
+    fn invitation(&self) -> &Invitation {
+        self.invitation()
+    }
+    fn public_key(&self) -> [u8; 32] {
+        self.public_key()
+    }
+    fn require_runtime_owner(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        self.require_runtime_owner(effects)
+    }
+}
+
+impl GuardianIssuedProof for super::issued_identity::IssuedQuorumInvitationCapability<'_> {
+    fn invitation(&self) -> &Invitation {
+        self.invitation()
+    }
+    fn public_key(&self) -> [u8; 32] {
+        *self.group_key()
+    }
+    fn require_runtime_owner(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        self.require_runtime_owner(effects)
+    }
+}
+
+impl GuardianIssuedProof for super::issued_identity::IssuedSenderProofCapability<'_> {
+    fn invitation(&self) -> &Invitation {
+        self.invitation()
+    }
+    fn public_key(&self) -> [u8; 32] {
+        match self {
+            Self::Solo(issued) => issued.public_key(),
+            Self::Quorum(issued) => *issued.group_key(),
+        }
+    }
+    fn require_runtime_owner(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        match self {
+            Self::Solo(issued) => issued.require_runtime_owner(effects),
+            Self::Quorum(issued) => issued.require_runtime_owner(effects),
+        }
+    }
+}
+
+struct RequiredGuardianPossessionVerificationCapability<'owner, T: GuardianIssuedProof> {
+    issued: &'owner T,
     accept: &'owner GuardianAccept,
 }
-impl RequiredGuardianPossessionVerificationCapability<'_, '_> {
+impl<T: GuardianIssuedProof> RequiredGuardianPossessionVerificationCapability<'_, T> {
     fn original_possession_key<'owner>(
         &'owner self,
         effects: &AuraEffectSystem,
@@ -433,9 +527,9 @@ impl RequiredGuardianPossessionVerificationCapability<'_, '_> {
         Ok(self.accept.recovery_public_key.as_slice())
     }
 }
-async fn verify_guardian_possession_required(
+async fn verify_guardian_possession_required<T: GuardianIssuedProof>(
     effects: &AuraEffectSystem,
-    original: &RequiredGuardianPossessionVerificationCapability<'_, '_>,
+    original: &RequiredGuardianPossessionVerificationCapability<'_, T>,
 ) -> AgentResult<bool> {
     let invitation = original.issued.invitation();
     let transcript = GuardianInvitationAcceptanceTranscript {
@@ -455,11 +549,35 @@ async fn verify_guardian_possession_required(
         .map_err(|source| guardian_crypto_failure("verify bound Guardian possession", source))
 }
 
-pub(super) async fn verify_and_record_guardian_acceptance(
-    effects: &AuraEffectSystem,
-    issued: &super::issued_identity::IssuedInvitationIdentityCapability<'_>,
+#[must_use]
+struct VerifiedGuardianAcceptance<'a> {
+    effects: &'a AuraEffectSystem,
+    guardian: AuthorityId,
+    recovery_public_key: Vec<u8>,
+}
+
+impl VerifiedGuardianAcceptance<'_> {
+    async fn record(self) -> AgentResult<()> {
+        self.effects
+            .store(
+                &crate::handlers::recovery::recovery_guardian_public_key_storage_key(self.guardian),
+                self.recovery_public_key,
+            )
+            .await
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Storage {
+                    message: "record required Guardian acceptance key".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })
+    }
+}
+
+async fn verify_guardian_acceptance<'a, T: GuardianIssuedProof>(
+    effects: &'a AuraEffectSystem,
+    issued: &T,
     accept: &GuardianAccept,
-) -> AgentResult<()> {
+) -> AgentResult<VerifiedGuardianAcceptance<'a>> {
     issued.require_runtime_owner(effects)?;
     let invitation = issued.invitation();
     if !matches!(invitation.invitation_type,
@@ -497,20 +615,23 @@ pub(super) async fn verify_and_record_guardian_acceptance(
             "guardian acceptance signature verification failed".to_string(),
         ));
     }
-    effects
-        .store(
-            &crate::handlers::recovery::recovery_guardian_public_key_storage_key(
-                invitation.receiver_id,
-            ),
-            accept.recovery_public_key.clone(),
-        )
+    Ok(VerifiedGuardianAcceptance {
+        effects,
+        guardian: invitation.receiver_id,
+        recovery_public_key: accept.recovery_public_key.clone(),
+    })
+}
+
+#[cfg(test)]
+pub(super) async fn verify_and_record_guardian_acceptance<T: GuardianIssuedProof>(
+    effects: &AuraEffectSystem,
+    issued: &T,
+    accept: &GuardianAccept,
+) -> AgentResult<()> {
+    verify_guardian_acceptance(effects, issued, accept)
+        .await?
+        .record()
         .await
-        .map_err(|source| {
-            AgentError::Aura(aura_core::AuraError::Storage {
-                message: "record required Guardian acceptance key".into(),
-                source: Some(Arc::new(source)),
-            })
-        })
 }
 
 pub(super) struct InvitationGuardianHandler<'a> {
@@ -554,11 +675,11 @@ impl<'a> InvitationGuardianHandler<'a> {
         invitation: &Invitation,
         budget: &TimeoutBudget,
     ) -> AgentResult<()> {
-        let record = self
-            .handler
-            .created_invitation_required(effects.clone(), &invitation.invitation_id)
-            .await?;
-        let issued = super::issued_identity::load_original_identity(record).await?;
+        let issued = super::issued_identity::select_original_sender_proof(
+            effects.as_ref(),
+            &invitation.invitation_id,
+        )
+        .await?;
         let candidate =
             serde_json::to_vec(&ShareableInvitation::from(invitation)).map_err(|source| {
                 AgentError::Aura(aura_core::AuraError::Serialization {
@@ -579,13 +700,6 @@ impl<'a> InvitationGuardianHandler<'a> {
             ));
         }
         let invitation = issued.invitation();
-        let selected_identity =
-            crate::handlers::rendezvous_identity::require_issued_identity_signing_context(
-                effects.as_ref(),
-                &issued,
-            )
-            .await
-            .map_err(AgentError::EnrollmentManifest)?;
         let authority_id = self.handler.context.authority.authority_id();
         let role_description = invitation
             .message
@@ -647,44 +761,78 @@ impl<'a> InvitationGuardianHandler<'a> {
                                     "guardian acceptance names another original issuer key",
                                 ));
                             }
-                            let (private_key, _) =
-                                crate::handlers::rendezvous_identity::require_identity_keys(
-                                    &selected_identity,
-                                )
-                                .await
-                                .map_err(AgentError::EnrollmentManifest)?;
-                            verify_and_record_guardian_acceptance(
+                            let verified_acceptance = verify_guardian_acceptance(
                                 effects.as_ref(),
                                 &issued,
                                 &accept.0,
                             )
                             .await?;
-                            // A verified acceptance makes the contact this
-                            // authority's guardian (the threshold is set separately
-                            // by guardian setup).
-                            effects
-                                .commit_relational_facts(vec![
-                                    aura_journal::RelationalFact::Protocol(
-                                        aura_journal::ProtocolRelationalFact::GuardianBinding {
-                                            account_id: authority_id,
-                                            guardian_id: invitation.receiver_id,
-                                            binding_hash: aura_core::Hash32::default(),
-                                        },
-                                    ),
-                                ])
-                                .await
-                                .map_err(|error| AgentError::effects(error.to_string()))?;
-                            let signature = sign_guardian_transcript(
-                                effects.as_ref(),
-                                &guardian_confirmation_payload(invitation),
-                                &private_key,
-                            )
-                            .await?;
+                            let confirmation_payload = guardian_confirmation_payload(invitation);
+                            let (signature, quorum_epoch, recipient_device_id) = match &issued {
+                                super::issued_identity::IssuedSenderProofCapability::Solo(solo) => {
+                                    let selected_identity = crate::handlers::rendezvous_identity::require_issued_identity_signing_context(
+                                        effects.as_ref(), solo,
+                                    ).await.map_err(AgentError::EnrollmentManifest)?;
+                                    let (private_key, _) = crate::handlers::rendezvous_identity::require_identity_keys(&selected_identity)
+                                        .await.map_err(AgentError::EnrollmentManifest)?;
+                                    let signature = sign_guardian_transcript(
+                                        effects.as_ref(), &confirmation_payload, &private_key,
+                                    ).await?;
+                                    (signature, None, None)
+                                }
+                                super::issued_identity::IssuedSenderProofCapability::Quorum(quorum) => {
+                                    quorum.require_runtime_owner(effects.as_ref())?;
+                                    let bytes = guardian_transcript(&confirmation_payload)?;
+                                    let context = aura_core::threshold::SigningContext::invitation_response(
+                                        authority_id,
+                                        invitation_id.clone(),
+                                        invitation.receiver_id,
+                                        Some(quorum.recipient_device()),
+                                        effects.device_id(),
+                                        aura_core::threshold::InvitationResponseKind::GuardianConfirmation,
+                                        aura_core::hash::hash(&bytes),
+                                    ).ok_or_else(|| AgentError::invalid("invalid quorum Guardian confirmation intent"))?;
+                                    let signed = self.handler
+                                        .require_threshold_signing(effects.as_ref())?
+                                        .sign_with_device_quorum(context.clone()).await?;
+                                    if signed.signer_count < 2 || signed.epoch != quorum.epoch() {
+                                        return Err(AgentError::invalid("Guardian confirmation quorum differs from original issuance"));
+                                    }
+                                    let package = frost_ed25519::keys::PublicKeyPackage::deserialize(&signed.public_key_package)
+                                        .map_err(|source| AgentError::invalid(format!("invalid Guardian quorum package: {source}")))?;
+                                    if package.verifying_key().serialize().as_slice() != quorum.group_key() {
+                                        return Err(AgentError::invalid("Guardian confirmation group key differs from original issuance"));
+                                    }
+                                    quorum
+                                        .verify_response_transcript(
+                                            effects.as_ref(),
+                                            &context,
+                                            signed.epoch,
+                                            &signed.signature,
+                                        )
+                                        .await?;
+                                    (signed.signature, Some(signed.epoch), Some(quorum.recipient_device()))
+                                }
+                            };
+                            // Only a verified acceptance and signed response may
+                            // precede the visible Guardian binding.
+                            verified_acceptance.record().await?;
+                            effects.commit_relational_facts(vec![
+                                aura_journal::RelationalFact::Protocol(
+                                    aura_journal::ProtocolRelationalFact::GuardianBinding {
+                                        account_id: authority_id,
+                                        guardian_id: invitation.receiver_id,
+                                        binding_hash: aura_core::Hash32::default(),
+                                    },
+                                ),
+                            ]).await.map_err(|error| AgentError::effects(error.to_string()))?;
                             let confirm = GuardianInvitationConfirm(GuardianConfirm {
                                 invitation_id: invitation_id.clone(),
                                 established: true,
                                 relationship_id: None,
                                 signature,
+                                quorum_epoch,
+                                recipient_device_id,
                             });
                             session.queue_send_bytes(
                                 to_vec(&confirm).map_err(guardian_codec_failure)?,
@@ -870,7 +1018,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                         let verified = verify_guardian_confirmation_required(
                             effects.as_ref(),
                             &original,
-                            &confirm.0.signature,
+                            &confirm.0,
                         )
                         .await?;
                         if !verified {
@@ -951,6 +1099,76 @@ impl<'a> InvitationGuardianHandler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn retained_quorum_guardian_confirmation_rejects_foreign_epoch_device_and_key() {
+        let directory = tempfile::tempdir().expect("isolated Guardian profile");
+        let guardian = AuthorityId::new_from_entropy([216; 32]);
+        let principal = AuthorityId::new_from_entropy([217; 32]);
+        let effects = owned_effects(&directory.path().join("guardian"), guardian);
+        let invitation = Invitation {
+            invitation_id: InvitationId::new("v3-guardian-confirmation-negative"),
+            context_id: default_context_id_for_authority(principal),
+            sender_id: principal,
+            receiver_id: guardian,
+            invitation_type: InvitationType::Guardian {
+                subject_authority: principal,
+            },
+            status: InvitationStatus::Pending,
+            created_at: 1,
+            expires_at: None,
+            message: None,
+            receiver_nickname: None,
+        };
+        let mut shareable = ShareableInvitation::from(&invitation);
+        shareable.version = ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION;
+        let mut stored = StoredImportedInvitation::pending(
+            shareable,
+            invitation.created_at,
+            ImportedSenderTrust::SelfCertified,
+        );
+        stored.sender_proof_key = Some(vec![3; 32]);
+        stored.sender_proof_epoch = Some(7);
+        stored.sender_proof_device = Some(DeviceId::new_from_entropy([218; 32]));
+        let lease = effects.acquire_imported_invitation_decision().await;
+        let mut original = RequiredGuardianConfirmationVerificationCapability {
+            effects: effects.as_ref(),
+            stored,
+            invitation: invitation.clone(),
+            lease,
+        };
+        let mut confirm = GuardianConfirm {
+            invitation_id: invitation.invitation_id,
+            established: true,
+            relationship_id: None,
+            signature: vec![4; 64],
+            quorum_epoch: Some(8),
+            recipient_device_id: Some(effects.device_id()),
+        };
+        assert!(
+            verify_guardian_confirmation_required(effects.as_ref(), &original, &confirm)
+                .await
+                .is_err(),
+            "foreign epoch cannot confirm a retained v3 invitation"
+        );
+        confirm.quorum_epoch = Some(7);
+        confirm.recipient_device_id = Some(DeviceId::new_from_entropy([219; 32]));
+        assert!(
+            verify_guardian_confirmation_required(effects.as_ref(), &original, &confirm)
+                .await
+                .is_err(),
+            "foreign recipient device cannot confirm a retained v3 invitation"
+        );
+        confirm.recipient_device_id = Some(effects.device_id());
+        original.stored.sender_proof_key = Some(vec![5; 32]);
+        assert!(
+            !matches!(
+                verify_guardian_confirmation_required(effects.as_ref(), &original, &confirm).await,
+                Ok(true)
+            ),
+            "foreign group key or signature cannot confirm a retained v3 invitation"
+        );
+    }
 
     #[tokio::test]
     async fn required_guardian_pair_verifier_rejects_foreign_runtime_owner() {

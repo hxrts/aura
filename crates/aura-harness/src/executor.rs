@@ -826,6 +826,42 @@ fn execute_semantic_step(
                 context.vars.insert(name.clone(), selection.item_id.clone());
                 Ok(())
             }
+            aura_app::scenario_contract::VariableAction::CaptureOperationInstance {
+                name,
+                operation_id,
+            } => {
+                let instance_id = resolve_required_semantic_instance(step)?;
+                let snapshot = fetch_ui_snapshot_in_lane(tool_api, semantic_lane, &instance_id)?;
+                let operation = snapshot
+                    .operations
+                    .iter()
+                    .find(|operation| operation.id == *operation_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "step {} found no operation instance for {}",
+                            step.id,
+                            operation_id.0
+                        )
+                    })?;
+                context
+                    .vars
+                    .insert(name.clone(), operation.instance_id.0.clone());
+                Ok(())
+            }
+            aura_app::scenario_contract::VariableAction::AssertOperationAbsent { operation_id } => {
+                let instance_id = resolve_required_semantic_instance(step)?;
+                let snapshot = fetch_ui_snapshot_in_lane(tool_api, semantic_lane, &instance_id)?;
+                anyhow::ensure!(
+                    !snapshot
+                        .operations
+                        .iter()
+                        .any(|operation| operation.id == *operation_id),
+                    "step {} found prior operation for {}",
+                    step.id,
+                    operation_id.0
+                );
+                Ok(())
+            }
             aura_app::scenario_contract::VariableAction::Extract {
                 name,
                 regex,
@@ -1887,10 +1923,15 @@ fn semantic_expectation_wait_step(
         Expectation::OperationStateIs {
             operation_id,
             state,
+            after_instance,
         } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.operation_id = Some(operation_id.clone());
             wait_step.operation_state = Some(*state);
+            wait_step.operation_after_instance = after_instance
+                .as_ref()
+                .map(|value| resolve_template(value, context))
+                .transpose()?;
         }
         Expectation::ParityWithActor { actor } => {
             wait_step.action = CompatibilityAction::AssertParity;
@@ -2084,6 +2125,12 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             }
             aura_app::scenario_contract::VariableAction::CaptureSelection { .. } => {
                 "capture_selection"
+            }
+            aura_app::scenario_contract::VariableAction::CaptureOperationInstance { .. } => {
+                "capture_operation_instance"
+            }
+            aura_app::scenario_contract::VariableAction::AssertOperationAbsent { .. } => {
+                "assert_operation_absent"
             }
             aura_app::scenario_contract::VariableAction::Extract { .. } => "extract_var",
         },
@@ -3143,10 +3190,21 @@ fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> boo
     if let (Some(operation_id), Some(operation_state)) =
         (step.operation_id.as_ref(), step.operation_state)
     {
-        let Some(observed_state) = snapshot.operation_state(operation_id) else {
+        let Some(observed_operation) = snapshot
+            .operations
+            .iter()
+            .find(|operation| &operation.id == operation_id)
+        else {
             return false;
         };
-        if observed_state != operation_state {
+        if observed_operation.state != operation_state {
+            return false;
+        }
+        if step
+            .operation_after_instance
+            .as_ref()
+            .is_some_and(|previous| observed_operation.instance_id.0 == *previous)
+        {
             return false;
         }
     }
@@ -3275,6 +3333,12 @@ fn semantic_wait_matches_for_instance(
     else {
         return true;
     };
+
+    // The shared observation gate above excludes operation fields. A missing
+    // or unrelated submission handle must not satisfy this terminal wait.
+    if !semantic_wait_matches(step, snapshot) {
+        return false;
+    }
 
     let Some(handle) = context.last_operation_handle.get(instance_id) else {
         return true;
@@ -4277,6 +4341,58 @@ mod exact_semantic_list_predicate_tests {
             }],
         });
         snapshot
+    }
+
+    #[test]
+    fn operation_wait_requires_new_instance_after_setup_success() {
+        let operation_id = OperationId::device_enrollment();
+        let wait = lowered(Expectation::OperationStateIs {
+            operation_id: operation_id.clone(),
+            state: OperationState::Succeeded,
+            after_instance: Some("op-2".into()),
+        });
+        let mut observed = snapshot();
+        observed
+            .operations
+            .push(aura_app::ui_contract::OperationSnapshot {
+                id: operation_id,
+                instance_id: aura_app::ui_contract::OperationInstanceId("op-2".into()),
+                state: OperationState::Succeeded,
+                failure: None,
+            });
+        assert!(!semantic_wait_matches(&wait, &observed));
+        observed.operations[0].instance_id =
+            aura_app::ui_contract::OperationInstanceId("op-3".into());
+        assert!(semantic_wait_matches(&wait, &observed));
+    }
+    #[test]
+    fn operation_wait_without_submission_handle_requires_observed_terminal() {
+        let operation_id = OperationId::device_enrollment();
+        let wait = lowered(Expectation::OperationStateIs {
+            operation_id: operation_id.clone(),
+            state: OperationState::Succeeded,
+            after_instance: None,
+        });
+        let context = ScenarioContext::default();
+        let mut observed = snapshot();
+        assert!(!semantic_wait_matches_for_instance(
+            &wait, &observed, &context, "bob"
+        ));
+        observed
+            .operations
+            .push(aura_app::ui_contract::OperationSnapshot {
+                id: operation_id,
+                instance_id: aura_app::ui_contract::OperationInstanceId("op-2".into()),
+                state: OperationState::Submitting,
+                failure: None,
+            });
+        assert!(!semantic_wait_matches_for_instance(
+            &wait, &observed, &context, "bob"
+        ));
+        observed.operations[0].state = OperationState::Succeeded;
+        assert!(semantic_wait_matches_for_instance(
+            &wait, &observed, &context, "bob"
+        ));
     }
     #[test]
     fn list_membership_does_not_require_or_reject_unrelated_selection() {

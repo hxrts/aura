@@ -472,7 +472,7 @@ impl EnrollmentControlFrame {
         self.verify_failure_at(effects, admitted, now.ts_ms).await
     }
 
-    async fn verify_failure_at(
+    pub(super) async fn verify_failure_at(
         &self,
         effects: &AuraEffectSystem,
         admitted: &AdmittedEnrollmentManifest,
@@ -1026,8 +1026,14 @@ async fn sign_control(
     let manifest = retained.manifest();
     // Shared signing-material custody precedes tree custody. All production
     // signing lifecycle mutations must acquire this same generation gate.
+    #[cfg(test)]
+    eprintln!("enrollment control signing: awaiting original generation guard");
     let _generation_owner = effects.enrollment_retirement_generation_guard().await;
+    #[cfg(test)]
+    eprintln!("enrollment control signing: generation acquired; awaiting tree guard");
     let _decision_owner = effects.lock_tree_decision().await;
+    #[cfg(test)]
+    eprintln!("enrollment control signing: tree acquired");
     if matches!(&decision, EnrollmentControlDecision::Committed(_)) {
         require_current_confirmation_membership(effects, manifest).await?;
     }
@@ -1314,22 +1320,31 @@ pub(super) async fn sign_request(
     )
     .await
 }
-pub(super) async fn sign_committed_confirmation(
+
+/// Test-only cryptographic assertion helper; production uses the original owned terminal receipt.
+#[cfg(test)]
+async fn sign_committed_confirmation(
     effects: &AuraEffectSystem,
     retained: &RetainedEnrollmentVmControl,
     runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
 ) -> AgentResult<EnrollmentControlFrame> {
-    use aura_app::runtime_bridge::CeremonyTerminalOutcome;
     match runner
         .await_enrollment_terminal_outcome(&retained.manifest().ceremony)
         .await
         .map_err(AgentError::from)?
     {
-        CeremonyTerminalOutcome::Committed => {}
-        CeremonyTerminalOutcome::Failed(reason) => {
-            return Err(failure(EnrollmentVmAdmissionError::TerminalFailed(reason)))
+        aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed => {
+            sign_committed_confirmation_frame(effects, retained).await
+        }
+        aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(reason) => {
+            Err(failure(EnrollmentVmAdmissionError::TerminalFailed(reason)))
         }
     }
+}
+async fn sign_committed_confirmation_frame(
+    effects: &AuraEffectSystem,
+    retained: &RetainedEnrollmentVmControl,
+) -> AgentResult<EnrollmentControlFrame> {
     let manifest = retained.manifest();
     let confirm = DeviceEnrollmentConfirm {
         invitation_id: manifest.invitation.clone(),
@@ -1353,6 +1368,10 @@ pub(crate) struct IssuerEnrollmentTerminalReceipt {
 }
 
 impl IssuerEnrollmentTerminalReceipt {
+    /// Read-only projection of the actual native terminal receipt.
+    pub(crate) fn positive(&self) -> bool {
+        matches!(self.frame.decision, EnrollmentControlDecision::Committed(_))
+    }
     pub(crate) fn require_runtime_owner(
         &self,
         effects: &AuraEffectSystem,
@@ -1372,10 +1391,6 @@ impl IssuerEnrollmentTerminalReceipt {
         &self.retained
     }
 
-    pub(crate) fn positive(&self) -> bool {
-        matches!(self.frame.decision, EnrollmentControlDecision::Committed(_))
-    }
-
     pub(super) fn frame(&self) -> &EnrollmentControlFrame {
         &self.frame
     }
@@ -1385,27 +1400,106 @@ pub(super) async fn sign_terminal_receipt(
     effects: Arc<AuraEffectSystem>,
     retained: Arc<RetainedEnrollmentVmControl>,
     original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
-    runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
 ) -> AgentResult<IssuerEnrollmentTerminalReceipt> {
-    original
+    let observed = original
+        .await_original_terminal(effects.as_ref(), &retained)
+        .await?;
+    observed.validation.map_err(|source| {
+        AgentError::from(aura_core::AuraError::crypto_with_source(
+            "original terminal observation validation",
+            Arc::new(source),
+        ))
+    })?;
+    let outcome = observed.operation.ok_or_else(|| {
+        aura_core::AuraError::invalid("original terminal observation remains unresolved")
+    })??;
+    if retained
+        .manifest()
+        .final_inventory
+        .iter()
+        .any(|parent| parent.mode == aura_core::crypto::single_signer::SigningMode::Threshold)
+    {
+        let observed = original
+            .acquire_original_conditional_signing(effects.as_ref(), &retained)
+            .await?;
+        retained.retain_original_conditional_acquisition(&observed)?;
+        observed.validation.map_err(|source| {
+            AgentError::from(aura_core::AuraError::crypto_with_source(
+                "original conditional state acquisition validation",
+                Arc::new(source),
+            ))
+        })?;
+        let mut state = observed.operation.ok_or_else(|| {
+            aura_core::AuraError::invalid("original conditional state acquisition interrupted")
+        })??;
+        if let aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(reason) = outcome {
+            let decision = original.original_negative_decision(&retained)?;
+            let signature = state
+                .sign_original_negative_terminal(Arc::clone(&retained), original, decision)
+                .await?;
+            let manifest = retained.manifest();
+            let frame = EnrollmentControlFrame {
+                version: 2,
+                manifest_digest: retained.digest(),
+                decision: EnrollmentControlDecision::Failed {
+                    invitation: manifest.invitation.clone(),
+                    ceremony: manifest.ceremony.clone(),
+                    reason,
+                },
+                committed_ops: None,
+                signature,
+            };
+            state.require_original_terminal_message(
+                &EnrollmentControlTranscript {
+                    version: frame.version,
+                    manifest_digest: frame.manifest_digest,
+                    decision: frame.decision.clone(),
+                    committed_ops: None,
+                }
+                .transcript_bytes()
+                .map_err(transcript_stage)?,
+            )?;
+            return Ok(IssuerEnrollmentTerminalReceipt {
+                runtime_owner: effects,
+                retained,
+                frame,
+            });
+        }
+        let decision = original.original_positive_decision(&retained)?;
+        let signature = state
+            .sign_original_positive_terminal(Arc::clone(&retained), original, decision)
+            .await?;
+        let manifest = retained.manifest();
+        let frame = EnrollmentControlFrame {
+            version: 2,
+            manifest_digest: retained.digest(),
+            decision: EnrollmentControlDecision::Committed(DeviceEnrollmentConfirm {
+                invitation_id: manifest.invitation.clone(),
+                ceremony_id: manifest.ceremony.clone(),
+                established: true,
+                new_epoch: Some(manifest.pending_epoch),
+            }),
+            committed_ops: Some(decision.committed_ops().to_vec()),
+            signature,
+        };
+        state.require_original_positive_terminal_message(
+            &frame
+                .transcript()
+                .transcript_bytes()
+                .map_err(transcript_stage)?,
+        )?;
+        return Ok(IssuerEnrollmentTerminalReceipt {
+            runtime_owner: effects,
+            retained,
+            frame,
+        });
+    }
+    let frame = original
         .execute(effects.as_ref(), || {
-            issue_original_terminal_receipt(effects.clone(), retained, runner)
+            sign_terminal_confirmation_for_outcome(effects.as_ref(), &retained, outcome)
         })
         .await
-        .map_err(|source| original.map_run_error("original issuer terminal signing", source))
-}
-
-/// The retained native control supplies signing authority. Callers bound this
-/// same operation with their original execution or observation owner.
-pub(crate) async fn issue_original_terminal_receipt(
-    effects: Arc<AuraEffectSystem>,
-    retained: Arc<RetainedEnrollmentVmControl>,
-    runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
-) -> AgentResult<IssuerEnrollmentTerminalReceipt> {
-    // Only the existing native generation/tree guarded signer can issue this
-    // receipt. There is deliberately no constructor from an observed frame.
-    retained.require_runtime_owner(effects.as_ref())?;
-    let frame = sign_terminal_confirmation(effects.as_ref(), &retained, runner).await?;
+        .map_err(|source| original.map_run_error("original issuer terminal signing", source))?;
     Ok(IssuerEnrollmentTerminalReceipt {
         runtime_owner: effects,
         retained,
@@ -1418,15 +1512,27 @@ pub(super) async fn sign_terminal_confirmation(
     retained: &RetainedEnrollmentVmControl,
     runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
 ) -> AgentResult<EnrollmentControlFrame> {
-    match runner
+    #[cfg(test)]
+    eprintln!("enrollment terminal signing: awaiting actual terminal outcome");
+    let outcome = runner
         .await_enrollment_terminal_outcome(&retained.manifest().ceremony)
         .await
-        .map_err(AgentError::from)?
-    {
+        .map_err(AgentError::from)?;
+    sign_terminal_confirmation_for_outcome(effects, retained, outcome).await
+}
+
+async fn sign_terminal_confirmation_for_outcome(
+    effects: &AuraEffectSystem,
+    retained: &RetainedEnrollmentVmControl,
+    outcome: aura_app::runtime_bridge::CeremonyTerminalOutcome,
+) -> AgentResult<EnrollmentControlFrame> {
+    match outcome {
         aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed => {
-            sign_committed_confirmation(effects, retained, runner).await
+            sign_committed_confirmation_frame(effects, retained).await
         }
         aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(reason) => {
+            #[cfg(test)]
+            eprintln!("enrollment terminal signing: actual negative outcome {reason:?}");
             let manifest = retained.manifest();
             sign_control(
                 effects,
@@ -1759,6 +1865,32 @@ mod tests {
                 frame.transcript().transcript_bytes().unwrap(),
                 "reviewed public request must match actual native control bytes exactly"
             );
+            for (kind, reason) in [
+                (aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::Rejected, aura_app::runtime_bridge::CeremonyFailureReason::Rejected),
+                (aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::Cancelled, aura_app::runtime_bridge::CeremonyFailureReason::Cancelled),
+                (aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::TimedOut, aura_app::runtime_bridge::CeremonyFailureReason::TimedOut),
+                (aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::ChoreographyFailed, aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed),
+                (aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::RuntimeFailed, aura_app::runtime_bridge::CeremonyFailureReason::RuntimeFailed),
+                (aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::Superseded, aura_app::runtime_bridge::CeremonyFailureReason::Superseded),
+            ] {
+                let reviewed = aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalTranscript::from_manifest(retained.manifest(), kind)
+                    .expect("derive reviewed conditional negative transcript");
+                let native = EnrollmentControlTranscript {
+                    version: 2,
+                    manifest_digest: retained.digest(),
+                    decision: EnrollmentControlDecision::Failed {
+                        invitation: retained.manifest().invitation.clone(),
+                        ceremony: retained.manifest().ceremony.clone(),
+                        reason,
+                    },
+                    committed_ops: None,
+                };
+                assert_eq!(
+                    reviewed.required_transcript_bytes().unwrap(),
+                    native.required_transcript_bytes().unwrap(),
+                    "reviewed negative {kind:?} must match actual native control bytes exactly"
+                );
+            }
             verify_initial_request(
                 issuer_effects.as_ref(),
                 &OriginalInitialRequestVerifier::Retained(&retained),
@@ -2012,30 +2144,313 @@ mod committed_receipt_tests {
     }
     #[test]
     fn real_committed_confirmation_is_durable_and_reverified_before_activation_capability() {
+        actual_confirmed_parent_scenario(false, false, None, false);
+    }
+
+    #[test]
+    fn confirmed_profile_negative_recovery_refuses_foreign_adopted_subject() {
+        actual_confirmed_parent_scenario_with_foreign_subject(
+            false, false, None, false, false, false, None, true,
+        );
+    }
+
+    #[test]
+    fn original_native_acquisition_failure_survives_disposal_and_negative_transition() {
+        actual_confirmed_parent_scenario(true, false, None, false);
+    }
+
+    #[test]
+    fn original_registration_commit_drop_retains_actual_cleanup_owner() {
+        actual_confirmed_parent_scenario(false, true, None, false);
+    }
+
+    #[test]
+    fn original_allocation_commit_before_ack_drop_retains_actual_cleanup_owner() {
+        actual_confirmed_parent_scenario(
+            false,
+            false,
+            Some(AllocationDropBoundary::ImmutableCommit),
+            false,
+        );
+    }
+
+    #[test]
+    fn original_allocation_before_write_drop_retains_unwritten_disposition() {
+        actual_confirmed_parent_scenario(
+            false,
+            false,
+            Some(AllocationDropBoundary::BeforeWrite),
+            false,
+        );
+    }
+
+    #[derive(Clone, Copy)]
+    enum AllocationDropBoundary {
+        BeforeWrite,
+        ImmutableCommit,
+        WrapBirth,
+    }
+
+    #[test]
+    fn original_allocation_wrap_birth_drop_retires_actual_original_lifetime() {
+        actual_confirmed_parent_scenario(
+            false,
+            false,
+            Some(AllocationDropBoundary::WrapBirth),
+            false,
+        );
+    }
+
+    #[test]
+    fn real_single_signer_committed_cancellation_closes_original_resources_without_confirmation() {
         crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+            let ((issuer, invitee, invitation, _start, _, _), original) = crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+            "single-signer-committed-cancellation", Some(Arc::new(clock.clone())), None,
+        ).await;
+            let invitee_service = invitee.invitations().unwrap();
+            let actual_root = invitee_service
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let actual_scope = actual_root.origin_observation();
+            let original_subject = actual_scope.manifest().subject;
+            let original_epoch = actual_scope.manifest().final_epoch;
+            invitee_service
+                .return_original_enrollment_execution_for_test(actual_root)
+                .await
+                .unwrap();
+            let key_location = aura_core::effects::SecureStorageLocation::with_sub_key(
+                "signing_keys",
+                format!("{original_subject}:{original_epoch}"),
+                "1",
+            );
+            let original_key = zeroize::Zeroizing::new(
+                issuer
+                    .runtime()
+                    .effects()
+                    .secure_retrieve(
+                        &key_location,
+                        &[aura_core::effects::secure::SecureStorageCapability::Read],
+                    )
+                    .await
+                    .expect("actual original account signing key"),
+            );
+            let original_key_digest = aura_core::hash::hash(&original_key);
+            drop(original_key);
+            let actual_disposal = original
+                .original_disposal_for_test()
+                .expect("same originally issued task observer");
+            let (committed, release) = original
+                .install_committed_confirmation_gate_for_test()
+                .unwrap();
+            let invitations = invitee.invitations().unwrap();
+            let mut acceptance = Box::pin(invitations.accept(&invitation.invitation_id));
+            tokio::select! {
+                actual = committed => actual.expect("actual protected Committed receipt retained before visible notification"),
+                result = &mut acceptance => panic!("actual acceptance ended before committed confirmation gate: {result:?}"),
+            }
+            assert!(original.has_original_positive_receipt_for_test());
+
+            assert!(!original
+                .observes_retained_retirement_acknowledgment()
+                .unwrap());
+            original
+                .request_original_issuer_cancel_for_test()
+                .expect("cancel SAME actual SingleSigner issuer task");
+            let disposed = actual_disposal.await_disposal().await;
+            original
+                .require_original_issuer_disposal_for_test(&disposed)
+                .unwrap();
+            assert!(
+                matches!(
+                    disposed.outcome(),
+                    aura_core::effects::task::RequiredTaskExit::Failed(_)
+                ),
+                "actual cancelled issuer source retained: {:?}",
+                disposed.outcome()
+            );
+            assert!(
+                release.send(()).is_err(),
+                "actual original finalizer was disposed while gated before confirmation"
+            );
+            drop(acceptance);
+            assert!(!original
+                .observes_retained_retirement_acknowledgment()
+                .unwrap());
+            assert!(original.has_original_positive_receipt_for_test());
+
+            assert_eq!(clock.now_ms(), 5_000);
+            let issuer_shutdown = issuer
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+                .expect_err("cancelled SingleSigner issuer retains actual domain failure");
+            crate::handlers::invitation_service::assert_original_single_signer_cancelled_shutdown_source(&disposed.outcome(), &issuer_shutdown);
+            let preserved_key = zeroize::Zeroizing::new(
+                issuer
+                    .runtime()
+                    .effects()
+                    .secure_retrieve(
+                        &key_location,
+                        &[aura_core::effects::secure::SecureStorageCapability::Read],
+                    )
+                    .await
+                    .expect("original account key survives resource cleanup"),
+            );
+            assert_eq!(
+                aura_core::hash::hash(&preserved_key),
+                original_key_digest,
+                "resource cleanup preserves actual original account signing key bytes"
+            );
+            drop(preserved_key);
+            match invitee
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+            {
+                Ok(()) => {}
+                Err(crate::task_registry::TaskSupervisionError::TaskFailed { source, .. }) => {
+                    eprintln!("actual invitee SingleSigner cancellation domain source: {source:?}");
+                }
+                Err(source) => {
+                    panic!("SingleSigner original invitee resource cleanup failed: {source:?}")
+                }
+            }
+        });
+    }
+    #[test]
+    fn real_quorum_positive_retirement_waits_for_canonical_existing_device_response() {
+        actual_confirmed_parent_scenario(false, false, None, true);
+    }
+
+    #[test]
+    fn real_quorum_peer_commit_postread_drop_reenters_same_admission_without_early_ack() {
+        actual_confirmed_parent_scenario_with_postread_drop(false, false, None, true, true, false);
+    }
+
+    #[test]
+    fn real_quorum_positive_material_cleanup_preserves_refusal_without_positive_completion() {
+        actual_confirmed_parent_scenario_with_postread_drop(false, false, None, true, true, true);
+    }
+
+    #[test]
+    fn real_quorum_positive_actor_consumed_nonce_drop_retains_original_interruption() {
+        actual_confirmed_parent_scenario_with_actor_fault(false, false, None, true, false, true,
+        Some(crate::runtime::services::threshold_signing::OriginalPositiveActorTestMode::ConsumedNonce));
+    }
+    #[test]
+    fn real_quorum_positive_actor_native_failure_survives_postread_drop() {
+        actual_confirmed_parent_scenario_with_actor_fault(false, false, None, true, false, true,
+        Some(crate::runtime::services::threshold_signing::OriginalPositiveActorTestMode::NativeFailure));
+    }
+    fn actual_confirmed_parent_scenario(
+        native_failure: bool,
+        registration_drop: bool,
+        allocation_drop: Option<AllocationDropBoundary>,
+        second_positive: bool,
+    ) {
+        actual_confirmed_parent_scenario_with_postread_drop(
+            native_failure,
+            registration_drop,
+            allocation_drop,
+            second_positive,
+            false,
+            false,
+        );
+    }
+
+    fn actual_confirmed_parent_scenario_with_postread_drop(
+        native_failure: bool,
+        registration_drop: bool,
+        allocation_drop: Option<AllocationDropBoundary>,
+        second_positive: bool,
+        postread_drop: bool,
+        cleanup_positive: bool,
+    ) {
+        actual_confirmed_parent_scenario_with_actor_fault(
+            native_failure,
+            registration_drop,
+            allocation_drop,
+            second_positive,
+            postread_drop,
+            cleanup_positive,
+            None,
+        );
+    }
+    fn actual_confirmed_parent_scenario_with_actor_fault(
+        native_failure: bool,
+        registration_drop: bool,
+        allocation_drop: Option<AllocationDropBoundary>,
+        second_positive: bool,
+        postread_drop: bool,
+        cleanup_positive: bool,
+        actor_fault: Option<
+            crate::runtime::services::threshold_signing::OriginalPositiveActorTestMode,
+        >,
+    ) {
+        actual_confirmed_parent_scenario_with_foreign_subject(
+            native_failure,
+            registration_drop,
+            allocation_drop,
+            second_positive,
+            postread_drop,
+            cleanup_positive,
+            actor_fault,
+            false,
+        );
+    }
+    fn actual_confirmed_parent_scenario_with_foreign_subject(
+        native_failure: bool,
+        registration_drop: bool,
+        allocation_drop: Option<AllocationDropBoundary>,
+        second_positive: bool,
+        postread_drop: bool,
+        cleanup_positive: bool,
+        actor_fault: Option<
+            crate::runtime::services::threshold_signing::OriginalPositiveActorTestMode,
+        >,
+        foreign_subject: bool,
+    ) {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async move {
             let original_transport = crate::SharedTransport::new();
             let original_clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
-            let (issuer, invitee, invitation, start, _accept, verified) = Box::pin(
-                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock_and_transport(
+            let postread_test = Arc::new(
+                crate::runtime::services::threshold_signing::OriginalPeerCommitPostreadTest::new(
+                    original_clock.clone(),
+                    cleanup_positive,
+                ),
+            );
+            let actor_test = actor_fault.map(|mode| {
+                Arc::new(
+                    crate::runtime::services::threshold_signing::OriginalPositiveActorTest::new(
+                        original_clock.clone(),
+                        mode,
+                    ),
+                )
+            });
+            let selected_clock: Arc<dyn aura_core::effects::PhysicalTimeEffects> =
+                if let Some(test) = &actor_test {
+                    test.clone()
+                } else if postread_drop {
+                    postread_test.clone()
+                } else {
+                    Arc::new(original_clock.clone())
+                };
+
+            let ((issuer, invitee, invitation, _start, _accept, _verified), original) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
                     "confirmed-import-receipt",
-                    Arc::new(original_clock.clone()),
-                    original_transport.clone(),
+                    Some(selected_clock.clone()),
+                    Some(original_transport.clone()),
                 ),
             )
             .await;
             let issuer_effects = issuer.runtime().effects();
             let invitee_effects = invitee.runtime().effects();
             let original_invitee_config = invitee_effects.config().clone();
-            let retained = Arc::new(
-                RetainedEnrollmentVmControl::load(issuer_effects.clone(), &invitation)
-                    .await
-                    .unwrap(),
-            );
-            let issuer_observation = issuer
-                .runtime()
-                .ceremony_tracker()
-                .original_running_issuer_observation(&retained)
-                .expect("actual original registered issuer task observation");
             let original_root = invitee
                 .invitations()
                 .unwrap()
@@ -2086,78 +2501,71 @@ mod committed_receipt_tests {
                 )
                 .await
                 .is_err());
-            let runner = issuer.runtime().ceremony_runner();
-            runner
-                .record_verified_enrollment_response(verified)
+            let captured = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed_capture = captured.clone();
+            let selected_effects = issuer_effects.clone();
+            original.install_original_receipt_test_hook(Box::new(move |receipt| {
+                let original_bytes = aura_core::util::serialization::to_vec(receipt.frame()).unwrap();
+                let receipt = crate::handlers::invitation_service::assert_original_terminal_capture_after_primary_failure_for_test(
+                    receipt, selected_effects.as_ref(),
+                );
+                assert_eq!(aura_core::util::serialization::to_vec(receipt.frame()).unwrap(), original_bytes);
+                observed_capture.store(true, std::sync::atomic::Ordering::Release);
+                receipt
+            })).unwrap();
+            invitee
+                .invitations()
+                .unwrap()
+                .return_original_enrollment_execution_for_test(original_root)
                 .await
                 .unwrap();
-            let finalizer = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
-                issuer.authority_id(),
-                issuer_effects.clone(),
-                issuer.runtime().ceremony_tracker().clone(),
-                runner.clone(),
-                issuer.runtime().threshold_signing(),
-                issuer.runtime().reconfiguration().clone(),
+            invitee
+                .invitations()
+                .unwrap()
+                .accept(&invitation.invitation_id)
+                .await
+                .expect("same original invitee executes canonical acceptance and VM exchange");
+            let delivery = original.original_disposal_for_test().unwrap();
+            let disposed = delivery.await_disposal().await;
+            delivery.require_positive(&disposed).unwrap();
+            assert!(
+                captured.load(std::sync::atomic::Ordering::Acquire),
+                "actual canonical issuer receipt passed the custody regression"
             );
-            issuer_observation
-                .finalize_original_issuer(issuer_effects.as_ref(), &retained, &finalizer)
+            original
+                .observe_original_finalizer()
                 .await
-                .expect("actual original issuer finalization before terminal signing");
-            // This fixture deliberately exercises native terminal signing and
-            // independent invitee verification. Its original running observer
-            // bounds the same retained-control signer used by production; it
-            // never reconstructs an execution window or issues a root ACK.
-            let frame = issuer_observation
-                .observe_terminal_receipt(issuer_effects.clone(), retained.clone(), runner)
-                .await
-                .map(|receipt| receipt.frame().clone());
-            let frame = match frame {
-                Ok(frame) => frame,
-                Err(error) => {
-                    let retained_failure = issuer
-                        .runtime()
-                        .ceremony_tracker()
-                        .get(&start.ceremony_id)
-                        .await
-                        .expect("actual retained ceremony state");
-                    panic!(
-                        "actual confirmation failed: {error:?}; retained failure: {:?}; supervisor: {:?}",
-                        retained_failure.error_message,
-                        issuer.runtime().tasks().terminal_failure()
-                    );
-                }
-            };
+                .expect("actual original issuer finalization after canonical acceptance");
+            let durable = super::super::enrollment_manifest_admission::load_confirmed_enrollment(
+                invitee_effects.as_ref(),
+                invitation.receiver_id,
+                &invitation.invitation_id,
+            )
+            .await
+            .expect("canonical durable confirmation from actual VM exchange");
+            let verified = durable.confirmation();
+            let frame = verified.frame().clone();
+            let committed_ops = frame
+                .committed_ops
+                .as_ref()
+                .expect("actual committed suffix");
+            let public_positive = aura_invitation::enrollment_signing_intent::EnrollmentPositiveTerminalTranscript::from_manifest(
+                admitted.manifest(), committed_ops,
+            ).expect("exact public positive control from actual signed transition");
+            assert_eq!(
+                public_positive.required_transcript_bytes().unwrap(),
+                frame.transcript().required_transcript_bytes().unwrap(),
+                "finite positive quorum transcript must equal actual native control bytes"
+            );
+            assert!(aura_invitation::enrollment_signing_intent::EnrollmentPositiveTerminalTranscript::from_manifest(
+                admitted.manifest(), &committed_ops[..1],
+            ).is_err(), "a leaf without the epoch fence cannot identify the positive control");
+            let mut reversed = committed_ops.clone();
+            reversed.reverse();
+            assert!(aura_invitation::enrollment_signing_intent::EnrollmentPositiveTerminalTranscript::from_manifest(
+                admitted.manifest(), &reversed,
+            ).is_err(), "the positive control requires the leaf then its fence");
             let request = expected_request(&admitted);
-            let (domain_sender, domain_receiver) = tokio::sync::oneshot::channel();
-            let child_effects = invitee_effects.clone();
-            let child_admission = admitted.clone();
-            let child_frame = frame.clone();
-            let child_request = request.clone();
-            let _verification_task = original_root.children().spawn_try_named(
-                "verify-original-enrollment-confirmation",
-                async move {
-                    let verified = child_frame
-                        .verify_confirmation(
-                            child_effects.as_ref(),
-                            &child_admission,
-                            &child_request,
-                        )
-                        .await
-                        .map_err(|source| aura_core::AuraError::Internal {
-                            message: "actual original confirmation verification".into(),
-                            source: Some(Arc::new(source)),
-                        })?;
-                    domain_sender
-                        .send(verified)
-                        .expect("original domain proof receiver");
-                    Ok(())
-                },
-            );
-            let verified = original_root
-                .child()
-                .execute(invitee_effects.as_ref(), || domain_receiver)
-                .await
-                .expect("original bounded confirmation verification");
             // The genuine original signer roster stays one while AddLeaf creates
             // two authenticated root children before the original-key epoch fence.
             let history = verified.committed_transition().ops();
@@ -2220,18 +2628,6 @@ mod committed_receipt_tests {
                 aura_core::tree::NodeIndex(0)
             )
             .is_err());
-            let acknowledged = original_root
-                .acknowledge_confirmation(invitee_effects.as_ref(), &verified)
-                .await
-                .unwrap();
-            let durable =
-                super::super::enrollment_manifest_admission::retain_verified_confirmation(
-                    invitee_effects.as_ref(),
-                    verified,
-                    acknowledged,
-                )
-                .await
-                .unwrap();
             assert_eq!(
                 durable.confirmation().manifest_digest(),
                 admitted.manifest_digest()
@@ -2914,6 +3310,93 @@ mod committed_receipt_tests {
             drop(admitted);
             drop(invitee_effects);
             drop(invitee);
+            if foreign_subject {
+                let foreign = aura_core::AuthorityId::new_from_entropy([219; 32]);
+                assert_ne!(foreign, first_manifest.subject);
+                assert_ne!(foreign, invitation.receiver_id);
+                let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(
+                    &original_invitee_config,
+                )
+                .expect("same exclusive confirmed profile for foreign runtime refusal");
+                let context = aura_core::context::EffectContext::new(
+                    foreign,
+                    adopted_context,
+                    aura_core::effects::ExecutionMode::Testing,
+                );
+                let startup_timer_admitted = original_clock
+                    .observe_next_relative_sleep_of(1_000)
+                    .await
+                    .expect("observe actual foreign-profile startup timer admission");
+                let build =
+                    crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
+                        .with_authority(foreign)
+                        .with_config(original_invitee_config.clone())
+                        .with_shared_transport(original_transport.clone())
+                        .with_physical_time_provider(selected_clock.clone())
+                        .build(&context);
+                let drive_startup_timer = async {
+                    let target = startup_timer_admitted
+                        .await
+                        .expect("actual foreign startup timer admitted");
+                    assert_eq!(target.value(), original_clock.now_ms() + 1_000);
+                    original_clock.set_time(target.value());
+                };
+                let (runtime, ()) = tokio::join!(build, drive_startup_timer);
+                let runtime =
+                    runtime.expect("actual foreign runtime on same confirmed physical profile");
+                let effects = runtime.effects();
+                let admission_key = SecureStorageLocation::new(
+                    "enrollment_manifest_admission_v2",
+                    format!("{}:{}", invitation.receiver_id, invitation.invitation_id),
+                );
+                let admission_bytes = effects
+                    .secure_retrieve(&admission_key, &[SecureStorageCapability::Read])
+                    .await
+                    .expect("actual original protected admission");
+                let confirmed_bytes = effects
+                    .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                    .await
+                    .expect("actual original protected confirmation");
+                let notice_tasks = || {
+                    runtime
+                        .tasks()
+                        .active_tasks()
+                        .into_iter()
+                        .filter(|name| {
+                            name.contains("recovered-negative-notice")
+                                || name.contains("recovered_negative_notice")
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let tasks_before = notice_tasks();
+                let refused = super::super::enrollment_manifest_admission::load_recoverable_negative_admissions(effects.as_ref()).await;
+                assert!(matches!(
+                    refused,
+                    Err(aura_invitation::enrollment_manifest::EnrollmentManifestError::Pin)
+                ));
+                assert_eq!(
+                    effects
+                        .secure_retrieve(&admission_key, &[SecureStorageCapability::Read])
+                        .await
+                        .expect("unchanged original admission"),
+                    admission_bytes
+                );
+                assert_eq!(
+                    effects
+                        .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                        .await
+                        .expect("unchanged original confirmation"),
+                    confirmed_bytes
+                );
+                assert_eq!(notice_tasks(), tasks_before);
+                runtime
+                    .tasks()
+                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                    .await
+                    .expect("foreign observation runtime strict cleanup");
+                drop(effects);
+                drop(runtime);
+            }
             let selected_profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(
                 &original_invitee_config,
             )
@@ -2923,24 +3406,41 @@ mod committed_receipt_tests {
                 adopted_context,
                 aura_core::effects::ExecutionMode::Testing,
             );
-            let reopened_runtime =
+            let startup_timer_admitted = original_clock
+                .observe_next_relative_sleep_of(1_000)
+                .await
+                .expect("observe actual confirmed-profile startup timer admission");
+            let build =
                 crate::runtime::EffectSystemBuilder::testing_with_owned_profile(selected_profile)
                     .with_authority(first_manifest.subject)
                     .with_config(original_invitee_config)
                     .with_shared_transport(original_transport.clone())
-                    .with_physical_time_provider(Arc::new(original_clock.clone()))
-                    .build(&adopted_context)
+                    .with_physical_time_provider(selected_clock.clone())
+                    .build(&adopted_context);
+            let drive_startup_timer = async {
+                let target = startup_timer_admitted
                     .await
-                    .expect(
-                        "actual confirmed original physical profile reopen under adopted subject",
-                    );
+                    .expect("actual confirmed startup timer admitted");
+                assert_eq!(target.value(), original_clock.now_ms() + 1_000);
+                original_clock.set_time(target.value());
+            };
+            let (reopened_runtime, ()) = tokio::join!(build, drive_startup_timer);
+            let reopened_runtime = reopened_runtime
+                .expect("actual confirmed original physical profile reopen under adopted subject");
             let reopened_invitee = std::sync::Arc::new(crate::AuraAgent::new(
                 reopened_runtime,
                 first_manifest.subject,
             ));
             use aura_app::runtime_bridge::RuntimeBridge;
             crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone())
-                .bootstrap_signing_keys()
+                .bootstrap_signing_keys(
+                    crate::runtime::services::RuntimeServiceContext::test_original(
+                        reopened_invitee.runtime().tasks(),
+                        reopened_invitee.runtime().effects(),
+                    )
+                    .await
+                    .startup_window(),
+                )
                 .await
                 .expect(
                     "restore original confirmed active native share without reminting authority",
@@ -2976,6 +3476,23 @@ mod committed_receipt_tests {
                 }
             }
             assert!(actual_quorum, "native current-key effect must preserve concrete 2/2 quorum source, not Storage or solo authority");
+            if foreign_subject {
+                reopened_invitee
+                    .runtime()
+                    .tasks()
+                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                    .await
+                    .expect(
+                        "actual confirmed subject runtime strict cleanup after foreign refusal",
+                    );
+                issuer
+                    .runtime()
+                    .tasks()
+                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                    .await
+                    .expect("actual original issuer strict cleanup without second ceremony");
+                return;
+            }
             // A second real issuance after the first attested epoch fence must
             // export the actual active threshold package, although its history
             // contains only old-epoch signature parents.
@@ -3007,14 +3524,24 @@ mod committed_receipt_tests {
                         .with_authority(third_authority)
                         .with_config(third_config)
                         .with_shared_transport(original_transport.clone())
-                        .with_physical_time_provider(Arc::new(original_clock.clone()))
+                        .with_physical_time_provider(selected_clock.clone())
                         .build(&third_context)
                         .await
                         .unwrap();
                 let third =
                     std::sync::Arc::new(crate::AuraAgent::new(third_runtime, third_authority));
                 let third_bridge = crate::runtime_bridge::AgentRuntimeBridge::new(third.clone());
-                third_bridge.bootstrap_signing_keys().await.unwrap();
+                third_bridge
+                    .bootstrap_signing_keys(
+                        crate::runtime::services::RuntimeServiceContext::test_original(
+                            third.runtime().tasks(),
+                            third.runtime().effects(),
+                        )
+                        .await
+                        .startup_window(),
+                    )
+                    .await
+                    .unwrap();
                 let setup = third_bridge
                     .export_device_enrollment_setup_request()
                     .await
@@ -3030,6 +3557,173 @@ mod committed_receipt_tests {
                     .unwrap(),
                 ));
                 let setup=aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(&issuer_app,setup).await.unwrap();
+                if let Some(boundary) = allocation_drop {
+                    let write_started = !matches!(boundary, AllocationDropBoundary::BeforeWrite);
+                    let allocation_effects = issuer.runtime().effects();
+                    let namespaces = [
+                        "device_enrollment_generation_allocation_v1",
+                        "device_enrollment_generation_live_slot_v2",
+                        "device_enrollment_orphan_retirement_v1",
+                        "device_enrollment_orphan_cleaned_v1",
+                    ];
+                    let mut before = Vec::new();
+                    if !write_started {
+                        for namespace in namespaces {
+                            let mut keys = allocation_effects
+                                .secure_list_keys(namespace, &[SecureStorageCapability::List])
+                                .await
+                                .unwrap();
+                            keys.sort();
+                            before.push(keys);
+                        }
+                    }
+                    type BirthReference =
+                        aura_core::effects::secret_lifetime::SecretAllocationReference;
+                    type Gate = std::pin::Pin<
+                        Box<
+                            dyn std::future::Future<
+                                    Output = Result<
+                                        Option<BirthReference>,
+                                        tokio::sync::oneshot::error::RecvError,
+                                    >,
+                                > + Send,
+                        >,
+                    >;
+                    let (committed, retain_ack): (Gate, _) = match boundary {
+                        AllocationDropBoundary::WrapBirth => {
+                            let (reached, resume) = allocation_effects
+                                .hold_original_allocation_birth_for_test()
+                                .unwrap();
+                            (Box::pin(async move { reached.await.map(Some) }), resume)
+                        }
+                        _ => {
+                            let (reached, resume) = if write_started {
+                                allocation_effects
+                                    .hold_original_allocation_commit_for_test()
+                                    .unwrap()
+                            } else {
+                                allocation_effects
+                                    .hold_original_allocation_prewrite_for_test()
+                                    .unwrap()
+                            };
+                            (
+                                Box::pin(async move { reached.await.map(|()| None) }),
+                                resume,
+                            )
+                        }
+                    };
+                    let probe = issuer
+                        .threshold_signing()
+                        .launch_original_prepared_probe_for_test(issuer.clone(), setup)
+                        .await
+                        .unwrap();
+                    let disposal = probe.disposal_observer().unwrap();
+                    tokio::pin!(disposal);
+                    let born = tokio::select! {
+                        result = committed => result.expect("actual original allocation boundary"),
+                        outcome = disposal.await_disposal() => panic!("original task ended before actual allocation boundary: {:?}", outcome.outcome()),
+                    };
+                    if let Some(reference) = born.as_ref() {
+                        let (state, readable) = allocation_effects
+                            .observe_original_lifetime_for_test(reference)
+                            .await
+                            .unwrap();
+                        assert!(matches!(
+                            state,
+                            aura_core::effects::secret_lifetime::SecretLifetimeState::Live
+                        ));
+                        assert!(readable);
+                    }
+                    let generation = allocation_effects.enrollment_retirement_generation_guard();
+                    tokio::pin!(generation);
+                    assert!(
+                        futures::poll!(generation.as_mut()).is_pending(),
+                        "actual original generation lease retained at cancellation boundary"
+                    );
+                    probe.request_cancel().unwrap();
+                    let disposed = disposal.await_disposal().await;
+                    probe.require_original_disposal_for_test(&disposed).unwrap();
+                    drop(generation.await);
+                    let wrap_original = probe
+                        .with_retained_resources_for_test(|resources| {
+                            assert!(resources.reservation.is_none());
+                            assert!(resources.root.is_none());
+                            assert!(resources.registered.is_none());
+                            let producer = resources
+                                .allocation
+                                .as_ref()
+                                .expect("same original producer retained");
+                            let wrap = if born.is_some() {
+                                Some(producer.acknowledged_wrap_original_for_test())
+                            } else {
+                                if write_started {
+                                    producer.assert_pending_allocation_retired_for_test();
+                                } else {
+                                    producer.assert_unwritten_allocation_disposed_for_test();
+                                }
+                                None
+                            };
+                            assert!(resources.first_failure.is_some());
+                            wrap
+                        })
+                        .unwrap();
+                    if let (Some(reference), Some((ceremony, authority, epoch, decision))) =
+                        (born.as_ref(), wrap_original)
+                    {
+                        let (state, readable) = allocation_effects
+                            .observe_original_lifetime_for_test(reference)
+                            .await
+                            .unwrap();
+                        match state {
+                            aura_core::effects::secret_lifetime::SecretLifetimeState::Retired {
+                                decision: actual,
+                            } => assert_eq!(actual, decision),
+                            _ => panic!("actual original birth remains unretired"),
+                        }
+                        assert!(!readable);
+                        for namespace in [
+                            "device_enrollment_generation_allocation_v1",
+                            "device_enrollment_orphan_retirement_v1",
+                            "device_enrollment_orphan_cleaned_v1",
+                        ] {
+                            assert_eq!(
+                                allocation_effects
+                                    .secure_retrieve(
+                                        &aura_core::effects::SecureStorageLocation::new(
+                                            namespace,
+                                            ceremony.to_string()
+                                        ),
+                                        &[SecureStorageCapability::Read]
+                                    )
+                                    .await
+                                    .unwrap(),
+                                decision
+                            );
+                        }
+                        assert!(!allocation_effects
+                            .secure_exists(
+                                &crate::runtime::effects::enrollment_generation_profile_location(
+                                    &authority, epoch
+                                )
+                            )
+                            .await
+                            .unwrap());
+                    }
+                    if !write_started {
+                        let mut after = Vec::new();
+                        for namespace in namespaces {
+                            let mut keys = allocation_effects
+                                .secure_list_keys(namespace, &[SecureStorageCapability::List])
+                                .await
+                                .unwrap();
+                            keys.sort();
+                            after.push(keys);
+                        }
+                        assert_eq!(before, after, "unwritten cleanup publishes no allocation/live/retirement/cleaned record");
+                    }
+                    drop(retain_ack);
+                    return;
+                }
                 let prepared = issuer_bridge
                     .prepare_device_enrollment_ceremony(
                         "Second actual device".into(),
@@ -3042,10 +3736,10 @@ mod committed_receipt_tests {
                 );
                 assert!(prepared
                     .signing_intent_code
-                    .starts_with("aura-enrollment-signing-intent:v2:"));
+                    .starts_with("aura-enrollment-signing-intent:v3:"));
                 assert!(aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
-                    prepared.signing_intent_code.replacen("aura-enrollment-signing-intent:v2:", "aura-enrollment-signing-intent:v1:", 1),
-                ).is_err(), "historical consent is never promoted to initial-request approval");
+                    prepared.signing_intent_code.replacen("aura-enrollment-signing-intent:v3:", "aura-enrollment-signing-intent:v1:", 1),
+                ).is_err(), "historical consent cannot authorize current terminal policy");
                 let sibling_app = std::sync::Arc::new(async_lock::RwLock::new(
                     aura_app::AppCore::with_runtime(
                         aura_app::AppConfig::default(),
@@ -3060,9 +3754,10 @@ mod committed_receipt_tests {
                     prepared.signing_intent_code.clone(),
                 ).expect("explicit sibling selection of exact public intent");
                 assert_eq!(sibling_intent.domains(), [
-                    aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::Manifest,
-                    aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::PublicTransport,
-                    aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::InitialRequest,
+                    aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::Manifest,
+                    aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::PublicTransport,
+                    aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::InitialRequest,
+                    aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::NegativeTerminalPolicy,
                 ]);
                 let sibling_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
                     &sibling_app, sibling_intent, sibling_setup,
@@ -3086,6 +3781,36 @@ mod committed_receipt_tests {
     Err(aura_core::AuraError::PermissionDenied { .. }),
 ), "a different bridge allocation over the same agent cannot consume original approval");
                 drop(original_dynamic_owner);
+                if native_failure {
+                    let sibling_approval = crate::runtime_bridge::enrollment_quorum::admit_original_runtime_approval_for_test(
+                        sibling_bridge.as_ref(), sibling_approval,
+                    ).expect("same actual independently adopted sibling approval");
+                    crate::runtime::services::enrollment_window::assert_original_native_failure_for_test(
+                        reopened_invitee.clone(), sibling_approval,
+                    ).await;
+                    let own_intent = aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
+                        prepared.signing_intent_code,
+                    ).unwrap();
+                    let own_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
+                        &issuer_app, own_intent, setup,
+                    ).await.unwrap();
+                    let own_approval = crate::runtime_bridge::enrollment_quorum::admit_original_runtime_approval_for_test(
+                        issuer_bridge.as_ref(), own_approval,
+                    ).unwrap();
+                    // This exact prepared entry acknowledges supervised disposal only.
+                    // It does not claim a durable enrollment negative acknowledgment.
+                    let teardown = issuer
+                        .threshold_signing()
+                        .cancel_original_prepared_for_test(&own_approval)
+                        .await;
+                    if let Err(source) = teardown {
+                        assert!(
+                            std::error::Error::source(&source).is_some(),
+                            "original supervised failure retains source"
+                        );
+                    }
+                    return;
+                }
                 sibling_bridge
                     .approve_device_enrollment_signing(sibling_approval)
                     .await
@@ -3096,6 +3821,61 @@ mod committed_receipt_tests {
                 let own_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
                     &issuer_app, own_intent, setup,
                 ).await.expect("original issuer explicit user approval");
+                if registration_drop {
+                    let actual = crate::runtime_bridge::enrollment_quorum::admit_original_runtime_approval_for_test(
+                        issuer_bridge.as_ref(), own_approval,
+                    ).expect("genuine original issuer approval");
+                    let signing = issuer.threshold_signing();
+                    let probe = signing
+                        .original_prepared_issuer_probe_for_test(&actual)
+                        .await
+                        .expect("same exact approval-bound required entry");
+                    let disposed = probe.disposal_observer().unwrap();
+                    let (committed, continue_readback) = issuer
+                        .runtime()
+                        .effects()
+                        .hold_original_registration_readback_for_test()
+                        .unwrap();
+                    let resume = signing.resume_original_quorum_issuer(actual);
+                    tokio::pin!(resume);
+                    tokio::select! {
+                        commit = committed => commit.expect("actual secure registration write completed"),
+                        result = &mut resume => panic!("issuance ended before actual registration commit gate: {result:?}"),
+                    }
+                    println!(
+                        "original-registration-drop: committed actual live profile before readback"
+                    );
+                    probe.request_cancel().unwrap();
+                    let disposal = disposed.await_disposal().await;
+                    println!(
+                        "original-registration-drop: original required task actually disposed"
+                    );
+                    probe.require_original_disposal_for_test(&disposal).unwrap();
+                    probe
+                        .with_retained_resources_for_test(|resources| {
+                            assert!(
+                                resources.registered_custody.is_none(),
+                                "no signed-control custodian fabricated before readback"
+                            );
+                            assert!(
+                                resources.registered.is_none(),
+                                "no positive registered authority survived negative handoff"
+                            );
+                            resources
+                                .negative
+                                .as_ref()
+                                .expect("same original held negative owner retained")
+                                .assert_retained_cleanup_for_test(
+                                    resources
+                                        .first_failure
+                                        .as_ref()
+                                        .expect("actual first cancellation source retained"),
+                                );
+                        })
+                        .unwrap();
+                    drop(continue_readback);
+                    return;
+                }
                 for (domain, diagnostic, required) in [
                     (
                         "manifest",
@@ -3124,10 +3904,28 @@ mod committed_receipt_tests {
                         "required encoding preserves exact original approved {domain} domain bytes"
                     );
                 }
-                let second = issuer_bridge
-                    .resume_device_enrollment_signing(own_approval)
-                    .await
-                    .expect("genuine approved active 2-of-2 runtime quorum issuance");
+                let (second, second_disposal, second_probe) = if second_positive {
+                    let actual = crate::runtime_bridge::enrollment_quorum::admit_original_runtime_approval_for_test(
+                        issuer_bridge.as_ref(), own_approval,
+                    ).expect("same actual issuer user approval for positive quorum scenario");
+                    let signing = issuer.threshold_signing();
+                    let probe = signing
+                        .original_prepared_issuer_probe_for_test(&actual)
+                        .await
+                        .unwrap();
+                    let disposal = probe.disposal_observer().unwrap();
+                    let start = signing.resume_original_quorum_issuer(actual).await.unwrap();
+                    (start, Some(disposal), Some(probe))
+                } else {
+                    (
+                        issuer_bridge
+                            .resume_device_enrollment_signing(own_approval)
+                            .await
+                            .expect("genuine approved active 2-of-2 runtime quorum issuance"),
+                        None,
+                        None,
+                    )
+                };
                 assert_eq!(
                     second.ceremony_id, prepared.ceremony_id,
                     "resume retains the original prepared ceremony allocation"
@@ -3181,10 +3979,269 @@ mod committed_receipt_tests {
                     active[0].public_key_package,
                     manifest.parents[0].public_key_package
                 );
+                let second_invitation = manifest.invitation.clone();
+                let peer_subject = manifest.subject;
+                let peer_ceremony = manifest.ceremony.clone();
                 crate::runtime_bridge::AgentRuntimeBridge::new(third.clone())
                     .import_enrollment_invitation(&second.enrollment_code, selected)
                     .await
                     .unwrap();
+                if second_positive {
+                    let (finished, finished_rx) = tokio::sync::watch::channel(false);
+                    let quorum_notify = original_transport.inbox_notify(first_manifest.subject);
+                    let rotation_notify = original_transport.inbox_notify(first_manifest.subject);
+                    let signing = reopened_invitee.threshold_signing();
+                    if postread_drop {
+                        signing
+                            .install_original_peer_commit_postread_test(
+                                peer_subject,
+                                &peer_ceremony,
+                                postread_test.clone(),
+                            )
+                            .await
+                            .unwrap();
+                    }
+                    let actor_disposal = if let Some(test) = &actor_test {
+                        Some(
+                            signing
+                                .install_original_positive_actor_test(
+                                    peer_subject,
+                                    &peer_ceremony,
+                                    test.clone(),
+                                )
+                                .await
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    };
+                    let rotation =
+                        crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone())
+                            .original_enrollment_finalizer_service();
+                    let mut quorum_finished = finished_rx.clone();
+                    let quorum_driver = async {
+                        loop {
+                            let arrival = quorum_notify.notified();
+                            tokio::pin!(arrival);
+                            arrival.as_mut().enable();
+                            signing.process_device_quorum_inbound().await.unwrap();
+                            for request in signing.pending_signing_requests().await {
+                                assert_eq!(
+                                    request.requesting_device,
+                                    issuer.runtime().effects().device_id()
+                                );
+                                assert!(["signed message (aura.sync.device_epoch_rotation.proposal.v2)", "signed message (aura.sync.device_epoch_rotation.enrollment_commit.v2)", "account device tree update"].contains(&request.operation.as_str()),
+                                    "explicit original enrollment rotation signing consent: {}", request.operation);
+                                signing
+                                    .decide_pending_signing_request(&request.id, true)
+                                    .await
+                                    .unwrap();
+                            }
+                            if *quorum_finished.borrow() {
+                                break;
+                            }
+                            tokio::select! {
+                                _ = arrival => {},
+                                changed = quorum_finished.changed() => { changed.unwrap(); },
+                            }
+                        }
+                    };
+                    let rotation_driver = async {
+                        loop {
+                            let arrival = rotation_notify.notified();
+                            tokio::pin!(arrival);
+                            arrival.as_mut().enable();
+                            let result = rotation.process_pending_participant_sessions().await;
+                            if cleanup_positive && result.is_err() {
+                                break;
+                            }
+                            let (_, completed) = result.unwrap();
+                            if completed > 0 {
+                                break;
+                            }
+                            arrival.await;
+                        }
+                    };
+                    let accept = async {
+                        if cleanup_positive {
+                            let actual = third.invitations().unwrap();
+                            let mut acceptance = Box::pin(actual.accept(&second_invitation));
+                            tokio::select! {
+                                _ = async { if let Some(test) = &actor_test { test.await_completed().await; } else { postread_test.await_cleanup_completed().await; } } => {},
+                                result = &mut acceptance => panic!("acceptance ended before actual original peer cleanup: {result:?}"),
+                            }
+                            drop(acceptance);
+                            if let Some(test) = &actor_test {
+                                test.assert_completed();
+                            } else {
+                                postread_test.assert_completed();
+                            }
+                            finished.send_replace(true);
+                            return;
+                        }
+                        third.invitations().unwrap().accept(&second_invitation).await
+                            .expect("real third-device acceptance and full existing-device quorum commit");
+                        let disposed = second_disposal
+                            .as_ref()
+                            .expect("same original issuer disposal observer")
+                            .await_disposal()
+                            .await;
+                        assert!(
+                            matches!(
+                                disposed.outcome(),
+                                aura_core::effects::task::RequiredTaskExit::Completed
+                            ),
+                            "same original issuer acknowledges actual positive cleanup"
+                        );
+                        finished.send_replace(true);
+                    };
+                    futures::join!(accept, quorum_driver, rotation_driver);
+                    if postread_drop {
+                        postread_test.assert_completed();
+                    }
+                    if let Some(disposal) = &actor_disposal {
+                        let actual = disposal.await_disposal().await;
+                        assert!(
+                            matches!(
+                                actual.outcome(),
+                                aura_core::effects::task::RequiredTaskExit::Failed(_)
+                            ),
+                            "actual original peer failure retained: {:?}",
+                            actual.outcome()
+                        );
+                        actor_test.as_ref().unwrap().assert_completed();
+                        signing
+                            .assert_original_positive_actor_cleanup(peer_subject, &peer_ceremony)
+                            .await;
+                    }
+                    assert_eq!(
+                        original_clock.now_ms(),
+                        6_000,
+                        "only the admitted confirmed-profile startup timer advances the selected clock"
+                    );
+                    if cleanup_positive {
+                        assert_eq!(
+                            issuer
+                                .runtime()
+                                .ceremony_runner()
+                                .terminal_outcome(&peer_ceremony)
+                                .await
+                                .unwrap(),
+                            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed),
+                            "destructive local cleanup never rewrites original first decision"
+                        );
+                        let original_issuer = second_probe
+                            .as_ref()
+                            .expect("same actual issuer probe")
+                            .original_registered_owner_for_test()
+                            .expect("project actual original registered owner");
+                        original_issuer
+                            .request_original_issuer_cancel_for_test()
+                            .expect("cancel SAME retained running issuer task");
+                        let original_disposal = second_disposal
+                            .as_ref()
+                            .expect("same original issuer disposal observer")
+                            .await_disposal()
+                            .await;
+                        original_issuer
+                            .require_original_issuer_disposal_for_test(&original_disposal)
+                            .expect("actual SAME issuer disposal");
+                        let aura_core::effects::task::RequiredTaskExit::Failed(source) =
+                            original_disposal.outcome()
+                        else {
+                            panic!("cancelled original issuer must retain its actual domain failure: {:?}", original_disposal.outcome());
+                        };
+                        eprintln!("actual original issuer failure before shutdown: {source:?}");
+                        let issuer_settlement = issuer
+                            .runtime()
+                            .tasks()
+                            .shutdown_gracefully(std::time::Duration::from_secs(5))
+                            .await;
+                        let Err(crate::task_registry::TaskSupervisionError::TaskFailed {
+                            source,
+                            ..
+                        }) = issuer_settlement
+                        else {
+                            panic!("expected retained unresolved issuer terminal, got {issuer_settlement:?}");
+                        };
+                        eprintln!(
+                            "actual unresolved issuer terminal after peer cleanup: {source:?}"
+                        );
+                        second_probe
+                            .as_ref()
+                            .expect("same actual issuer probe")
+                            .with_retained_resources_for_test(|resources| {
+                                assert!(
+                                    resources.registered_custody.is_some(),
+                                    "same registered issuer custody remains retained"
+                                );
+                            })
+                            .unwrap();
+                        for (label, settlement) in [
+                            (
+                                "peer",
+                                reopened_invitee
+                                    .runtime()
+                                    .tasks()
+                                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                                    .await,
+                            ),
+                            (
+                                "invitee",
+                                third
+                                    .runtime()
+                                    .tasks()
+                                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                                    .await,
+                            ),
+                        ] {
+                            match settlement {
+                                Ok(()) => {},
+                                Err(crate::task_registry::TaskSupervisionError::TaskFailed { source, .. }) => eprintln!("actual {label} retained domain failure after cleanup: {source:?}"),
+                                Err(source) => panic!("unexpected {label} resource shutdown failure: {source:?}"),
+                            }
+                        }
+                        return;
+                    }
+                } else {
+                    // The enrolled sibling supplies actual quorum-signing
+                    // ingress for the signed negative terminal. A declined
+                    // enrollment has no participant acceptance to process.
+                    let (finished, mut finished_rx) = tokio::sync::watch::channel(false);
+                    let peer_notify = original_transport.inbox_notify(first_manifest.subject);
+                    let signing = reopened_invitee.threshold_signing();
+                    let peer_driver = async {
+                        loop {
+                            let arrival = peer_notify.notified();
+                            tokio::pin!(arrival);
+                            arrival.as_mut().enable();
+                            signing.process_device_quorum_inbound().await.unwrap();
+                            for request in signing.pending_signing_requests().await {
+                                assert_eq!(
+                                    request.requesting_device,
+                                    issuer.runtime().effects().device_id()
+                                );
+                                signing
+                                    .decide_pending_signing_request(&request.id, true)
+                                    .await
+                                    .unwrap();
+                            }
+                            if *finished_rx.borrow() {
+                                break;
+                            }
+                            tokio::select! {
+                                _ = arrival => {},
+                                changed = finished_rx.changed() => { changed.unwrap(); },
+                            }
+                        }
+                    };
+                    let decline = async {
+                        third.invitations().unwrap().decline(&second_invitation).await.expect(
+                            "actual second invitation decline settles its original negative exchange");
+                        finished.send_replace(true);
+                    };
+                    futures::join!(decline, peer_driver);
+                }
                 third
                     .runtime()
                     .tasks()
@@ -3272,9 +4329,9 @@ mod actual_committed_checkpoint_tests {
     #[test]
     fn actual_finalizer_signed_confirmation_retains_authenticated_receiver_history() {
         super::super::tests::run_async_test_on_large_stack(async {
-            let (issuer, invitee, invitation, start, _acceptance, witness) = Box::pin(
-                super::super::tests::actual_pinned_device_enrollment_fixture(
-                    "actual-committed-checkpoint",
+            let ((issuer, invitee, invitation, start, _acceptance, witness), original) = Box::pin(
+                super::super::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                    "actual-committed-checkpoint", None, None,
                 ),
             )
             .await;
@@ -3295,18 +4352,10 @@ mod actual_committed_checkpoint_tests {
                 .record_verified_enrollment_response(witness)
                 .await
                 .expect("actual signed acceptance witness");
-            let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
-                issuer.authority_id(),
-                issuer_effects.clone(),
-                issuer.runtime().ceremony_tracker().clone(),
-                runner.clone(),
-                issuer.runtime().threshold_signing(),
-                issuer.runtime().reconfiguration().clone(),
-            );
-            service
-                .finalize_sole_device_enrollment(&start.ceremony_id)
+            original
+                .observe_original_finalizer()
                 .await
-                .expect("actual owned finalizer commits");
+                .expect("actual original owned finalizer commits");
             assert_eq!(
                 runner
                     .terminal_outcome(&start.ceremony_id)

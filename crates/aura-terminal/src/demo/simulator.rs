@@ -79,6 +79,7 @@ pub struct DemoPeerProfile {
 /// Demo simulator that manages Alice, Carol, and Mobile peer runtimes.
 pub struct DemoSimulator {
     seed: u64,
+    construction_time: Arc<dyn PhysicalTimeEffects>,
     shared_transport: SharedTransport,
     bob_authority: AuthorityId,
     alice: Arc<AuraAgent>,
@@ -97,64 +98,111 @@ impl DemoSimulator {
         bob_authority: AuthorityId,
         _bob_context: ContextId,
     ) -> TerminalResult<Self> {
-        let shared_transport = SharedTransport::new();
-
-        // Peer identities MUST match demo hint derivations.
-        let alice_authority = demo_authority_id(seed, "Alice");
-        let carol_authority = demo_authority_id(seed + 1, "Carol");
-        let mobile_authority = demo_authority_id(seed + 2, "Mobile");
-
-        let alice_device = demo_device_id(seed, "Alice");
-        let carol_device = demo_device_id(seed + 1, "Carol");
-        let mobile_device = demo_device_id(seed + 2, "Mobile");
-
-        // Each peer has its own storage sandbox beside (never inside) the demo
-        // user's profile, which its runtime owns exclusively.
-        let peers_root = demo_peers_root(&base_path);
-        let alice_dir = peers_root.join("alice");
-        let carol_dir = peers_root.join("carol");
-        let mobile_dir = peers_root.join("mobile");
-
-        let (alice, carol, mobile) = tokio::try_join!(
-            build_demo_peer_agent(
-                seed,
-                "Alice",
-                alice_authority,
-                demo_context_id(seed, "Alice"),
-                alice_device,
-                alice_dir,
-                shared_transport.clone(),
-            ),
-            build_demo_peer_agent(
-                seed + 1,
-                "Carol",
-                carol_authority,
-                demo_context_id(seed + 1, "Carol"),
-                carol_device,
-                carol_dir,
-                shared_transport.clone(),
-            ),
-            build_demo_peer_agent(
-                seed + 2,
-                "Mobile",
-                mobile_authority,
-                demo_context_id(seed + 2, "Mobile"),
-                mobile_device,
-                mobile_dir,
-                shared_transport.clone(),
-            )
-        )?;
-
-        Ok(Self {
+        Self::with_physical_time_provider(
             seed,
-            shared_transport,
+            base_path,
             bob_authority,
-            alice,
-            carol,
-            mobile,
-            social_peers: Vec::new(),
-            event_loop_tasks: Arc::new(UiTaskOwner::new()),
-            shutdown_tx: None,
+            _bob_context,
+            Arc::new(PhysicalTimeHandler::new()),
+        )
+        .await
+    }
+
+    /// Construct all original demo peers with one selected provider and endpoint.
+    /// The initial provider observation issues this constructor's original root;
+    /// all subsequent construction/bootstrap awaits use that same fixed root.
+    pub async fn with_physical_time_provider(
+        seed: u64,
+        base_path: PathBuf,
+        bob_authority: AuthorityId,
+        _bob_context: ContextId,
+        construction_time: Arc<dyn PhysicalTimeEffects>,
+    ) -> TerminalResult<Self> {
+        let born = construction_time.physical_time().await.map_err(|source| {
+            TerminalError::native_operation("issue original demo construction time", source)
+        })?;
+        let construction_budget =
+            aura_core::TimeoutBudget::from_start_and_timeout(&born, Duration::from_secs(30))
+                .map_err(|source| {
+                    TerminalError::native_operation(
+                        "issue original demo construction window",
+                        source,
+                    )
+                })?;
+        aura_core::execute_with_timeout_budget(&construction_time, &construction_budget, || async {
+            let shared_transport = SharedTransport::new();
+
+            // Peer identities MUST match demo hint derivations.
+            let alice_authority = demo_authority_id(seed, "Alice");
+            let carol_authority = demo_authority_id(seed + 1, "Carol");
+            let mobile_authority = demo_authority_id(seed + 2, "Mobile");
+
+            let alice_device = demo_device_id(seed, "Alice");
+            let carol_device = demo_device_id(seed + 1, "Carol");
+            let mobile_device = demo_device_id(seed + 2, "Mobile");
+
+            // Each peer has its own storage sandbox beside (never inside) the demo
+            // user's profile, which its runtime owns exclusively.
+            let peers_root = demo_peers_root(&base_path);
+            let alice_dir = peers_root.join("alice");
+            let carol_dir = peers_root.join("carol");
+            let mobile_dir = peers_root.join("mobile");
+
+            let (alice, carol, mobile) = tokio::try_join!(
+                build_demo_peer_agent(
+                    seed,
+                    "Alice",
+                    alice_authority,
+                    demo_context_id(seed, "Alice"),
+                    alice_device,
+                    alice_dir,
+                    shared_transport.clone(),
+                    construction_time.clone(),
+                    &construction_budget,
+                ),
+                build_demo_peer_agent(
+                    seed + 1,
+                    "Carol",
+                    carol_authority,
+                    demo_context_id(seed + 1, "Carol"),
+                    carol_device,
+                    carol_dir,
+                    shared_transport.clone(),
+                    construction_time.clone(),
+                    &construction_budget,
+                ),
+                build_demo_peer_agent(
+                    seed + 2,
+                    "Mobile",
+                    mobile_authority,
+                    demo_context_id(seed + 2, "Mobile"),
+                    mobile_device,
+                    mobile_dir,
+                    shared_transport.clone(),
+                    construction_time.clone(),
+                    &construction_budget,
+                )
+            )?;
+
+            Ok(Self {
+                seed,
+                shared_transport,
+                bob_authority,
+                alice,
+                carol,
+                mobile,
+                social_peers: Vec::new(),
+                event_loop_tasks: Arc::new(UiTaskOwner::new()),
+                shutdown_tx: None,
+                construction_time: construction_time.clone(),
+            })
+        })
+        .await
+        .map_err(|error| match error {
+            aura_core::TimeoutRunError::Operation(source) => source,
+            aura_core::TimeoutRunError::Timeout(source) => {
+                TerminalError::native_operation("original demo construction exhausted", source)
+            }
         })
     }
 
@@ -232,6 +280,26 @@ impl DemoSimulator {
             return Ok(());
         }
 
+        // This later action owns one initialization root for all of its peers;
+        // it cannot renew the constructor's completed resource window.
+        let born = self
+            .construction_time
+            .physical_time()
+            .await
+            .map_err(|source| {
+                TerminalError::native_operation(
+                    "issue original social peer construction time",
+                    source,
+                )
+            })?;
+        let original =
+            aura_core::TimeoutBudget::from_start_and_timeout(&born, Duration::from_secs(30))
+                .map_err(|source| {
+                    TerminalError::native_operation(
+                        "issue original social peer construction window",
+                        source,
+                    )
+                })?;
         let peers_root = demo_peers_root(&base_path).join("community");
         let mut social_peers = Vec::with_capacity(EXTENDED_DEMO_PEER_NAMES.len());
 
@@ -250,6 +318,8 @@ impl DemoSimulator {
                 device_id,
                 storage_dir,
                 self.shared_transport.clone(),
+                self.construction_time.clone(),
+                &original,
             )
             .await?;
 
@@ -418,37 +488,52 @@ async fn build_demo_peer_agent(
     device_id: aura_core::DeviceId,
     storage_dir: PathBuf,
     shared_transport: SharedTransport,
+    construction_time: Arc<dyn PhysicalTimeEffects>,
+    construction_budget: &aura_core::TimeoutBudget,
 ) -> TerminalResult<Arc<AuraAgent>> {
-    let mut config = AgentConfig {
-        device_id,
-        ..AgentConfig::default()
-    };
-    config.storage.base_path = storage_dir;
+    aura_core::execute_with_timeout_budget(&construction_time, construction_budget, || async {
+        let mut config = AgentConfig {
+            device_id,
+            ..AgentConfig::default()
+        };
+        config.storage.base_path = storage_dir;
 
-    let ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
+        let ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
-    let agent = AgentBuilder::new()
-        .with_config(config)
-        .with_authority(authority_id)
-        .build_simulation_async_with_shared_transport(seed, &ctx, shared_transport)
-        .await
-        .map_err(|e| {
-            aura_core::AuraError::internal(format!("Failed to build {name} agent: {e}"))
-        })?;
+        let agent = AgentBuilder::new()
+            .with_config(config)
+            .with_authority(authority_id)
+            .with_physical_time_provider(construction_time.clone())
+            .build_simulation_async_with_shared_transport(seed, &ctx, shared_transport)
+            .await
+            .map_err(|e| {
+                TerminalError::native_operation(format!("Failed to build {name} agent"), e)
+            })?;
 
-    // Give the peer a signing identity the way account creation does, so it
-    // can sign invitation responses and ceremony messages.
-    let agent = Arc::new(agent);
-    agent
-        .clone()
-        .as_runtime_bridge()
-        .bootstrap_signing_keys()
-        .await
-        .map_err(|e| {
-            aura_core::AuraError::internal(format!("Failed to bootstrap {name} signing keys: {e}"))
-        })?;
+        // Give the peer a signing identity the way account creation does, so it
+        // can sign invitation responses and ceremony messages.
+        let agent = Arc::new(agent);
+        agent
+            .clone()
+            .as_runtime_bridge()
+            .bootstrap_signing_keys(construction_budget)
+            .await
+            .map_err(|e| {
+                TerminalError::native_operation(
+                    format!("Failed to bootstrap {name} signing keys"),
+                    e,
+                )
+            })?;
 
-    Ok(agent)
+        Ok(agent)
+    })
+    .await
+    .map_err(|error| match error {
+        aura_core::TimeoutRunError::Operation(source) => source,
+        aura_core::TimeoutRunError::Timeout(source) => {
+            TerminalError::native_operation("original demo peer construction exhausted", source)
+        }
+    })
 }
 
 async fn establish_contact_exchange(

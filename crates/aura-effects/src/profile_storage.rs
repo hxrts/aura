@@ -5,7 +5,7 @@ use aura_core::effects::profile_storage::{
     ProfileStorageEffects, ProfileStorageError, ProfileStorageLease,
 };
 use std::path::PathBuf;
-#[cfg(unix)]
+#[cfg(any(unix, target_arch = "wasm32"))]
 use std::sync::Arc;
 
 /// Infrastructure-owned physical subtree excluded from ordinary profile IO.
@@ -228,6 +228,10 @@ impl OwnedProfileLease {
 /// Exclusive browser profile writer lease retaining its actual Web Locks owner.
 pub struct OwnedProfileLease {
     identity: String,
+    pub(crate) secure_record_gate: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) lifetime_provider_identity:
+        aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity,
+    pub(crate) lifetime_root_claimed: std::sync::atomic::AtomicBool,
     release: Option<futures::channel::oneshot::Sender<()>>,
     completion: Option<futures::channel::oneshot::Receiver<Result<(), ProfileStorageError>>>,
 }
@@ -413,6 +417,9 @@ impl FilesystemProfileStorageHandler {
                 drop(callback);
                 Ok(OwnedProfileLease {
                     identity,
+                    secure_record_gate: Arc::new(tokio::sync::Mutex::new(())),
+                    lifetime_provider_identity: aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity::new_trusted_provider_identity(),
+                    lifetime_root_claimed: std::sync::atomic::AtomicBool::new(false),
                     release: Some(release),
                     completion: Some(completion),
                 })

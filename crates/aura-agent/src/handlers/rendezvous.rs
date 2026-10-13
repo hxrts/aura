@@ -17,8 +17,7 @@ use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
 use aura_core::effects::{
-    FlowBudgetEffects, PhysicalTimeEffects, TransportEffects, TransportEnvelope, TransportError,
-    TransportReceipt,
+    FlowBudgetEffects, PhysicalTimeEffects, TransportEnvelope, TransportError, TransportReceipt,
 };
 use aura_core::hash::hash;
 use aura_core::service::{EstablishPath, ServiceFamily};
@@ -644,7 +643,7 @@ impl RendezvousHandler {
         let mut processed = 0usize;
 
         loop {
-            let envelope = match effects.receive_envelope().await {
+            let envelope = match effects.receive_envelope_retained().await {
                 Ok(env) => env,
                 Err(TransportError::NoMessage) => break,
                 Err(e) => {
@@ -654,12 +653,14 @@ impl RendezvousHandler {
             };
 
             let Some(content_type) = envelope.metadata.get("content-type") else {
-                effects.requeue_envelope(envelope);
                 break;
             };
 
             if content_type == HANDSHAKE_INIT_CONTENT_TYPE {
-                if let Err(e) = self.handle_handshake_init(effects.clone(), envelope).await {
+                if let Err(e) = self
+                    .handle_handshake_init(effects.clone(), envelope.consume())
+                    .await
+                {
                     tracing::debug!(error = %e, "Failed to handle rendezvous handshake init");
                 }
                 processed += 1;
@@ -668,7 +669,7 @@ impl RendezvousHandler {
 
             if content_type == HANDSHAKE_COMPLETE_CONTENT_TYPE {
                 if let Err(e) = self
-                    .handle_handshake_complete(effects.clone(), envelope)
+                    .handle_handshake_complete(effects.clone(), envelope.consume())
                     .await
                 {
                     tracing::debug!(error = %e, "Failed to handle rendezvous handshake complete");
@@ -677,7 +678,6 @@ impl RendezvousHandler {
                 continue;
             }
 
-            effects.requeue_envelope(envelope);
             break;
         }
 
@@ -1087,6 +1087,7 @@ mod tests {
         SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
     };
     use aura_core::effects::ThresholdSigningEffects;
+    use aura_core::effects::TransportEffects;
     use aura_core::CapabilityName;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_guards::GuardContextProvider;
@@ -1192,6 +1193,64 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone());
 
         assert!(handler.is_ok());
+    }
+
+    #[tokio::test]
+    async fn unrelated_handshake_frame_keeps_original_full_inbox_order_on_return_and_cancel() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        use aura_core::effects::TransportEffects;
+        let effects = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let authority = effects.runtime_authority_id();
+        let handler = RendezvousHandler::new(AuthorityContext::new(authority))
+            .expect("same runtime rendezvous handler");
+        let frame = |index: u8| TransportEnvelope {
+            source: AuthorityId::new_from_entropy([index; 32]),
+            destination: authority,
+            context: ContextId::new_from_entropy([3; 32]),
+            payload: vec![index],
+            metadata: std::collections::HashMap::from([(
+                "content-type".to_string(),
+                "application/aura-unrelated".to_string(),
+            )]),
+            receipt: None,
+        };
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            assert_eq!(
+                effects.queue_runtime_envelope(frame(index as u8)),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        assert_eq!(
+            handler
+                .process_handshake_envelopes(effects.clone())
+                .await
+                .unwrap(),
+            0
+        );
+        let borrowed = effects
+            .receive_envelope_retained()
+            .await
+            .expect("borrow frame");
+        assert_eq!(borrowed.payload, [0]);
+        assert_eq!(
+            effects.queue_runtime_envelope(frame(99)),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "cancellation return slot remains reserved at full capacity"
+        );
+        drop(borrowed);
+        let mut payloads = Vec::new();
+        for _ in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            payloads.push(
+                effects
+                    .receive_envelope()
+                    .await
+                    .expect("all original frames remain queued")
+                    .payload[0],
+            );
+        }
+        assert_eq!(payloads, (0..=255).collect::<Vec<_>>());
     }
 
     #[tokio::test]

@@ -736,7 +736,7 @@ impl FactReducer for InvitationFactReducer {
 mod tests {
     use super::*;
     #[test]
-    fn required_invitation_decoder_requires_schema_three_and_preserves_sources() {
+    fn required_invitation_decoder_requires_current_schema_and_preserves_sources() {
         use aura_core::types::facts::{FactEncoding, FactError, MAX_FACT_PAYLOAD_BYTES};
         use std::error::Error;
         let fact = InvitationFact::sent_ms(
@@ -763,17 +763,22 @@ mod tests {
             ));
         }
         let mut future = fact.to_envelope();
-        future.schema_version = 4;
+        future.schema_version = INVITATION_FACT_SCHEMA_VERSION + 1;
         assert!(matches!(
             InvitationFact::try_from_envelope(&future),
             Err(InvitationFactDecodeError::Envelope(
-                FactError::VersionMismatch { actual: 4, .. }
-            ))
+                FactError::VersionMismatch { actual, .. }
+            )) if actual == future.schema_version
         ));
-        for retired in [1, 2] {
+        for retired in 1..INVITATION_FACT_SCHEMA_VERSION {
             let mut old = fact.to_envelope();
             old.schema_version = retired;
-            assert!(InvitationFact::try_from_envelope(&old).is_err());
+            assert!(matches!(
+                InvitationFact::try_from_envelope(&old),
+                Err(InvitationFactDecodeError::Envelope(
+                    FactError::VersionMismatch { actual, .. }
+                )) if actual == retired
+            ));
         }
         let mut malformed = fact.to_envelope();
         malformed.payload = vec![0xff];

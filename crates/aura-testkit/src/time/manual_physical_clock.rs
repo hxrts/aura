@@ -23,8 +23,12 @@ struct State {
     deadlines_changed: tokio::sync::Notify,
     observation_override: tokio::sync::Mutex<Option<Result<PhysicalTime, TimeError>>>,
     sleep_failure: tokio::sync::Mutex<Option<TimeError>>,
-    sleep_admission:
-        tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<WindowPosition<PhysicalMillis>>>>,
+    sleep_admission: tokio::sync::Mutex<
+        Option<(
+            Option<u64>,
+            tokio::sync::oneshot::Sender<WindowPosition<PhysicalMillis>>,
+        )>,
+    >,
 }
 impl ManualPhysicalClock {
     /// Construct the original physical observation.
@@ -76,14 +80,29 @@ impl ManualPhysicalClock {
     pub async fn observe_next_relative_sleep(
         &self,
     ) -> Result<tokio::sync::oneshot::Receiver<WindowPosition<PhysicalMillis>>, TimeError> {
+        self.observe_relative_sleep_matching(None).await
+    }
+    /// Observe an actually polled relative sleep of one duration, leaving
+    /// unrelated admitted timers untouched and without satisfying the sleep.
+    pub async fn observe_next_relative_sleep_of(
+        &self,
+        duration_ms: u64,
+    ) -> Result<tokio::sync::oneshot::Receiver<WindowPosition<PhysicalMillis>>, TimeError> {
+        self.observe_relative_sleep_matching(Some(duration_ms))
+            .await
+    }
+    async fn observe_relative_sleep_matching(
+        &self,
+        duration_ms: Option<u64>,
+    ) -> Result<tokio::sync::oneshot::Receiver<WindowPosition<PhysicalMillis>>, TimeError> {
         let mut slot = self.state.sleep_admission.lock().await;
-        if slot.as_ref().is_some_and(|sender| !sender.is_closed()) {
+        if slot.as_ref().is_some_and(|(_, sender)| !sender.is_closed()) {
             return Err(TimeError::OperationFailed {
                 reason: "manual relative-sleep observer already installed".into(),
             });
         }
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        *slot = Some(sender);
+        *slot = Some((duration_ms, sender));
         Ok(receiver)
     }
     /// Current manual observation in milliseconds.
@@ -179,9 +198,14 @@ impl PhysicalTimeEffects for ManualPhysicalClock {
                 reason: "manual sleep deadline overflow".into(),
             })?;
         let _registration = self.register_deadline(target).await;
-        if let Some(observer) = self.state.sleep_admission.lock().await.take() {
-            let _ = observer.send(WindowPosition::new(target));
+        let mut observer = self.state.sleep_admission.lock().await;
+        if observer.as_ref().is_some_and(|(selected_duration, _)| {
+            selected_duration.is_none_or(|selected| selected == duration)
+        }) {
+            let (_, sender) = observer.take().expect("matching admitted sleep observer");
+            let _ = sender.send(WindowPosition::new(target));
         }
+        drop(observer);
         loop {
             let changed = self.state.changed.notified();
             tokio::pin!(changed);

@@ -7,9 +7,9 @@ use aura_app::{BootstrapCandidateInfo, BootstrapCandidateOrigin};
 use aura_ui::{AuraUiRoot, RequiredDomId};
 use dioxus::dioxus_core::schedule_update;
 use dioxus::prelude::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use crate::error::{log_web_error, WebUiError};
 use crate::harness_bridge;
@@ -151,6 +151,7 @@ fn broker_candidates(
         .filter_map(|record| {
             Some(BootstrapCandidateInfo {
                 authority_id: record.authority_id()?,
+                device_id: Some(record.device_id),
                 origin,
                 address: record.address,
                 discovered_at_ms: record.discovered_at_ms,
@@ -168,16 +169,18 @@ fn onboarding_finished(controller: &aura_ui::UiController) -> bool {
 #[component]
 fn BootstrappedApp(state: BootstrapState) -> Element {
     let controller = state.controller.clone();
+    let bootstrap_delivery_notice = state
+        .bootstrap_delivery_error()
+        .map(WebUiError::user_message);
     let rerender = schedule_update();
     let mut account_name = use_signal(String::new);
     let mut account_error = use_signal(|| Option::<WebUiError>::None);
     let creating_account = use_signal(|| false);
-    let mut import_code = use_signal(String::new);
+    let mut import_code = use_signal(|| state.claim_enrollment_prefill().unwrap_or_default());
     let mut import_manifest = use_signal(String::new);
     let mut import_initiator_verifier = use_signal(String::new);
     let mut import_error = use_signal(|| Option::<WebUiError>::None);
     let importing_code = use_signal(|| false);
-    let mut auto_import_started = use_signal(|| false);
     let bootstrap_candidates = use_signal(Vec::<BootstrapCandidateInfo>::new);
     let controller_snapshot = controller.semantic_model_snapshot();
     let controller_account_ready = onboarding_finished(&controller);
@@ -213,10 +216,25 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
         }
     });
 
+    // Account creation replaces the bootstrap controller without necessarily
+    // remounting this component. Bind the host ACK policy to the actual current
+    // controller before either onboarding or ready import controls are exposed.
+    let import_policy_controller = use_hook(|| Rc::new(RefCell::new(Weak::new())));
+    let needs_import_policy = import_policy_controller
+        .borrow()
+        .upgrade()
+        .is_none_or(|bound: Arc<aura_ui::UiController>| !Arc::ptr_eq(&bound, &controller));
+    if needs_import_policy {
+        controller.set_enrollment_import_host_policy(workflows::enrollment_import_host_policy(
+            controller.app_core().clone(),
+            active_storage_prefix(),
+        ));
+        *import_policy_controller.borrow_mut() = Arc::downgrade(&controller);
+    }
+
     if account_ready {
         return rsx! {
             super::rendered_controls::ObservedRendererFrame {
-                snapshot: controller.semantic_model_snapshot(),
                 controller: controller.clone(),
                 AuraUiRoot { controller: controller.clone() }
             }
@@ -250,7 +268,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         let app = app_core.read().await;
                         app.get_bootstrap_candidates()
                             .await
-                            .map_err(|error| error.to_string())
+                            .map_err(aura_app::runtime_bridge::RuntimeBridgeError::from)
                     } else {
                         // Before an account exists there is no runtime, so LAN
                         // discovery is unavailable; the configured bootstrap
@@ -264,6 +282,14 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         aura_agent::fetch_bootstrap_broker_candidates(&base_url, &auth_token)
                             .await
                             .map(|records| broker_candidates(&base_url, records))
+                            .map_err(|error| {
+                                aura_app::runtime_bridge::RuntimeBridgeError::with_source(
+                                    aura_app::IntentError::network_error(format!(
+                                        "Bootstrap broker candidate discovery failed: {error}"
+                                    )),
+                                    error,
+                                )
+                            })
                     };
 
                     match candidate_result {
@@ -309,7 +335,11 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
         let import_manifest = import_manifest.clone();
         let import_initiator_verifier = import_initiator_verifier.clone();
         move |code: String| {
-            if importing_code() {
+            if importing_code()
+                || code.trim().is_empty()
+                || import_manifest().trim().is_empty()
+                || import_initiator_verifier().trim().is_empty()
+            {
                 return;
             }
             let mut importing_code = importing_code.clone();
@@ -320,39 +350,39 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 manifest_code: import_manifest(),
                 initiator_verifier_code: import_initiator_verifier(),
             });
-            let (handle, transfer) = aura_ui::semantic_lifecycle::begin_exact_handoff_operation(
-                controller.clone(),
-                aura_app::ui::contract::OperationId::device_enrollment(),
-                aura_app::ui::contract::SemanticOperationKind::ImportDeviceEnrollmentCode,
-                aura_ui::semantic_lifecycle::UiOperationTransferScope::ImportDeviceEnrollment,
-            );
-            let instance = Some(handle.instance_id().clone());
+            let (_, transfer, observer) =
+                match aura_ui::semantic_lifecycle::begin_exact_enrollment_import(
+                    controller.clone(),
+                    code,
+                    manifest_transfer,
+                    controller.enrollment_import_host_policy(),
+                ) {
+                    Ok(admitted) => admitted,
+                    Err(detail) => {
+                        importing_code.set(false);
+                        import_error.set(Some(WebUiError::operation(
+                            WebUiOperation::ImportDeviceEnrollmentCode,
+                            "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",
+                            detail,
+                        )));
+                        return;
+                    }
+                };
             let controller = controller.clone();
             shared_web_task_owner().spawn_local(async move {
-                let app=controller.app_core().clone();
-                let result=transfer.run_workflow(controller.clone(),"import_device_enrollment",
-                    aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
-                        &app,code,manifest_transfer,instance)).await;
+                let result = transfer
+                    .run_workflow(controller.clone(), "import_device_enrollment", observer)
+                    .await;
                 match result {
-                    Ok(completed)=>{
-                        match workflows::persist_completed_enrollment_identity(&app,&completed,&active_storage_prefix()).await {
-                            Ok(())=>controller.finalize_account_setup(ScreenId::Neighborhood),
-                            Err(error)=>{
-                                controller.runtime_error_toast(error.user_message());
-                                write_signal_with_retry(
-                                    import_error,
-                                    Some(error),
-                                    WebUiOperation::ImportDeviceEnrollmentCode,
-                                    "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
-                                    "publish device enrollment import error",
-                                );
-                            }
-                        }
-                    }
-                    Err(error)=>{
-                        let error=WebUiError::operation(WebUiOperation::ImportDeviceEnrollmentCode,
-                            "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",error.to_string()).with_source(error);
-                        controller.set_account_setup_state(false,"",Some(error.user_message()));
+                    Ok(_completed) => controller.finalize_account_setup(ScreenId::Neighborhood),
+                    Err(error) => {
+                        let error = WebUiError::operation(
+                            WebUiOperation::ImportDeviceEnrollmentCode,
+                            "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",
+                            error.to_string(),
+                        )
+                        .with_source(error);
+                        controller.set_account_setup_state(false, "", Some(error.user_message()));
                         write_signal_with_retry(
                             import_error,
                             Some(error),
@@ -483,31 +513,8 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
         }
     };
 
-    if !auto_import_started() {
-        if let Some(pending_code) = state.pending_device_enrollment_code.clone() {
-            if !pending_code.is_empty() {
-                auto_import_started.set(true);
-                import_code.set(pending_code.clone());
-                let run_import = run_import.clone();
-                if let Err(error) = harness_bridge::schedule_browser_task_next_tick(move || {
-                    run_import(pending_code);
-                }) {
-                    log_web_error(
-                        "error",
-                        &WebUiError::operation(
-                            WebUiOperation::ImportDeviceEnrollmentCode,
-                            "WEB_DEVICE_ENROLLMENT_AUTOSTART_SCHEDULE_FAILED",
-                            format!("{error:?}"),
-                        ),
-                    );
-                }
-            }
-        }
-    }
-
     rsx! {
         super::rendered_controls::ObservedRendererFrame {
-            snapshot: controller_snapshot.clone(),
             controller: controller.clone(),
         main {
             class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
@@ -607,6 +614,13 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             }
                         }
                         // Join an existing account
+                        if let Some(notice) = bootstrap_delivery_notice {
+                            p {
+                                role: "alert",
+                                class: "rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive",
+                                "An invitation could not be received. You can still enter an enrollment code and approve its transfer below. {notice}"
+                            }
+                        }
                         label {
                             class: "block space-y-2",
                             span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join an existing account" }
@@ -684,3 +698,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
         }
     }
 }
+
+#[cfg(all(test, target_arch = "wasm32", feature = "web"))]
+#[path = "enrollment_browser_tests.rs"]
+mod enrollment_browser_tests;

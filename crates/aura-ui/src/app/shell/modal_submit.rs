@@ -834,30 +834,26 @@ fn submit_simple_modal_action(
                 rerender();
                 return true;
             }
-            let operation = UiWorkflowHandoffOwner::submit(
-                controller.clone(),
-                OperationId::device_enrollment(),
-                SemanticOperationKind::ImportDeviceEnrollmentCode,
-            );
-            let instance = operation.workflow_instance_id();
-            let transfer =
-                operation.handoff_to_app_workflow(UiOperationTransferScope::ImportDeviceEnrollment);
-            let app = controller.app_core().clone();
+            let (_, transfer, observer) =
+                match crate::semantic_lifecycle::begin_exact_enrollment_import(
+                    controller.clone(),
+                    input.value,
+                    Some(aura_app::ui::contract::EnrollmentManifestTransferInput {
+                        manifest_code: input.manifest_code,
+                        initiator_verifier_code: input.initiator_verifier_code,
+                    }),
+                    controller.enrollment_import_host_policy(),
+                ) {
+                    Ok(admitted) => admitted,
+                    Err(error) => {
+                        controller.runtime_error_toast(error);
+                        rerender();
+                        return true;
+                    }
+                };
             spawn_ui(async move {
                 let outcome = transfer
-                    .run_workflow(
-                        controller.clone(),
-                        "import_device_enrollment",
-                        invitation_workflows::import_device_enrollment_with_terminal_status(
-                            &app,
-                            input.value,
-                            Some(aura_app::ui::contract::EnrollmentManifestTransferInput {
-                                manifest_code: input.manifest_code,
-                                initiator_verifier_code: input.initiator_verifier_code,
-                            }),
-                            instance,
-                        ),
-                    )
+                    .run_workflow(controller.clone(), "import_device_enrollment", observer)
                     .await;
                 match outcome {
                     Ok(_) => controller.info_toast("Device enrollment accepted"),

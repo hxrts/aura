@@ -156,6 +156,7 @@ pub async fn handle_network(
             };
             let peer_info = BootstrapCandidateInfo {
                 authority_id: *authority_id,
+                device_id: None,
                 origin: BootstrapCandidateOrigin::Lan,
                 address: address.clone(),
                 discovered_at_ms: 0,

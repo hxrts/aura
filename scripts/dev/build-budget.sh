@@ -178,8 +178,13 @@ target_has_open_files() {
     echo 'build-budget: open-file scan failed; treating target as in use' >&2
     return 0
   fi
+  if ! command -v grep >/dev/null; then
+    sweep_skip_reason=open-file-scan-unavailable
+    echo 'build-budget: grep unavailable; treating target as in use' >&2
+    return 0
+  fi
   sweep_skip_reason=open-files
-  rg -F -q "$root/target/" <<< "$open_files"
+  grep -F -q -- "$root/target/" <<< "$open_files"
 }
 sweep() {
   local mode="$1" rc=0 before=null after=null outcome=completed reason=success
@@ -202,14 +207,14 @@ sweep_original() {
   preview="$(mktemp "${TMPDIR:-/tmp}/aura-sweep-preview.XXXXXX")"
   printf 'Sweep preview: cargo sweep --maxsize %sGiB --dry-run -v .\n' "$cap_gib"
   if (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" --dry-run -v .) > "$preview" 2>&1; then
-    rg '\[INFO\]' "$preview" || cat "$preview"
+    grep -F '[INFO]' "$preview" || cat "$preview"
   else
     rc=$?
     cat "$preview" >&2
     rm -f "$preview"
     return "$rc"
   fi
-  release_count="$(rg -c 'Would remove: .*target/(release/|wasm-release/|wasm32-unknown-unknown/release/)' "$preview" || true)"
+  release_count="$(grep -c -E 'Would remove: .*target/(release/|wasm-release/|wasm32-unknown-unknown/release/)' "$preview" || true)"
   release_count="${release_count:-0}"
   printf 'Protected production/web candidates: %s\n' "$release_count"
   rm -f "$preview"

@@ -371,7 +371,7 @@ async fn finalize_runtime_account_bootstrap_inner(
         "finalize_runtime_account_bootstrap",
         "bootstrap_signing_keys",
         ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.bootstrap_signing_keys(),
+        || runtime.bootstrap_signing_keys(budget),
     )
     .await
     .map_err(|error| {

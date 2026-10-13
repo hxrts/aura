@@ -126,3 +126,5 @@ cargo test -p aura-authorization --lib             # inline unit tests
 - [Authorization & Biscuit](../../docs/106_authorization.md)
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
+
+`VerifiedBiscuitToken` delegates signature-chain parsing to the foundational core verification producer while retaining this crate's error facade and Datalog authorization ownership. Signature integrity under a supplied root is distinct from trusted authority/root selection. Capability algebra in core does not import this crate or perform authorization policy evaluation.

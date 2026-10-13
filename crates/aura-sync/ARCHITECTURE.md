@@ -199,3 +199,14 @@ including initializing sessions. `SessionManagerStatistics::total_sessions`
 counts terminal outcomes and is not allocation or retirement evidence. Exact
 issued-owner Drop and cancellation must remove original records while retaining
 unrelated session records; partial failed admission must leave no issued subset.
+
+### Exact device enrollment proposal purpose
+
+`DeviceEpochProposalPurpose` distinguishes Rotation, Removal and Enrollment.
+Enrollment carries its original manifest digest and enrolling device, separately
+from `participant_device_id`. `DeviceEpochProposalTranscript` uses schema v2 and
+`aura.sync.device-epoch.proposal.v2`, binding that purpose alongside the existing
+subject, epoch and package/recipient commitments. Native enrollment consent must
+compare these exact bindings with its independently retained approval; public
+proposal data grants no consent. Historical proposal envelopes cannot substitute
+for this schema. See `docs/100_crypto.md`.

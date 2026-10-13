@@ -41,13 +41,55 @@ pub(crate) fn load_persisted_account_config(
     )
 }
 
-fn persist_account_config(
+pub(crate) fn load_persisted_account_config_for_authority(
+    operation: WebUiOperation,
+    authority_id: AuthorityId,
+) -> Result<Option<AccountConfig>, WebUiError> {
+    let Some(storage) = WebLocalStorage::optional_lookup(operation)? else {
+        return Ok(None);
+    };
+    let storage_key = WebStorageScope::active().authority_account_config_key(authority_id);
+    let selected: Option<AccountConfig> = storage.load_json(
+        &storage_key,
+        operation,
+        "WEB_ACCOUNT_CONFIG_READ_FAILED",
+        "WEB_ACCOUNT_CONFIG_PARSE_FAILED",
+        "authority account config",
+        "authority account config",
+    )?;
+    if let Some(config) = selected {
+        return if config.authority_id == authority_id {
+            Ok(Some(config))
+        } else {
+            Err(WebUiError::operation(
+                operation,
+                "WEB_ACCOUNT_CONFIG_AUTHORITY_MISMATCH",
+                "persisted authority account config does not match its storage key",
+            ))
+        };
+    }
+    // The old single selected-profile key remains a read-only migration input.
+    Ok(load_persisted_account_config(operation)?
+        .filter(|config| config.authority_id == authority_id))
+}
+
+pub(crate) fn persist_account_config(
     operation: WebUiOperation,
     account_config: &AccountConfig,
 ) -> Result<(), WebUiError> {
-    let storage_key = WebStorageScope::active().account_config_key();
-    WebLocalStorage::required(operation)?.set_json(
-        &storage_key,
+    let scope = WebStorageScope::active();
+    let storage = WebLocalStorage::required(operation)?;
+    storage.set_json(
+        &scope.authority_account_config_key(account_config.authority_id),
+        account_config,
+        operation,
+        "WEB_ACCOUNT_CONFIG_SERIALIZE_FAILED",
+        "WEB_ACCOUNT_CONFIG_PERSIST_FAILED",
+        "authority account config",
+        "authority account config",
+    )?;
+    storage.set_json(
+        &scope.account_config_key(),
         account_config,
         operation,
         "WEB_ACCOUNT_CONFIG_SERIALIZE_FAILED",
@@ -67,12 +109,11 @@ fn resolve_account_config_context_id(
         .unwrap_or_else(|| default_context_id_for_authority(authority_id))
 }
 
-pub(crate) async fn persist_runtime_account_config(
+pub(crate) async fn prepare_runtime_account_config(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_override: Option<String>,
     operation: WebUiOperation,
 ) -> Result<AccountConfig, WebUiError> {
-    let existing = load_persisted_account_config(operation)?;
     let runtime = runtime_workflows::require_runtime(app_core)
         .await
         .map_err(|error| {
@@ -83,6 +124,7 @@ pub(crate) async fn persist_runtime_account_config(
             )
         })?;
     let authority_id = runtime.authority_id();
+    let existing = load_persisted_account_config_for_authority(operation, authority_id)?;
     let matching_existing = existing
         .as_ref()
         .filter(|account_config| account_config.authority_id == authority_id);
@@ -113,6 +155,53 @@ pub(crate) async fn persist_runtime_account_config(
     };
     let account_config =
         AccountConfig::new(authority_id, context_id, nickname_suggestion, created_at);
+    Ok(account_config)
+}
+
+/// Prepare the browser profile selected by an authenticated enrollment completion.
+/// The attached runtime still belongs to the provisional invitee here, so its
+/// authority, home context, settings, and nickname cannot describe the adopted
+/// account.
+pub(crate) async fn prepare_imported_enrollment_account_config(
+    app_core: &Arc<RwLock<AppCore>>,
+    completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
+) -> Result<AccountConfig, WebUiError> {
+    let operation = WebUiOperation::ImportDeviceEnrollmentCode;
+    let authority_id = completed.subject_authority();
+    let existing = load_persisted_account_config_for_authority(operation, authority_id)?;
+    let matching_existing = existing
+        .as_ref()
+        .filter(|account_config| account_config.authority_id == authority_id);
+    let context_id = matching_existing
+        .map(|account_config| account_config.context_id)
+        .unwrap_or_else(|| default_context_id_for_authority(authority_id));
+    let created_at = match matching_existing {
+        Some(account_config) => account_config.created_at,
+        None => time_workflows::current_time_ms(app_core)
+            .await
+            .map_err(|error| {
+                WebUiError::operation(
+                    operation,
+                    "WEB_IMPORTED_ACCOUNT_CONFIG_CREATED_AT_FAILED",
+                    error.to_string(),
+                )
+            })?,
+    };
+    Ok(AccountConfig::new(
+        authority_id,
+        context_id,
+        matching_existing.and_then(|account_config| account_config.nickname_suggestion.clone()),
+        created_at,
+    ))
+}
+
+pub(crate) async fn persist_runtime_account_config(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_override: Option<String>,
+    operation: WebUiOperation,
+) -> Result<AccountConfig, WebUiError> {
+    let account_config =
+        prepare_runtime_account_config(app_core, nickname_override, operation).await?;
     persist_account_config(operation, &account_config)?;
     Ok(account_config)
 }

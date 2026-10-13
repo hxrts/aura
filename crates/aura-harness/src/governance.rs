@@ -586,6 +586,7 @@ fn action_satisfies_barrier(action: &SemanticAction, barrier: &BarrierDeclaratio
             SemanticAction::Expect(Expectation::OperationStateIs {
                 operation_id,
                 state,
+                ..
             }),
             BarrierDeclaration::OperationState {
                 operation_id: expected_id,
@@ -839,6 +840,7 @@ mod tests {
             &SemanticAction::Expect(Expectation::OperationStateIs {
                 operation_id: OperationId::invitation_accept_contact(),
                 state: OperationState::Succeeded,
+                after_instance: None,
             }),
             &BarrierDeclaration::OperationState {
                 operation_id: OperationId::invitation_accept_contact(),

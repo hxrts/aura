@@ -145,6 +145,7 @@ pub enum Expectation {
     OperationStateIs {
         operation_id: OperationId,
         state: OperationState,
+        after_instance: Option<String>,
     },
     ParityWithActor {
         actor: ActorId,
@@ -182,6 +183,7 @@ pub struct SemanticScenarioFileStep {
     pub runtime_event_kind: Option<RuntimeEventKind>,
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
+    pub after_instance: Option<String>,
     pub peer_actor: Option<ActorId>,
     pub setup_code: Option<String>,
     #[serde(default)]
@@ -248,6 +250,8 @@ pub enum SemanticActionKind {
     ReadinessIs,
     RuntimeEventOccurred,
     OperationStateIs,
+    CaptureOperationInstance,
+    AssertOperationAbsent,
     ParityWithActor,
     PrepareDeviceEnrollmentSetup,
     CaptureCurrentAuthorityId,
@@ -531,6 +535,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Expect(Expectation::OperationStateIs {
                     operation_id: required(value.operation_id, "operation_id", value.action)?,
                     state: required(value.operation_state, "operation_state", value.action)?,
+                    after_instance: value.after_instance,
                 })
             }
             SemanticActionKind::ParityWithActor => {
@@ -552,6 +557,17 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Variables(VariableAction::CaptureSelection {
                     name: required(value.name, "name", value.action)?,
                     list: required(value.list_id, "list_id", value.action)?,
+                })
+            }
+            SemanticActionKind::CaptureOperationInstance => {
+                ScenarioAction::Variables(VariableAction::CaptureOperationInstance {
+                    name: required(value.name, "name", value.action)?,
+                    operation_id: required(value.operation_id, "operation_id", value.action)?,
+                })
+            }
+            SemanticActionKind::AssertOperationAbsent => {
+                ScenarioAction::Variables(VariableAction::AssertOperationAbsent {
+                    operation_id: required(value.operation_id, "operation_id", value.action)?,
                 })
             }
             SemanticActionKind::SetVar => ScenarioAction::Variables(VariableAction::Set {

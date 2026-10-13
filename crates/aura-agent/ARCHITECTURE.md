@@ -8,6 +8,17 @@ Native delegation and VM diagnostics box bulky concrete causes while retaining t
 
 Production runtime composition and effect system assembly for authority-based identity management. Owns structured concurrency, service lifecycle, session ownership, effect registry, builder infrastructure, and choreography adapters.
 
+`SimulationSharedInbox` carries canonical frames and reserved return capacity
+across runtimes sharing one simulation inbox. A borrowed `InboundEnvelopeLease`
+retains the original frame and position until explicit consumption or
+cancellation return. New local ingress counts reserved slots against capacity.
+
+The session-local choreography inbox retains a separate lease for an unclaimed
+envelope across VM startup. The lease reserves its original session bucket and
+position, returning a valid frame there if startup is cancelled or fails before
+VM ownership transfers. A malformed selected frame is consumed instead. Once
+VM admission may own the frame, the caller cannot replay a weaker copy.
+
 ## Scope
 
 | Belongs here | Does not belong here |
@@ -45,6 +56,17 @@ acceptance-verifier binding remain required before full trust migration is
 complete; replacing the issuance parameter alone does not prove those contracts.
 
 ## Key Modules
+
+Required reactive publications, including startup replay, flush the ordered
+pending scheduler batch immediately after a fallible selected-clock observation.
+Their processing targets acknowledge only completed view application; the
+performance batching timer cannot hold required readiness on a frozen simulator
+clock. Earlier pending facts and issued sequence highwater remain in that same
+batch, and native clock or projection failures remain required failures.
+Test this boundary with default scheduler configuration and a frozen selected
+clock: a nonempty required replay must apply its ordered facts without advancing
+time, while selected-clock failure, projection failure and lagged diagnostics
+must preserve the processing target's actual outcome and highwater.
 
 The simulation factory owns a bounded membership-rekey driver for closed sets
 of simulation runtimes. It requires matching canonical membership and epoch,
@@ -267,6 +289,11 @@ External events reach session state only through typed ingress and the current o
 Enforcement locus:
 - `SessionHandle` provides the only ingress path.
 - Session actors consume ingress and drive protocol-machine work.
+
+An opening VM session retains its claimed `RuntimeSessionOwner` until the VM
+accepts it. Cancellation retires that exact session and claimed fragments while
+preserving the session inbox for an outstanding return lease. Retirement errors
+remain in task cleanup health rather than becoming a successful open.
 
 Failure mode:
 - Direct session mutation from arbitrary tasks.
@@ -822,7 +849,11 @@ registration before disposal removes the entry or drain can acknowledge it.
 Failed or panicked cleanup retains the original execution disposition and concrete
 cleanup cause, and retry uses the accepted noncloneable original control rather
 than a new task or a name lookup. Rejected admission returns the unpolled original
-boxed obligation and concrete native cause. Resource settlement and independent
+boxed obligation and concrete native cause.
+
+Successful required cleanup deposits its actual settled task outcome in the original custody slot under the same registry lock before publishing the resource acknowledgment. Both ordinary completion and a resolved negative domain outcome retain their concrete execution and terminal causes. Repeated disposal observations read that immutable outcome; a failed or interrupted cleanup publishes no disposition acknowledgment.
+
+The canonical enrollment entry and running issuer observation retain the same original required-task control in a shared mutex-backed slot. Cancellation of a reconciliation attempt cannot take and drop that control. After genuine cancelled-generation retirement, reconciliation borrows that exact control under the original negative-cleanup budget and selected effects; it does not hold the tracker state lock across await. Native reconciliation failure and final budget validation remain separate required evidence. An already disposed original control supplies only observed resource settlement, never positive domain authority. Active execution, contention or failed cleanup must retain refusal and original retry custody rather than start a replacement task, renew a window or fabricate an ACK. Resource settlement and independent
 domain terminal failure remain separate supervision outcomes.
 
 Native/local regressions cover descendant IO causes and panic health, dropped child handles, resource-drop-before-idle ordering, shutdown/admission races using the real registry, limits and weak-entry pruning, and unpolled rejected futures. Browser execution of these contracts remains a separate platform gate; local Rust coverage does not claim browser runtime validation.
@@ -833,6 +864,15 @@ Native/local regressions cover descendant IO causes and panic health, dropped ch
 
 `CeremonyTracker` uses this original budget for timeout queries, activation eligibility, and cleanup. Cleanup returns the original typed failure and uses the fallible owned interval API. Task-group terminal failures, including timer errors, produce unhealthy service status and remain available through typed service outcome and shutdown errors.
 
+The post-enrollment shortcut bridge retains the original issuer continuation,
+selected external authority/device and Contact or Guardian purpose in one
+runtime-bound owner. Delivery first observes original resource disposal and
+acknowledges the positive, purpose-bound grant under the original shortcut
+budget. Fresh signed invitation issuance and broker send require that grant
+and the exact selected destination; self-recipient, foreign runtime, missing
+grant and purpose mismatch refuse. Once dispatch may have begun, uncertain
+delivery cannot be retried as a new invitation without reconciliation.
+
 Enforcement: strongest sealed attempt parameters, private constructors, `capability_boundary` declarations, checkpoint acknowledgment compile-fail coverage, and the Rust-native `async-session-ownership` lint. Its AST checks reject raw/no-op timeout executors, aliases, fresh budget reconstruction, and weaker attempt parameters in production enrollment. Explicit test-only model fixtures remain separate. Tests cover persisted highwater, sticky rollback, missing checkpoint, storage-failure source chains, postoperation publication failure, and cancellation before acknowledgment.
 
 ### Required native identity reads
@@ -842,6 +882,8 @@ The runtime bridge settings, device inventory, authority inventory, authenticati
 ### Enrollment window admission phases
 
 The registered execution token is minted from actual tracker state and retained through checkpoint writes. The immutable `enrollment_window_ever_live_v1` binding precedes registry visibility and prevents deleted clock history from being recreated after live admission. A private pre-live capability can repair only an interrupted original allocation lacking canonical/live evidence. Exact secure allocation, deadline and shared observation/exhaustion identity remain required; checkpoints hold registry allocation continuity through their storage acknowledgment. Terminal outcomes for the same generation remain compatible with retaining historical clock evidence.
+
+The original issuer's selected `PhysicalTime` also fixes a distinct shortcut operation endpoint before enrollment publication. The v4 protected signing clock and enrollment registration retain that original budget across checkpoint and restart; completion cannot select a new provider or renew it. Protected v3 clocks and older registration records still resume their original enrollment with no shortcut budget, so legacy recovery grants no shortcut delivery authority.
 
 ### Native account bootstrap failures
 
@@ -983,6 +1025,14 @@ Only verified recovery reaches the private storage helper without the live reser
 ### Initial persistent enrollment allocation
 
 Persistent tracker construction accepts only the original `Arc<AuraEffectSystem>`; that exact owner supplies both physical time and storage. Independent clock injection belongs to standalone nonpersistent trackers. Persistent simulations install virtual time in the effect system itself, so allocation, deadline observation, and durable acknowledgment cannot select different providers.
+
+Wasm runtime assembly transfers the selected profile-owned secure writer and
+its one-shot browser allocation lifetime root together. The signing subsystem
+accepts that exact root only for the matching selected secure provider; a
+foreign provider or repeated handoff cannot reconstruct allocation custody.
+The browser root is backed by the Web Lock-held, encrypted strict-IndexedDB
+inventory described in the effects adapter, while enrollment registration
+still requires its separate held generation reservation and original window.
 
 Generic `CeremonyRunner::start` and tracker registration cannot allocate persistent device enrollment from plain request facts. The owned enrollment entry accepts the actual held `EnrollmentGenerationReservation`, and immutable allocation publication independently checks that owner before writing. Another effect instance, physical roster/policy, ceremony, epoch, prestate, or terminal state cannot reuse the reservation. Missing ownership returns structural `RequiredOwner` before durable or tracker mutation.
 
@@ -1387,6 +1437,14 @@ eligibility-ended disposition and prevents further sends. Required clock,
 checkpoint, signer, transport and teardown faults retain their original typed
 cause through task failure and drain. Both preserve the Cancelled decision.
 
+Original cancelled-generation retirement consumes the sealed original cancelled terminal through the registered negative-cleanup owner and its original cleanup budget. The producer validates the same runtime, registered allocation and retained receipt destination before destructive work. Actual retirement writes are retained in that destination before the operation returns Ready, so a later observation or final validation failure cannot discard completed writes. Signing order and signing authority remain unchanged. A full resource acknowledgment additionally requires successful original-budget validation and durable cleanup/checkpoint evidence; early negative publication or a retained write alone cannot supply it.
+
+The required negative clock producer validates continuation from the protected
+original clock record before persisting the latest positive-budget snapshot and
+the original negative-cleanup budget. This includes postcheckpoint rollback;
+actual storage readback precedes acknowledgment. Restored terminal tracker state
+is an observation, while active enrollment-window access continues to refuse it.
+
 Failed enrollment retirement acknowledges its exact immutable receipt after
 required secret cleanup and retains the immutable original allocation record.
 Restart must not attempt generic deletion of that immutable evidence or immutable
@@ -1741,6 +1799,8 @@ The activity handle exposes observation and admission closure, while stopped-sta
 
 ### Required Contact confirmation custody
 
+Threshold Contact responses and Guardian confirmations use the agent's initialized runtime signing service. The invitation service and maintenance processor bind that retained signer to their handlers; response issuance checks its effect owner and the original quorum key and epoch. An unbound or foreign signer fails before publication, and a new signing-service instance cannot stand in for adopted threshold state.
+
 Contact acceptance derives its confirmation child from the original operation budget. Signed payload retries share that child, its physical observation owner and fixed deadline. Required imported metadata reads propagate storage, codec, identity and size failures; observed caches cannot substitute for those reads. A runtime-owned decision lease covers verified response selection through contact fact and imported status publication. The move-only verified response carries the retained complete import, so materialization does not re-resolve an invitation id. Native clock, transport and sleep faults retain their original standard error sources. Only an exact destination-unreachable fault permits acceptance retransmission.
 
 Contact fact publication does not wait for an unrelated later view batch. Canonical commit and observed handler cache recording complete under the decision lease; app semantic readiness remains owned by its bounded authoritative refresh.
@@ -1991,3 +2051,32 @@ original inbox; configured providers retain their required readiness contract.
 Unrelated frames remain queued without waking a polling loop. The sealed
 original enrollment child bounds the complete wait and preserves native errors;
 no arrival advances time or reconstructs a window (docs/111).
+
+### Consuming original enrollment completion
+
+Admitted, held-issuer, registered and approved-signing children retain their
+actual durable Pending birth before positive execution. The consuming root owns
+its domain evidence and sealed descendant disposal before its Closed write.
+Approved signing additionally requires `OriginalParticipantCompletion`, retained
+from the actual native participant and checked against the exact original
+approval by `ApprovedSigningCheckpoint::close_original_participant`. Transcript
+bytes, successful observation and previously read Closed records cannot recreate
+this process-local completion authority.
+
+Prepared issuer, participant, cancellation publication, terminal notice and peer
+owners retain their original required-task custody through observation disposal,
+refused admission and partial native/allocation acquisition. Native material,
+selected physical provider, interval and first failures remain attached to the
+original owner. The negative-notice recovery owner retains its admitted terminal
+obligation and cannot regain active signing authority.
+
+`OriginalEnrollmentSendProgress` and `OriginalEnrollmentReceiveProgress` retain
+exact packet/provider bindings and deposit completed native IO results before
+enclosing checkpoint validation. A started send with unresolved completion
+refuses replacement; observation cancellation cannot authorize another packet,
+nonce or deadline. These cursors are observations, not signing authority.
+`OriginalRequiredTaskDisposalObserver` names the same accepted custody slot and
+retains its actual cleanup/domain outcome; repeated or dropped observations do
+not authorize execution or terminal success. The existing required-task kernel
+and main observed-task API contracts remain unchanged. See `docs/104_runtime.md`,
+`docs/122_ownership_model.md` and `docs/804_testing_guide.md`.

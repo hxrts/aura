@@ -5,6 +5,7 @@ use aura_app::ui::types::{
     BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
 };
 use aura_app::ui::workflows::account as account_workflows;
+use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::system as system_workflows;
@@ -19,7 +20,9 @@ use std::sync::Arc;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::future_to_promise;
 
-use crate::bootstrap_storage::{load_persisted_account_config, persist_runtime_account_config};
+use crate::bootstrap_storage::{
+    load_persisted_account_config_for_authority, persist_runtime_account_config,
+};
 use crate::browser_promises::{await_browser_promise_with_timeout, browser_sleep_ms};
 use crate::error::{log_web_error, WebUiError};
 use crate::harness::generation::BrowserShellPhase;
@@ -50,6 +53,53 @@ pub(crate) struct BootstrapState {
     pub(crate) account_ready: bool,
     pub(crate) pending_device_enrollment_code: Option<String>,
     pub(crate) pending_device_enrollment_code_key: String,
+    bootstrap_delivery_error: Option<WebUiError>,
+    enrollment_prefill_claimed: std::rc::Rc<Cell<bool>>,
+}
+
+impl BootstrapState {
+    fn awaiting_account(
+        generation_id: u64,
+        controller: Arc<UiController>,
+        pending_device_enrollment_code: Option<String>,
+        pending_device_enrollment_code_key: String,
+    ) -> Self {
+        Self {
+            generation_id,
+            controller,
+            agent: None,
+            account_ready: false,
+            pending_device_enrollment_code: pending_device_enrollment_code
+                .filter(|code| !code.trim().is_empty()),
+            pending_device_enrollment_code_key,
+            bootstrap_delivery_error: None,
+            enrollment_prefill_claimed: std::rc::Rc::new(Cell::new(false)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enrollment_form_fixture(controller: Arc<UiController>, pending: String) -> Self {
+        controller.set_account_setup_state(false, "", None);
+        Self::awaiting_account(311, controller, Some(pending), "task311-pending".into())
+    }
+
+    pub(crate) fn claim_enrollment_prefill(&self) -> Option<String> {
+        if self.enrollment_prefill_claimed.replace(true) {
+            return None;
+        }
+        self.pending_device_enrollment_code
+            .clone()
+            .filter(|code| !code.trim().is_empty())
+    }
+
+    pub(crate) fn bootstrap_delivery_error(&self) -> Option<&WebUiError> {
+        self.bootstrap_delivery_error.as_ref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_bootstrap_delivery_error_for_test(&mut self, error: WebUiError) {
+        self.bootstrap_delivery_error = Some(error);
+    }
 }
 
 impl PartialEq for BootstrapState {
@@ -59,6 +109,7 @@ impl PartialEq for BootstrapState {
             && self.account_ready == other.account_ready
             && self.pending_device_enrollment_code == other.pending_device_enrollment_code
             && self.pending_device_enrollment_code_key == other.pending_device_enrollment_code_key
+            && self.bootstrap_delivery_error == other.bootstrap_delivery_error
     }
 }
 
@@ -461,36 +512,6 @@ async fn hydrate_existing_runtime_account_projection(
     Ok(())
 }
 
-async fn reconcile_pending_device_enrollment_import(
-    app_core: &Arc<RwLock<AppCore>>,
-    _runtime_authority_id: AuthorityId,
-    _runtime_device_id: aura_core::types::identifiers::DeviceId,
-    pending_code: &str,
-    _pending_code_storage_key: &str,
-) -> Result<Option<String>, WebUiError> {
-    let outcome =
-        aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
-            app_core,
-            pending_code.to_string(),
-            None,
-            None,
-        )
-        .await;
-    match outcome.result {
-        Err(error) => Err(WebUiError::operation(
-            WebUiOperation::BootstrapController,
-            "WEB_PENDING_DEVICE_ENROLLMENT_PIN_REQUIRED",
-            error.to_string(),
-        )
-        .with_source(error)),
-        Ok(_) => Err(WebUiError::operation(
-            WebUiOperation::BootstrapController,
-            "WEB_PENDING_DEVICE_ENROLLMENT_OWNER_CONTRACT",
-            "An unpinned legacy pending code cannot authorize enrollment",
-        )),
-    }
-}
-
 fn install_harness_instrumentation(controller: Arc<UiController>, generation_id: u64) {
     if !harness_mode_enabled() {
         return;
@@ -547,17 +568,6 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
     let mut pending_device_enrollment_code = logged_optional(load_pending_device_enrollment_code(
         &pending_code_storage_key,
     ));
-    if pending_device_enrollment_code
-        .as_ref()
-        .is_some_and(|code| !code.is_empty())
-    {
-        return Err(WebUiError::input(
-            WebUiOperation::BootstrapController,
-            "WEB_PENDING_DEVICE_ENROLLMENT_PIN_REQUIRED",
-            "Legacy pending enrollment requires independently transferred manifest and verifier",
-        )
-        .with_source(aura_app::ui::workflows::ceremonies::EnrollmentManifestError::MissingPin));
-    }
     web_sys::console::log_1(
         &format!(
             "[web-bootstrap] generation={generation_id};storage_prefix={storage_prefix};selected_runtime_identity={:?};pending_account_bootstrap={:?};pending_device_enrollment_code_present={}",
@@ -575,7 +585,10 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
     let clipboard = Arc::new(WebClipboardAdapter::default());
     if let Some(runtime_identity) = selected_runtime_identity {
         let persisted_account_config =
-            logged_optional(load_persisted_account_config(WebUiOperation::BootstrapController))
+            logged_optional(load_persisted_account_config_for_authority(
+                WebUiOperation::BootstrapController,
+                runtime_identity.authority_id,
+            ))
                 .and_then(|account_config| {
                     if account_config.authority_id == runtime_identity.authority_id {
                         Some(account_config)
@@ -639,40 +652,62 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             )
             .into(),
         );
-        if pending_device_enrollment_code
-            .as_ref()
-            .is_none_or(|code| code.is_empty())
-        {
-            if let Some(rendezvous) = agent.runtime().rendezvous() {
-                match rendezvous.take_bootstrap_broker_invitations().await {
-                    Ok(mut pending_invitations) => {
-                        if let Some(code) = pending_invitations.pop() {
-                            persist_pending_device_enrollment_code(
-                                &pending_code_storage_key,
-                                &code,
-                            )
-                            .map_err(|error| {
-                                phase.error(
-                                    WebUiOperation::BootstrapController,
-                                    "WEB_BOOTSTRAP_PENDING_CODE_PERSIST_FAILED",
-                                    error.user_message(),
-                                )
-                            })?;
-                            pending_device_enrollment_code = Some(code);
-                        }
-                    }
-                    Err(error) => {
-                        log_web_error(
-                            "warn",
-                            &phase.error(
-                                WebUiOperation::BootstrapController,
-                                "WEB_BOOTSTRAP_BROKER_INVITATION_FETCH_FAILED",
-                                error.to_string(),
-                            ),
-                        );
-                    }
+        let storage_key = pending_code_storage_key.clone();
+        let host = Arc::new(move |code: &str| {
+            persist_pending_device_enrollment_code(&storage_key, code).map_err(|source| {
+                aura_core::AuraError::Internal {
+                    message: "Persist bootstrap enrollment prefill".into(),
+                    source: Some(Arc::new(source)),
                 }
-            }
+            })
+        });
+        let admitted = invitation_workflows::receive_bootstrap_invitation_batch(
+            agent.clone().as_runtime_bridge(),
+            pending_device_enrollment_code
+                .clone()
+                .filter(|code| !code.trim().is_empty()),
+            host,
+        );
+        let bootstrap_delivery_error = match admitted {
+            Err(refused) => Some(
+                phase
+                    .error(
+                        WebUiOperation::BootstrapController,
+                        "WEB_BOOTSTRAP_BATCH_ADMISSION_FAILED",
+                        "bootstrap receiver admission failed",
+                    )
+                    .with_source(refused.source_error().clone()),
+            ),
+            Ok(observation) => match observation.await {
+                Err(source) => Some(
+                    phase
+                        .error(
+                            WebUiOperation::BootstrapController,
+                            "WEB_BOOTSTRAP_BATCH_OBSERVATION_FAILED",
+                            "original bootstrap receiver observation failed",
+                        )
+                        .with_source(source),
+                ),
+                Ok(Err(refused)) => {
+                    pending_device_enrollment_code = refused.completed().enrollment_prefill.clone();
+                    Some(
+                        phase
+                            .error(
+                                WebUiOperation::BootstrapController,
+                                "WEB_BOOTSTRAP_BATCH_REFUSED",
+                                "bootstrap receiver returned a typed refusal",
+                            )
+                            .with_source(refused),
+                    )
+                }
+                Ok(Ok(completed)) => {
+                    pending_device_enrollment_code = completed.enrollment_prefill;
+                    None
+                }
+            },
+        };
+        if let Some(error) = &bootstrap_delivery_error {
+            log_web_error("warn", error);
         }
 
         phase.advance_to(BootstrapPhase::InitAppCore)?;
@@ -697,7 +732,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 )
             })?;
 
-        if pending_account_bootstrap.is_none() && pending_device_enrollment_code.is_none() {
+        if pending_account_bootstrap.is_none() {
             phase.advance_to(BootstrapPhase::HydrateExistingAccount)?;
             hydrate_existing_runtime_account_projection(
                 &app_core,
@@ -726,7 +761,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 format!("failed to reconcile pending web account bootstrap: {error}"),
             )
         })?;
-        let mut account_ready = bootstrap_resolution.account_ready;
+        let account_ready = bootstrap_resolution.account_ready;
 
         if bootstrap_resolution.action != account_workflows::PendingRuntimeBootstrapAction::None {
             let reconciled_event = BootstrapEvent::new(
@@ -792,31 +827,6 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             );
         }
         phase.advance_to(BootstrapPhase::ReconcilePendingEnrollment)?;
-        if let Some(pending_code) = pending_device_enrollment_code
-            .as_ref()
-            .filter(|code| !code.is_empty())
-        {
-            let pending_code = pending_code.clone();
-            if reconcile_pending_device_enrollment_import(
-                &app_core,
-                authority_id,
-                device_id,
-                &pending_code,
-                &pending_code_storage_key,
-            )
-            .await
-            .map_err(|error| {
-                phase.error(
-                    WebUiOperation::BootstrapController,
-                    "WEB_PENDING_DEVICE_ENROLLMENT_RECONCILE_FAILED",
-                    error.user_message(),
-                )
-            })?
-            .is_some()
-            {
-                account_ready = true;
-            }
-        }
         controller.set_account_setup_state(account_ready, "", None);
         if account_ready {
             controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Neighborhood);
@@ -969,6 +979,8 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             pending_device_enrollment_code: pending_device_enrollment_code
                 .filter(|code| !code.is_empty()),
             pending_device_enrollment_code_key: pending_code_storage_key,
+            bootstrap_delivery_error,
+            enrollment_prefill_claimed: std::rc::Rc::new(Cell::new(false)),
         })
     } else {
         phase.advance_to(BootstrapPhase::InitAppCore)?;
@@ -1007,14 +1019,12 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             ));
         }
         phase.advance_to(BootstrapPhase::Ready)?;
-        Ok(BootstrapState {
+        Ok(BootstrapState::awaiting_account(
             generation_id,
             controller,
-            agent: None,
-            account_ready: false,
-            pending_device_enrollment_code: None,
-            pending_device_enrollment_code_key: pending_code_storage_key,
-        })
+            pending_device_enrollment_code,
+            pending_code_storage_key,
+        ))
     }
 }
 
@@ -1058,59 +1068,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_host_hydrates_runtime_projection_before_pending_reconcile() {
-        let source = include_str!("shell_host.rs");
-        let bootstrap_start = source
-            .find("async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {")
-            .unwrap_or_else(|| panic!("missing bootstrap_generation"));
-        let bootstrap_end = source[bootstrap_start..]
-            .find("\n#[cfg(test)]")
-            .map(|offset| bootstrap_start + offset)
-            .unwrap_or(source.len());
-        let bootstrap_block = &source[bootstrap_start..bootstrap_end];
-        assert!(
-            bootstrap_block.contains("if pending_account_bootstrap.is_none() && pending_device_enrollment_code.is_none() {\n            hydrate_existing_runtime_account_projection("),
-            "runtime-backed web bootstrap should only fall back to persisted account hydration when there is no pending device-enrollment continuation to reconcile first"
-        );
-    }
-
-    #[test]
-    fn shell_host_reconciles_pending_device_enrollment_before_ready() {
-        let source = include_str!("shell_host.rs");
-        let bootstrap_start = source
-            .find("async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {")
-            .unwrap_or_else(|| panic!("missing bootstrap_generation"));
-        let bootstrap_end = source[bootstrap_start..]
-            .find("\n#[cfg(test)]")
-            .map(|offset| bootstrap_start + offset)
-            .unwrap_or(source.len());
-        let bootstrap_block = &source[bootstrap_start..bootstrap_end];
-        assert!(
-            bootstrap_block.contains("if let Some(pending_code) = pending_device_enrollment_code"),
-            "bootstrap_generation should reconcile pending device enrollment imports inside the shell host before declaring the new generation ready"
-        );
-        assert!(
-            bootstrap_block.contains("reconcile_pending_device_enrollment_import("),
-            "runtime-identity staged imports should continue through a shell-host owned reconciliation path"
-        );
-    }
-
-    #[test]
-    fn shell_host_rejects_legacy_pending_code_before_runtime_construction() {
-        let source = include_str!("shell_host.rs");
-        let start = source
-            .find("async fn bootstrap_generation(generation_id: u64)")
-            .unwrap();
-        let code = &source[start..];
-        let pin_failure = code.find("EnrollmentManifestError::MissingPin").unwrap();
-        let runtime_build = code.find("AgentBuilder::web()").unwrap();
-        assert!(
-            pin_failure < runtime_build,
-            "legacy unpinned identity cannot construct a runtime first"
-        );
-    }
-
-    #[test]
     fn shell_host_only_waits_for_generation_ready_when_account_ready() {
         let source = include_str!("shell_host.rs");
         let handoff_start = source
@@ -1122,7 +1079,8 @@ mod tests {
             .unwrap_or(source.len());
         let handoff_block = &source[handoff_start..handoff_end];
         assert!(
-            handoff_block.contains("if account_ready {\n                    harness_bridge::wait_for_generation_ready(generation_id)"),
+            handoff_block.contains("if account_ready {
+                    harness_bridge::wait_for_generation_ready(generation_id)"),
             "bootstrap handoff completion should wait for generation-ready publication only when the promoted generation is semantically ready"
         );
     }
@@ -1140,7 +1098,8 @@ mod tests {
         let bootstrap_block = &source[bootstrap_start..bootstrap_end];
         assert!(
             bootstrap_block.contains(
-                "if account_ready {\n            let finalized_event = BootstrapEvent::new("
+                "if account_ready {
+            let finalized_event = BootstrapEvent::new("
             ),
             "runtime bootstrap finalized logs must only be published for semantically ready generations"
         );

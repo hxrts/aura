@@ -212,12 +212,38 @@ fn original_reservation_error(reason: OriginalEnrollmentReservationError) -> Aur
 /// effect owner; no raw guard, deserialization or caller-supplied lock can mint it.
 /// Private fields restrict construction to the actual effect-owned acquisition path.
 pub(crate) struct EnrollmentGenerationCustodyCapability<'a> {
-    effects: &'a AuraEffectSystem,
-    _guard: tokio::sync::MutexGuard<'a, ()>,
+    effects: EnrollmentRuntimeOrigin<'a>,
+    _guard: EnrollmentGenerationGuard<'a>,
+}
+pub(crate) enum EnrollmentRuntimeOrigin<'a> {
+    Borrowed(&'a AuraEffectSystem),
+    Owned(Arc<AuraEffectSystem>),
+}
+impl EnrollmentRuntimeOrigin<'_> {
+    pub(crate) fn effects(&self) -> &AuraEffectSystem {
+        match self {
+            Self::Borrowed(effects) => effects,
+            Self::Owned(effects) => effects,
+        }
+    }
+}
+impl std::ops::Deref for EnrollmentRuntimeOrigin<'_> {
+    type Target = AuraEffectSystem;
+    fn deref(&self) -> &Self::Target {
+        self.effects()
+    }
+}
+enum EnrollmentGenerationGuard<'a> {
+    Borrowed {
+        _guard: tokio::sync::MutexGuard<'a, ()>,
+    },
+    Owned {
+        _guard: tokio::sync::OwnedMutexGuard<()>,
+    },
 }
 impl EnrollmentGenerationCustodyCapability<'_> {
     pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
-        if !std::ptr::eq(self.effects, effects) {
+        if !std::ptr::eq(self.effects.effects(), effects) {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::EffectIdentity,
             ));
@@ -229,7 +255,7 @@ impl EnrollmentGenerationCustodyCapability<'_> {
 /// A held, authenticated roster decision. Raw identifiers cannot construct it.
 /// Both custody guards remain held until the original issuer registration ends.
 pub(crate) struct AuthenticatedEnrollmentRotationPlan<'a> {
-    effects: &'a AuraEffectSystem,
+    effects: EnrollmentRuntimeOrigin<'a>,
     setup_digest: [u8; 32],
     baseline: OriginalEnrollmentBaseline,
     state: aura_journal::commitment_tree::state::TreeState,
@@ -255,7 +281,7 @@ impl AuthenticatedEnrollmentRotationPlan<'_> {
         effects: &AuraEffectSystem,
         setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
     ) -> Result<(), AuraError> {
-        if !std::ptr::eq(self.effects, effects) || self.setup_digest != setup.digest() {
+        if !std::ptr::eq(self.effects.effects(), effects) || self.setup_digest != setup.digest() {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::EffectIdentity,
             ));
@@ -326,25 +352,39 @@ fn final_inventory_error(source: EnrollmentFinalInventoryError) -> AuraError {
     }
 }
 pub(crate) struct EnrollmentFinalVerifierInventoryCapability<'owner, 'runtime> {
-    reservation: &'owner EnrollmentGenerationReservation<'runtime>,
+    reservation: EnrollmentFinalReservationOrigin<'owner, 'runtime>,
     inventory: Vec<aura_invitation::enrollment_manifest::EnrollmentParentVerifier>,
 }
+enum EnrollmentFinalReservationOrigin<'owner, 'runtime> {
+    Borrowed(&'owner EnrollmentGenerationReservation<'runtime>),
+    Owned(Arc<EnrollmentGenerationReservation<'static>>),
+}
 impl EnrollmentFinalVerifierInventoryCapability<'_, '_> {
+    fn reservation(&self) -> &EnrollmentGenerationReservation<'_> {
+        match &self.reservation {
+            EnrollmentFinalReservationOrigin::Borrowed(reservation) => reservation,
+            EnrollmentFinalReservationOrigin::Owned(reservation) => reservation.as_ref(),
+        }
+    }
     pub(crate) fn inventory(
         &self,
     ) -> &[aura_invitation::enrollment_manifest::EnrollmentParentVerifier] {
         &self.inventory
+    }
+    pub(crate) fn generation(&self) -> &EnrollmentGenerationCustodyCapability<'_> {
+        self.reservation().generation()
     }
     pub(crate) fn require_manifest(
         &self,
         effects: &AuraEffectSystem,
         manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     ) -> Result<(), AuraError> {
-        self.reservation.require_effects(effects)?;
-        if manifest.ceremony != *self.reservation.ceremony_id()
-            || manifest.invitation != *self.reservation.invitation_id()
-            || manifest.pending_epoch != self.reservation.pending_epoch()
-            || manifest.setup.digest != self.reservation.setup_digest()
+        let reservation = self.reservation();
+        reservation.require_effects(effects)?;
+        if manifest.ceremony != *reservation.ceremony_id()
+            || manifest.invitation != *reservation.invitation_id()
+            || manifest.pending_epoch != reservation.pending_epoch()
+            || manifest.setup.digest != reservation.setup_digest()
             || manifest.version != 3
         {
             return Err(final_inventory_error(
@@ -369,11 +409,490 @@ impl EnrollmentFinalVerifierInventoryCapability<'_, '_> {
 }
 
 pub(crate) struct EnrollmentGenerationReservation<'a> {
-    effects: &'a AuraEffectSystem,
+    effects: EnrollmentRuntimeOrigin<'a>,
     owner: StoredEnrollmentGenerationProfile,
     _tree: aura_protocol::handlers::tree::TreeDecisionLease<'a>,
     _owner: crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'a>,
     original_birth: Option<OriginalEnrollmentAllocationAcknowledgment>,
+}
+
+/// Custody of the original authenticated decision before an allocation is
+/// acknowledged. A pending storage call is not evidence that nothing was
+/// written. The required issuance owner retains this value across frame Drop.
+pub(crate) struct OriginalEnrollmentAllocationProducer<'a> {
+    origin: EnrollmentRuntimeOrigin<'a>,
+    launch: Option<Arc<()>>,
+    plan: Option<AuthenticatedEnrollmentRotationPlan<'a>>,
+    progress: OriginalEnrollmentAllocationProgress,
+    retirement: Option<OriginalOrphanAllocationRetirement>,
+    unwritten: Option<OriginalUnwrittenAllocationDisposition>,
+    pub(crate) cleanup_failure: Option<AuraError>,
+    pub(crate) cleanup_validation_failure: Option<aura_core::time::timeout::TimeoutBudgetError>,
+    acknowledged: bool,
+    acknowledgment: Option<
+        crate::runtime::services::enrollment_window::OriginalAllocationCleanupAcknowledgment,
+    >,
+    pub(crate) cleanup_observation:
+        Option<aura_core::time::timeout::NegativeCleanupExecution<AuraError, (), AuraError>>,
+}
+
+#[derive(Default)]
+struct OriginalEnrollmentAllocationProgress {
+    original: Option<StoredEnrollmentGenerationProfile>,
+    immutable_write_started: bool,
+    immutable_write_acknowledged: bool,
+    immutable_readback_acknowledged: bool,
+    live_write_started: bool,
+    live_write_acknowledged: bool,
+    live_readback_acknowledged: bool,
+}
+
+impl<'a> OriginalEnrollmentAllocationProducer<'a> {
+    pub(crate) fn from_original(plan: AuthenticatedEnrollmentRotationPlan<'a>) -> Self {
+        let origin = match &plan.effects {
+            EnrollmentRuntimeOrigin::Borrowed(effects) => {
+                EnrollmentRuntimeOrigin::Borrowed(effects)
+            }
+            EnrollmentRuntimeOrigin::Owned(effects) => {
+                EnrollmentRuntimeOrigin::Owned(effects.clone())
+            }
+        };
+        Self {
+            origin,
+            launch: None,
+            plan: Some(plan),
+            progress: OriginalEnrollmentAllocationProgress::default(),
+            retirement: None,
+            unwritten: None,
+            cleanup_failure: None,
+            cleanup_validation_failure: None,
+            acknowledged: false,
+            acknowledgment: None,
+            cleanup_observation: None,
+        }
+    }
+    pub(crate) fn bind_original_launch(
+        &mut self,
+        effects: &AuraEffectSystem,
+        launch: &crate::runtime::services::enrollment_window::OriginalIssuerLaunchWindow,
+    ) -> Result<(), AuraError> {
+        self.require_original(effects)?;
+        if let Some(original) = self.launch.as_ref() {
+            if !Arc::ptr_eq(original, launch.observation_identity()) {
+                return Err(AuraError::permission_denied(
+                    "allocation launch cannot be replaced",
+                ));
+            }
+        } else {
+            self.launch = Some(launch.observation_identity().clone());
+        }
+        Ok(())
+    }
+
+    fn require_original(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            AuraError::invalid("original allocation decision already transferred")
+        })?;
+        if !std::ptr::eq(plan.effects.effects(), effects) {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::EffectIdentity,
+            ));
+        }
+        if let Some(original) = self.progress.original.as_ref() {
+            if original.registered
+                || original.authority != effects.authority_id
+                || plan.state.epoch.value().checked_add(1) != Some(original.pending_epoch)
+                || original.prestate != plan.prestate
+                || original.setup_digest != plan.setup_digest
+                || original.baseline != Some(plan.baseline)
+                || original.threshold != plan.threshold
+                || original.participants != plan.participants
+            {
+                return Err(held_registration_error(
+                    HeldEnrollmentRegistrationError::Binding,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn retire_original(
+        &mut self,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), AuraError> {
+        self.require_original(effects)?;
+        let Some(original) = self.progress.original.as_ref() else {
+            if self.progress.immutable_write_started || self.progress.live_write_started {
+                return Err(AuraError::invalid(
+                    "allocation write began without original intent",
+                ));
+            }
+            if self.unwritten.is_none() {
+                self.unwritten = Some(OriginalUnwrittenAllocationDisposition {
+                    identity: Arc::new(()),
+                });
+            }
+            return Ok(());
+        };
+        let bytes = serde_json::to_vec(original).map_err(|source| AuraError::Serialization {
+            message: "validate original partial allocation bytes".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        let active = effects
+            .secure_retrieve(
+                &SecureStorageLocation::new("epoch_state", original.authority.to_string()),
+                &[SecureStorageCapability::Read],
+            )
+            .await?;
+        let active = u64::from_le_bytes(
+            active
+                .try_into()
+                .map_err(|_| AuraError::invalid("invalid active signing epoch"))?,
+        );
+        if active >= original.pending_epoch {
+            return Err(AuraError::permission_denied(
+                "partial allocation no longer owns inactive epoch",
+            ));
+        }
+        for location in [
+            SecureStorageLocation::new(
+                "device_enrollment_generation_allocation_v1",
+                original.ceremony.to_string(),
+            ),
+            super::enrollment_generation_profile_location(
+                &original.authority,
+                original.pending_epoch,
+            ),
+        ] {
+            if effects.secure_exists(&location).await?
+                && effects
+                    .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                    .await?
+                    != bytes
+            {
+                return Err(held_registration_error(
+                    HeldEnrollmentRegistrationError::Binding,
+                ));
+            }
+        }
+        for namespace in [
+            "device_enrollment_activation_v1",
+            "device_enrollment_allocated_registration_v1",
+        ] {
+            if effects
+                .secure_exists(&SecureStorageLocation::new(
+                    namespace,
+                    original.ceremony.to_string(),
+                ))
+                .await?
+            {
+                return Err(AuraError::permission_denied(
+                    "partial allocation already transferred to registered or activation owner",
+                ));
+            }
+        }
+        for invitation in required_committed_invitation_facts(
+            effects.load_committed_facts(original.authority).await?,
+        )? {
+            if let aura_invitation::InvitationFact::Sent { invitation_id, .. } = invitation {
+                if invitation_id == original.invitation {
+                    return Err(AuraError::permission_denied(
+                        "partial allocation already has committed issued invitation",
+                    ));
+                }
+            }
+        }
+        if self.retirement.is_none() {
+            let plan = self
+                .plan
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("original allocation decision missing"))?;
+            match effects
+                .retire_original_orphan_allocation(original, plan.generation.generation())
+                .await
+            {
+                Ok(receipt) => self.retirement = Some(receipt),
+                Err(source) => {
+                    self.cleanup_failure.get_or_insert_with(|| source.clone());
+                    return Err(source);
+                }
+            }
+        }
+        self.retirement
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original allocation retirement missing"))?
+            .require_original(effects, original)?;
+        Ok(())
+    }
+
+    pub(crate) fn acknowledge_original(
+        &mut self,
+        effects: &AuraEffectSystem,
+    ) -> Result<OriginalAllocationCleanupReceipt<'_>, AuraError> {
+        self.require_original(effects)?;
+        if let Some(unwritten) = self.unwritten.as_ref() {
+            if self.progress.original.is_some()
+                || self.progress.immutable_write_started
+                || self.progress.live_write_started
+            {
+                return Err(AuraError::permission_denied(
+                    "unwritten disposition cannot replace allocation retirement",
+                ));
+            }
+            return Ok(OriginalAllocationCleanupReceipt::Unwritten(unwritten));
+        }
+        let original = self
+            .progress
+            .original
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original allocation write intent missing"))?;
+        let receipt = self
+            .retirement
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original allocation retirement missing"))?;
+        receipt.require_original(effects, original)?;
+        Ok(OriginalAllocationCleanupReceipt::Retired(receipt))
+    }
+
+    pub(crate) fn observe_original_cleanup_acknowledged(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<bool, AuraError> {
+        if !std::ptr::eq(self.origin.effects(), effects) {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::EffectIdentity,
+            ));
+        }
+        if !self.acknowledged {
+            return Ok(false);
+        }
+        let identity = if let Some(receipt) = self.retirement.as_ref() {
+            &receipt.identity
+        } else if let Some(unwritten) = self.unwritten.as_ref() {
+            &unwritten.identity
+        } else {
+            return Err(AuraError::invalid("original cleanup evidence missing"));
+        };
+        self.acknowledgment
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original cleanup acknowledgment missing"))?
+            .require_original(
+                effects,
+                identity,
+                self.launch
+                    .as_ref()
+                    .ok_or_else(|| AuraError::invalid("original allocation launch missing"))?,
+            )?;
+        Ok(true)
+    }
+
+    pub(crate) fn release_original(
+        &mut self,
+        effects: &AuraEffectSystem,
+        acknowledgment: crate::runtime::services::enrollment_window::OriginalAllocationCleanupAcknowledgment,
+    ) -> Result<(), AuraError> {
+        self.require_original(effects)?;
+        let identity = self
+            .acknowledge_original(effects)?
+            .observation_identity()
+            .clone();
+        acknowledgment.require_original(
+            effects,
+            &identity,
+            self.launch
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("original allocation launch missing"))?,
+        )?;
+        self.acknowledgment = Some(acknowledgment);
+        self.acknowledged = true;
+        self.plan = None;
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn acknowledged_wrap_original_for_test(
+        &self,
+    ) -> (aura_core::CeremonyId, AuthorityId, u64, Vec<u8>) {
+        assert!(self.progress.live_readback_acknowledged);
+        assert!(self.retirement.is_some() && self.acknowledgment.is_some() && self.plan.is_none());
+        let original = self.progress.original.as_ref().unwrap();
+        (
+            original.ceremony.clone(),
+            original.authority,
+            original.pending_epoch,
+            serde_json::to_vec(original).unwrap(),
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn assert_pending_allocation_retired_for_test(&self) {
+        assert!(self.progress.immutable_write_started);
+        assert!(
+            !self.progress.immutable_write_acknowledged,
+            "provider ACK never reached original caller"
+        );
+        assert!(!self.progress.live_write_started);
+        assert!(self.acknowledged);
+        assert!(
+            self.plan.is_none(),
+            "actual generation/tree/decision guards released only after cleanup ACK"
+        );
+        assert!(
+            self.retirement.is_some(),
+            "actual immutable cleaned readback retained"
+        );
+        let observation = self
+            .cleanup_observation
+            .as_ref()
+            .expect("same original negative observation retained");
+        assert!(matches!(observation.operation, Some(Ok(()))));
+        assert!(observation.validation.is_ok());
+    }
+    #[cfg(test)]
+    pub(crate) fn assert_unwritten_allocation_disposed_for_test(&self) {
+        assert!(self.progress.original.is_none());
+        assert!(!self.progress.immutable_write_started && !self.progress.live_write_started);
+        assert!(self.unwritten.is_some());
+        assert!(
+            self.retirement.is_none(),
+            "no retirement receipt manufactured without a write intent"
+        );
+        assert!(self.acknowledgment.is_some() && self.plan.is_none());
+        let observation = self
+            .cleanup_observation
+            .as_ref()
+            .expect("original negative observation retained");
+        assert!(matches!(observation.operation, Some(Ok(()))) && observation.validation.is_ok());
+    }
+}
+
+/// Actual required retirement observed under the original physical decision
+/// lease. No serialization or public constructor can manufacture this receipt.
+/// Actual canonical orphan retirement: immutable cleaned readback and pending
+/// slot deletion completed under the original held generation capability.
+pub(crate) struct OriginalOrphanAllocationRetirement {
+    identity: Arc<()>,
+    runtime_identity: Arc<()>,
+    ceremony: aura_core::CeremonyId,
+    authority: AuthorityId,
+    epoch: u64,
+    original_digest: [u8; 32],
+}
+pub(crate) struct OriginalUnwrittenAllocationDisposition {
+    identity: Arc<()>,
+}
+pub(crate) enum OriginalAllocationCleanupReceipt<'a> {
+    Retired(&'a OriginalOrphanAllocationRetirement),
+    Unwritten(&'a OriginalUnwrittenAllocationDisposition),
+}
+impl OriginalAllocationCleanupReceipt<'_> {
+    pub(crate) fn observation_identity(&self) -> &Arc<()> {
+        match self {
+            Self::Retired(receipt) => receipt.observation_identity(),
+            Self::Unwritten(receipt) => &receipt.identity,
+        }
+    }
+}
+impl OriginalOrphanAllocationRetirement {
+    pub(crate) fn observation_identity(&self) -> &Arc<()> {
+        &self.identity
+    }
+    fn require_original(
+        &self,
+        effects: &AuraEffectSystem,
+        owner: &StoredEnrollmentGenerationProfile,
+    ) -> Result<(), AuraError> {
+        let bytes = serde_json::to_vec(owner).map_err(|source| AuraError::Serialization {
+            message: "validate original orphan retirement binding".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        if !Arc::ptr_eq(
+            &self.runtime_identity,
+            &effects.crypto.lifetime_owner_identity(),
+        ) || self.ceremony != owner.ceremony
+            || self.authority != owner.authority
+            || self.epoch != owner.pending_epoch
+            || self.original_digest != aura_core::hash::hash(&bytes)
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
+}
+
+enum EnrollmentRetirementStorageDisposition {
+    RequiredWritesAcknowledged,
+    LaterGenerationObservation,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[derive(Debug, thiserror::Error)]
+#[error("retirement storage unavailable")]
+pub(crate) struct InjectedEnrollmentRetirementFailure;
+
+pub(crate) struct AcknowledgedEnrollmentRetirement {
+    disposition: EnrollmentRetirementStorageDisposition,
+    runtime_identity: std::sync::Arc<()>,
+    ceremony: aura_core::CeremonyId,
+    prestate: aura_core::Hash32,
+    binding: (aura_core::AuthorityId, u64, [u8; 32], [u8; 32]),
+}
+impl AcknowledgedEnrollmentRetirement {
+    pub(in crate::runtime) fn require_original_held(
+        &self,
+        reservation: &EnrollmentGenerationReservation<'static>,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), AuraError> {
+        reservation.require_effects(effects)?;
+        if !matches!(
+            self.disposition,
+            EnrollmentRetirementStorageDisposition::RequiredWritesAcknowledged
+        ) || !Arc::ptr_eq(
+            &self.runtime_identity,
+            &effects.crypto.lifetime_owner_identity(),
+        ) || self.ceremony != reservation.owner.ceremony
+            || self.prestate != reservation.owner.prestate
+            || self.binding.0 != reservation.owner.authority
+            || self.binding.1 != reservation.owner.pending_epoch
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn prestate(&self) -> aura_core::Hash32 {
+        self.prestate
+    }
+    pub(crate) fn require_original(
+        &self,
+        effects: &AuraEffectSystem,
+        original: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        original.require_runtime_owner(effects)?;
+        if matches!(
+            self.disposition,
+            EnrollmentRetirementStorageDisposition::LaterGenerationObservation
+        ) {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        let manifest = original.manifest();
+        if !std::sync::Arc::ptr_eq(
+            &self.runtime_identity,
+            &effects.crypto.lifetime_owner_identity(),
+        ) || self.ceremony != manifest.ceremony
+            || self.binding.0 != manifest.subject
+            || self.binding.1 != manifest.pending_epoch
+            || self.binding.2 != manifest.pending_public_key_package_digest
+            || self.binding.3 != *manifest.pending_threshold_config_digest.as_bytes()
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Actual fresh physical allocation acknowledgment. Protected bytes cannot
@@ -432,7 +951,13 @@ impl OriginalEnrollmentAllocationAcknowledgment {
         issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
     ) -> Result<(), AuraError> {
         issued.require_runtime_owner(effects)?;
-        let manifest = issued.manifest();
+        self.require_manifest(effects, issued.manifest())
+    }
+    pub(in crate::runtime) fn require_manifest(
+        &self,
+        effects: &AuraEffectSystem,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> Result<(), AuraError> {
         if !std::sync::Arc::ptr_eq(
             &self.runtime_identity,
             &effects.crypto.lifetime_owner_identity(),
@@ -536,20 +1061,12 @@ struct StoredEnrollmentGenerationProfile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     baseline: Option<OriginalEnrollmentBaseline>,
     threshold: u16,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    response_policy: Option<EnrollmentResponsePolicy>,
-    #[serde(skip)]
-    proved_legacy_response_policy: Option<EnrollmentResponsePolicy>,
+    response_policy: EnrollmentResponsePolicy,
     participants: Vec<ParticipantIdentity>,
 }
 impl StoredEnrollmentGenerationProfile {
     fn response_policy(&self) -> Result<EnrollmentResponsePolicy, AuraError> {
-        let policy = self
-            .response_policy
-            .or(self.proved_legacy_response_policy)
-            .ok_or_else(|| {
-                held_registration_error(HeldEnrollmentRegistrationError::ResponsePolicyMissing)
-            })?;
+        let policy = self.response_policy;
         let total = self.participants.len().checked_sub(1).ok_or_else(|| {
             held_registration_error(HeldEnrollmentRegistrationError::ResponsePolicyMismatch)
         })?;
@@ -612,13 +1129,95 @@ fn original_baseline_fingerprint(
 /// Process-local capability minted after required original registration storage.
 /// It cannot be constructed from an invitation, id, or deserialized state.
 pub(crate) struct RegisteredEnrollmentGenerationCapability<'runtime> {
-    effects: &'runtime AuraEffectSystem,
+    effects: EnrollmentRuntimeOrigin<'runtime>,
     tracker: crate::runtime::services::ceremony_tracker::CeremonyTracker,
     canonical_invitation: aura_invitation::Invitation,
+    // The exact original guards survive the registration write and its outer
+    // observation until signed-control custody takes over negative cleanup.
+    original_registration: Option<EnrollmentGenerationReservation<'runtime>>,
 }
-impl RegisteredEnrollmentGenerationCapability<'_> {
+impl<'runtime> RegisteredEnrollmentGenerationCapability<'runtime> {
+    pub(in crate::runtime) fn require_original_execution_root(
+        &self,
+        root: &crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            crate::runtime::services::ceremony_tracker::RegisteredEnrollmentWindowCapability,
+        >,
+    ) -> Result<(), AuraError> {
+        let original = self.original_registration.as_ref().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::RequiredOwner)
+        })?;
+        self.require_effects(original.effects.effects())?;
+        self.require_tracker(&original._owner.tracker())?;
+        root.origin().require_original_held_reservation(original)
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "RegisteredEnrollmentGenerationCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn take_original_registration(
+        registered: &mut Option<RegisteredEnrollmentGenerationCapability<'runtime>>,
+        effects: &AuraEffectSystem,
+        pending: &mut Option<EnrollmentGenerationReservation<'runtime>>,
+    ) -> Result<(), AuraError> {
+        let actual = registered.as_ref().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::RequiredOwner)
+        })?;
+        actual.require_effects(effects)?;
+        if pending.is_some() {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::RequiredOwner,
+            ));
+        }
+        let original = actual.original_registration.as_ref().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::RequiredOwner)
+        })?;
+        original.require_effects(effects)?;
+        original.require_tracker(&actual.tracker)?;
+        // No fallible operation or await follows the original custody transfer.
+        if let Some(mut actual) = registered.take() {
+            *pending = actual.original_registration.take();
+        }
+        Ok(())
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "RegisteredEnrollmentGenerationCapability",
+        family = "runtime_helper",
+        receiver_type = RegisteredEnrollmentGenerationCapability<'runtime>
+    )]
+    pub(crate) fn release_original_registration(
+        &mut self,
+        effects: &AuraEffectSystem,
+        root: &crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            crate::runtime::services::ceremony_tracker::RegisteredEnrollmentWindowCapability,
+        >,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        self.require_effects(effects)?;
+        issued.require_runtime_owner(effects)?;
+        root.child().require_issued_notice_owner(issued)?;
+        let expected = aura_core::util::serialization::to_vec(&self.canonical_invitation)?;
+        let actual = aura_core::util::serialization::to_vec(issued.canonical_invitation())?;
+        if expected != actual {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        let original = self.original_registration.as_ref().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::RequiredOwner)
+        })?;
+        original.require_effects(effects)?;
+        original.require_tracker(&self.tracker)?;
+        // Actual signed control is already bound to the retained root. Only
+        // now may its guard-bearing predecessor be released before child work.
+        self.original_registration = None;
+        Ok(())
+    }
+
     pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
-        if !std::ptr::eq(self.effects, effects) {
+        if !std::ptr::eq(self.effects.effects(), effects) {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::EffectIdentity,
             ));
@@ -637,6 +1236,11 @@ impl RegisteredEnrollmentGenerationCapability<'_> {
         &self.canonical_invitation
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnrollmentAllocationConflict {
+    ExistingLiveGeneration,
+    ImmutableAllocationAlreadyPresent,
+}
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum HeldEnrollmentRegistrationError {
     #[error("response quorum binding differs: expected {expected_required}/{expected_total}, observed {observed_required}/{observed_total}")]
@@ -646,8 +1250,6 @@ pub(crate) enum HeldEnrollmentRegistrationError {
         observed_required: u16,
         observed_total: u16,
     },
-    #[error("original allocation lacks distinct response quorum evidence")]
-    ResponsePolicyMissing,
     #[error("original response quorum differs from its protected roster")]
     ResponsePolicyMismatch,
     #[error("registration uses another physical effect owner")]
@@ -661,7 +1263,9 @@ pub(crate) enum HeldEnrollmentRegistrationError {
     #[error("registration differs from held enrollment generation bindings")]
     Binding,
     #[error("the immutable original enrollment allocation was already published")]
-    AllocationAlreadyPublished,
+    AllocationAlreadyPublished {
+        origin: EnrollmentAllocationConflict,
+    },
     #[error("enrollment execution requires the actual fresh physical allocation acknowledgment")]
     MissingOriginalBirth,
 }
@@ -676,7 +1280,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
         let birth = self.original_birth.as_ref().ok_or_else(|| {
             held_registration_error(HeldEnrollmentRegistrationError::MissingOriginalBirth)
         })?;
-        self.require_effects(self.effects)?;
+        self.require_effects(self.effects.effects())?;
         if !std::sync::Arc::ptr_eq(
             &birth.runtime_identity,
             &self.effects.crypto.lifetime_owner_identity(),
@@ -704,7 +1308,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
 
     pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
         self.generation().require_effects(effects)?;
-        if !std::ptr::eq(self.effects, effects) {
+        if !std::ptr::eq(self.effects.effects(), effects) {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::EffectIdentity,
             ));
@@ -720,7 +1324,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
     }
     pub(crate) fn decision(
         &self,
-    ) -> &crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'_>
+    ) -> &crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'runtime>
     {
         &self._owner
     }
@@ -745,8 +1349,38 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
         effects: &AuraEffectSystem,
         state: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
     ) -> Result<(), AuraError> {
+        self.validate_held_registration_binding(effects, state, true)
+    }
+
+    pub(in crate::runtime) fn validate_held_negative_registration(
+        &self,
+        effects: &AuraEffectSystem,
+        state: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
+    ) -> Result<(), AuraError> {
+        self.validate_held_registration_binding(effects, state, false)?;
+        if state.terminal_outcome
+            != Some(
+                crate::runtime::services::ceremony_tracker::CeremonyTerminalOutcome::Failed(
+                    crate::runtime::services::ceremony_tracker::CeremonyFailureReason::Cancelled,
+                ),
+            )
+            || !state.has_failed
+        {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_held_registration_binding(
+        &self,
+        effects: &AuraEffectSystem,
+        state: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
+        require_pending: bool,
+    ) -> Result<(), AuraError> {
         self.require_effects(effects)?;
-        if !std::ptr::eq(self.effects, effects) {
+        if !std::ptr::eq(self.effects.effects(), effects) {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::EffectIdentity,
             ));
@@ -771,15 +1405,14 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
             || state
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .is_none_or(|device| !expected.contains(&device))
+                .map_or(true, |device| !expected.contains(&device))
             || state.participants != expected
             || usize::from(state.total_n) != expected.len()
             || state.threshold_k != self.owner.response_policy()?.required()
             || !state.accepted_participants.is_empty()
             || state.is_committed
-            || state.has_failed
             || state.is_superseded
-            || state.terminal_outcome.is_some()
+            || (require_pending && (state.has_failed || state.terminal_outcome.is_some()))
         {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::Binding,
@@ -795,7 +1428,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
         state: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
         invitation: &aura_invitation::Invitation,
     ) -> Result<(), AuraError> {
-        if !std::ptr::eq(self.effects, effects) {
+        if !std::ptr::eq(self.effects.effects(), effects) {
             return Err(held_registration_error(
                 HeldEnrollmentRegistrationError::EffectIdentity,
             ));
@@ -862,18 +1495,27 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
         capability_type = RegisteredEnrollmentGenerationCapability,
         family = "runtime_helper"
     )]
-    pub(crate) async fn complete_registration(
-        mut self,
-    ) -> Result<RegisteredEnrollmentGenerationCapability<'runtime>, AuraError> {
+    pub(crate) async fn complete_registration_retained(
+        held: &mut Option<Self>,
+        registered: &mut Option<RegisteredEnrollmentGenerationCapability<'runtime>>,
+    ) -> Result<(), AuraError> {
+        if registered.is_some() {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::RequiredOwner,
+            ));
+        }
+        let actual = held.as_ref().ok_or_else(|| {
+            held_registration_error(HeldEnrollmentRegistrationError::RequiredOwner)
+        })?;
         let canonical_invitation =
             crate::handlers::invitation::enrollment_trust::verify_generation_registration_binding(
-                self.effects,
-                self.owner.authority,
-                self.pending_epoch(),
-                &self.owner.ceremony,
-                self.owner.prestate,
-                self.invitation_id(),
-                self.setup_digest(),
+                actual.effects.effects(),
+                actual.owner.authority,
+                actual.pending_epoch(),
+                &actual.owner.ceremony,
+                actual.owner.prestate,
+                actual.invitation_id(),
+                actual.setup_digest(),
             )
             .await
             .map_err(|error| AuraError::Internal {
@@ -881,34 +1523,45 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
                 source: Some(std::sync::Arc::new(error)),
             })?;
         let location = super::enrollment_generation_profile_location(
-            &self.owner.authority,
-            self.pending_epoch(),
+            &actual.owner.authority,
+            actual.pending_epoch(),
         );
-        let old = self
+        let old = actual
             .effects
-            .read_owned_enrollment_generation_profile(self.owner.authority, self.pending_epoch())
+            .read_owned_enrollment_generation_profile(
+                actual.owner.authority,
+                actual.pending_epoch(),
+            )
             .await?;
-        let expected = serde_json::to_vec(&self.owner).map_err(|error| AuraError::Internal {
+        let expected = serde_json::to_vec(&actual.owner).map_err(|error| AuraError::Internal {
             message: "encode allocated enrollment owner".into(),
             source: Some(std::sync::Arc::new(error)),
         })?;
-        if old != expected {
+        // Only ordinary profile data is cloned. The original reservation and
+        // its guards remain in the retained slot through every awaited write.
+        let mut registered_owner = actual.owner.clone();
+        registered_owner.registered = true;
+        let bytes = serde_json::to_vec(&registered_owner).map_err(|error| AuraError::Internal {
+            message: "encode registered enrollment owner".into(),
+            source: Some(std::sync::Arc::new(error)),
+        })?;
+        // The same retained invocation can resume after its own live write
+        // committed but observation was dropped. Exact original bytes remain
+        // required; neither a different profile nor a reconstructed owner fits.
+        if old != expected && old != bytes {
             return Err(AuraError::invalid(
                 "allocated enrollment generation was replaced",
             ));
         }
-        self.owner.registered = true;
-        let bytes = serde_json::to_vec(&self.owner).map_err(|error| AuraError::Internal {
-            message: "encode registered enrollment owner".into(),
-            source: Some(std::sync::Arc::new(error)),
-        })?;
-        self.effects
-            .require_original_generation_history(&self.owner)
+        actual
+            .effects
+            .require_original_generation_history(&registered_owner)
             .await?;
         #[cfg(test)]
-        self.effects.require_registration_seal_for_test().await?;
-        let history = registration_history_location(&self.owner.ceremony);
-        self.effects
+        actual.effects.require_registration_seal_for_test().await?;
+        let history = registration_history_location(&actual.owner.ceremony);
+        actual
+            .effects
             .secure_store_immutable(
                 &history,
                 &bytes,
@@ -918,7 +1571,7 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
                 ],
             )
             .await?;
-        let retained = self
+        let retained = actual
             .effects
             .secure_retrieve(&history, &[SecureStorageCapability::Read])
             .await?;
@@ -927,7 +1580,8 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
                 EnrollmentGenerationHistoryError::RegistrationBinding,
             ));
         }
-        self.effects
+        actual
+            .effects
             .secure_store(
                 &location,
                 &bytes,
@@ -937,11 +1591,43 @@ impl<'runtime> EnrollmentGenerationReservation<'runtime> {
                 ],
             )
             .await?;
-        Ok(RegisteredEnrollmentGenerationCapability {
-            effects: self.effects,
-            tracker: self._owner.tracker(),
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        actual
+            .effects
+            .await_original_registration_readback_for_test()
+            .await?;
+        let retained = actual
+            .effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await?;
+        if retained.len() > 131_072 || retained != bytes {
+            return Err(generation_history_error(
+                EnrollmentGenerationHistoryError::RegistrationBinding,
+            ));
+        }
+        let tracker = actual._owner.tracker();
+        // No await or callback follows removal from the retained slot. Deposit
+        // the actual original capability before returning Ready to the owner.
+        let Some(actual) = held.take() else {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::RequiredOwner,
+            ));
+        };
+        let effects = match &actual.effects {
+            EnrollmentRuntimeOrigin::Borrowed(effects) => {
+                EnrollmentRuntimeOrigin::Borrowed(effects)
+            }
+            EnrollmentRuntimeOrigin::Owned(effects) => {
+                EnrollmentRuntimeOrigin::Owned(Arc::clone(effects))
+            }
+        };
+        *registered = Some(RegisteredEnrollmentGenerationCapability {
+            effects,
+            tracker,
             canonical_invitation,
-        })
+            original_registration: Some(actual),
+        });
+        Ok(())
     }
 }
 /// Structural attribution for required generation retirement effects.
@@ -997,170 +1683,7 @@ fn registration_history_location(ceremony: &aura_core::CeremonyId) -> SecureStor
     )
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredLegacyEnrollmentResponsePolicy {
-    version: u16,
-    authority: AuthorityId,
-    ceremony: aura_core::CeremonyId,
-    pending_epoch: u64,
-    original_allocation_digest: [u8; 32],
-    original_registration_digest: [u8; 32],
-    response_policy: EnrollmentResponsePolicy,
-}
-fn legacy_response_policy_location(ceremony: &aura_core::CeremonyId) -> SecureStorageLocation {
-    SecureStorageLocation::new(
-        "device_enrollment_legacy_response_policy_v1",
-        ceremony.to_string(),
-    )
-}
 impl AuraEffectSystem {
-    async fn legacy_response_policy_evidence(
-        &self,
-        owner: &StoredEnrollmentGenerationProfile,
-    ) -> Result<StoredLegacyEnrollmentResponsePolicy, AuraError> {
-        self.require_original_generation_history(owner).await?;
-        let allocation = self
-            .secure_retrieve(
-                &SecureStorageLocation::new(
-                    "device_enrollment_generation_allocation_v1",
-                    owner.ceremony.to_string(),
-                ),
-                &[SecureStorageCapability::Read],
-            )
-            .await?;
-        let registration = self
-            .secure_retrieve(
-                &SecureStorageLocation::new(
-                    "device_enrollment_allocated_registration_v1",
-                    owner.ceremony.to_string(),
-                ),
-                &[SecureStorageCapability::Read],
-            )
-            .await?;
-        if allocation.len() > 131_072 || registration.len() > 131_072 {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        let original = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(self, &owner.ceremony)
-            .await.map_err(|source| AuraError::Internal { message: "verify protected historical response registration".into(), source: Some(std::sync::Arc::new(source)) })?;
-        let expected: std::collections::HashSet<_> = owner
-            .participants
-            .iter()
-            .filter(|participant| **participant != ParticipantIdentity::device(self.device_id()))
-            .cloned()
-            .collect();
-        if original.kind != aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
-            || original.initiator_id != owner.authority
-            || original.ceremony_id != owner.ceremony
-            || original.prestate_hash != owner.prestate
-            || original.new_epoch != owner.pending_epoch
-            || original.participants != expected
-            || usize::from(original.total_n) != expected.len()
-            || original.threshold_k == 0
-            || original.threshold_k > original.total_n
-            || original
-                .enrollment_device_id
-                .map(ParticipantIdentity::device)
-                .is_none_or(|device| !expected.contains(&device))
-            || !original.accepted_participants.is_empty()
-            || original.is_committed
-            || original.terminal_outcome.is_some()
-        {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::ResponsePolicyMismatch,
-            ));
-        }
-        crate::handlers::invitation::enrollment_trust::validate_original_allocation_setup(
-            self,
-            &original,
-            owner.setup_digest,
-        )
-        .await
-        .map_err(|source| AuraError::Internal {
-            message: "verify original historical response setup".into(),
-            source: Some(std::sync::Arc::new(source)),
-        })?;
-        Ok(StoredLegacyEnrollmentResponsePolicy {
-            version: 1,
-            authority: owner.authority,
-            ceremony: owner.ceremony.clone(),
-            pending_epoch: owner.pending_epoch,
-            original_allocation_digest: aura_core::hash::hash(&allocation),
-            original_registration_digest: aura_core::hash::hash(&registration),
-            response_policy: EnrollmentResponsePolicy {
-                required: original.threshold_k,
-                total: original.total_n,
-            },
-        })
-    }
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "EnrollmentGenerationCustodyCapability",
-        family = "runtime_helper"
-    )]
-    async fn supplement_proved_legacy_response_policy(
-        &self,
-        custody: &EnrollmentGenerationCustodyCapability<'_>,
-        owner: &StoredEnrollmentGenerationProfile,
-    ) -> Result<(), AuraError> {
-        custody.require_effects(self)?;
-        if owner.response_policy.is_some() {
-            return Ok(());
-        }
-        let evidence = self.legacy_response_policy_evidence(owner).await?;
-        let bytes = serde_json::to_vec(&evidence).map_err(|source| {
-            generation_history_error(EnrollmentGenerationHistoryError::Codec(source))
-        })?;
-        self.secure_store_immutable(
-            &legacy_response_policy_location(&owner.ceremony),
-            &bytes,
-            &[
-                SecureStorageCapability::Read,
-                SecureStorageCapability::Write,
-            ],
-        )
-        .await?;
-        let mut checked = owner.clone();
-        self.hydrate_legacy_response_policy(&mut checked).await
-    }
-    async fn hydrate_legacy_response_policy(
-        &self,
-        owner: &mut StoredEnrollmentGenerationProfile,
-    ) -> Result<(), AuraError> {
-        if owner.response_policy.is_some() {
-            owner.response_policy()?;
-            return Ok(());
-        }
-        let expected = self.legacy_response_policy_evidence(owner).await?;
-        let bytes = self
-            .secure_retrieve(
-                &legacy_response_policy_location(&owner.ceremony),
-                &[SecureStorageCapability::Read],
-            )
-            .await?;
-        if bytes.len() > 16_384 {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        let retained: StoredLegacyEnrollmentResponsePolicy = serde_json::from_slice(&bytes)
-            .map_err(|source| {
-                generation_history_error(EnrollmentGenerationHistoryError::Codec(source))
-            })?;
-        let expected_bytes = serde_json::to_vec(&expected).map_err(|source| {
-            generation_history_error(EnrollmentGenerationHistoryError::Codec(source))
-        })?;
-        if bytes != expected_bytes || retained.version != 1 {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::ResponsePolicyMismatch,
-            ));
-        }
-        owner.proved_legacy_response_policy = Some(retained.response_policy);
-        owner.response_policy()?;
-        Ok(())
-    }
     /// Mutable slots select protected original history; their fields never
     /// establish signer/roster/setup or registration authority by themselves.
     async fn require_original_generation_history(
@@ -1299,7 +1822,7 @@ impl AuraEffectSystem {
             ));
         }
         self.require_original_generation_history(&owner).await?;
-        self.hydrate_legacy_response_policy(&mut owner).await?;
+        owner.response_policy()?;
         if self.generation_retirement_completed(&owner).await? {
             return Err(generation_history_error(
                 EnrollmentGenerationHistoryError::Retired,
@@ -1347,118 +1870,6 @@ impl AuraEffectSystem {
             .await
     }
 
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "EnrollmentGenerationCustodyCapability",
-        family = "runtime_helper"
-    )]
-    async fn migrate_legacy_generation_live_slot(
-        &self,
-        custody: &EnrollmentGenerationCustodyCapability<'_>,
-        authority: AuthorityId,
-        epoch: u64,
-    ) -> Result<(), AuraError> {
-        custody.require_effects(self)?;
-        let current = super::enrollment_generation_profile_location(&authority, epoch);
-        if self.secure_exists(&current).await? {
-            let bytes = self
-                .secure_retrieve(&current, &[SecureStorageCapability::Read])
-                .await?;
-            if bytes.len() > 131_072 {
-                return Err(generation_history_error(
-                    EnrollmentGenerationHistoryError::OriginalBinding,
-                ));
-            }
-            let owner: StoredEnrollmentGenerationProfile =
-                serde_json::from_slice(&bytes).map_err(|source| {
-                    generation_history_error(EnrollmentGenerationHistoryError::Codec(source))
-                })?;
-            if owner.authority != authority || owner.pending_epoch != epoch {
-                return Err(generation_history_error(
-                    EnrollmentGenerationHistoryError::OriginalBinding,
-                ));
-            }
-            self.require_original_generation_history(&owner).await?;
-            self.supplement_proved_legacy_response_policy(custody, &owner)
-                .await?;
-            return Ok(());
-        }
-        let legacy = super::legacy_enrollment_generation_profile_location(&authority, epoch);
-        if !self.secure_exists(&legacy).await? {
-            return Ok(());
-        }
-        let bytes = self
-            .secure_retrieve(&legacy, &[SecureStorageCapability::Read])
-            .await?;
-        if bytes.len() > 131_072 {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        let owner: StoredEnrollmentGenerationProfile =
-            serde_json::from_slice(&bytes).map_err(|source| {
-                generation_history_error(EnrollmentGenerationHistoryError::Codec(source))
-            })?;
-        if owner.authority != authority || owner.pending_epoch != epoch {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        self.require_original_generation_history(&owner).await?;
-        self.supplement_proved_legacy_response_policy(custody, &owner)
-            .await?;
-        if self.generation_retirement_completed(&owner).await? {
-            return Ok(());
-        }
-        if owner.registered {
-            crate::handlers::invitation::enrollment_trust::verify_generation_registration_binding(
-                self,
-                owner.authority,
-                owner.pending_epoch,
-                &owner.ceremony,
-                owner.prestate,
-                &owner.invitation,
-                owner.setup_digest,
-            )
-            .await
-            .map_err(|source| AuraError::Internal {
-                message: "verify original legacy registration before migration".into(),
-                source: Some(std::sync::Arc::new(source)),
-            })?;
-            self.secure_store_immutable(
-                &registration_history_location(&owner.ceremony),
-                &bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await?;
-        }
-        let validated = self
-            .validate_generation_profile_bytes(authority, epoch, &bytes)
-            .await?;
-        self.secure_create_mutable(
-            &current,
-            &validated,
-            &[
-                SecureStorageCapability::Read,
-                SecureStorageCapability::Write,
-            ],
-        )
-        .await?;
-        let actual = self
-            .read_owned_enrollment_generation_profile(authority, epoch)
-            .await?;
-        if actual != validated {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        // Legacy original bytes stay protected; migration never removes history.
-        Ok(())
-    }
-
     pub(crate) async fn has_live_enrollment_generation(
         &self,
         authority: AuthorityId,
@@ -1482,29 +1893,7 @@ impl AuraEffectSystem {
             // generic mutation until the required owner releases that slot.
             return Ok(true);
         }
-        let legacy = super::legacy_enrollment_generation_profile_location(&authority, epoch);
-        if !self.secure_exists(&legacy).await? {
-            return Ok(false);
-        }
-        let bytes = self
-            .secure_retrieve(&legacy, &[SecureStorageCapability::Read])
-            .await?;
-        if bytes.len() > 131_072 {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        let owner: StoredEnrollmentGenerationProfile =
-            serde_json::from_slice(&bytes).map_err(|source| {
-                generation_history_error(EnrollmentGenerationHistoryError::Codec(source))
-            })?;
-        if owner.authority != authority || owner.pending_epoch != epoch {
-            return Err(generation_history_error(
-                EnrollmentGenerationHistoryError::OriginalBinding,
-            ));
-        }
-        self.require_original_generation_history(&owner).await?;
-        Ok(!self.generation_retirement_completed(&owner).await?)
+        Ok(false)
     }
 
     #[aura_macros::capability_boundary(
@@ -1552,6 +1941,7 @@ impl AuraEffectSystem {
         self.require_original_enrollment_reservation(reserved).await
     }
 
+    #[cfg(test)]
     async fn require_original_baseline(
         &self,
         owner: &StoredEnrollmentGenerationProfile,
@@ -1648,26 +2038,6 @@ impl AuraEffectSystem {
         AuraError,
     > {
         let decision = tracker.acquire_enrollment_generation_decision(self).await?;
-        self.recover_initial_enrollment_allocation_with_decision(ceremony, decision)
-            .await
-    }
-
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "EnrollmentGenerationDecisionCapability",
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn recover_initial_enrollment_allocation_with_decision<'a>(
-        &'a self,
-        ceremony: &aura_core::CeremonyId,
-        decision:crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'a>,
-    ) -> Result<
-        (
-            EnrollmentGenerationReservation<'a>,
-            crate::runtime::services::ceremony_tracker::TrackedCeremony,
-        ),
-        AuraError,
-    > {
         decision.require_effects(self)?;
         let (owner, original) = self
             .read_initial_enrollment_allocation(ceremony, decision.generation())
@@ -1689,7 +2059,7 @@ impl AuraEffectSystem {
         self.require_original_baseline(&owner).await?;
         Ok((
             EnrollmentGenerationReservation {
-                effects: self,
+                effects: EnrollmentRuntimeOrigin::Borrowed(self),
                 owner,
                 _tree: tree,
                 _owner: decision,
@@ -1732,10 +2102,9 @@ impl AuraEffectSystem {
         ),
         AuraError,
     > {
+        generation.require_effects(self)?;
         let original = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(self, ceremony)
             .await.map_err(|source| AuraError::Internal { message: "read original initial allocation".into(), source: Some(std::sync::Arc::new(source)) })?;
-        self.migrate_legacy_generation_live_slot(generation, self.authority_id, original.new_epoch)
-            .await?;
         let bytes = self
             .read_owned_enrollment_generation_profile(self.authority_id, original.new_epoch)
             .await?;
@@ -1744,13 +2113,13 @@ impl AuraEffectSystem {
                 HeldEnrollmentRegistrationError::Binding,
             ));
         }
-        let mut owner: StoredEnrollmentGenerationProfile =
+        let owner: StoredEnrollmentGenerationProfile =
             serde_json::from_slice(&bytes).map_err(|source| AuraError::Serialization {
                 message: "decode original initial allocation custody".into(),
                 source: Some(std::sync::Arc::new(source)),
             })?;
 
-        self.hydrate_legacy_response_policy(&mut owner).await?;
+        owner.response_policy()?;
         let original_profile_location = SecureStorageLocation::new(
             "device_enrollment_generation_allocation_v1",
             ceremony.to_string(),
@@ -1811,7 +2180,7 @@ impl AuraEffectSystem {
             || original
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .is_none_or(|device| !expected.contains(&device))
+                .map_or(true, |device| !expected.contains(&device))
             || original.terminal_outcome.is_some()
             || !original.accepted_participants.is_empty()
         {
@@ -1882,13 +2251,13 @@ impl AuraEffectSystem {
         if bytes.len() > 131_072 {
             return Err(AuraError::invalid("oversized original orphan decision"));
         }
-        let mut original: StoredEnrollmentGenerationProfile = serde_json::from_slice(&bytes)
-            .map_err(|error| AuraError::Internal {
+        let original: StoredEnrollmentGenerationProfile =
+            serde_json::from_slice(&bytes).map_err(|error| AuraError::Internal {
                 message: "decode original orphan decision".into(),
                 source: Some(std::sync::Arc::new(error)),
             })?;
 
-        self.hydrate_legacy_response_policy(&mut original).await?;
+        original.response_policy()?;
         let accepted_roster: std::collections::HashSet<_> = original
             .participants
             .iter()
@@ -1935,80 +2304,6 @@ impl AuraEffectSystem {
             false
         }
     }
-    pub(crate) async fn resume_owned_enrollment_registration<'runtime>(
-        &'runtime self,
-        tracker: &'runtime crate::runtime::services::ceremony_tracker::CeremonyTracker,
-        authority: AuthorityId,
-        epoch: u64,
-        ceremony: &aura_core::CeremonyId,
-        prestate: aura_core::Hash32,
-    ) -> Result<RegisteredEnrollmentGenerationCapability<'runtime>, AuraError> {
-        let owner_guard = tracker.acquire_enrollment_generation_decision(self).await?;
-        self.migrate_legacy_generation_live_slot(owner_guard.generation(), authority, epoch)
-            .await?;
-        let location = super::enrollment_generation_profile_location(&authority, epoch);
-        let bytes = self
-            .read_owned_enrollment_generation_profile(authority, epoch)
-            .await?;
-        if bytes.len() > 131_072 {
-            return Err(AuraError::invalid("oversized registration owner"));
-        }
-        let mut owner: StoredEnrollmentGenerationProfile =
-            serde_json::from_slice(&bytes).map_err(|error| AuraError::Internal {
-                message: "decode recovered registration owner".into(),
-                source: Some(std::sync::Arc::new(error)),
-            })?;
-
-        self.hydrate_legacy_response_policy(&mut owner).await?;
-        if owner.version != 1
-            || owner.authority != self.authority_id
-            || owner.authority != authority
-            || owner.pending_epoch != epoch
-            || owner.ceremony != *ceremony
-            || owner.prestate != prestate
-        {
-            return Err(AuraError::invalid(
-                "recovered registration owner binding mismatch",
-            ));
-        }
-        if owner.registered {
-            let canonical_invitation = crate::handlers::invitation::enrollment_trust::verify_generation_registration_binding(self,
-                owner.authority, owner.pending_epoch, &owner.ceremony, owner.prestate, &owner.invitation,
-                owner.setup_digest).await.map_err(|error| AuraError::Internal { message: "verify restored registered generation".into(), source: Some(std::sync::Arc::new(error)) })?;
-            self.secure_store(
-                &location,
-                &bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await?;
-            return Ok(RegisteredEnrollmentGenerationCapability {
-                effects: self,
-                tracker: tracker.clone(),
-                canonical_invitation,
-            });
-        }
-
-        // Consume the actual held first-decision owner exactly once. The original
-        // allocation producer validates retained setup, package and registration
-        // evidence and keeps the same generation and tree guards through commit.
-        let (reservation, original) = self
-            .recover_initial_enrollment_allocation_with_decision(ceremony, owner_guard)
-            .await?;
-        if reservation.owner.authority != authority
-            || reservation.owner.pending_epoch != epoch
-            || reservation.owner.ceremony != *ceremony
-            || reservation.owner.prestate != prestate
-            || original.ceremony_id != *ceremony
-        {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::Binding,
-            ));
-        }
-        reservation.complete_registration().await
-    }
     pub(crate) async fn require_registered_enrollment_profile(
         &self,
         authority: AuthorityId,
@@ -2054,9 +2349,8 @@ impl AuraEffectSystem {
         generation: EnrollmentGenerationCustodyCapability<'a>,
     ) -> Result<RecoveredEnrollmentCleanupCustody<'a>, AuraError> {
         generation.require_effects(self)?;
-        let mut verified_owner = owner.clone();
-        self.hydrate_legacy_response_policy(&mut verified_owner)
-            .await?;
+        let verified_owner = owner.clone();
+        verified_owner.response_policy()?;
         let owner = &verified_owner;
         self.require_original_generation_history(owner).await?;
         let expected = serde_json::to_vec(owner).map_err(|source| {
@@ -2098,7 +2392,7 @@ impl AuraEffectSystem {
             || original
                 .enrollment_device_id
                 .map(ParticipantIdentity::device)
-                .is_none_or(|device| !participants.contains(&device))
+                .map_or(true, |device| !participants.contains(&device))
             || !original.accepted_participants.is_empty()
             || original.is_committed
         {
@@ -2185,8 +2479,6 @@ impl AuraEffectSystem {
         let epoch = current
             .checked_add(1)
             .ok_or_else(|| AuraError::invalid("pending epoch overflow"))?;
-        self.migrate_legacy_generation_live_slot(&_generation, authority, epoch)
-            .await?;
         let profile = super::enrollment_generation_profile_location(&authority, epoch);
         if !self.secure_exists(&profile).await? {
             return Ok(false);
@@ -2198,13 +2490,13 @@ impl AuraEffectSystem {
         if bytes.len() > 131_072 {
             return Err(AuraError::invalid("oversized generation allocation"));
         }
-        let mut owner: StoredEnrollmentGenerationProfile =
+        let owner: StoredEnrollmentGenerationProfile =
             serde_json::from_slice(&bytes).map_err(|error| AuraError::Internal {
                 message: "decode allocated generation".into(),
                 source: Some(std::sync::Arc::new(error)),
             })?;
 
-        self.hydrate_legacy_response_policy(&mut owner).await?;
+        owner.response_policy()?;
         if owner.version != 1
             || owner.authority != authority
             || owner.pending_epoch != epoch
@@ -2335,6 +2627,69 @@ impl AuraEffectSystem {
                 }
             }
         }
+        self.retire_original_orphan_allocation(&owner, &_generation)
+            .await?;
+        Ok(true)
+    }
+
+    /// Shared destructive retirement under the already-held original physical
+    /// generation custody. Callers validate their actual original profile and
+    /// absence of issued/activated ownership; this body never reacquires gates.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_orphan_generation",
+        capability_type = EnrollmentGenerationCustodyCapability,
+        family = "runtime_helper"
+    )]
+    async fn retire_original_orphan_allocation(
+        &self,
+        owner: &StoredEnrollmentGenerationProfile,
+        generation: &EnrollmentGenerationCustodyCapability<'_>,
+    ) -> Result<OriginalOrphanAllocationRetirement, AuraError> {
+        generation.require_effects(self)?;
+        if owner.registered || owner.authority != self.authority_id || owner.pending_epoch == 0 {
+            return Err(held_registration_error(
+                HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        let authority = owner.authority;
+        let epoch = owner.pending_epoch;
+        let profile = super::enrollment_generation_profile_location(&authority, epoch);
+        let bytes = serde_json::to_vec(owner).map_err(|source| AuraError::Serialization {
+            message: "encode original orphan retirement owner".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        // Eligibility is checked before publishing the irreversible first
+        // decision. The original generation lease excludes same-generation
+        // inventory changes while the following retirement is in flight.
+        for participant in &owner.participants {
+            if self
+                .secure_exists(&Self::participant_wrap_key_location(
+                    &authority,
+                    epoch,
+                    participant,
+                ))
+                .await?
+            {
+                return Err(AuraError::invalid(
+                    "legacy permanent orphan wrap has no birth retirement policy",
+                ));
+            }
+        }
+        {
+            let mut custody = self.crypto.allocation_lifetimes.lock().await;
+            let inventory = custody.ready().await?;
+            for reference in inventory.references() {
+                let _: EnrollmentSecretScope =
+                    serde_json::from_slice(&reference.scope).map_err(|source| {
+                        AuraError::Serialization {
+                            message: "validate original orphan birth scope before first decision"
+                                .into(),
+                            source: Some(Arc::new(source)),
+                        }
+                    })?;
+            }
+        }
         let first = SecureStorageLocation::new(
             "device_enrollment_orphan_retirement_v1",
             owner.ceremony.to_string(),
@@ -2366,7 +2721,7 @@ impl AuraEffectSystem {
                     "legacy permanent orphan wrap has no birth retirement policy",
                 ));
             }
-            let expected = EnrollmentSecretScope::original(&owner, participant, &[])?;
+            let expected = EnrollmentSecretScope::original(owner, participant, &[])?;
             let mut custody = self.crypto.allocation_lifetimes.lock().await;
             let inventory = custody.ready().await?;
             for reference in inventory.references() {
@@ -2381,8 +2736,8 @@ impl AuraEffectSystem {
                             &reference,
                             &OwnedSecretNegativeCapability {
                                 runtime_identity: self.crypto.lifetime_owner_identity(),
-                                proof: OriginalNegativeSecretOwner::Orphan(&_generation),
-                                original: &owner,
+                                proof: OriginalNegativeSecretOwner::Orphan(generation),
+                                original: owner,
                                 decision: &retained,
                             },
                         )
@@ -2457,8 +2812,17 @@ impl AuraEffectSystem {
                 EnrollmentGenerationHistoryError::OriginalBinding,
             ));
         }
-        self.secure_delete(&profile, delete).await?;
-        Ok(true)
+        if self.secure_exists(&profile).await? {
+            self.secure_delete(&profile, delete).await?;
+        }
+        Ok(OriginalOrphanAllocationRetirement {
+            identity: Arc::new(()),
+            runtime_identity: self.crypto.lifetime_owner_identity(),
+            ceremony: owner.ceremony.clone(),
+            authority,
+            epoch,
+            original_digest: aura_core::hash::hash(&bytes),
+        })
     }
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn fail_next_enrollment_retirement_for_test(&self, epoch: u64) {
@@ -2477,8 +2841,10 @@ impl AuraEffectSystem {
         &self,
     ) -> EnrollmentGenerationCustodyCapability<'_> {
         EnrollmentGenerationCustodyCapability {
-            effects: self,
-            _guard: self.enrollment_generation_gate.lock().await,
+            effects: EnrollmentRuntimeOrigin::Borrowed(self),
+            _guard: EnrollmentGenerationGuard::Borrowed {
+                _guard: self.enrollment_generation_gate.lock().await,
+            },
         }
     }
     pub(crate) async fn enrollment_retirement_generation_guard(
@@ -2495,7 +2861,7 @@ impl AuraEffectSystem {
     pub(crate) async fn retire_pinned_enrollment_generation(
         &self,
         lease: &crate::runtime::services::ceremony_tracker::EnrollmentRetirementCapability<'_>,
-    ) -> Result<(), AuraError> {
+    ) -> Result<AcknowledgedEnrollmentRetirement, AuraError> {
         #[derive(serde::Serialize, serde::Deserialize)]
         struct RetiredThresholdConfigMetadata {
             threshold_k: u16,
@@ -2513,6 +2879,13 @@ impl AuraEffectSystem {
         }
 
         let (authority, epoch, package_digest, config_digest) = lease.binding();
+        let receipt = |disposition| AcknowledgedEnrollmentRetirement {
+            disposition,
+            runtime_identity: self.crypto.lifetime_owner_identity(),
+            ceremony: lease.ceremony().clone(),
+            prestate: lease.prestate(),
+            binding: lease.binding(),
+        };
         let retired_location = SecureStorageLocation::new(
             "device_enrollment_generation_retired_v1",
             lease.ceremony().to_string(),
@@ -2545,7 +2918,9 @@ impl AuraEffectSystem {
                 // The exact immutable receipt above was written only after all
                 // generation secrets were deleted. An absent released profile
                 // makes this original failed decision an idempotent observation.
-                return Ok(());
+                return Ok(receipt(
+                    EnrollmentRetirementStorageDisposition::RequiredWritesAcknowledged,
+                ));
             }
             let profile_bytes = self
                 .secure_retrieve(&profile, &[SecureStorageCapability::Read])
@@ -2562,7 +2937,9 @@ impl AuraEffectSystem {
             // A later owned generation may reuse the epoch after the old release.
             // The old immutable receipt permits observation only, never deletion.
             if current.ceremony != *lease.ceremony() {
-                return Ok(());
+                return Ok(receipt(
+                    EnrollmentRetirementStorageDisposition::LaterGenerationObservation,
+                ));
             }
             if current.authority != authority
                 || current.pending_epoch != epoch
@@ -2577,7 +2954,9 @@ impl AuraEffectSystem {
                 .map_err(|source| {
                     retirement_effect_error(EnrollmentRetirementStage::PendingSlot, source)
                 })?;
-            return Ok(());
+            return Ok(receipt(
+                EnrollmentRetirementStorageDisposition::RequiredWritesAcknowledged,
+            ));
         }
         if authority != self.authority_id {
             return Err(AuraError::invalid("retirement authority mismatch"));
@@ -2600,7 +2979,12 @@ impl AuraEffectSystem {
         }
         let profile = super::enrollment_generation_profile_location(&authority, epoch);
         if !self.secure_exists(&profile).await? {
-            return Ok(());
+            return Err(AuraError::PermissionDenied {
+                message: "original retirement profile and receipt are both missing".into(),
+                source: Some(std::sync::Arc::new(
+                    EnrollmentGenerationHistoryError::OriginalBinding,
+                )),
+            });
         }
         let bytes = self
             .read_owned_enrollment_generation_profile(authority, epoch)
@@ -2755,7 +3139,7 @@ impl AuraEffectSystem {
                 return Err(AuraError::Internal {
                     message: "injected required retirement deletion failure".into(),
                     source: Some(std::sync::Arc::new(std::io::Error::other(
-                        "retirement storage unavailable",
+                        InjectedEnrollmentRetirementFailure,
                     ))),
                 });
             }
@@ -2797,7 +3181,9 @@ impl AuraEffectSystem {
             .map_err(|source| {
                 retirement_effect_error(EnrollmentRetirementStage::PendingSlot, source)
             })?;
-        Ok(())
+        Ok(receipt(
+            EnrollmentRetirementStorageDisposition::RequiredWritesAcknowledged,
+        ))
     }
 
     async fn rotate_keys_for_owned_profile(
@@ -2811,7 +3197,9 @@ impl AuraEffectSystem {
             &AuthenticatedEnrollmentRotationPlan<'_>,
         )>,
         generation: &EnrollmentGenerationCustodyCapability<'_>,
+        mut allocation_progress: Option<&mut OriginalEnrollmentAllocationProgress>,
     ) -> Result<RotatedOwnedProfile, AuraError> {
+        generation.require_effects(self)?;
         tracing::info!(
             ?authority,
             new_threshold,
@@ -2849,12 +3237,12 @@ impl AuraEffectSystem {
         let new_epoch = current_epoch
             .checked_add(1)
             .ok_or_else(|| AuraError::invalid("signing epoch overflow"))?;
-        self.migrate_legacy_generation_live_slot(generation, *authority, new_epoch)
-            .await?;
         let profile = super::enrollment_generation_profile_location(authority, new_epoch);
         if self.secure_exists(&profile).await? {
             return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::AllocationAlreadyPublished,
+                HeldEnrollmentRegistrationError::AllocationAlreadyPublished {
+                    origin: EnrollmentAllocationConflict::ExistingLiveGeneration,
+                },
             ));
         }
         let original_birth = if let Some((owner, _)) = enrollment {
@@ -2869,6 +3257,10 @@ impl AuraEffectSystem {
                 "device_enrollment_generation_allocation_v1",
                 record.ceremony.to_string(),
             );
+            if let Some(progress) = allocation_progress.as_deref_mut() {
+                progress.original = Some(record.clone());
+                progress.immutable_write_started = true;
+            }
             if bytes.len() > 131_072 {
                 return Err(held_registration_error(
                     HeldEnrollmentRegistrationError::Binding,
@@ -2886,8 +3278,13 @@ impl AuraEffectSystem {
                 .await?;
             if immutable != aura_core::effects::secure::ImmutableSecureStoreOutcome::Created {
                 return Err(held_registration_error(
-                    HeldEnrollmentRegistrationError::AllocationAlreadyPublished,
+                    HeldEnrollmentRegistrationError::AllocationAlreadyPublished {
+                        origin: EnrollmentAllocationConflict::ImmutableAllocationAlreadyPresent,
+                    },
                 ));
+            }
+            if let Some(progress) = allocation_progress.as_deref_mut() {
+                progress.immutable_write_acknowledged = true;
             }
             let original = self
                 .secure_retrieve(&original_location, &[SecureStorageCapability::Read])
@@ -2896,6 +3293,10 @@ impl AuraEffectSystem {
                 return Err(held_registration_error(
                     HeldEnrollmentRegistrationError::Binding,
                 ));
+            }
+            if let Some(progress) = allocation_progress.as_deref_mut() {
+                progress.immutable_readback_acknowledged = true;
+                progress.live_write_started = true;
             }
             let created = self
                 .secure_create_mutable(
@@ -2912,6 +3313,9 @@ impl AuraEffectSystem {
                     "an enrollment already owns this pending generation",
                 ));
             }
+            if let Some(progress) = allocation_progress.as_deref_mut() {
+                progress.live_write_acknowledged = true;
+            }
             let mutable = self
                 .secure_retrieve(&profile, &[SecureStorageCapability::Read])
                 .await?;
@@ -2919,6 +3323,9 @@ impl AuraEffectSystem {
                 return Err(held_registration_error(
                     HeldEnrollmentRegistrationError::Binding,
                 ));
+            }
+            if let Some(progress) = allocation_progress {
+                progress.live_readback_acknowledged = true;
             }
             Some(OriginalEnrollmentAllocationAcknowledgment {
                 runtime_identity: self.crypto.lifetime_owner_identity(),
@@ -3026,6 +3433,7 @@ impl AuraEffectSystem {
         capability_type = UserTransferredEnrollmentSetup,
         family = "runtime_helper"
     )]
+    #[cfg(test)]
     pub(crate) async fn prepare_authenticated_enrollment_rotation<'a>(
         &'a self,
         setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
@@ -3037,7 +3445,39 @@ impl AuraEffectSystem {
             .authenticate_current_enrollment_roster(setup.statement().device)
             .await?;
         Ok(AuthenticatedEnrollmentRotationPlan {
-            effects: self,
+            effects: EnrollmentRuntimeOrigin::Borrowed(self),
+            setup_digest: setup.digest(),
+            baseline,
+            state,
+            participants,
+            threshold,
+            prestate,
+            generation,
+            tree,
+        })
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "authenticate_current_enrollment_roster", capability_type = UserTransferredEnrollmentSetup, family = "runtime_helper")]
+    pub(crate) async fn prepare_owned_authenticated_enrollment_rotation(
+        self: &Arc<Self>,
+        setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        tracker: &crate::runtime::services::ceremony_tracker::CeremonyTracker,
+    ) -> Result<AuthenticatedEnrollmentRotationPlan<'static>, AuraError> {
+        let generation = tracker
+            .retain_owned_enrollment_generation_decision(EnrollmentGenerationCustodyCapability {
+                effects: EnrollmentRuntimeOrigin::Owned(Arc::clone(self)),
+                _guard: EnrollmentGenerationGuard::Owned {
+                    _guard: Arc::clone(&self.enrollment_generation_gate)
+                        .lock_owned()
+                        .await,
+                },
+            })
+            .await?;
+        let tree = self.tree_handler.lock_owned_decision().await;
+        let (state, participants, threshold, prestate, baseline) = self
+            .authenticate_current_enrollment_roster(setup.statement().device)
+            .await?;
+        Ok(AuthenticatedEnrollmentRotationPlan {
+            effects: EnrollmentRuntimeOrigin::Owned(Arc::clone(self)),
             setup_digest: setup.digest(),
             baseline,
             state,
@@ -3176,11 +3616,11 @@ impl AuraEffectSystem {
         family = "runtime_helper"
     )]
     pub(crate) async fn prepare_pinned_enrollment_rotation<'a>(
-        &'a self,
+        &self,
         setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
         reserved: &crate::handlers::invitation::ReservedInvitationIssuance,
         ceremony: &aura_core::CeremonyId,
-        plan: AuthenticatedEnrollmentRotationPlan<'a>,
+        producer: &mut OriginalEnrollmentAllocationProducer<'a>,
     ) -> Result<
         (
             u64,
@@ -3190,6 +3630,10 @@ impl AuraEffectSystem {
         ),
         AuraError,
     > {
+        let plan = producer
+            .plan
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original allocation plan already transferred"))?;
         plan.require_effects(self, setup)?;
         self.require_original_enrollment_reservation(reserved)
             .await?;
@@ -3249,10 +3693,9 @@ impl AuraEffectSystem {
             prestate,
             setup_digest: setup.digest(),
             baseline: Some(plan.baseline),
-            proved_legacy_response_policy: None,
-            response_policy: Some(
-                EnrollmentResponsePolicy::select_for_original_signing_policy(threshold, total)?,
-            ),
+            response_policy: EnrollmentResponsePolicy::select_for_original_signing_policy(
+                threshold, total,
+            )?,
             threshold,
             participants: participants.to_vec(),
         };
@@ -3262,8 +3705,9 @@ impl AuraEffectSystem {
                 threshold,
                 total,
                 participants,
-                Some((&profile_owner, &plan)),
+                Some((&profile_owner, plan)),
                 plan.generation.generation(),
+                Some(&mut producer.progress),
             )
             .await?;
         let RotatedOwnedProfile::Enrollment {
@@ -3286,18 +3730,45 @@ impl AuraEffectSystem {
             ));
         }
         profile_owner.pending_epoch = epoch;
+        let plan = producer
+            .plan
+            .take()
+            .ok_or_else(|| AuraError::invalid("original allocation plan already transferred"))?;
         Ok((
             epoch,
             packages,
             public,
             EnrollmentGenerationReservation {
-                effects: self,
+                effects: plan.effects,
                 owner: profile_owner,
                 _owner: plan.generation,
                 _tree: plan.tree,
                 original_birth: Some(*original_birth),
             },
         ))
+    }
+
+    /// Retain the same original reservation while capturing its authenticated
+    /// inventory. The borrowed producer performs all validation before the
+    /// projection becomes independently retained by signing material.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentGenerationReservation",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn capture_owned_enrollment_final_inventory(
+        &self,
+        reservation: Arc<EnrollmentGenerationReservation<'static>>,
+        baseline: &[aura_core::AttestedOp],
+    ) -> Result<EnrollmentFinalVerifierInventoryCapability<'static, 'static>, AuraError> {
+        let inventory = self
+            .capture_enrollment_final_inventory(reservation.as_ref(), baseline)
+            .await?
+            .inventory;
+        Ok(EnrollmentFinalVerifierInventoryCapability {
+            reservation: EnrollmentFinalReservationOrigin::Owned(reservation),
+            inventory,
+        })
     }
 
     /// Capture the active root package from the original physical issuer while
@@ -3415,7 +3886,7 @@ impl AuraEffectSystem {
             ));
         }
         Ok(EnrollmentFinalVerifierInventoryCapability {
-            reservation,
+            reservation: EnrollmentFinalReservationOrigin::Borrowed(reservation),
             inventory: vec![
                 aura_invitation::enrollment_manifest::EnrollmentParentVerifier {
                     epoch,
@@ -4803,7 +5274,15 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
         let owner = self.acquire_enrollment_generation_custody().await;
         match self
-            .rotate_keys_for_owned_profile(authority, threshold, total, participants, None, &owner)
+            .rotate_keys_for_owned_profile(
+                authority,
+                threshold,
+                total,
+                participants,
+                None,
+                &owner,
+                None,
+            )
             .await?
         {
             RotatedOwnedProfile::Ordinary(material) => {
@@ -4971,7 +5450,7 @@ impl AuraEffectSystem {
         package: &[u8],
     ) -> Result<Vec<u8>, AuraError> {
         plan.generation.require_effects(self)?;
-        if !std::ptr::eq(plan.effects, self)
+        if !std::ptr::eq(plan.effects.effects(), self)
             || owner.authority != self.authority_id
             || owner.prestate != plan.prestate
             || owner.setup_digest != plan.setup_digest
@@ -4998,6 +5477,10 @@ impl AuraEffectSystem {
                 },
                 wrap.as_ref(),
             )
+            .await?;
+        drop(custody);
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        self.await_original_allocation_birth_for_test(&allocation)
             .await?;
         let nonce = self.random_bytes(12).await;
         let aad = serde_json::to_vec(&(
@@ -5278,7 +5761,7 @@ impl OwnedSecretBirthCapability<'_, '_> {
     pub(in crate::runtime) fn scope_bytes(&self) -> Result<Vec<u8>, AuraError> {
         match &self.origin {
             OriginalSecretBirthOrigin::Plan(plan) => {
-                plan.generation.require_effects(plan.effects)?;
+                plan.generation.require_effects(plan.effects.effects())?;
             }
             OriginalSecretBirthOrigin::Confirmed(owner) => {
                 let expected = EnrollmentSecretScope::confirmed(owner.confirmed())?;
@@ -5332,7 +5815,7 @@ impl OwnedSecretNegativeCapability<'_, '_> {
                 }
             }
             OriginalNegativeSecretOwner::Orphan(generation) => {
-                if generation.effects.authority_id != self.original.authority {
+                if generation.effects.effects().authority_id != self.original.authority {
                     return Err(held_registration_error(
                         HeldEnrollmentRegistrationError::EffectIdentity,
                     ));
@@ -5590,7 +6073,12 @@ mod required_orphan_fact_tests {
             .expect("authenticated current roster");
         let prestate = plan.prestate();
         let (epoch, _packages, _public, allocation) = effects
-            .prepare_pinned_enrollment_rotation(&setup, &reserved, &ceremony, plan)
+            .prepare_pinned_enrollment_rotation(
+                &setup,
+                &reserved,
+                &ceremony,
+                &mut OriginalEnrollmentAllocationProducer::from_original(plan),
+            )
             .await
             .unwrap();
         let raw_registration = issuer.runtime().ceremony_tracker().register(
@@ -5955,7 +6443,12 @@ mod authenticated_roster_tests {
             let ceremony =
                 aura_core::CeremonyId::new(format!("roster-held:{}", reserved.invitation_id()));
             let (_, _, _, generation) = effects
-                .prepare_pinned_enrollment_rotation(&pin, &reserved, &ceremony, plan)
+                .prepare_pinned_enrollment_rotation(
+                    &pin,
+                    &reserved,
+                    &ceremony,
+                    &mut OriginalEnrollmentAllocationProducer::from_original(plan),
+                )
                 .await
                 .expect("consume held plan into generation reservation");
             let mutation = effects.apply_attested_op(aura_core::AttestedOp {
@@ -6154,7 +6647,14 @@ mod required_active_signer_fault_tests {
                 .expect("actual runtime"),
         );
         AgentRuntimeBridge::new(agent.clone())
-            .bootstrap_signing_keys()
+            .bootstrap_signing_keys(
+                crate::runtime::services::RuntimeServiceContext::test_original(
+                    agent.runtime().tasks(),
+                    agent.runtime().effects(),
+                )
+                .await
+                .startup_window(),
+            )
             .await
             .expect("actual physical bootstrap");
         agent
@@ -6282,104 +6782,56 @@ mod required_active_signer_fault_tests {
 #[cfg(test)]
 mod registered_generation_actual_owner_tests {
     use super::*;
-    use std::error::Error;
 
     #[tokio::test]
     async fn equal_ids_cannot_handoff_registration_to_another_runtime() {
         let original_clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
-        let (issuer, _invitee, _invitation, start, _acceptance, _verified) =
-            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock(
-                "registration-actual-owner",
-                original_clock,
-            )
-            .await;
+        let ((issuer, invitee, invitation, _start, _, _), original) = Box::pin(crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+        "registration-actual-owner", Some(original_clock), None,
+    )).await;
         let effects = issuer.runtime().effects();
         let tracker = issuer.runtime().ceremony_tracker();
-        let state = tracker
-            .get(&start.ceremony_id)
-            .await
-            .expect("original registered state");
-        let registered = effects
-            .resume_owned_enrollment_registration(
-                tracker,
-                state.initiator_id,
-                state.new_epoch,
-                &state.ceremony_id,
-                state.prestate_hash,
-            )
-            .await
-            .expect("actual retained registration");
-        registered
-            .require_effects(effects.as_ref())
-            .expect("original physical effect owner");
+        let original_disposal = original
+            .observe_original_running_owner_for_test(effects.as_ref(), tracker)
+            .expect("genuine original running continuation");
         let detached =
             crate::runtime::services::ceremony_tracker::CeremonyTracker::new_with_storage(
                 effects.clone(),
             );
-        let detached_runner =
-            crate::runtime::services::ceremony_runner::CeremonyRunner::new(detached);
-        let error = match detached_runner
-            .registered_enrollment_generation_window(&registered)
-            .await
-        {
-            Ok(_) => panic!("same effects do not authorize an unrelated tracker owner"),
-            Err(error) => error,
-        };
-        assert!(matches!(
-            std::error::Error::source(&error)
-                .and_then(|cause| cause.downcast_ref::<HeldEnrollmentRegistrationError>()),
-            Some(HeldEnrollmentRegistrationError::EffectIdentity)
-        ));
-        // A second service facade shares the real tracker execution lease.
-        let original_service = issuer.invitations().expect("original service");
-        // Only enrollment tasks matter: facade construction may start unrelated
-        // one-shot work (peer hint restore).
-        let enrollment_tasks = |tasks: Vec<String>| {
-            let mut tasks: Vec<String> = tasks
+        let error = original
+            .observe_original_running_owner_for_test(effects.as_ref(), &detached)
+            .err()
+            .expect("same effects cannot authorize unrelated tracker");
+        crate::runtime::services::ceremony_tracker::assert_original_running_owner_refusal_for_test(
+            &error, false,
+        );
+        let enrollment_tasks = || {
+            let mut tasks: Vec<_> = issuer
+                .runtime()
+                .tasks()
+                .active_tasks()
                 .into_iter()
-                .filter(|task| task.contains("device_enrollment"))
+                .filter(|task| task.contains("enrollment"))
                 .collect();
             tasks.sort();
             tasks
         };
-        let before = enrollment_tasks(issuer.runtime().tasks().active_tasks());
+        let before = enrollment_tasks();
+        let repeated = original
+            .observe_original_running_owner_for_test(effects.as_ref(), tracker)
+            .expect("same original observer reentry");
         assert_eq!(
-            original_service
-                .start_registered_device_enrollment(&registered)
-                .await
-                .expect("existing actual owner"),
-            crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::AlreadyRunning
+            enrollment_tasks(),
+            before,
+            "retained continuation observation cannot admit duplicate tasks"
         );
-        let second_service =
-            crate::handlers::invitation_service::InvitationServiceApi::new_with_runner(
-                effects.clone(),
-                issuer.context().clone(),
-                issuer.ceremony_runner().await,
-                issuer.runtime().tasks(),
-            )
-            .expect("second facade over same runtime");
-        assert_eq!(
-            second_service
-                .start_registered_device_enrollment(&registered)
-                .await
-                .expect("shared actual owner"),
-            crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::AlreadyRunning
-        );
-        let after = enrollment_tasks(issuer.runtime().tasks().active_tasks());
-        assert_eq!(after, before, "no parallel task admission");
-        assert!(tracker
-            .get(&state.ceremony_id)
-            .await
-            .expect("original remains live")
-            .terminal_outcome
-            .is_none());
         let original_config = effects.config().clone();
         let foreign_config = crate::core::AgentConfig {
             storage: crate::core::config::StorageConfig {
                 base_path: tempfile::Builder::new()
                     .prefix("aura-foreign-registered-owner-")
                     .tempdir()
-                    .expect("foreign profile")
+                    .unwrap()
                     .keep(),
                 ..original_config.storage.clone()
             },
@@ -6395,36 +6847,77 @@ mod registered_generation_actual_owner_tests {
             .with_config(foreign_config)
             .build(&context)
             .await
-            .expect("actual foreign runtime with equal IDs");
+            .unwrap();
         let foreign = crate::AuraAgent::new(runtime, issuer.authority_id());
         assert_eq!(foreign.authority_id(), issuer.authority_id());
         assert_eq!(foreign.context().device_id(), issuer.context().device_id());
-        let service = foreign.invitations().expect("foreign service owner");
-        let error = service
-            .start_registered_device_enrollment(&registered)
+        let error = original
+            .observe_original_running_owner_for_test(
+                foreign.runtime().effects().as_ref(),
+                foreign.runtime().ceremony_tracker(),
+            )
+            .err()
+            .expect("equal identifiers do not confer original runtime custody");
+        crate::runtime::services::ceremony_tracker::assert_original_running_owner_refusal_for_test(
+            &error, true,
+        );
+        let admitted = invitee
+            .invitations()
+            .unwrap()
+            .take_original_enrollment_execution(&invitation.invitation_id)
             .await
-            .expect_err("equal identifiers do not confer original runtime custody");
-        let mut source: Option<&(dyn Error + 'static)> = Some(&error);
-        let mut found = false;
-        while let Some(cause) = source {
-            if matches!(
-                cause.downcast_ref::<HeldEnrollmentRegistrationError>(),
-                Some(HeldEnrollmentRegistrationError::EffectIdentity)
-            ) {
-                found = true;
+            .unwrap();
+        let epoch = admitted.origin_observation().manifest().pending_epoch;
+        invitee
+            .invitations()
+            .unwrap()
+            .return_original_enrollment_execution_for_test(admitted)
+            .await
+            .unwrap();
+        assert!(
+            !foreign
+                .runtime()
+                .effects()
+                .secure_exists(&super::super::enrollment_generation_profile_location(
+                    &issuer.authority_id(),
+                    epoch
+                ))
+                .await
+                .unwrap(),
+            "foreign profile remains untouched"
+        );
+        invitee
+            .invitations()
+            .unwrap()
+            .accept(&invitation.invitation_id)
+            .await
+            .expect("same original protocol positive completion");
+        let actual = original_disposal.await_disposal().await;
+        original_disposal.require_positive(&actual).unwrap();
+        original
+            .require_original_issuer_disposal_for_test(&actual)
+            .unwrap();
+        let repeated_actual = repeated.await_disposal().await;
+        repeated.require_positive(&repeated_actual).unwrap();
+        original
+            .require_original_issuer_disposal_for_test(&repeated_actual)
+            .unwrap();
+        for agent in [issuer, invitee, Arc::new(foreign)] {
+            match agent
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+            {
+                Ok(()) => {}
+                Err(crate::task_registry::TaskSupervisionError::TaskFailed { source, .. }) => {
+                    eprintln!("actual original-owner regression domain failure: {source:?}");
+                }
+                Err(source) => {
+                    panic!("actual original-owner regression resource cleanup failed: {source:?}")
+                }
             }
-            source = cause.source();
         }
-        assert!(found, "actual owner mismatch remains structural");
-        assert!(!foreign
-            .runtime()
-            .effects()
-            .secure_exists(&super::super::enrollment_generation_profile_location(
-                &issuer.authority_id(),
-                state.new_epoch
-            ),)
-            .await
-            .expect("foreign profile observation"));
     }
 }
 
@@ -6541,7 +7034,7 @@ mod enrollment_generation_history_tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    async fn protected_legacy_profile_migration_preserves_registered_first_decision() {
+    async fn retired_generation_namespace_cannot_restore_current_registered_owner() {
         Box::pin(async {
             let (issuer, _invitee, _invitation, start, _acceptance, _witness) =
                 crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
@@ -6552,9 +7045,10 @@ mod enrollment_generation_history_tests {
             let epoch = start.pending_epoch.value();
             let live =
                 super::super::enrollment_generation_profile_location(&issuer.authority_id(), epoch);
-            let legacy = super::super::legacy_enrollment_generation_profile_location(
-                &issuer.authority_id(),
-                epoch,
+            let legacy = SecureStorageLocation::with_sub_key(
+                "device_enrollment_generation_profile_v1",
+                issuer.authority_id().to_string(),
+                epoch.to_string(),
             );
             let canonical = effects
                 .read_owned_enrollment_generation_profile(issuer.authority_id(), epoch)
@@ -6585,25 +7079,21 @@ mod enrollment_generation_history_tests {
                 .secure_delete(&live, &[SecureStorageCapability::Delete])
                 .await
                 .unwrap();
-            assert!(
-                effects
-                    .has_live_enrollment_generation(issuer.authority_id(), epoch)
-                    .await
-                    .unwrap(),
-                "legacy custody continues fencing generic activation before migration"
-            );
-            let custody = effects.acquire_enrollment_generation_custody().await;
-            effects
-                .migrate_legacy_generation_live_slot(&custody, issuer.authority_id(), epoch)
+            assert!(!effects
+                .has_live_enrollment_generation(issuer.authority_id(), epoch)
                 .await
-                .unwrap();
-            assert_eq!(
-                effects
-                    .read_owned_enrollment_generation_profile(issuer.authority_id(), epoch)
-                    .await
-                    .unwrap(),
-                canonical
-            );
+                .unwrap());
+            let missing = effects
+                .read_owned_enrollment_generation_profile(issuer.authority_id(), epoch)
+                .await
+                .expect_err("retired namespace cannot restore current owner");
+            let source = std::error::Error::source(&missing)
+                .and_then(|source| {
+                    source.downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>()
+                })
+                .expect("current slot absence retains native source");
+            assert_eq!(source.location(), &live);
+            assert!(!effects.secure_exists(&live).await.unwrap());
             assert_eq!(
                 effects
                     .secure_retrieve(&legacy, &[SecureStorageCapability::Read])
@@ -6645,7 +7135,6 @@ mod enrollment_generation_history_tests {
                 .secure_store(&live, &canonical, &[SecureStorageCapability::Write])
                 .await
                 .unwrap();
-            drop(custody);
         })
         .await;
     }
@@ -6699,10 +7188,12 @@ mod enrollment_generation_history_tests {
                 registered,
                 "immutable registration first decision prevents a mutable phase downgrade"
             );
+            // Close only the fact publisher. The original prepared issuer is a
+            // required task: cancelling the whole runtime here force-aborts its
+            // custody before the negative retirement below can acknowledge it.
             issuer
                 .runtime()
-                .tasks()
-                .shutdown_with_timeout(std::time::Duration::from_secs(2))
+                .stop_original_reactive_pipeline_for_test()
                 .await
                 .unwrap();
             finish_original_retirement_after_closed_fact_publisher(&issuer, &first.ceremony_id)
@@ -6757,7 +7248,12 @@ mod enrollment_generation_history_tests {
                 .await
                 .unwrap();
             let (epoch, _, _, generation) = effects
-                .prepare_pinned_enrollment_rotation(&setup, &reserved, &second_id, plan)
+                .prepare_pinned_enrollment_rotation(
+                    &setup,
+                    &reserved,
+                    &second_id,
+                    &mut OriginalEnrollmentAllocationProducer::from_original(plan),
+                )
                 .await
                 .expect("a genuinely fresh owned allocation can reuse the retired pending epoch");
             assert_eq!(epoch, first.pending_epoch.value());
@@ -6871,90 +7367,98 @@ fn original_response_quorum_is_distinct_from_signing_policy() {
 #[cfg(all(test, unix))]
 mod missing_response_policy_history_tests {
     use super::*;
-    fn old_owner_bytes(bytes: &[u8]) -> Vec<u8> {
-        let mut old: serde_json::Value = serde_json::from_slice(bytes)
-            .expect("decode original owner for historical schema fixture");
-        assert!(old
-            .as_object_mut()
-            .expect("original owner must encode as an object")
-            .remove("response_policy")
-            .is_some());
-        let owner: StoredEnrollmentGenerationProfile =
-            serde_json::from_value(old).expect("decode historical owner without response policy");
-        assert!(owner.response_policy.is_none());
-        assert!(owner.proved_legacy_response_policy.is_none());
-        serde_json::to_vec(&owner).expect("encode original historical owner bytes")
-    }
-    async fn replace_with_historical_bytes(
-        effects: &AuraEffectSystem,
-        key: &SecureStorageLocation,
-        bytes: &[u8],
-    ) {
-        // Only selected-provider backing fault supports historical layout fixtures;
-        // no generic immutable overwrite/delete capability is introduced.
-        assert!(effects
-            .fault_remove_secure_record_for_test(key)
-            .await
-            .expect("remove selected provider record for historical schema fault"));
-        effects
-            .secure_store_immutable(
-                key,
-                bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await
-            .expect("retain exact historical fixture bytes immutably");
-    }
-    #[tokio::test]
-    async fn truly_old_missing_response_policy_uses_protected_original_registration_and_preserves_bytes(
-    ) {
+
+    #[tokio::test(start_paused = true)]
+    async fn missing_response_policy_refuses_current_owner_without_supplementation() {
         Box::pin(async {
+            // The policy fixture needs ordered physical observations, including
+            // genuine timeout/rollback errors. A shared quiescent provider keeps
+            // its two runtimes on one deterministic clock instead of depending
+            // on host wall-clock millisecond ordering.
+            let clock = aura_testkit::time::QuiescentClock::start();
             let (issuer, _invitee, _invitation, start, _acceptance, _response) =
-                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture("old-response-history").await;
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock(
+                    "missing-current-response-policy", clock.provider(),
+                )
+                .await;
             let effects = issuer.runtime().effects();
             let epoch = start.pending_epoch.value();
-            let live = super::super::enrollment_generation_profile_location(&issuer.authority_id(), epoch);
-            let allocated = SecureStorageLocation::new("device_enrollment_generation_allocation_v1", start.ceremony_id.to_string());
+            let live =
+                super::super::enrollment_generation_profile_location(&issuer.authority_id(), epoch);
+            let allocated = SecureStorageLocation::new(
+                "device_enrollment_generation_allocation_v1",
+                start.ceremony_id.to_string(),
+            );
             let registered = registration_history_location(&start.ceremony_id);
-            let old_allocated = old_owner_bytes(&effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"));
-            let old_registered = old_owner_bytes(&effects.secure_retrieve(&registered, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"));
-            replace_with_historical_bytes(effects.as_ref(), &allocated, &old_allocated).await;
-            replace_with_historical_bytes(effects.as_ref(), &registered, &old_registered).await;
-            let legacy = super::super::legacy_enrollment_generation_profile_location(&issuer.authority_id(), epoch);
-            effects.secure_store_immutable(&legacy, &old_registered, &[SecureStorageCapability::Read, SecureStorageCapability::Write]).await.expect("retain original historical generation bytes");
-            effects.secure_delete(&live, &[SecureStorageCapability::Delete]).await.expect("clear migration live slot for actual legacy restore");
-            assert!(effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.is_err());
-            let original = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(effects.as_ref(), &start.ceremony_id).await.expect("recover original protected enrollment registration");
-            let original_deadline = original.timeout_budget.deadline_at_ms();
-            let custody = effects.acquire_enrollment_generation_custody().await;
-            effects.migrate_legacy_generation_live_slot(&custody, issuer.authority_id(), epoch).await.expect("migrate actual original legacy generation");
-            let restored = effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.expect("read restored original generation");
-            assert_eq!(restored, old_registered);
-            let mut owner: StoredEnrollmentGenerationProfile = serde_json::from_slice(&restored).expect("decode restored historical owner");
-            effects.hydrate_legacy_response_policy(&mut owner).await.expect("hydrate response policy from original protected evidence");
-            owner.response_policy().expect("original evidence supplies exact response policy").require_exact(original.threshold_k, original.total_n).expect("hydrated policy matches original signing roster");
-            let detached: StoredEnrollmentGenerationProfile = serde_json::from_slice(&serde_json::to_vec(&owner).expect("encode detached historical owner")).expect("decode detached historical owner without process proof");
-            assert!(detached.proved_legacy_response_policy.is_none());
-            assert!(detached.response_policy().is_err());
-            assert_eq!(effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_allocated);
-            assert_eq!(effects.secure_retrieve(&registered, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_registered);
-            assert_eq!(effects.secure_retrieve(&legacy, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_registered);
-            let after = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(effects.as_ref(), &start.ceremony_id).await.expect("recover original protected enrollment registration");
-            assert_eq!(after.timeout_budget.deadline_at_ms(), original_deadline);
-            let proof = legacy_response_policy_location(&start.ceremony_id);
-            assert!(effects.fault_remove_secure_record_for_test(&proof).await.expect("remove original policy proof for required missing-record fault"));
-            let missing = effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.expect_err("missing original policy proof must refuse generation restoration");
-            assert!(matches!(missing, AuraError::Storage { .. }));
-            let source = std::error::Error::source(&missing).expect("missing policy proof retains native source")
-                .downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>().expect("native source identifies original missing secure record");
-            assert_eq!(source.location(), &proof);
-
-            assert_eq!(effects.secure_retrieve(&live, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_registered);
-            assert_eq!(effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_allocated);
-        }).await;
+            let allocated_before = effects
+                .secure_retrieve(&allocated, &[SecureStorageCapability::Read])
+                .await
+                .unwrap();
+            let registered_before = effects
+                .secure_retrieve(&registered, &[SecureStorageCapability::Read])
+                .await
+                .unwrap();
+            let canonical = effects
+                .read_owned_enrollment_generation_profile(issuer.authority_id(), epoch)
+                .await
+                .unwrap();
+            let mut malformed: serde_json::Value = serde_json::from_slice(&canonical).unwrap();
+            assert!(malformed
+                .as_object_mut()
+                .unwrap()
+                .remove("response_policy")
+                .is_some());
+            let malformed = serde_json::to_vec(&malformed).unwrap();
+            assert!(
+                serde_json::from_slice::<StoredEnrollmentGenerationProfile>(&malformed).is_err()
+            );
+            effects
+                .secure_store(&live, &malformed, &[SecureStorageCapability::Write])
+                .await
+                .unwrap();
+            let failure = effects
+                .read_owned_enrollment_generation_profile(issuer.authority_id(), epoch)
+                .await
+                .expect_err("missing mandatory policy cannot be hydrated from history");
+            assert!(matches!(
+                std::error::Error::source(&failure)
+                    .and_then(|source| source.downcast_ref::<EnrollmentGenerationHistoryError>()),
+                Some(EnrollmentGenerationHistoryError::Codec(_))
+            ));
+            assert_eq!(
+                effects
+                    .secure_retrieve(&live, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                malformed
+            );
+            assert_eq!(
+                effects
+                    .secure_retrieve(&allocated, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                allocated_before
+            );
+            assert_eq!(
+                effects
+                    .secure_retrieve(&registered, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                registered_before
+            );
+            effects
+                .secure_store(&live, &canonical, &[SecureStorageCapability::Write])
+                .await
+                .unwrap();
+            assert_eq!(
+                effects
+                    .read_owned_enrollment_generation_profile(issuer.authority_id(), epoch)
+                    .await
+                    .unwrap(),
+                canonical
+            );
+        })
+        .await;
     }
 }
 
@@ -7074,6 +7578,196 @@ async fn owned_enrollment_reader_rejects_equal_scope_on_another_runtime_registry
     receiver.expect("independent invitee task teardown");
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) struct OriginalAllocationBirthGate {
+    reached: tokio::sync::oneshot::Sender<
+        aura_core::effects::secret_lifetime::SecretAllocationReference,
+    >,
+    resume: tokio::sync::oneshot::Receiver<()>,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) struct OriginalRegistrationReadbackGate {
+    committed: tokio::sync::oneshot::Sender<()>,
+    continue_readback: tokio::sync::oneshot::Receiver<()>,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl AuraEffectSystem {
+    pub(crate) fn hold_original_allocation_birth_for_test(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<
+                aura_core::effects::secret_lifetime::SecretAllocationReference,
+            >,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let mut slot = self.original_allocation_birth_gate.lock();
+        if slot.is_some() {
+            return Err(AuraError::invalid(
+                "original allocation birth gate already installed",
+            ));
+        }
+        let (reached, receiver) = tokio::sync::oneshot::channel();
+        let (resume, continuation) = tokio::sync::oneshot::channel();
+        *slot = Some(OriginalAllocationBirthGate {
+            reached,
+            resume: continuation,
+        });
+        Ok((receiver, resume))
+    }
+    async fn await_original_allocation_birth_for_test(
+        &self,
+        reference: &aura_core::effects::secret_lifetime::SecretAllocationReference,
+    ) -> Result<(), AuraError> {
+        let gate = self.original_allocation_birth_gate.lock().take();
+        if let Some(gate) = gate {
+            gate.reached
+                .send(reference.clone())
+                .map_err(|_| AuraError::invalid("original birth observer lost"))?;
+            gate.resume.await.map_err(|source| AuraError::Internal {
+                message: "original birth gate interrupted".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        }
+        Ok(())
+    }
+    pub(crate) async fn observe_original_lifetime_for_test(
+        &self,
+        reference: &aura_core::effects::secret_lifetime::SecretAllocationReference,
+    ) -> Result<
+        (
+            aura_core::effects::secret_lifetime::SecretLifetimeState,
+            bool,
+        ),
+        AuraError,
+    > {
+        let inventory = self.crypto.allocation_lifetimes.lock().await;
+        inventory.observe_original_for_test(reference).await
+    }
+    pub(crate) fn hold_original_allocation_prewrite_for_test(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let mut gate = self.original_allocation_prewrite_gate.lock();
+        if gate.is_some() {
+            return Err(AuraError::invalid(
+                "original allocation prewrite gate already installed",
+            ));
+        }
+        let (committed, observed) = tokio::sync::oneshot::channel();
+        let (continue_readback, held) = tokio::sync::oneshot::channel();
+        *gate = Some(OriginalRegistrationReadbackGate {
+            committed,
+            continue_readback: held,
+        });
+        Ok((observed, continue_readback))
+    }
+    pub(crate) async fn await_original_allocation_prewrite_for_test(
+        &self,
+    ) -> Result<(), AuraError> {
+        let gate = self.original_allocation_prewrite_gate.lock().take();
+        if let Some(gate) = gate {
+            gate.committed
+                .send(())
+                .map_err(|_| AuraError::invalid("original allocation prewrite observer lost"))?;
+            gate.continue_readback
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "original allocation prewrite interrupted".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+        }
+        Ok(())
+    }
+    pub(crate) fn hold_original_allocation_commit_for_test(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let mut original = self.original_allocation_commit_gate.lock();
+        if original.is_some() {
+            return Err(AuraError::invalid(
+                "original allocation commit gate already installed",
+            ));
+        }
+        let (committed, observed) = tokio::sync::oneshot::channel();
+        let (continue_readback, held) = tokio::sync::oneshot::channel();
+        *original = Some(OriginalRegistrationReadbackGate {
+            committed,
+            continue_readback: held,
+        });
+        Ok((observed, continue_readback))
+    }
+    pub(super) async fn await_original_allocation_commit_for_test(&self) -> Result<(), AuraError> {
+        let original = self.original_allocation_commit_gate.lock().take();
+        if let Some(original) = original {
+            original
+                .committed
+                .send(())
+                .map_err(|_| AuraError::invalid("original allocation commit observer lost"))?;
+            original
+                .continue_readback
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "original allocation result delivery interrupted".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+        }
+        Ok(())
+    }
+    pub(crate) fn hold_original_registration_readback_for_test(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let mut original = self.original_registration_readback_gate.lock();
+        if original.is_some() {
+            return Err(AuraError::invalid(
+                "original registration readback gate already installed",
+            ));
+        }
+        let (committed, observed) = tokio::sync::oneshot::channel();
+        let (continue_readback, held) = tokio::sync::oneshot::channel();
+        *original = Some(OriginalRegistrationReadbackGate {
+            committed,
+            continue_readback: held,
+        });
+        Ok((observed, continue_readback))
+    }
+    async fn await_original_registration_readback_for_test(&self) -> Result<(), AuraError> {
+        let original = self.original_registration_readback_gate.lock().take();
+        if let Some(original) = original {
+            original
+                .committed
+                .send(())
+                .map_err(|_| AuraError::invalid("original registration commit observer lost"))?;
+            original
+                .continue_readback
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "original registration readback was interrupted".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 static REGISTRATION_SEAL_FAULTS: std::sync::LazyLock<
     tokio::sync::Mutex<std::collections::BTreeSet<usize>>,
@@ -7105,7 +7799,7 @@ impl AuraEffectSystem {
 // Staged inside runtime/effects/crypto.rs, where the protected verifier and
 // authenticated history validators remain private. No raw caller tree DTO.
 pub(crate) struct ApprovedEnrollmentTreeCustody<'runtime> {
-    effects: &'runtime AuraEffectSystem,
+    effects: EnrollmentRuntimeOrigin<'runtime>,
     generation: EnrollmentGenerationCustodyCapability<'runtime>,
     _tree: aura_protocol::handlers::tree::TreeDecisionLease<'runtime>,
     _archive: Option<
@@ -7114,8 +7808,145 @@ pub(crate) struct ApprovedEnrollmentTreeCustody<'runtime> {
         >,
     >,
     inventory: aura_invitation::enrollment_manifest::EnrollmentParentVerifier,
+    baseline: Vec<aura_core::AttestedOp>,
 }
 impl ApprovedEnrollmentTreeCustody<'_> {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "ApprovedEnrollmentTreeCustody", receiver_type = ApprovedEnrollmentTreeCustody, family = "runtime_helper")]
+    pub(crate) async fn install_original_peer_commit(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        proposal: &aura_sync::protocols::device_epoch_rotation::DeviceEpochProposal,
+        commit: &aura_sync::protocols::device_epoch_rotation::DeviceEpochCommit,
+    ) -> Result<(), AuraError> {
+        use aura_signature::SecurityTranscript;
+        use aura_sync::protocols::device_epoch_rotation::*;
+        self.require_manifest(approval.effects().as_ref(), approval.manifest())?;
+        let DeviceEpochProposalPurpose::Enrollment {
+            manifest_digest,
+            enrolling_device_id,
+        } = proposal.purpose
+        else {
+            return Err(AuraError::permission_denied(
+                "peer commit requires enrollment purpose",
+            ));
+        };
+        if manifest_digest
+            != aura_core::Hash32::new(aura_core::hash::hash(
+                &approval
+                    .manifest()
+                    .required_transcript_bytes()
+                    .map_err(|source| {
+                        AuraError::crypto_with_source(
+                            "original peer manifest transcript",
+                            Arc::new(source),
+                        )
+                    })?,
+            ))
+            || proposal.subject_authority != approval.manifest().subject
+            || commit.ceremony_id != proposal.ceremony_id
+            || commit.new_epoch != proposal.pending_epoch
+            || commit.proposal_hash != device_epoch_proposal_hash(proposal)?
+            || commit.attested_leaf_op_hash != device_epoch_commit_attested_op_hash(commit)?
+        {
+            return Err(AuraError::permission_denied(
+                "original peer commit scope mismatch",
+            ));
+        }
+        let key = aura_core::TrustedPublicKey::active(
+            aura_core::TrustedKeyDomain::AuthorityThreshold,
+            Some(self.inventory.epoch),
+            self.inventory.public_key_package.clone(),
+            aura_core::Hash32::from_bytes(&self.inventory.public_key_package),
+        );
+        if !verify_device_epoch_authority_signature(
+            approval.effects().as_ref(),
+            proposal.subject_authority,
+            "aura.sync.device_epoch_rotation.enrollment_commit.v2",
+            &DeviceEnrollmentEpochCommitTranscript::from_commit(commit)?,
+            &commit.authority_signature,
+            &key,
+            self.inventory.epoch,
+        )
+        .await?
+        {
+            return Err(AuraError::permission_denied(
+                "original peer commit signature refused",
+            ));
+        }
+        let leaf = commit
+            .attested_leaf_op
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("peer commit signed leaf missing"))?;
+        let fence = commit
+            .attested_epoch_op
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("peer commit signed fence missing"))?;
+        let before = aura_journal::commitment_tree::reduce(&self.baseline).map_err(|source| {
+            AuraError::crypto_with_source("reduce original peer signed history", Arc::new(source))
+        })?;
+        if leaf.op.parent_epoch != before.epoch
+            || leaf.op.parent_commitment != before.root_commitment
+        {
+            return Err(AuraError::permission_denied(
+                "peer leaf does not extend original baseline",
+            ));
+        }
+        let aura_core::TreeOpKind::AddLeaf { leaf: added, .. } = &leaf.op.op else {
+            return Err(AuraError::invalid("peer commit is not AddLeaf"));
+        };
+        if added.device_id != enrolling_device_id || added.role != aura_core::LeafRole::Device {
+            return Err(AuraError::permission_denied(
+                "peer commit enrolling leaf mismatch",
+            ));
+        }
+        let mut candidate = self.baseline.clone();
+        candidate.push(leaf.clone());
+        let after_leaf = aura_journal::commitment_tree::reduce(&candidate).map_err(|source| {
+            AuraError::crypto_with_source("reduce original peer signed history", Arc::new(source))
+        })?;
+        if fence.op.parent_epoch != after_leaf.epoch
+            || fence.op.parent_commitment != after_leaf.root_commitment
+            || !matches!(&fence.op.op, aura_core::TreeOpKind::RotateEpoch { affected } if affected == &vec![aura_core::NodeIndex(0)])
+        {
+            return Err(AuraError::permission_denied(
+                "peer commit epoch fence mismatch",
+            ));
+        }
+        candidate.push(fence.clone());
+        let state = aura_journal::commitment_tree::reduce(&candidate).map_err(|source| {
+            AuraError::crypto_with_source("reduce original peer signed history", Arc::new(source))
+        })?;
+        if state.epoch.value() != proposal.pending_epoch {
+            return Err(AuraError::permission_denied(
+                "peer commit pending epoch mismatch",
+            ));
+        }
+        match &self._archive {
+            Some(archive) => {
+                approval
+                    .effects()
+                    .collect_imported_enrollment_parent_inventory(archive, &candidate)
+                    .await?;
+            }
+            None => {
+                approval
+                    .effects()
+                    .collect_enrollment_parent_inventory(&candidate)
+                    .await?;
+            }
+        }
+        self._tree
+            .install_authenticated_extension(self.baseline.len(), &candidate)
+            .await?;
+        Ok(())
+    }
+    pub(crate) fn original_baseline(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<&[aura_core::AttestedOp], AuraError> {
+        self.require_manifest(approval.effects().as_ref(), approval.manifest())?;
+        Ok(&self.baseline)
+    }
     pub(crate) fn generation(&self) -> &EnrollmentGenerationCustodyCapability<'_> {
         &self.generation
     }
@@ -7125,7 +7956,7 @@ impl ApprovedEnrollmentTreeCustody<'_> {
         manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     ) -> Result<(), AuraError> {
         self.generation.require_effects(effects)?;
-        if !std::ptr::eq(self.effects, effects)
+        if !std::ptr::eq(self.effects.effects(), effects)
             || manifest.subject != effects.authority_id
             || manifest.final_epoch != self.inventory.epoch
             || manifest.final_commitment != self.inventory.commitment
@@ -7151,26 +7982,27 @@ impl ApprovedEnrollmentTreeCustody<'_> {
     }
 }
 impl AuraEffectSystem {
-    /// Remote participant-local custody, acquired once after original local
-    /// explicit approval. It authorizes no provisional namespace substitution.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "RuntimeApprovedEnrollmentSigningIntent",
-        family = "authorizer"
-    )]
-    pub(crate) async fn acquire_approved_enrollment_tree_custody<'a>(
-        &'a self,
+    async fn authenticate_original_approved_inventory<'runtime>(
+        &self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
-    ) -> Result<ApprovedEnrollmentTreeCustody<'a>, AuraError> {
-        if !std::ptr::eq(self, approval.effects().as_ref())
-            || approval.manifest().subject != self.authority_id
+        generation: &EnrollmentGenerationCustodyCapability<'runtime>,
+        _tree: &aura_protocol::handlers::tree::TreeDecisionLease<'runtime>,
+        archive: &mut Option<crate::handlers::invitation::enrollment_parent_archive::ConfirmedParentInventoryCapability<'runtime>>,
+        origin: EnrollmentRuntimeOrigin<'runtime>,
+    ) -> Result<
+        (
+            aura_invitation::enrollment_manifest::EnrollmentParentVerifier,
+            Vec<aura_core::AttestedOp>,
+        ),
+        AuraError,
+    > {
+        generation.require_effects(self)?;
+        if !std::ptr::eq(self, origin.effects()) || !std::ptr::eq(self, approval.effects().as_ref())
         {
             return Err(final_inventory_error(
                 EnrollmentFinalInventoryError::OwnerBinding,
             ));
         }
-        let generation = self.acquire_enrollment_generation_custody().await;
-        let tree = self.lock_tree_decision().await;
         let ops = self
             .export_tree_ops()
             .await
@@ -7178,12 +8010,12 @@ impl AuraEffectSystem {
                 message: "read original approved native signing history".into(),
                 source: Some(Arc::new(source)),
             })?;
-        let archive =
-            crate::runtime::services::enrollment_profile::load_original_active_profile_archive(
-                self,
-            )
-            .await?;
-        let parents = match &archive {
+        if archive.is_none() {
+            crate::runtime::services::enrollment_profile::load_original_active_profile_archive_from_origin(
+                origin, archive,
+            ).await?;
+        }
+        let parents = match archive.as_ref() {
             Some(original) => {
                 self.collect_imported_enrollment_parent_inventory(original, &ops)
                     .await?
@@ -7279,12 +8111,8 @@ impl AuraEffectSystem {
                 EnrollmentFinalInventoryError::PolicyMismatch,
             ));
         }
-        let custody = ApprovedEnrollmentTreeCustody {
-            effects: self,
-            generation,
-            _tree: tree,
-            _archive: archive,
-            inventory: aura_invitation::enrollment_manifest::EnrollmentParentVerifier {
+        Ok((
+            aura_invitation::enrollment_manifest::EnrollmentParentVerifier {
                 epoch,
                 commitment: state.root_commitment,
                 signing_node: aura_core::tree::NodeIndex(0),
@@ -7294,11 +8122,139 @@ impl AuraEffectSystem {
                 public_key_package: package,
                 agreement: metadata.agreement_mode,
             },
-        };
-        custody.require_manifest(self, approval.manifest())?;
-        Ok(custody)
+            ops,
+        ))
     }
 }
+/// Actual original native acquisition lives in the registered participant
+/// holder before its first await. Partial acquisition is retained on Drop.
+pub(crate) struct OriginalApprovedNativeAdmission {
+    effects: Arc<AuraEffectSystem>,
+    approved_intent_digest: [u8; 32],
+    generation: Option<EnrollmentGenerationCustodyCapability<'static>>,
+    tree: Option<aura_protocol::handlers::tree::TreeDecisionLease<'static>>,
+    archive: Option<
+        crate::handlers::invitation::enrollment_parent_archive::ConfirmedParentInventoryCapability<
+            'static,
+        >,
+    >,
+    authenticated: Option<Arc<ApprovedEnrollmentTreeCustody<'static>>>,
+    first_failure: Option<AuraError>,
+}
+impl OriginalApprovedNativeAdmission {
+    pub(crate) fn from_original(
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Self {
+        Self {
+            effects: Arc::clone(approval.effects()),
+            approved_intent_digest: approval.canonical_intent_digest(),
+            generation: None,
+            tree: None,
+            archive: None,
+            authenticated: None,
+            first_failure: None,
+        }
+    }
+    pub(crate) async fn acquire_original(
+        &mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        let result = self.acquire_original_once(approval).await;
+        if let Err(source) = &result {
+            self.first_failure.get_or_insert_with(|| source.clone());
+        }
+        result
+    }
+    async fn acquire_original_once(
+        &mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        if let Some(source) = &self.first_failure {
+            return Err(source.clone());
+        }
+        if let Some(actual) = &self.authenticated {
+            return actual.require_manifest(self.effects.as_ref(), approval.manifest());
+        }
+        if self.generation.is_none() {
+            let guard = Arc::clone(&self.effects.enrollment_generation_gate)
+                .lock_owned()
+                .await;
+            self.generation = Some(EnrollmentGenerationCustodyCapability {
+                effects: EnrollmentRuntimeOrigin::Owned(Arc::clone(&self.effects)),
+                _guard: EnrollmentGenerationGuard::Owned { _guard: guard },
+            });
+        }
+        if self.tree.is_none() {
+            self.tree = Some(self.effects.tree_handler.lock_owned_decision().await);
+        }
+        let generation = self
+            .generation
+            .as_ref()
+            .ok_or_else(|| final_inventory_error(EnrollmentFinalInventoryError::OwnerBinding))?;
+        let tree = self
+            .tree
+            .as_ref()
+            .ok_or_else(|| final_inventory_error(EnrollmentFinalInventoryError::OwnerBinding))?;
+        let (inventory, baseline) = self
+            .effects
+            .authenticate_original_approved_inventory(
+                approval,
+                generation,
+                tree,
+                &mut self.archive,
+                EnrollmentRuntimeOrigin::Owned(Arc::clone(&self.effects)),
+            )
+            .await?;
+        // All subsequent moves are synchronous. A refused transition restores
+        // every actual guard; no await ever sees an empty retained owner.
+        match (self.generation.take(), self.tree.take()) {
+            (Some(generation), Some(tree)) => {
+                self.authenticated = Some(Arc::new(ApprovedEnrollmentTreeCustody {
+                    effects: EnrollmentRuntimeOrigin::Owned(Arc::clone(&self.effects)),
+                    generation,
+                    _tree: tree,
+                    _archive: self.archive.take(),
+                    inventory,
+                    baseline,
+                }));
+                Ok(())
+            }
+            (generation, tree) => {
+                self.generation = generation;
+                self.tree = tree;
+                Err(final_inventory_error(
+                    EnrollmentFinalInventoryError::OwnerBinding,
+                ))
+            }
+        }
+    }
+    pub(crate) fn original_authenticated(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<Arc<ApprovedEnrollmentTreeCustody<'static>>, AuraError> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        let actual = self
+            .authenticated
+            .as_ref()
+            .ok_or_else(|| final_inventory_error(EnrollmentFinalInventoryError::OwnerBinding))?;
+        actual.require_manifest(self.effects.as_ref(), approval.manifest())?;
+        Ok(Arc::clone(actual))
+    }
+}
+
 // Staged inside runtime/effects/crypto.rs. One narrow borrowed signing owner
 // preserves the actual original tree/generation allocation in both roles.
 enum EnrollmentTranscriptTreeOrigin<'custody, 'owner, 'runtime> {
@@ -7337,10 +8293,659 @@ impl<'custody, 'owner, 'runtime> EnrollmentTranscriptTreeOwner<'custody, 'owner,
             }
         }
     }
-    pub(crate) fn generation(&self) -> &EnrollmentGenerationCustodyCapability<'_> {
-        match self.origin {
-            EnrollmentTranscriptTreeOrigin::Issuer(inventory) => inventory.reservation.generation(),
-            EnrollmentTranscriptTreeOrigin::Participant(custody) => custody.generation(),
+}
+
+/// Actual original locks have been released; the original confirmed archive
+/// remains retained independently of the participant's domain failure.
+pub(crate) struct AcknowledgedApprovedNativeDisposal {
+    effects: Arc<AuraEffectSystem>,
+    approved_intent_digest: [u8; 32],
+    _archive: Option<
+        crate::handlers::invitation::enrollment_parent_archive::ConfirmedParentInventoryCapability<
+            'static,
+        >,
+    >,
+    first_failure: Option<AuraError>,
+    peer_reentry_prepared: bool,
+}
+impl AcknowledgedApprovedNativeDisposal {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "AcknowledgedApprovedNativeDisposal",
+        receiver_type = AcknowledgedApprovedNativeDisposal,
+        family = "runtime_helper"
+    )]
+    pub(crate) fn prepare_original_peer_reentry(
+        &mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<OriginalApprovedNativeAdmission, AuraError> {
+        self.require_original(approval)?;
+        if let Some(source) = self.first_failure.as_ref() {
+            return Err(source.clone());
         }
+        if self.peer_reentry_prepared {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        let mut actual = OriginalApprovedNativeAdmission::from_original(approval);
+        actual.archive = self._archive.take();
+        self.peer_reentry_prepared = true;
+        Ok(actual)
+    }
+    pub(crate) fn require_original(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn original_failure(&self) -> Option<&AuraError> {
+        self.first_failure.as_ref()
+    }
+}
+impl OriginalApprovedNativeAdmission {
+    pub(crate) fn require_original(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.effects, approval.effects())
+            || self.approved_intent_digest != approval.canonical_intent_digest()
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn original_failure(&self) -> Option<&AuraError> {
+        self.first_failure.as_ref()
+    }
+    pub(crate) fn dispose_original(
+        mut self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<AcknowledgedApprovedNativeDisposal, Box<(Self, AuraError)>> {
+        if let Err(source) = self.require_original(approval) {
+            return Err(Box::new((self, source)));
+        }
+        if let Some(actual) = self.authenticated.take() {
+            match Arc::try_unwrap(actual) {
+                Ok(mut actual) => {
+                    self.archive = actual._archive.take();
+                    // The actual original native leases drop synchronously.
+                    drop(actual);
+                }
+                Err(actual) => {
+                    self.authenticated = Some(actual);
+                    return Err(Box::new((
+                        self,
+                        final_inventory_error(EnrollmentFinalInventoryError::OwnerBinding),
+                    )));
+                }
+            }
+        }
+        self.tree = None;
+        self.generation = None;
+        Ok(AcknowledgedApprovedNativeDisposal {
+            effects: Arc::clone(&self.effects),
+            approved_intent_digest: self.approved_intent_digest,
+            _archive: self.archive.take(),
+            peer_reentry_prepared: false,
+            first_failure: self.first_failure.take(),
+        })
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod owned_enrollment_reservation_tests {
+    use super::*;
+    use aura_app::runtime_bridge::RuntimeBridge;
+
+    #[derive(Clone, Copy, Debug)]
+    enum PreflightFault {
+        TypedScopeRoundtrip,
+        CommittedContactSent,
+        MissingEpoch,
+        MalformedEpoch,
+        ActiveEpoch,
+        AllocationMismatch,
+        LiveMismatch,
+        Activation,
+        Registration,
+        PermanentWrap,
+        ConflictingFirstDecision,
+    }
+
+    async fn partial_storage_snapshot(
+        effects: &AuraEffectSystem,
+        owner: &StoredEnrollmentGenerationProfile,
+    ) -> Vec<Option<Vec<u8>>> {
+        let mut locations = vec![
+            SecureStorageLocation::new(
+                "device_enrollment_orphan_retirement_v1",
+                owner.ceremony.to_string(),
+            ),
+            SecureStorageLocation::new(
+                "device_enrollment_orphan_cleaned_v1",
+                owner.ceremony.to_string(),
+            ),
+            SecureStorageLocation::new(
+                "device_enrollment_generation_allocation_v1",
+                owner.ceremony.to_string(),
+            ),
+            super::super::enrollment_generation_profile_location(
+                &owner.authority,
+                owner.pending_epoch,
+            ),
+        ];
+        locations.extend(owner.participants.iter().map(|participant| {
+            AuraEffectSystem::participant_share_location(
+                &owner.authority,
+                owner.pending_epoch,
+                participant,
+            )
+        }));
+        let mut snapshot = Vec::new();
+        for location in locations {
+            snapshot.push(
+                if effects
+                    .secure_exists(&location)
+                    .await
+                    .expect("original fixture: secure exists")
+                {
+                    Some(
+                        effects
+                            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                            .await
+                            .expect("original fixture: secure retrieve"),
+                    )
+                } else {
+                    None
+                },
+            );
+        }
+        snapshot
+    }
+
+    #[test]
+    fn original_secret_birth_scope_roundtrips_only_from_actual_retained_plan() {
+        original_owned_rotation_scenario(true, Some(PreflightFault::TypedScopeRoundtrip));
+    }
+
+    #[test]
+    fn original_partial_retirement_refuses_actual_committed_contact_sent_without_mutation() {
+        original_owned_rotation_scenario(true, Some(PreflightFault::CommittedContactSent));
+    }
+
+    #[test]
+    fn original_partial_retirement_preflight_refusals_preserve_custody_and_storage() {
+        for fault in [
+            PreflightFault::MissingEpoch,
+            PreflightFault::MalformedEpoch,
+            PreflightFault::ActiveEpoch,
+            PreflightFault::AllocationMismatch,
+            PreflightFault::LiveMismatch,
+            PreflightFault::Activation,
+            PreflightFault::Registration,
+            PreflightFault::PermanentWrap,
+            PreflightFault::ConflictingFirstDecision,
+        ] {
+            original_owned_rotation_scenario(true, Some(fault));
+        }
+    }
+
+    #[test]
+    fn original_owned_rotation_retains_exact_runtime_and_excludes_generation_and_tree_until_drop() {
+        original_owned_rotation_scenario(false, None);
+    }
+
+    #[test]
+    fn original_partial_retirement_refuses_foreign_launch_and_failed_validation_before_guard_release(
+    ) {
+        original_owned_rotation_scenario(true, None);
+    }
+
+    fn original_owned_rotation_scenario(cleanup: bool, fault: Option<PreflightFault>) {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async move {
+            let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+            let ((issuer, invitee, invitation, _start, _accept, _witness), original) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                    &format!("{}-{fault:?}", if cleanup { "owned-partial-release" } else { "owned-original-rotation" }), Some(clock.clone()), None,
+                ),
+            ).await;
+            let issuer_disposal = original
+                .original_disposal_for_test()
+                .expect("original fixture: original disposal for test");
+            issuer
+                .invitations()
+                .expect("original fixture: invitations")
+                .cancel(&invitation.invitation_id)
+                .await
+                .expect("original fixture: cancel");
+            original
+                .original_cancellation_disposal_for_test()
+                .await
+                .expect("original fixture: original cancellation disposal for test")
+                .await_disposal()
+                .await;
+            issuer_disposal.await_disposal().await;
+            assert!(original
+                .observes_retained_retirement_acknowledgment()
+                .expect("original fixture: observes retained retirement acknowledgment"));
+            let bridge = Arc::new(crate::runtime_bridge::AgentRuntimeBridge::new(
+                issuer.clone(),
+            ));
+            let app = Arc::new(async_lock::RwLock::new(
+                aura_app::AppCore::with_runtime(aura_app::AppConfig::default(), bridge)
+                    .expect("actual app attaches original runtime"),
+            ));
+            let code = crate::runtime_bridge::AgentRuntimeBridge::new(invitee.clone())
+                .export_device_enrollment_setup_request()
+                .await
+                .expect("original fixture: export device enrollment setup request");
+            let setup =
+                aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                    &app, code,
+                )
+                .await
+                .expect("actual setup is pinned by original app");
+            let effects = issuer.runtime().effects();
+            let plan = effects
+                .prepare_owned_authenticated_enrollment_rotation(
+                    &setup,
+                    issuer.runtime().ceremony_tracker(),
+                )
+                .await
+                .expect("original fixture: ceremony tracker");
+            let EnrollmentRuntimeOrigin::Owned(actual) = &plan.effects else {
+                panic!("actual owned runtime origin")
+            };
+            assert!(Arc::ptr_eq(actual, &effects));
+            plan.require_effects(effects.as_ref(), &setup)
+                .expect("original fixture: require effects");
+            assert!(plan
+                .require_effects(invitee.runtime().effects().as_ref(), &setup)
+                .is_err());
+            if cleanup {
+                use crate::runtime::services::enrollment_window::{
+                    OriginalAllocationCheckpointCustody, OriginalIssuerLaunchWindow,
+                };
+                let (launch, _) = OriginalIssuerLaunchWindow::select(effects.clone())
+                    .await
+                    .expect("selected provider issues original launch window");
+                let (foreign, _) = OriginalIssuerLaunchWindow::select(effects.clone())
+                    .await
+                    .expect("foreign launch owns its independent original window");
+                let reserved = issuer
+                    .invitations()
+                    .expect("original fixture: invitations")
+                    .reserve_device_enrollment_invitation()
+                    .await
+                    .expect("original fixture: reserve device enrollment invitation");
+                let ceremony = aura_core::CeremonyId::new(format!(
+                    "actual-partial-release:{}",
+                    reserved.invitation_id()
+                ));
+                let mut producer = OriginalEnrollmentAllocationProducer::from_original(plan);
+                producer
+                    .bind_original_launch(effects.as_ref(), &launch)
+                    .expect("original fixture: bind original launch");
+                let (reached, _resume) = effects
+                    .hold_original_allocation_commit_for_test()
+                    .expect("original fixture: hold original allocation commit for test");
+                {
+                    let mut allocating = Box::pin(effects.prepare_pinned_enrollment_rotation(
+                        &setup,
+                        &reserved,
+                        &ceremony,
+                        &mut producer,
+                    ));
+                    tokio::select! {
+                        outcome = allocating.as_mut() => panic!("allocation completed before retained backend boundary: {}", outcome.is_ok()),
+                        signal = reached => signal.expect("actual backend reached immutable allocation commit"),
+                    }
+                }
+                let primary = AuraError::invalid("actual original allocation interrupted");
+                if matches!(fault, Some(PreflightFault::TypedScopeRoundtrip)) {
+                    let actual_plan = producer
+                        .plan
+                        .as_ref()
+                        .expect("interrupted producer retains original plan");
+                    let actual_profile = producer
+                        .progress
+                        .original
+                        .as_ref()
+                        .expect("interrupted producer retains original allocation profile");
+                    let scope = EnrollmentSecretScope::original(
+                        actual_profile,
+                        &actual_profile.participants[0],
+                        &[],
+                    )
+                    .expect("original profile produces exact typed secret scope");
+                    let birth = OwnedSecretBirthCapability {
+                        runtime_identity: effects.crypto.lifetime_owner_identity(),
+                        origin: OriginalSecretBirthOrigin::Plan(actual_plan),
+                        scope,
+                    };
+                    birth
+                        .require_runtime_owner(&effects.crypto.lifetime_owner_identity())
+                        .expect("original fixture: lifetime owner identity");
+                    let bytes = birth.scope_bytes().expect("original fixture: scope bytes");
+                    let decoded: EnrollmentSecretScope =
+                        serde_json::from_slice(&bytes).expect("canonical secret scope decodes");
+                    assert_eq!(decoded, birth.scope);
+                    assert_eq!(
+                        decoded
+                            .encode()
+                            .expect("typed secret scope reencodes exactly"),
+                        bytes
+                    );
+                }
+                if matches!(fault, Some(PreflightFault::CommittedContactSent)) {
+                    let owner = producer
+                        .progress
+                        .original
+                        .as_ref()
+                        .expect("producer retains original allocation after contact commit")
+                        .clone();
+                    let actual = issuer
+                        .invitations()
+                        .expect("original fixture: invitations")
+                        .commit_reserved_contact_for_retirement_test(reserved)
+                        .await
+                        .expect("original fixture: commit reserved contact for retirement test");
+                    assert_eq!(actual.invitation_id, owner.invitation);
+                    assert!(matches!(
+                        actual.invitation_type,
+                        aura_invitation::InvitationType::Contact { .. }
+                    ));
+                    let before = partial_storage_snapshot(effects.as_ref(), &owner).await;
+                    let generation = effects.enrollment_retirement_generation_guard();
+                    let tree = effects.lock_tree_decision();
+                    futures::pin_mut!(generation, tree);
+                    assert!(producer.retire_original(effects.as_ref()).await.is_err());
+                    assert!(producer.plan.is_some());
+                    assert!(producer.retirement.is_none());
+                    assert!(!producer.acknowledged);
+                    assert!(futures::poll!(generation.as_mut()).is_pending());
+                    assert!(futures::poll!(tree.as_mut()).is_pending());
+                    assert_eq!(
+                        partial_storage_snapshot(effects.as_ref(), &owner).await,
+                        before
+                    );
+                    // This proves refusal; the actual committed fact is not erased for a cleanup ACK.
+                    return;
+                }
+                if let Some(fault) =
+                    fault.filter(|fault| !matches!(fault, PreflightFault::TypedScopeRoundtrip))
+                {
+                    let owner = producer
+                        .progress
+                        .original
+                        .as_ref()
+                        .expect("producer retains original allocation for fault injection")
+                        .clone();
+                    let location = match fault {
+                        PreflightFault::TypedScopeRoundtrip => {
+                            unreachable!("typed scope handled above")
+                        }
+                        PreflightFault::CommittedContactSent => {
+                            unreachable!("committed contact handled above")
+                        }
+                        PreflightFault::MissingEpoch
+                        | PreflightFault::MalformedEpoch
+                        | PreflightFault::ActiveEpoch => {
+                            SecureStorageLocation::new("epoch_state", owner.authority.to_string())
+                        }
+                        PreflightFault::AllocationMismatch => SecureStorageLocation::new(
+                            "device_enrollment_generation_allocation_v1",
+                            owner.ceremony.to_string(),
+                        ),
+                        PreflightFault::LiveMismatch => {
+                            super::super::enrollment_generation_profile_location(
+                                &owner.authority,
+                                owner.pending_epoch,
+                            )
+                        }
+                        PreflightFault::Activation => SecureStorageLocation::new(
+                            "device_enrollment_activation_v1",
+                            owner.ceremony.to_string(),
+                        ),
+                        PreflightFault::Registration => SecureStorageLocation::new(
+                            "device_enrollment_allocated_registration_v1",
+                            owner.ceremony.to_string(),
+                        ),
+                        PreflightFault::PermanentWrap => {
+                            AuraEffectSystem::participant_wrap_key_location(
+                                &owner.authority,
+                                owner.pending_epoch,
+                                owner.participants.first().expect("original fixture: first"),
+                            )
+                        }
+                        PreflightFault::ConflictingFirstDecision => SecureStorageLocation::new(
+                            "device_enrollment_orphan_retirement_v1",
+                            owner.ceremony.to_string(),
+                        ),
+                    };
+                    let original_bytes = if effects
+                        .secure_exists(&location)
+                        .await
+                        .expect("original fixture: secure exists")
+                    {
+                        Some(
+                            effects
+                                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                                .await
+                                .expect("original fixture: secure retrieve"),
+                        )
+                    } else {
+                        None
+                    };
+                    effects
+                        .fault_remove_secure_record_for_test(&location)
+                        .await
+                        .expect("original fixture: fault remove secure record for test");
+                    let injected = match fault {
+                        PreflightFault::MissingEpoch => None,
+                        PreflightFault::ActiveEpoch => {
+                            Some(owner.pending_epoch.to_le_bytes().to_vec())
+                        }
+                        _ => Some(vec![0xff]),
+                    };
+                    if let Some(bytes) = injected.as_ref() {
+                        if matches!(fault, PreflightFault::ConflictingFirstDecision) {
+                            effects
+                                .secure_store_immutable(
+                                    &location,
+                                    bytes,
+                                    &[
+                                        SecureStorageCapability::Read,
+                                        SecureStorageCapability::Write,
+                                    ],
+                                )
+                                .await
+                                .expect("original fixture: secure store immutable");
+                        } else {
+                            effects
+                                .secure_store(&location, bytes, &[SecureStorageCapability::Write])
+                                .await
+                                .expect("original fixture: secure store");
+                        }
+                    }
+                    let first = SecureStorageLocation::new(
+                        "device_enrollment_orphan_retirement_v1",
+                        owner.ceremony.to_string(),
+                    );
+                    let had_first_decision = effects
+                        .secure_exists(&first)
+                        .await
+                        .expect("original fixture: secure exists");
+                    assert_eq!(
+                        had_first_decision,
+                        matches!(fault, PreflightFault::ConflictingFirstDecision)
+                    );
+                    let before = partial_storage_snapshot(effects.as_ref(), &owner).await;
+                    let generation = effects.enrollment_retirement_generation_guard();
+                    let tree = effects.lock_tree_decision();
+                    futures::pin_mut!(generation, tree);
+                    assert!(
+                        producer.retire_original(effects.as_ref()).await.is_err(),
+                        "{fault:?}"
+                    );
+                    assert!(producer.plan.is_some(), "{fault:?}");
+                    assert!(producer.retirement.is_none(), "{fault:?}");
+                    assert_eq!(
+                        effects
+                            .secure_exists(&first)
+                            .await
+                            .expect("original fixture: secure exists"),
+                        had_first_decision,
+                        "{fault:?}"
+                    );
+                    assert!(
+                        futures::poll!(generation.as_mut()).is_pending(),
+                        "{fault:?}"
+                    );
+                    assert!(futures::poll!(tree.as_mut()).is_pending(), "{fault:?}");
+                    assert_eq!(
+                        partial_storage_snapshot(effects.as_ref(), &owner).await,
+                        before,
+                        "{fault:?}"
+                    );
+                    let retained = if effects
+                        .secure_exists(&location)
+                        .await
+                        .expect("original fixture: secure exists")
+                    {
+                        Some(
+                            effects
+                                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                                .await
+                                .expect("original fixture: secure retrieve"),
+                        )
+                    } else {
+                        None
+                    };
+                    assert_eq!(retained, injected, "{fault:?}");
+                    effects
+                        .fault_remove_secure_record_for_test(&location)
+                        .await
+                        .expect("original fixture: fault remove secure record for test");
+                    if let Some(bytes) = original_bytes {
+                        effects
+                            .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+                            .await
+                            .expect("original fixture: secure store");
+                    }
+                }
+                let work = launch
+                    .execute_original_allocation_cleanup(&effects, &primary, || {
+                        producer.retire_original(effects.as_ref())
+                    })
+                    .await
+                    .expect("original fixture: retire original");
+                assert!(matches!(work.operation, Some(Ok(()))));
+                work.validation
+                    .expect("original cleanup stays within selected fixed endpoint");
+                let generation = effects.enrollment_retirement_generation_guard();
+                futures::pin_mut!(generation);
+                assert!(futures::poll!(generation.as_mut()).is_pending());
+                let native = Arc::new(std::io::Error::other(
+                    "original cleanup post-observation failed",
+                ));
+                let mut checkpoint = OriginalAllocationCheckpointCustody::default();
+                let failed = launch.acknowledge_original_allocation_cleanup(&effects, &primary, || async {
+                    let receipt = producer.acknowledge_original(effects.as_ref()).expect("original fixture: acknowledge original");
+                    clock.fail_next_observation(aura_core::effects::TimeError::ProviderFailure {
+                        operation: aura_core::effects::time::TimeProviderOperation::ReadPhysicalClock,
+                        source: Some(native.clone()),
+                    }).await;
+                    Ok(receipt)
+                }, &mut checkpoint).await.err().expect("failed post-observation cannot authorize release");
+                let mut source: &(dyn std::error::Error + 'static) = &failed;
+                loop {
+                    if let Some(actual) = source.downcast_ref::<std::io::Error>() {
+                        assert!(std::ptr::eq(actual, native.as_ref()));
+                        break;
+                    }
+                    source = source
+                        .source()
+                        .expect("original native provider cause retained");
+                }
+                assert!(producer.plan.is_some());
+                assert!(futures::poll!(generation.as_mut()).is_pending());
+                let mut foreign_checkpoint = OriginalAllocationCheckpointCustody::default();
+                let foreign_ack = foreign
+                    .acknowledge_original_allocation_cleanup(
+                        &effects,
+                        &primary,
+                        || async {
+                            Ok(producer
+                                .acknowledge_original(effects.as_ref())
+                                .expect("original fixture: acknowledge original"))
+                        },
+                        &mut foreign_checkpoint,
+                    )
+                    .await
+                    .expect("foreign acknowledgment observation completes with typed refusal");
+                assert!(producer
+                    .release_original(effects.as_ref(), foreign_ack)
+                    .is_err());
+                assert!(producer.plan.is_some());
+                assert!(producer.retirement.is_some());
+                assert!(futures::poll!(generation.as_mut()).is_pending());
+                let actual_ack = launch
+                    .acknowledge_original_allocation_cleanup(
+                        &effects,
+                        &primary,
+                        || async {
+                            Ok(producer
+                                .acknowledge_original(effects.as_ref())
+                                .expect("original fixture: acknowledge original"))
+                        },
+                        &mut checkpoint,
+                    )
+                    .await
+                    .expect("original acknowledgment observation completes");
+                producer
+                    .release_original(effects.as_ref(), actual_ack)
+                    .expect("original fixture: release original");
+                assert!(producer
+                    .observe_original_cleanup_acknowledged(effects.as_ref())
+                    .expect("original fixture: observe original cleanup acknowledged"));
+                let mut retained_source: &(dyn std::error::Error + 'static) = checkpoint
+                    .first_validation_failure_for_test()
+                    .expect("first post-observation failure survives successful original retry");
+                loop {
+                    if let Some(actual) = retained_source.downcast_ref::<std::io::Error>() {
+                        assert!(std::ptr::eq(actual, native.as_ref()));
+                        break;
+                    }
+                    retained_source = retained_source
+                        .source()
+                        .expect("original provider allocation retained");
+                }
+                drop(generation.await);
+                return;
+            }
+            let generation = effects.enrollment_retirement_generation_guard();
+            let tree = effects.lock_tree_decision();
+            let tracker = issuer.runtime().ceremony_tracker();
+            let decision = tracker.original_enrollment_decision_guard_for_test();
+            futures::pin_mut!(generation, tree, decision);
+            assert!(futures::poll!(generation.as_mut()).is_pending());
+            assert!(futures::poll!(tree.as_mut()).is_pending());
+            assert!(futures::poll!(decision.as_mut()).is_pending());
+            drop(plan);
+            drop(generation.await);
+            drop(tree.await);
+            drop(decision.await);
+        });
     }
 }

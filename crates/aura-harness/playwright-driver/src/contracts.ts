@@ -174,6 +174,7 @@ export interface DriverSession {
   artifactDir: string;
   uiStateCache: UiSnapshotPayload | null;
   uiStateCacheJson: string | null;
+  uiStateCacheGeneration?: number | null;
   uiStateVersion: number;
   uiStateWaiters: UiStateWaiter[];
   domState: { text: string; ids: Set<string> | string[] };

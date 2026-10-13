@@ -26,13 +26,17 @@ pub const AURA_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
 /// Biscuit token that has been reparsed under the configured authority root key.
 #[derive(Clone, Debug)]
 pub struct VerifiedBiscuitToken {
-    token: Biscuit,
+    token: aura_core::crypto::verified_biscuit::VerifiedBiscuitToken,
 }
 
 impl VerifiedBiscuitToken {
     /// Verify serialized Biscuit bytes against the configured root public key.
     pub fn from_bytes(bytes: &[u8], root_public_key: PublicKey) -> Result<Self, BiscuitError> {
-        let token = Biscuit::from(bytes, root_public_key).map_err(BiscuitError::BiscuitLib)?;
+        let token = aura_core::crypto::verified_biscuit::VerifiedBiscuitToken::from_bytes(
+            bytes,
+            root_public_key,
+        )
+        .map_err(BiscuitError::BiscuitLib)?;
         Ok(Self { token })
     }
 
@@ -46,12 +50,15 @@ impl VerifiedBiscuitToken {
     /// Borrow the verified Biscuit token.
     #[must_use]
     pub fn token(&self) -> &Biscuit {
-        &self.token
+        self.token.token()
     }
 
     /// Create an authorizer from the verified token.
     pub fn authorizer(&self) -> Result<biscuit_auth::Authorizer, BiscuitError> {
-        self.token.authorizer().map_err(BiscuitError::BiscuitLib)
+        self.token
+            .token()
+            .authorizer()
+            .map_err(BiscuitError::BiscuitLib)
     }
 }
 

@@ -686,13 +686,22 @@ impl IoContext {
         })
     }
 
-    pub async fn persist_completed_enrollment_identity(
+    pub fn enrollment_import_host_policy(
         &self,
-        completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
-    ) -> Result<(), aura_core::AuraError> {
-        self.account_files
-            .persist_completed_enrollment_identity(completed)
-            .await
+    ) -> aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy {
+        // Retained enrollment custody needs the original profile helper, not
+        // the entire frontend context (which also owns the UI task root).
+        let account_files = self.account_files.clone();
+        aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy::Finalize(Arc::new(
+            move |completed| {
+                let account_files = account_files.clone();
+                Box::pin(async move {
+                    account_files
+                        .persist_completed_enrollment_identity(completed)
+                        .await
+                })
+            },
+        ))
     }
 
     pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<CeremonyHandle> {
@@ -1095,6 +1104,23 @@ mod tests {
                 .contains("cannot be called inside a tokio runtime"),
             "unexpected error: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn enrollment_host_policy_does_not_retain_frontend_task_root() {
+        let ctx = IoContext::try_with_defaults_async().await.unwrap();
+        let host_policy = ctx.enrollment_import_host_policy();
+        let tasks = ctx.tasks();
+        let original_manager = std::sync::Arc::downgrade(&tasks);
+        tasks.shutdown();
+        tasks.wait_required_disposed().await.unwrap();
+        drop(ctx);
+        drop(tasks);
+        assert!(
+            original_manager.upgrade().is_none(),
+            "retained host persistence must not retain the original frontend task root"
+        );
+        drop(host_policy);
     }
 
     #[tokio::test]

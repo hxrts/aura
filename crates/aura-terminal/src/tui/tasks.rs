@@ -82,8 +82,10 @@ impl UiTaskManager {
         self.inner.shutdown();
     }
 
-    pub async fn wait_drained(&self) {
-        self.inner.wait_drained().await;
+    /// Worker completion alone does not settle required resource obligations.
+    /// The shell bounds this observation with its original shutdown window.
+    pub async fn wait_required_disposed(&self) -> Result<(), aura_core::AuraError> {
+        self.inner.wait_required_disposed().await
     }
 }
 

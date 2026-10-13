@@ -132,6 +132,8 @@ pub mod protocol_validation;
 pub mod replay; // Effect trace replay helpers for native parity/debug tooling
 pub mod simulation;
 pub mod stateful_effects;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod task_custody;
 pub mod test_builders;
 pub mod test_utils;
 pub mod time;

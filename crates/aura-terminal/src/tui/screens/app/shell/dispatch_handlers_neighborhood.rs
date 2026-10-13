@@ -63,7 +63,7 @@ pub(super) fn handle_neighborhood_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
@@ -77,7 +77,13 @@ pub(super) fn handle_neighborhood_dispatch(
                 } else {
                     SemanticOperationKind::RevokeModerator
                 },
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             // The workflows act on the selected (entered) home.
             (cb.neighborhood.on_set_moderator)(target_id.to_string(), assign, operation);
             new_state.modal_queue.dismiss();
@@ -191,13 +197,19 @@ pub(super) fn handle_neighborhood_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::create_home(),
                 SemanticOperationKind::CreateHome,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.neighborhood.on_create_home)(name, description, operation);
             new_state.modal_queue.dismiss();
         }
@@ -206,13 +218,19 @@ pub(super) fn handle_neighborhood_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::create_neighborhood(),
                 SemanticOperationKind::CreateNeighborhood,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.neighborhood.on_create_neighborhood)(name, operation);
         }
         DispatchCommand::AddSelectedHomeToNeighborhood => {
@@ -224,13 +242,19 @@ pub(super) fn handle_neighborhood_dispatch(
                         new_state.toast_error("UI update sender is unavailable");
                         return EventCommandLoopAction::ContinueCommand;
                     };
-                    let operation = submit_local_terminal_operation(
+                    let operation = match submit_local_terminal_operation(
                         app_core_for_events,
                         tasks_for_events,
                         update_tx,
                         OperationId::add_home_to_neighborhood(),
                         SemanticOperationKind::AddHomeToNeighborhood,
-                    );
+                    ) {
+                        Ok(owner) => owner,
+                        Err(source) => {
+                            new_state.toast_error(source.to_string());
+                            return EventCommandLoopAction::ContinueCommand;
+                        }
+                    };
                     (cb.neighborhood.on_add_home_to_neighborhood)(home_id.clone(), operation);
                 } else {
                     new_state.toast_error("No home selected");
@@ -242,13 +266,19 @@ pub(super) fn handle_neighborhood_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::add_home_to_neighborhood(),
                 SemanticOperationKind::AddHomeToNeighborhood,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.neighborhood.on_add_home_to_neighborhood)(target.as_command_arg(), operation);
         }
         DispatchCommand::LinkSelectedHomeOneHopLink => {
@@ -260,13 +290,19 @@ pub(super) fn handle_neighborhood_dispatch(
                         new_state.toast_error("UI update sender is unavailable");
                         return EventCommandLoopAction::ContinueCommand;
                     };
-                    let operation = submit_local_terminal_operation(
+                    let operation = match submit_local_terminal_operation(
                         app_core_for_events,
                         tasks_for_events,
                         update_tx,
                         OperationId::link_home_one_hop_link(),
                         SemanticOperationKind::LinkHomeOneHopLink,
-                    );
+                    ) {
+                        Ok(owner) => owner,
+                        Err(source) => {
+                            new_state.toast_error(source.to_string());
+                            return EventCommandLoopAction::ContinueCommand;
+                        }
+                    };
                     (cb.neighborhood.on_link_home_one_hop_link)(home_id.clone(), operation);
                 } else {
                     new_state.toast_error("No home selected");
@@ -278,13 +314,19 @@ pub(super) fn handle_neighborhood_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::link_home_one_hop_link(),
                 SemanticOperationKind::LinkHomeOneHopLink,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.neighborhood.on_link_home_one_hop_link)(target.as_command_arg(), operation);
         }
         _ => {

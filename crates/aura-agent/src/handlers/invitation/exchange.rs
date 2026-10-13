@@ -149,16 +149,20 @@ impl InvitationHandler {
     pub(crate) async fn execute_device_enrollment_initiator_owned(
         &self,
         effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
+        retained: Arc<super::enrollment_trust::RetainedEnrollmentVmControl>,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
         budget: crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
-    ) -> AgentResult<Option<super::IssuerEnrollmentTerminalReceipt>> {
+        retirement_destination: Arc<
+            crate::handlers::invitation_service::OriginalIssuerTerminalDestination,
+        >,
+    ) -> AgentResult<super::IssuerEnrollmentTerminalOutcome> {
         Box::pin(
             InvitationDeviceEnrollmentHandler::new(self).execute_device_enrollment_initiator_owned(
                 effects,
-                invitation,
+                retained,
                 ceremony_runner,
                 budget,
+                retirement_destination,
             ),
         )
         .await

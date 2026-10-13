@@ -345,6 +345,7 @@ impl<'a> InvitationCacheHandler<'a> {
             || !matches!(
                 stored.shareable.version,
                 1 | ShareableInvitation::CURRENT_VERSION
+                    | ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION
             )
         {
             return Err(imported_record_error(

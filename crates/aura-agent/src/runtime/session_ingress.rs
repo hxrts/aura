@@ -100,6 +100,8 @@ pub enum SessionIngressError {
         owner_label: String,
         reason: SessionStartFailureReason,
         message: String,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     #[error("failed to advance owned runtime session {session_id} for {owner_label}: {message}")]
     Round {
@@ -236,6 +238,40 @@ pub struct OwnedVmSession {
     handler: Arc<AuraQueuedVmBridgeHandler>,
     vm_session_id: SessionId,
     retirement_armed: bool,
+}
+
+/// Owns the claimed choreography capability until VM open transfers it to the
+/// completed session. Cancellation at any later await retires it synchronously.
+struct OpeningVmSessionOwner {
+    effects: Arc<AuraEffectSystem>,
+    owner: Option<RuntimeSessionOwner>,
+}
+
+impl Drop for OpeningVmSessionOwner {
+    fn drop(&mut self) {
+        let Some(owner) = self.owner.take() else {
+            return;
+        };
+        if let Err(source) = self
+            .effects
+            .retire_unfinished_vm_open_owner(&owner.capability)
+        {
+            let source = SessionIngressError::ForcedRetirement {
+                session_id: owner.session_id,
+                source: ForcedVmRetirementFailure::Ownership(source),
+            };
+            let retained = crate::task_registry::retain_current_task_cleanup_failure(
+                aura_core::AuraError::Internal {
+                    message: source.to_string(),
+                    source: Some(Arc::new(source)),
+                },
+            );
+            if !retained {
+                tracing::error!(session_id=%owner.session_id,
+                    "unfinished VM open retirement failure has no registered task health owner");
+            }
+        }
+    }
 }
 
 impl Drop for OwnedVmSession {
@@ -570,6 +606,12 @@ impl OwnedVmSession {
     }
 
     pub async fn close(mut self) -> Result<(), SessionIngressError> {
+        self.close_retained().await
+    }
+
+    /// Close through the actual retained owner. An interrupted close leaves the
+    /// same session capability available to its required task custodian.
+    pub(crate) async fn close_retained(&mut self) -> Result<(), SessionIngressError> {
         self.effects
             .assert_owned_choreography_session(&self.owner)?;
         // The engine reaps terminal sessions during step cleanup. This admitted
@@ -635,6 +677,11 @@ pub async fn open_owned_manifest_vm_session_admitted(
     let owner = effects
         .start_owned_choreography_session(owner_label, session_uuid, roles)
         .await?;
+    let mut opening = OpeningVmSessionOwner {
+        effects: effects.clone(),
+        owner: Some(owner),
+    };
+    let owner = opening.owner.as_ref().expect("opening owner retained");
     effects
         .set_current_runtime_choreography_protocol_id(manifest.protocol_id.clone())
         .map_err(|message| SessionIngressError::SessionStart {
@@ -642,6 +689,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
             owner_label: owner.owner_label.clone(),
             reason: SessionStartFailureReason::VmSessionOpenFailed,
             message,
+            source: None,
         })?;
     let routing_boundary = AuraLinkBoundary::for_manifest(manifest);
 
@@ -657,7 +705,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
     {
         Ok((engine, handler, vm_session_id)) => Ok(OwnedVmSession {
             effects,
-            owner,
+            owner: opening.owner.take().expect("opening owner transfers once"),
             routing_boundary,
             engine,
             handler,
@@ -672,12 +720,15 @@ pub async fn open_owned_manifest_vm_session_admitted(
                 "vm_session_open_failed",
                 &error.to_string(),
             );
-            let _ = effects.end_owned_choreography_session(&owner).await;
+            let message = error.to_string();
+            // Retirement remains synchronous and preserves the admitted packet.
+            // The guard retains any concrete cleanup failure through task health.
             Err(SessionIngressError::SessionStart {
                 session_id: owner.session_id,
-                owner_label: owner.owner_label,
+                owner_label: owner.owner_label.clone(),
                 reason: SessionStartFailureReason::VmSessionOpenFailed,
-                message: error.to_string(),
+                message,
+                source: Some(Box::new(error)),
             })
         }
     }
@@ -772,6 +823,7 @@ impl AuraEffectSystem {
                 owner_label: owner_label.clone(),
                 reason: classify_session_start_error(&error),
                 message: error.to_string(),
+                source: Some(Box::new(error)),
             })
             .inspect_err(|error| {
                 log_session_owner_rejected(
@@ -801,6 +853,7 @@ impl AuraEffectSystem {
                         owner_label,
                         reason: SessionStartFailureReason::OwnerClaimRejected,
                         message: error,
+                        source: None,
                     });
                 }
             };
@@ -948,6 +1001,220 @@ mod tests {
     use aura_protocol::effects::{ChoreographicRole, RoleIndex};
     use std::collections::BTreeSet;
     use std::sync::Arc;
+
+    use aura_core::effects::transport::TransportEnvelope;
+
+    #[tokio::test]
+    async fn owned_start_retains_selected_physical_read_fault_source() {
+        use std::error::Error;
+
+        let authority = test_authority(0xe3);
+        let selected = aura_testkit::time::ManualPhysicalClock::new(5_000);
+        selected
+            .fail_next_observation(aura_core::effects::TimeError::OperationFailed {
+                reason: "selected owned start read fault".into(),
+            })
+            .await;
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("effect system")
+                .with_physical_time_provider(Arc::new(selected));
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role"),
+        )];
+        let error = effects
+            .start_owned_choreography_session("selected-start", Uuid::from_bytes([0xe4; 16]), roles)
+            .await
+            .expect_err("actual selected clock fault must refuse owner claim");
+        assert!(matches!(
+            &error,
+            SessionIngressError::SessionStart {
+                reason: SessionStartFailureReason::Other,
+                ..
+            }
+        ));
+        let mut cursor: &(dyn Error + 'static) = &error;
+        let mut choreography = false;
+        let mut physical = false;
+        loop {
+            choreography |= cursor.is::<aura_protocol::effects::ChoreographyError>();
+            physical |= matches!(
+                cursor.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::OperationFailed { reason })
+                    if reason == "selected owned start read fault"
+            );
+            let Some(source) = cursor.source() else { break };
+            cursor = source;
+        }
+        assert!(
+            choreography && physical,
+            "both native sources remain downcastable"
+        );
+        assert!(effects.vm_fragment_snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn owned_vm_open_refusal_retains_native_source_and_releases_owner() {
+        use std::error::Error;
+
+        let authority = test_authority(0xe5);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("effect system"),
+        );
+        let session_uuid = Uuid::from_bytes([0xe6; 16]);
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role"),
+        )];
+        let manifest = linked_manifest("aura.test.vm-refusal", "vm-refusal-fragment");
+        let error = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_uuid,
+            roles.clone(),
+            &manifest,
+            "Role",
+            &GlobalType::End,
+            &BTreeMap::new(),
+            AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .err()
+        .expect("missing active-role local type must refuse VM open");
+        assert!(matches!(
+            &error,
+            SessionIngressError::SessionStart {
+                reason: SessionStartFailureReason::VmSessionOpenFailed,
+                ..
+            }
+        ));
+        let mut cursor: &(dyn Error + 'static) = &error;
+        let mut native = false;
+        while let Some(source) = cursor.source() {
+            if let Some(refusal) =
+                source.downcast_ref::<crate::runtime::vm_host_bridge::AuraVmSessionOpenError>()
+            {
+                native = true;
+                assert!(
+                    matches!(
+                        refusal,
+                        crate::runtime::vm_host_bridge::AuraVmSessionOpenError::RoleScopedImage { .. }
+                    ),
+                    "actual VM refusal: {refusal:?}"
+                );
+            }
+            cursor = source;
+        }
+        assert!(
+            native,
+            "VM refusal keeps its native source rather than display text"
+        );
+        assert!(effects.vm_fragment_snapshot().is_empty());
+        let replacement = effects
+            .start_owned_choreography_session("replacement", session_uuid, roles)
+            .await
+            .expect("refused VM open releases exact runtime owner");
+        effects
+            .end_owned_choreography_session(&replacement)
+            .await
+            .expect("replacement closes");
+    }
+
+    #[tokio::test]
+    async fn cancelled_after_owner_claim_retires_fragments_and_preserves_original_inbox() {
+        let authority = test_authority(0xd5);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("effect system"),
+        );
+        let session_uuid = Uuid::from_bytes([0xd6; 16]);
+        let (claimed_tx, claimed_rx) = tokio::sync::oneshot::channel();
+        let (_release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        crate::runtime::vm_host_bridge::opening_vm_test_holds()
+            .lock()
+            .expect("opening test holds lock")
+            .insert(
+                RuntimeChoreographySessionId::from_uuid(session_uuid),
+                (claimed_tx, release_rx),
+            );
+        let context = aura_core::ContextId::new_from_entropy([0xd7; 32]);
+        effects.queue_runtime_envelope(TransportEnvelope {
+            destination: authority,
+            source: test_authority(0xd8),
+            context,
+            payload: vec![0x51],
+            metadata: std::collections::HashMap::from([
+                (
+                    "content-type".to_string(),
+                    "application/aura-choreography".to_string(),
+                ),
+                ("session-id".to_string(), session_uuid.to_string()),
+            ]),
+            receipt: None,
+        });
+        let task_effects = effects.clone();
+        let mut task = tokio::spawn(async move {
+            let roles = vec![ChoreographicRole::for_authority(
+                authority,
+                RoleIndex::new(0).expect("role"),
+            )];
+            let manifest = linked_manifest("aura.test.opening", "opening-fragment");
+            let intake = task_effects
+                .take_unclaimed_choreography_envelope_retained(|envelope| {
+                    envelope.payload == [0x51]
+                })
+                .expect("original session packet is retained during VM open");
+            let opened = open_owned_manifest_vm_session_admitted(
+                task_effects.clone(),
+                session_uuid,
+                roles,
+                &manifest,
+                "Role",
+                &GlobalType::End,
+                &BTreeMap::from([("Role".to_string(), LocalTypeR::End)]),
+                AuraVmSchedulerSignals::default(),
+            )
+            .await;
+            drop(intake);
+            opened
+        });
+        tokio::select! {
+            claimed = claimed_rx => {
+                claimed.expect("real VM open claimed owner before cancellation");
+            }
+            _ = &mut task => {
+                crate::runtime::vm_host_bridge::opening_vm_test_holds()
+                    .lock()
+                    .expect("opening test holds lock")
+                    .remove(&RuntimeChoreographySessionId::from_uuid(session_uuid));
+                panic!("real VM open completed before the after-fragment-claim hold");
+            }
+        }
+        assert_eq!(effects.vm_fragment_snapshot().len(), 1);
+        task.abort();
+        let cancelled = match task.await {
+            Ok(_) => panic!("VM open unexpectedly completed after abort"),
+            Err(error) => error,
+        };
+        assert!(cancelled.is_cancelled());
+        let queued = effects.peek_queued_choreography_envelopes();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].payload, vec![0x51]);
+        assert!(effects.vm_fragment_snapshot().is_empty());
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role"),
+        )];
+        let next = effects
+            .start_owned_choreography_session("replacement-owner", session_uuid, roles)
+            .await
+            .expect("cancelled opening owner releases session admission");
+        effects
+            .end_owned_choreography_session(&next)
+            .await
+            .expect("replacement owner closes");
+    }
 
     fn test_authority(byte: u8) -> AuthorityId {
         AuthorityId::from_uuid(Uuid::from_bytes([byte; 16]))

@@ -36,8 +36,8 @@ Invitation protocol for establishing relationships between authorities, includin
   lifecycle coordination. A decoded shape never establishes original issuance
   or policy approval. There is one schema implementation across layers.
 
-- Invitation facts emit and accept only schema 3 canonical DAG-CBOR payloads.
-  Retired schemas 1–2 and JSON envelopes are rejected. Decoding never
+- Invitation facts emit and accept only schema 4 canonical DAG-CBOR payloads.
+  Retired schemas 1–3 and JSON envelopes are rejected. Decoding never
   manufactures setup bindings or response authorization.
 - Signed setup admission binds nonce/digest, both physical devices, provisional
   invitee, subject, invitation/ceremony, pending epoch, baseline manifest and
@@ -160,7 +160,7 @@ See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/1
 
 ### Required invitation fact decoding
 
-Required recovery uses `InvitationFact::try_from_envelope`, which bounds payloads, accepts only schema 3 and canonical DAG-CBOR encoding, and retains structural envelope and original codec errors. Retired schemas 1–2, future schemas and JSON envelopes are rejected. `try_from_envelope_in_context` also validates an explicit payload context against the relational wrapper; a current-schema contextless variant remains contextless. Observational `DomainFact::from_envelope` returns `None` for invalid envelopes and grants no additional schema compatibility. Domain regressions exercise current-schema round trips, retired/future schemas, encoding mismatches, malformed payloads, size bounds, context mismatches and typed sources.
+Required recovery uses `InvitationFact::try_from_envelope`, which bounds payloads, accepts only schema 4 and canonical DAG-CBOR encoding, and retains structural envelope and original codec errors. Retired schemas 1–3, future schemas and JSON envelopes are rejected. `try_from_envelope_in_context` also validates an explicit payload context against the relational wrapper; a current-schema contextless variant remains contextless. Observational `DomainFact::from_envelope` returns `None` for invalid envelopes and grants no additional schema compatibility. Domain regressions exercise current-schema round trips, retired/future schemas, encoding mismatches, malformed payloads, size bounds, context mismatches and typed sources.
 
 ### Device-enrollment response contract
 
@@ -225,7 +225,12 @@ Constants, capability-like substrings, incidental body calls, phantom markers an
 The typed initial Request transcript derives only from the canonical manifest:
 manifest digest, invitation, subject, ceremony, pending epoch and invitee device.
 Its version 2 control domain and absence of committed operations remain exact.
-The versioned signing intent explicitly enumerates this third domain alongside
-manifest and public v4 transport. Earlier two-domain consent cannot authorize it;
-the pure transcript shape itself grants no runtime signing, membership or window
-capability. Committed and Failed controls are separate approval domains.
+Signing intent v3 enumerates Manifest, PublicTransport, InitialRequest and
+NegativeTerminalPolicy in that fixed order. Its v1 finite policy binds the exact
+manifest digest and six supported negative outcomes; it is conditional consent,
+not a fourth initiation signature or an observed decision. Validation rejects
+historical versions and substituted bindings. Only the original runtime owner
+may bind its protected first negative decision and retained participant custody
+to the matching Failed control. Committed control retains its distinct protected
+positive decision. These pure shapes grant no runtime signing, membership or
+window capability. See `docs/100_crypto.md` for the authoritative schema contract.

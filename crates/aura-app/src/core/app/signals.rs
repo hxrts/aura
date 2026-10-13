@@ -54,8 +54,18 @@ impl AppCore {
     /// Initialize all application signals with default values.
     pub(super) async fn ensure_signals_registered(&mut self) -> Result<(), RuntimeBridgeError> {
         if let Some(runtime) = self.runtime.as_ref() {
-            if crate::workflows::runtime::timeout_runtime_call(
+            // Signal attachment is one resource initialization, including its
+            // threshold query and required key bootstrap. Stages share this
+            // canonical policy allocation and cannot renew the endpoint.
+            let original = crate::workflows::runtime::workflow_timeout_budget(
                 runtime,
+                APP_RUNTIME_OPERATION_TIMEOUT,
+            )
+            .await
+            .map_err(|source| signals_runtime_boundary(source.into()))?;
+            if crate::workflows::runtime::timeout_runtime_call_with_budget(
+                runtime,
+                &original,
                 "ensure_signals_registered",
                 "get_threshold_config",
                 APP_RUNTIME_QUERY_TIMEOUT,
@@ -65,12 +75,13 @@ impl AppCore {
             .map_err(signals_runtime_boundary)?
             .is_none()
             {
-                let bootstrap = crate::workflows::runtime::timeout_runtime_call(
+                let bootstrap = crate::workflows::runtime::timeout_runtime_call_with_budget(
                     runtime,
+                    &original,
                     "ensure_signals_registered",
                     "bootstrap_signing_keys",
                     APP_RUNTIME_OPERATION_TIMEOUT,
-                    || runtime.bootstrap_signing_keys(),
+                    || runtime.bootstrap_signing_keys(&original),
                 )
                 .await
                 .map_err(signals_runtime_boundary)?;

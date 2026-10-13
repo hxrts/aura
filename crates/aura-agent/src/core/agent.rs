@@ -40,6 +40,7 @@ impl AuraAgent {
             runtime.effects(),
             runtime.ceremony_runner().clone(),
             runtime.reconfiguration().clone(),
+            runtime.threshold_signing(),
             runtime.tasks(),
             runtime.activity_gate(),
             context.clone(),
@@ -191,6 +192,7 @@ struct ServiceRegistry {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     reconfiguration_manager: ReconfigurationManager,
+    threshold_signing: ThresholdSigningService,
     runtime_tasks: Arc<TaskSupervisor>,
     runtime_activity: Arc<RuntimeActivityGate>,
     authority_context: AuthorityContext,
@@ -208,6 +210,7 @@ impl ServiceRegistry {
         effects: Arc<AuraEffectSystem>,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
         reconfiguration_manager: ReconfigurationManager,
+        threshold_signing: ThresholdSigningService,
         runtime_tasks: Arc<TaskSupervisor>,
         runtime_activity: Arc<RuntimeActivityGate>,
         authority_context: AuthorityContext,
@@ -217,6 +220,7 @@ impl ServiceRegistry {
             effects,
             ceremony_runner,
             reconfiguration_manager,
+            threshold_signing,
             runtime_tasks,
             runtime_activity,
             authority_context,
@@ -273,11 +277,12 @@ impl ServiceRegistry {
         self.ensure_accepting_public_operations()?;
         self.invitations
             .get_or_try_init(|| {
-                InvitationServiceApi::new_with_runner(
+                InvitationServiceApi::new_with_runner_and_signing(
                     self.effects.clone(),
                     self.authority_context.clone(),
                     self.ceremony_runner.clone(),
                     self.runtime_tasks.clone(),
+                    self.threshold_signing.clone(),
                 )
             })
             .cloned()

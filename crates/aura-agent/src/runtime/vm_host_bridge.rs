@@ -646,6 +646,30 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     Ok((engine, handler, sid))
 }
 
+#[cfg(test)]
+pub(in crate::runtime) fn opening_vm_test_holds() -> &'static std::sync::Mutex<
+    std::collections::HashMap<
+        super::subsystems::choreography::RuntimeChoreographySessionId,
+        (
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        ),
+    >,
+> {
+    static HOLDS: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                super::subsystems::choreography::RuntimeChoreographySessionId,
+                (
+                    tokio::sync::oneshot::Sender<()>,
+                    tokio::sync::oneshot::Receiver<()>,
+                ),
+            >,
+        >,
+    > = std::sync::OnceLock::new();
+    HOLDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
 pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
     effects: &AuraEffectSystem,
     manifest: &CompositionManifest,
@@ -691,6 +715,17 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
             protocol_id: manifest.protocol_id.clone(),
             message,
         })?;
+    #[cfg(test)]
+    if let Some(session_id) = claimed_session_id {
+        let hold = opening_vm_test_holds()
+            .lock()
+            .expect("opening test holds lock")
+            .remove(&session_id);
+        if let Some((claimed, release)) = hold {
+            let _ = claimed.send(());
+            let _ = release.await;
+        }
+    }
     let open_result = open_role_scoped_vm_session_admitted(
         role_names.as_slice(),
         active_role,

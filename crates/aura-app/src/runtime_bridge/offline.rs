@@ -117,7 +117,29 @@ pub(crate) struct OfflineSettingsSnapshot {
     pub pending_requests: Vec<super::PendingSigningRequest>,
 }
 
+#[cfg(test)]
+struct OfflineManifestVerification {
+    manifest_code: String,
+    verifier_code: String,
+    result: Result<
+        aura_invitation::enrollment_manifest::VerifiedEnrollmentManifestSignature,
+        aura_invitation::enrollment_manifest::EnrollmentManifestError,
+    >,
+}
+
+#[cfg(test)]
+type OfflineEnrollmentImportRequests = Arc<Mutex<Vec<(String, [u8; 32])>>>;
+
 pub struct OfflineRuntimeBridge {
+    #[cfg(test)]
+    manifest_verifications: Arc<Mutex<std::collections::VecDeque<OfflineManifestVerification>>>,
+    #[cfg(test)]
+    enrollment_import_answers: OfflineCallAnswers<
+        InvitationInfo,
+        aura_invitation::enrollment_manifest::EnrollmentManifestError,
+    >,
+    #[cfg(test)]
+    enrollment_import_requests: OfflineEnrollmentImportRequests,
     #[cfg(test)]
     settings_snapshot: Arc<Mutex<Option<OfflineSettingsSnapshot>>>,
     physical_time: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
@@ -129,6 +151,9 @@ pub struct OfflineRuntimeBridge {
     sync_answers: OfflineCallAnswers<()>,
     #[cfg(test)]
     import_answers: OfflineCallAnswers<InvitationInfo>,
+    #[cfg(test)]
+    bootstrap_answers:
+        OfflineCallAnswers<aura_core::invitation::BootstrapInvitationBatch, RuntimeBridgeError>,
     #[cfg(test)]
     sync_status_answers: OfflineCallAnswers<SyncStatus>,
     #[cfg(test)]
@@ -177,13 +202,70 @@ pub struct OfflineRuntimeBridge {
 
 impl OfflineRuntimeBridge {
     #[cfg(test)]
+    pub(crate) fn queue_bootstrap_answers(
+        &self,
+        answers: Vec<
+            futures::future::BoxFuture<
+                'static,
+                Result<aura_core::invitation::BootstrapInvitationBatch, RuntimeBridgeError>,
+            >,
+        >,
+    ) {
+        self.bootstrap_answers
+            .try_lock()
+            .expect("bootstrap fixture is idle")
+            .extend(answers);
+    }
+    #[cfg(test)]
+    pub(crate) fn queue_verified_manifest(
+        &self,
+        manifest_code: String,
+        verifier_code: String,
+        result: Result<
+            aura_invitation::enrollment_manifest::VerifiedEnrollmentManifestSignature,
+            aura_invitation::enrollment_manifest::EnrollmentManifestError,
+        >,
+    ) {
+        self.manifest_verifications
+            .try_lock()
+            .expect("manifest fixture is idle")
+            .push_back(OfflineManifestVerification {
+                manifest_code,
+                verifier_code,
+                result,
+            });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn queue_enrollment_import_answers(
+        &self,
+        answers: Vec<
+            futures::future::BoxFuture<
+                'static,
+                Result<
+                    InvitationInfo,
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError,
+                >,
+            >,
+        >,
+    ) {
+        self.enrollment_import_answers
+            .try_lock()
+            .expect("enrollment import fixture is idle")
+            .extend(answers);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn enrollment_import_requests(&self) -> Vec<(String, [u8; 32])> {
+        self.enrollment_import_requests.lock().await.clone()
+    }
+    #[cfg(test)]
     pub(crate) fn set_settings_snapshot(&self, snapshot: OfflineSettingsSnapshot) {
         *self
             .settings_snapshot
             .try_lock()
             .expect("settings fixture is idle") = Some(snapshot);
     }
-
     #[cfg(test)]
     pub(crate) fn queue_guardian_outcome_answers(
         &self,
@@ -381,17 +463,25 @@ impl OfflineRuntimeBridge {
     /// Create a new offline runtime bridge
     pub fn new(authority_id: AuthorityId) -> Self {
         let bridge = Self {
-            #[cfg(test)]
-            settings_snapshot: Arc::new(Mutex::new(None)),
             physical_time: Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
             #[cfg(test)]
             clock_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            settings_snapshot: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            manifest_verifications: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            enrollment_import_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            enrollment_import_requests: Arc::new(Mutex::new(Vec::new())),
             #[cfg(test)]
             deadline_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             #[cfg(test)]
             sync_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             #[cfg(test)]
             import_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            bootstrap_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             #[cfg(test)]
             sync_status_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             #[cfg(test)]
@@ -1124,26 +1214,39 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn try_get_bootstrap_candidates(
         &self,
-    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
-        Err(IntentError::no_agent(
-            "Bootstrap candidates not available in offline mode",
-        ))
+    ) -> Result<Vec<BootstrapCandidateInfo>, crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Bootstrap candidates not available in offline mode").into())
     }
 
-    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Bootstrap registration not available in offline mode",
-        ))
+    async fn refresh_bootstrap_candidate_registration(
+        &self,
+        _original: &aura_core::TimeoutBudget,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Bootstrap registration not available in offline mode").into())
+    }
+
+    async fn take_bootstrap_invitation_batch(
+        &self,
+    ) -> Result<
+        aura_core::invitation::BootstrapInvitationBatch,
+        crate::runtime_bridge::RuntimeBridgeError,
+    > {
+        #[cfg(test)]
+        {
+            let answer = self.bootstrap_answers.lock().await.pop_front();
+            if let Some(answer) = answer {
+                return answer.await;
+            }
+        }
+        Err(IntentError::no_agent("Bootstrap receiving requires an attached runtime").into())
     }
 
     async fn send_bootstrap_invitation(
         &self,
         _peer: &BootstrapCandidateInfo,
         _invitation_code: &str,
-    ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Bootstrap invitation not available in offline mode",
-        ))
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Bootstrap invitation not available in offline mode").into())
     }
 
     async fn sign_tree_op(&self, _op: &TreeOp) -> Result<AttestedOp, IntentError> {
@@ -1154,6 +1257,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn bootstrap_signing_keys(
         &self,
+        _original: &aura_core::TimeoutBudget,
     ) -> Result<Vec<u8>, crate::runtime_bridge::RuntimeBridgeError> {
         Err(IntentError::no_agent("Key bootstrapping not available in offline mode").into())
     }
@@ -1422,6 +1526,45 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Err(IntentError::no_agent(
             "Invitation import not available in offline mode",
         ))
+    }
+
+    #[cfg(test)]
+    async fn verify_enrollment_manifest_transfer(
+        &self,
+        manifest_code: String,
+        verifier_code: String,
+    ) -> Result<
+        aura_invitation::enrollment_manifest::VerifiedEnrollmentManifestSignature,
+        aura_invitation::enrollment_manifest::EnrollmentManifestError,
+    > {
+        use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+        let answer = self
+            .manifest_verifications
+            .lock()
+            .await
+            .pop_front()
+            .ok_or(EnrollmentManifestError::Unavailable)?;
+        if answer.manifest_code != manifest_code || answer.verifier_code != verifier_code {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        answer.result
+    }
+
+    #[cfg(test)]
+    async fn import_enrollment_invitation(
+        &self,
+        code: &str,
+        pin: crate::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
+    ) -> Result<InvitationInfo, aura_invitation::enrollment_manifest::EnrollmentManifestError> {
+        self.enrollment_import_requests
+            .lock()
+            .await
+            .push((code.to_owned(), pin.digest()));
+        let answer = self.enrollment_import_answers.lock().await.pop_front();
+        match answer {
+            Some(answer) => answer.await,
+            None => Err(aura_invitation::enrollment_manifest::EnrollmentManifestError::Unavailable),
+        }
     }
 
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {

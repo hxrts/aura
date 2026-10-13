@@ -1201,6 +1201,15 @@ impl RuntimeSystem {
         self.reactive_pipeline_service.is_running().await
     }
 
+    /// Exercise failure of this runtime's actual publication owner without
+    /// replacing its ingress or cancelling unrelated enrollment tasks.
+    #[cfg(test)]
+    pub(crate) async fn stop_original_reactive_pipeline_for_test(
+        &self,
+    ) -> Result<(), ServiceError> {
+        RuntimeService::stop(&self.reactive_pipeline_service).await
+    }
+
     /// Get the context manager
     pub fn contexts(&self) -> &ContextManager {
         &self.context_manager
@@ -2126,14 +2135,18 @@ pub(crate) async fn publish_lan_descriptor_with(
     let result = handler
         .publish_descriptor(&effects, context_id, hints.clone(), [0u8; 32], 0)
         .await
-        .map_err(|error| ServiceError::startup_failed("rendezvous_publish", error.to_string()))?;
+        .map_err(|error| {
+            ServiceError::startup_failed("rendezvous_publish", error.to_string()).with_cause(error)
+        })?;
     let mut descriptor = require_published_lan_descriptor(result, device_id)?;
     // Label the announcement so peers can show a name for this candidate.
     descriptor.nickname_suggestion = load_account_nickname_suggestion(&effects).await;
     let signing_key = retrieve_lan_identity_signing_key(&effects, authority_id).await?;
     install_lan_descriptor(rendezvous_manager, descriptor, signing_key).await?;
 
-    if let Err(error) = register_bootstrap_candidate_with(rendezvous_manager, lan_transport).await {
+    if let Err(error) =
+        register_bootstrap_candidate_with(rendezvous_manager, lan_transport, device_id).await
+    {
         tracing::debug!(
             error = %error,
             "Failed to register bootstrap candidate after publishing LAN descriptor"
@@ -2146,7 +2159,11 @@ pub(crate) async fn publish_lan_descriptor_with(
 pub(crate) async fn register_bootstrap_candidate_with(
     rendezvous_manager: &RendezvousManager,
     lan_transport: &LanTransportService,
+    device_id: aura_core::DeviceId,
 ) -> Result<(), RendezvousManagerError> {
+    if !rendezvous_manager.config().bootstrap_broker.enabled {
+        return Ok(());
+    }
     let tcp_addrs = lan_transport.advertised_addrs();
     let websocket_addrs = lan_transport.websocket_addrs();
     let Some(address) = websocket_addrs
@@ -2154,11 +2171,15 @@ pub(crate) async fn register_bootstrap_candidate_with(
         .cloned()
         .or_else(|| tcp_addrs.first().cloned())
     else {
-        return Ok(());
+        return Err(RendezvousManagerError::BootstrapBroker(
+            aura_core::AuraError::invalid(
+                "enabled bootstrap broker registration requires an advertised address",
+            ),
+        ));
     };
 
     rendezvous_manager
-        .register_bootstrap_candidate(address, None)
+        .register_bootstrap_candidate(device_id, address, None)
         .await
 }
 

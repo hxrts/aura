@@ -171,3 +171,13 @@ public package and checks the selected verifier, epoch presence and key hash
 before participant callbacks. L6 additionally requires byte equality with the
 original approved domain. Raw-byte policy construction is compile-fail guarded;
 wrong domain, revoked key, corrupt hash and codec failures have unit coverage.
+
+### Owned commitment-tree decision custody
+
+`PersistentTreeHandler::lock_owned_decision` retains the exact original handler
+and its existing mutation gate in `TreeDecisionLease<'static>`. It acquires the
+same gate as the borrowed lease; moving the lease into a participant does not
+reconstruct a handler or release that exclusion. The lease proves mutual
+exclusion only. Its caller must separately retain authenticated tree history,
+current membership and original approval. Read methods do not reacquire the gate;
+mutation while holding it would recursively wait. See `docs/104_runtime.md`.

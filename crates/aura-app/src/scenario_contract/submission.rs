@@ -207,3 +207,165 @@ mod tests {
         assert!(decoded.handle.ui_operation.is_none());
     }
 }
+
+/// Typed refusal before semantic operation admission. It carries no operation handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticCommandRejection {
+    pub error: crate::ui_contract::SemanticOperationError,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<SemanticRejectionReason>,
+}
+
+/// Stable immediate-validation reasons backed by actual native enum variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticRejectionReason {
+    NicknameEmpty,
+    NicknameTooLong,
+    NicknameInvalidChars,
+    InvitationInvalidFormat,
+    InvitationUnsupportedVersion,
+    InvitationSizeLimitExceeded,
+    InvitationDecodingFailed,
+    InvitationParsingFailed,
+    InvitationSerializationFailed,
+    InvitationMissingSenderProof,
+    InvitationInvalidSenderProof,
+    InvitationMissingChannelContext,
+    InvitationExpired,
+}
+
+impl SemanticCommandRejection {
+    /// Project a known concrete admission failure before a shell converts it
+    /// into a diagnostic string. Unknown sources supply no typed evidence.
+    pub fn from_native_source(original: &(dyn std::error::Error + 'static)) -> Option<Self> {
+        use crate::ui_contract::{
+            SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+        };
+        use crate::workflows::account::NicknameSuggestionError;
+        let mut current = Some(original);
+        while let Some(source) = current {
+            if let Some(rejection) = source.downcast_ref::<Self>() {
+                return Some(rejection.clone());
+            }
+            if let Some(error) = source.downcast_ref::<NicknameSuggestionError>() {
+                let reason = match error {
+                    NicknameSuggestionError::Empty => SemanticRejectionReason::NicknameEmpty,
+                    NicknameSuggestionError::TooLong { .. } => {
+                        SemanticRejectionReason::NicknameTooLong
+                    }
+                    NicknameSuggestionError::InvalidChars { .. } => {
+                        SemanticRejectionReason::NicknameInvalidChars
+                    }
+                };
+                return Some(Self {
+                    error: SemanticOperationError::new(
+                        SemanticFailureDomain::Command,
+                        SemanticFailureCode::InvalidArgument,
+                    ),
+                    reason: Some(reason),
+                });
+            }
+            if let Some(error) =
+                source.downcast_ref::<aura_invitation::shareable::ShareableInvitationError>()
+            {
+                use aura_invitation::shareable::ShareableInvitationError as E;
+                use SemanticRejectionReason as R;
+                let (reason, code) = match error {
+                    E::InvalidFormat => (
+                        R::InvitationInvalidFormat,
+                        SemanticFailureCode::InvalidArgument,
+                    ),
+                    E::UnsupportedVersion(_) => (
+                        R::InvitationUnsupportedVersion,
+                        SemanticFailureCode::InvalidArgument,
+                    ),
+                    E::SizeLimitExceeded(_) => (
+                        R::InvitationSizeLimitExceeded,
+                        SemanticFailureCode::InvalidArgument,
+                    ),
+                    E::DecodingFailed(_) => (
+                        R::InvitationDecodingFailed,
+                        SemanticFailureCode::InvalidArgument,
+                    ),
+                    E::ParsingFailed(_) => (
+                        R::InvitationParsingFailed,
+                        SemanticFailureCode::InvalidArgument,
+                    ),
+                    E::SerializationFailed(_) => (
+                        R::InvitationSerializationFailed,
+                        SemanticFailureCode::SerializationFailure,
+                    ),
+                    E::MissingSenderProof => (
+                        R::InvitationMissingSenderProof,
+                        SemanticFailureCode::PermissionDenied,
+                    ),
+                    E::InvalidSenderProof => (
+                        R::InvitationInvalidSenderProof,
+                        SemanticFailureCode::PermissionDenied,
+                    ),
+                    E::MissingChannelContext => (
+                        R::InvitationMissingChannelContext,
+                        SemanticFailureCode::MissingAuthoritativeContext,
+                    ),
+                    E::Expired => (R::InvitationExpired, SemanticFailureCode::InvitationExpired),
+                };
+                return Some(Self {
+                    error: SemanticOperationError::new(SemanticFailureDomain::Invitation, code),
+                    reason: Some(reason),
+                });
+            }
+            current = source.source();
+        }
+        None
+    }
+}
+
+impl std::fmt::Display for SemanticCommandRejection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "semantic admission rejected: {:?}/{:?}",
+            self.error.domain, self.error.code
+        )
+    }
+}
+
+impl std::error::Error for SemanticCommandRejection {}
+
+#[cfg(test)]
+mod rejection_wire_tests {
+    use super::*;
+    use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
+    #[test]
+    fn concrete_native_source_projects_without_using_diagnostic_text() {
+        use crate::workflows::account::NicknameSuggestionError;
+        let original = NicknameSuggestionError::Empty;
+        let rejection = SemanticCommandRejection::from_native_source(&original)
+            .expect("actual native enum provides stable reason");
+        assert_eq!(
+            rejection.reason,
+            Some(SemanticRejectionReason::NicknameEmpty)
+        );
+        let text_only = std::io::Error::other(original.to_string());
+        assert!(SemanticCommandRejection::from_native_source(&text_only).is_none());
+    }
+    #[test]
+    fn immediate_rejection_roundtrip_has_no_accepted_operation_custody() {
+        let rejection = SemanticCommandRejection {
+            error: SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                SemanticFailureCode::InvalidArgument,
+            ),
+            reason: Some(SemanticRejectionReason::NicknameEmpty),
+        };
+        let wire = serde_json::to_value(&rejection).expect("encode actual typed refusal");
+        assert!(wire.get("handle").is_none());
+        assert!(wire.get("submission").is_none());
+        assert_eq!(
+            serde_json::from_value::<SemanticCommandRejection>(wire).expect("decode exact refusal"),
+            rejection
+        );
+    }
+}

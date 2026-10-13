@@ -314,8 +314,18 @@ impl From<TimeoutBudgetError> for AuraError {
 /// hold a nonblocking owner lease across the required read, update, and checkpoint.
 #[derive(Debug, Clone)]
 pub struct TimeoutClockObservation {
+    provider_rollback: std::sync::Arc<ProviderRollbackObservation>,
     state: std::sync::Arc<futures::lock::Mutex<TimeoutClockSnapshot>>,
     observation_gate: std::sync::Arc<futures::lock::Mutex<()>>,
+}
+
+// Publication never waits for the snapshot lock. Readers fail closed while the
+// first actual provider witness is being published; no partial pair is observed.
+#[derive(Debug, Default)]
+struct ProviderRollbackObservation {
+    status: std::sync::atomic::AtomicU8,
+    previous: std::sync::atomic::AtomicU64,
+    observed: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +357,55 @@ pub struct TimeoutObservationLease {
 }
 
 impl TimeoutClockObservation {
+    fn retain_provider_rollback(&self, error: &TimeError) {
+        use std::sync::atomic::Ordering;
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+        while let Some(actual) = source {
+            if let Some(TimeError::PhysicalClockRollback {
+                previous_ms,
+                observed_ms,
+            }) = actual.downcast_ref::<TimeError>()
+            {
+                if observed_ms < previous_ms
+                    && self
+                        .provider_rollback
+                        .status
+                        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                {
+                    self.provider_rollback
+                        .previous
+                        .store(*previous_ms, Ordering::Relaxed);
+                    self.provider_rollback
+                        .observed
+                        .store(*observed_ms, Ordering::Relaxed);
+                    self.provider_rollback.status.store(2, Ordering::Release);
+                }
+                return;
+            }
+            source = actual.source();
+        }
+    }
+
+    fn merge_provider_rollback(&self, state: &mut TimeoutClockSnapshot) -> TimeoutBudgetResult<()> {
+        use std::sync::atomic::Ordering;
+        match self.provider_rollback.status.load(Ordering::Acquire) {
+            0 => return Ok(()),
+            1 => return Err(TimeoutBudgetError::ObservationUnavailable),
+            _ => {}
+        }
+        if matches!(state.rollback, TimeoutClockRollbackSnapshot::Absent) {
+            let previous = self.provider_rollback.previous.load(Ordering::Relaxed);
+            let observed = self.provider_rollback.observed.load(Ordering::Relaxed);
+            state.max_observed_at_ms = state.max_observed_at_ms.max(previous);
+            state.rollback = TimeoutClockRollbackSnapshot::Detected {
+                previous_observed_at_ms: state.max_observed_at_ms,
+                observed_at_ms: observed,
+            };
+        }
+        Ok(())
+    }
+
     async fn acquire_observation(&self) -> TimeoutObservationLease {
         TimeoutObservationLease {
             _guard: self.observation_gate.clone().lock_owned().await,
@@ -356,6 +415,7 @@ impl TimeoutClockObservation {
     pub fn new(started_at: &PhysicalTime) -> Self {
         Self {
             observation_gate: std::sync::Arc::new(futures::lock::Mutex::new(())),
+            provider_rollback: std::sync::Arc::new(ProviderRollbackObservation::default()),
             state: std::sync::Arc::new(futures::lock::Mutex::new(TimeoutClockSnapshot {
                 max_observed_at_ms: started_at.ts_ms,
                 rollback: TimeoutClockRollbackSnapshot::Absent,
@@ -369,6 +429,7 @@ impl TimeoutClockObservation {
             .state
             .try_lock()
             .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.merge_provider_rollback(&mut state)?;
         Self::observe_state(&mut state, now)
     }
 
@@ -402,10 +463,12 @@ impl TimeoutClockObservation {
     }
 
     fn snapshot(&self) -> TimeoutBudgetResult<TimeoutClockSnapshot> {
-        self.state
+        let mut state = self
+            .state
             .try_lock()
-            .map(|state| state.clone())
-            .ok_or(TimeoutBudgetError::ObservationUnavailable)
+            .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.merge_provider_rollback(&mut state)?;
+        Ok(state.clone())
     }
 
     fn restore(snapshot: TimeoutClockSnapshot) -> TimeoutBudgetResult<Self> {
@@ -423,6 +486,7 @@ impl TimeoutClockObservation {
         Ok(Self {
             state: std::sync::Arc::new(futures::lock::Mutex::new(snapshot)),
             observation_gate: std::sync::Arc::new(futures::lock::Mutex::new(())),
+            provider_rollback: std::sync::Arc::new(ProviderRollbackObservation::default()),
         })
     }
 }
@@ -468,9 +532,12 @@ struct TimeoutBudgetSnapshot {
 impl Serialize for TimeoutBudget {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let snapshot = {
-            let clock = self.clock.state.try_lock().ok_or_else(|| {
+            let mut clock = self.clock.state.try_lock().ok_or_else(|| {
                 serde::ser::Error::custom(TimeoutBudgetError::ObservationUnavailable)
             })?;
+            self.clock
+                .merge_provider_rollback(&mut clock)
+                .map_err(serde::ser::Error::custom)?;
             let expired = self.expired_at_ms.try_lock().ok_or_else(|| {
                 serde::ser::Error::custom(TimeoutBudgetError::ObservationUnavailable)
             })?;
@@ -557,11 +624,12 @@ impl TimeoutBudget {
     fn checkpoint_history(
         &self,
     ) -> TimeoutBudgetResult<(u64, TimeoutClockRollbackSnapshot, Option<u64>)> {
-        let clock = self
+        let mut clock = self
             .clock
             .state
             .try_lock()
             .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.clock.merge_provider_rollback(&mut clock)?;
         let expiration = self
             .expired_at_ms
             .try_lock()
@@ -619,6 +687,7 @@ impl TimeoutBudget {
             .state
             .try_lock()
             .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.clock.merge_provider_rollback(&mut clock)?;
         let mut expired = self
             .expired_at_ms
             .try_lock()
@@ -646,6 +715,7 @@ impl TimeoutBudget {
             .state
             .try_lock()
             .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.clock.merge_provider_rollback(&mut clock)?;
         let mut expired = self
             .expired_at_ms
             .try_lock()
@@ -663,11 +733,12 @@ impl TimeoutBudget {
         &self,
         recorded_at: &PhysicalTime,
     ) -> TimeoutBudgetResult<()> {
-        let clock = self
+        let mut clock = self
             .clock
             .state
             .try_lock()
             .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.clock.merge_provider_rollback(&mut clock)?;
         let expired = self
             .expired_at_ms
             .try_lock()
@@ -1185,6 +1256,9 @@ where
             }
         }
     };
+    if let Err(source) = &witness {
+        budget.clock.retain_provider_rollback(source);
+    }
     match project_deadline(witness) {
         Err(error) => Err(TimeoutRunError::Timeout(error)),
         Ok(never) => match never {},
@@ -1204,6 +1278,145 @@ pub enum CheckpointAttempt<A> {
     Failed { source: TimeoutBudgetError },
 }
 
+/// Execution and checkpoint results retained for the original domain owner.
+/// The caller retains its consuming root and any required negative obligation.
+pub enum CheckpointExecution<T, E, A> {
+    /// The operation completed and the final checkpoint returned its own receipt.
+    Finished {
+        operation: Result<T, E>,
+        checkpoint: A,
+    },
+    /// Positive execution stopped. This value creates no negative cleanup owner.
+    Unresolved {
+        operation: Option<Result<T, E>>,
+        checkpoint: CheckpointAttempt<A>,
+        validation: TimeoutBudgetResult<PhysicalTime>,
+    },
+    Negative {
+        /// The first actual observation/checkpoint failure.
+        source: TimeoutBudgetError,
+        /// Independent final selected-provider/deadline validation.
+        validation: TimeoutBudgetResult<PhysicalTime>,
+        /// A completed operation result, if completion preceded the failure.
+        operation: Option<Result<T, E>>,
+        /// The actual checkpoint disposition, independent of the first failure.
+        checkpoint: CheckpointAttempt<A>,
+    },
+}
+
+// A preoperation receipt is deliberately dropped after admission. Only the
+// actual postoperation receipt can accompany a completed operation result.
+enum CheckpointObservation<A> {
+    Positive(A),
+    Unresolved {
+        checkpoint: CheckpointAttempt<A>,
+        validation: TimeoutBudgetResult<PhysicalTime>,
+    },
+    Negative {
+        source: TimeoutBudgetError,
+        validation: TimeoutBudgetResult<PhysicalTime>,
+        checkpoint: CheckpointAttempt<A>,
+    },
+}
+
+async fn checkpoint_original_observation<TTime, C, CFut, A>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    checkpoint: &mut C,
+) -> CheckpointObservation<A>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    C: FnMut() -> CFut,
+    CFut: Future<Output = TimeoutBudgetResult<A>>,
+{
+    let mut primary = None;
+    let mut attempted = false;
+    let mut returned_receipt = None;
+    let mut checkpoint_error = None;
+    let observed = bounded_timeout_observation_result(time, budget, || async {
+        let now = match current_physical_time(time).await {
+            Ok(now) => now,
+            Err(error) => {
+                primary = Some(error.clone());
+                return Err(TimeoutRunError::<std::convert::Infallible>::Timeout(error));
+            }
+        };
+        // Capture rollback before awaiting persistence: a stalled checkpoint's
+        // deadline must not replace the original rollback cause.
+        if let Err(error) = budget.remaining_at(&now) {
+            primary = Some(error.clone());
+            // A latched rollback may be checkpointed only while its original
+            // positive endpoint is still physically available. Expiration or
+            // other observation failure admits no new persistence attempt.
+            if !matches!(error, TimeoutBudgetError::ClockRollback { .. })
+                || now.ts_ms >= budget.deadline_at_ms()
+            {
+                return Err(TimeoutRunError::Timeout(error));
+            }
+        }
+        attempted = true;
+        match checkpoint().await {
+            Ok(receipt) => returned_receipt = Some(receipt),
+            Err(error) => {
+                checkpoint_error = Some(error.clone());
+                return Err(TimeoutRunError::Timeout(error));
+            }
+        }
+        Ok(())
+    })
+    .await;
+    match observed {
+        Ok(((), lease)) => {
+            let receipt = match returned_receipt.take() {
+                Some(receipt) => receipt,
+                None => {
+                    drop(lease);
+                    return CheckpointObservation::Unresolved {
+                        checkpoint: if attempted {
+                            CheckpointAttempt::Interrupted
+                        } else {
+                            CheckpointAttempt::NotAttempted
+                        },
+                        validation: observe_with_timeout_budget(time, budget).await,
+                    };
+                }
+            };
+            drop(lease);
+            // Retain the actual receipt outside the next losing future. A
+            // checkpoint can synchronously advance the selected clock in the
+            // same poll that returns its receipt; timer-first arbitration alone
+            // does not validate that return. Reobserve under the SAME endpoint.
+            let final_observation = observe_with_timeout_budget(time, budget).await;
+            let negative = match primary {
+                Some(source) => Some(source),
+                None => final_observation.as_ref().err().cloned(),
+            };
+            match negative {
+                None => CheckpointObservation::Positive(receipt),
+                Some(source) => CheckpointObservation::Negative {
+                    source,
+                    validation: final_observation,
+                    checkpoint: CheckpointAttempt::Returned(receipt),
+                },
+            }
+        }
+        Err(TimeoutRunError::Timeout(error)) => CheckpointObservation::Negative {
+            source: primary.unwrap_or_else(|| error.clone()),
+            validation: Err(error),
+            checkpoint: if let Some(receipt) = returned_receipt {
+                CheckpointAttempt::Returned(receipt)
+            } else if let Some(source) = checkpoint_error {
+                CheckpointAttempt::Failed { source }
+            } else if attempted {
+                CheckpointAttempt::Interrupted
+            } else {
+                CheckpointAttempt::NotAttempted
+            },
+        },
+        Err(TimeoutRunError::Operation(never)) => match never {},
+    }
+}
+
 /// Negative-only observation; no positive publication or domain authority.
 pub struct NegativeCheckpointObservation<P, A> {
     pub primary: P,
@@ -1219,6 +1432,7 @@ impl TimeoutBudget {
             .state
             .try_lock()
             .ok_or(TimeoutBudgetError::ObservationUnavailable)?;
+        self.clock.merge_provider_rollback(&mut clock)?;
         let mut expired = self
             .expired_at_ms
             .try_lock()
@@ -1428,10 +1642,10 @@ fn negative_deadline_validation(
     ))
 }
 
-/// Execute under a deadline whose owner acknowledges every observation before
-/// continuing. The checkpoint also runs for latched rollback and expiration.
-/// Runtime enrolled owners seal this hook behind their persistence capability.
-///
+/// Execute using the original provider and absolute endpoint for gate, reads,
+/// work and actual checkpoint attempts. No postexpiry write is started here.
+/// An unresolved negative belongs to the retained domain root; only that root's
+/// preauthorized negative-only custody can perform subsequent cleanup.
 /// ```compile_fail
 /// use aura_core::{AuraError, TimeoutBudget};
 /// use aura_core::effects::PhysicalTimeEffects;
@@ -1441,61 +1655,97 @@ fn negative_deadline_validation(
 ///     ).await;
 /// }
 /// ```
-pub async fn execute_with_timeout_budget_and_checkpoint<TTime, C, CFut, F, Fut, T, E>(
+pub async fn execute_with_timeout_budget_and_checkpoint<TTime, C, CFut, F, Fut, T, E, A>(
     time: &TTime,
     budget: &TimeoutBudget,
     mut checkpoint: C,
     operation: F,
-) -> Result<T, TimeoutRunError<E>>
+) -> CheckpointExecution<T, E, A>
 where
     TTime: PhysicalTimeEffects + Sync,
     C: FnMut() -> CFut,
-    CFut: Future<Output = TimeoutBudgetResult<()>>,
+    CFut: Future<Output = TimeoutBudgetResult<A>>,
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    let remaining = {
-        let _observation = budget.acquire_observation().await;
-        let now = current_physical_time(time)
-            .await
-            .map_err(TimeoutRunError::Timeout)?;
-        let remaining = budget.remaining_at(&now);
-        checkpoint().await.map_err(TimeoutRunError::Timeout)?;
-        remaining.map_err(TimeoutRunError::Timeout)?
+    match checkpoint_original_observation(time, budget, &mut checkpoint).await {
+        CheckpointObservation::Positive(receipt) => drop(receipt),
+        CheckpointObservation::Unresolved {
+            checkpoint,
+            validation,
+        } => {
+            return CheckpointExecution::Unresolved {
+                operation: None,
+                checkpoint,
+                validation,
+            };
+        }
+        CheckpointObservation::Negative {
+            source,
+            checkpoint,
+            validation,
+        } => {
+            return CheckpointExecution::Negative {
+                source,
+                validation,
+                operation: None,
+                checkpoint,
+            };
+        }
+    }
+    let mut completed_operation = None;
+    let work = async {
+        completed_operation = Some(operation().await);
+        Ok::<(), TimeoutRunError<std::convert::Infallible>>(())
     };
-    let sleep_ms = duration_to_ms(remaining).map_err(TimeoutRunError::Timeout)?;
-
-    // The select must own each future, not just a Pin<&mut _>; dropping a
-    // borrowed pin leaves the hidden stack future and its leases alive.
-    let operation_future = Box::pin(operation());
-    let sleep_future = Box::pin(time.sleep_ms(sleep_ms));
-    match futures::future::select(operation_future, sleep_future).await {
-        Either::Left((result, sleep_future)) => {
-            drop(sleep_future);
-            let _observation = budget.acquire_observation().await;
-            let observed = current_physical_time(time)
-                .await
-                .map_err(TimeoutRunError::Timeout)?;
-            let observation = budget.remaining_at(&observed);
-            checkpoint().await.map_err(TimeoutRunError::Timeout)?;
-            observation.map_err(TimeoutRunError::Timeout)?;
-            result.map_err(TimeoutRunError::Operation)
+    let raced = race_original_deadline(time, budget, work, |witness| {
+        expire_witnessed_deadline::<std::convert::Infallible>(budget, witness.map_err(time_error)?)
+    })
+    .await;
+    let result = match raced {
+        Err(TimeoutRunError::Timeout(source)) => {
+            return CheckpointExecution::Negative {
+                validation: Err(source.clone()),
+                source,
+                operation: completed_operation,
+                checkpoint: CheckpointAttempt::NotAttempted,
+            };
         }
-        Either::Right((sleep, operation_future)) => {
-            // Cancellation must release any observation lease held by the
-            // losing operation before the timeout owner reacquires that lease.
-            drop(operation_future);
-            sleep.map_err(|error| TimeoutRunError::Timeout(time_error(error)))?;
-            let _observation = budget.acquire_observation().await;
-            let observed = current_physical_time(time)
-                .await
-                .map_err(TimeoutRunError::Timeout)?;
-            let expiration = budget.expire_at(&observed);
-            checkpoint().await.map_err(TimeoutRunError::Timeout)?;
-            Err(TimeoutRunError::Timeout(
-                expiration.map_err(TimeoutRunError::Timeout)?,
-            ))
-        }
+        Err(TimeoutRunError::Operation(never)) => match never {},
+        Ok(()) => match completed_operation {
+            Some(result) => result,
+            None => {
+                return CheckpointExecution::Unresolved {
+                    operation: None,
+                    checkpoint: CheckpointAttempt::NotAttempted,
+                    validation: observe_with_timeout_budget(time, budget).await,
+                }
+            }
+        },
+    };
+    match checkpoint_original_observation(time, budget, &mut checkpoint).await {
+        CheckpointObservation::Unresolved {
+            checkpoint,
+            validation,
+        } => CheckpointExecution::Unresolved {
+            operation: Some(result),
+            checkpoint,
+            validation,
+        },
+        CheckpointObservation::Positive(checkpoint) => CheckpointExecution::Finished {
+            operation: result,
+            checkpoint,
+        },
+        CheckpointObservation::Negative {
+            source,
+            checkpoint,
+            validation,
+        } => CheckpointExecution::Negative {
+            source,
+            validation,
+            operation: Some(result),
+            checkpoint,
+        },
     }
 }
 
@@ -1635,13 +1885,12 @@ fn time_error(error: TimeError) -> TimeoutBudgetError {
 #[cfg(test)]
 #[allow(clippy::disallowed_types, clippy::expect_used, clippy::redundant_clone)]
 mod tests {
-    use super::TimeoutBudgetResult;
     use super::{
         acknowledge_initial_publication_with_timeout_budget, execute_with_retry_budget,
         execute_with_timeout_budget, execute_with_timeout_budget_and_checkpoint, AttemptBudget,
-        ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError, TimeoutBudget,
-        TimeoutBudgetError, TimeoutExecutionClass, TimeoutExecutionProfile, TimeoutRunError,
-        TimeoutTimeSemantics,
+        CheckpointExecution, ExponentialBackoffPolicy, PhysicalMillis, RetryBudgetPolicy,
+        RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutBudgetResult,
+        TimeoutExecutionClass, TimeoutExecutionProfile, TimeoutRunError, TimeoutTimeSemantics,
     };
     use crate::types::window::WindowPosition;
     use crate::{
@@ -1651,9 +1900,14 @@ mod tests {
     };
     use futures::FutureExt;
     use parking_lot::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
-    use std::{collections::VecDeque, sync::Arc};
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
 
     pub(super) fn physical_time(ts_ms: u64) -> PhysicalTime {
         PhysicalTime::exact(ts_ms)
@@ -1720,26 +1974,6 @@ mod tests {
             .expect("original terminal interval")
     }
 
-    #[tokio::test]
-    async fn required_terminal_ack_forwards_original_nonclone_callback_receipt() {
-        struct ActualReceipt(Arc<()>);
-        let identity = Arc::new(());
-        let checkpoint_identity = identity.clone();
-        let clock = ScriptedTimeEffects::new(
-            [physical_time(100), physical_time(100)],
-            SleepBehavior::Immediate,
-        );
-        let budget = terminal_test_budget();
-        let retained = super::acknowledge_with_timeout_budget(
-            &clock,
-            &budget,
-            || async move { Ok(ActualReceipt(checkpoint_identity)) },
-            |receipt| Arc::ptr_eq(&identity, &receipt.0),
-        )
-        .await
-        .expect("actual receipt under original endpoint");
-        assert!(retained);
-    }
     #[tokio::test]
     async fn required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease() {
         let (clock, read, endpoint) = TerminalObservationClock::controlled();
@@ -2703,6 +2937,8 @@ mod tests {
     }
 
     struct InterleavedObservationTime {
+        now: std::sync::atomic::AtomicU64,
+        deadline_waker: futures::task::AtomicWaker,
         reads: std::sync::atomic::AtomicUsize,
         release_first: futures::lock::Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
     }
@@ -2710,7 +2946,7 @@ mod tests {
     impl PhysicalTimeEffects for InterleavedObservationTime {
         async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
             let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if read == 0 {
+            let sample = if read == 0 {
                 let receiver = self
                     .release_first
                     .lock()
@@ -2720,10 +2956,29 @@ mod tests {
                 receiver
                     .await
                     .expect("test releases captured first clock read");
-                Ok(physical_time(150))
+                physical_time(150)
             } else {
-                Ok(physical_time(200))
-            }
+                physical_time(200)
+            };
+            self.now
+                .store(sample.ts_ms, std::sync::atomic::Ordering::SeqCst);
+            self.deadline_waker.wake();
+            Ok(sample)
+        }
+        async fn wait_until_physical_deadline(
+            &self,
+            deadline: WindowPosition<PhysicalMillis>,
+        ) -> Result<PhysicalTime, TimeError> {
+            futures::future::poll_fn(|cx| {
+                self.deadline_waker.register(cx.waker());
+                let now = self.now.load(std::sync::atomic::Ordering::SeqCst);
+                if now >= deadline.value() {
+                    std::task::Poll::Ready(Ok(physical_time(now)))
+                } else {
+                    std::task::Poll::Pending
+                }
+            })
+            .await
         }
         async fn sleep_ms(&self, _: u64) -> Result<(), TimeError> {
             futures::future::pending().await
@@ -2735,6 +2990,8 @@ mod tests {
         use std::sync::atomic::Ordering;
         let (release, wait) = futures::channel::oneshot::channel();
         let time = InterleavedObservationTime {
+            now: std::sync::atomic::AtomicU64::new(100),
+            deadline_waker: futures::task::AtomicWaker::new(),
             reads: std::sync::atomic::AtomicUsize::new(0),
             release_first: futures::lock::Mutex::new(Some(wait)),
         };
@@ -2770,13 +3027,23 @@ mod tests {
         );
         release.send(()).expect("release original read");
         assert_eq!(
-            first.await.expect("original owner observes before sibling"),
+            match first.await {
+                CheckpointExecution::Finished {
+                    operation: Ok(value),
+                    ..
+                } => value,
+                _ => panic!("original owner must complete with actual receipt"),
+            },
             1
         );
         assert_eq!(
-            second
-                .await
-                .expect("child observes in owner order without false rollback"),
+            match second.await {
+                CheckpointExecution::Finished {
+                    operation: Ok(value),
+                    ..
+                } => value,
+                _ => panic!("child must complete with actual receipt"),
+            },
             2
         );
         assert_eq!(
@@ -2804,6 +3071,8 @@ mod tests {
         use std::sync::atomic::Ordering;
         let (_release, wait) = futures::channel::oneshot::channel();
         let time = InterleavedObservationTime {
+            now: std::sync::atomic::AtomicU64::new(100),
+            deadline_waker: futures::task::AtomicWaker::new(),
             reads: std::sync::atomic::AtomicUsize::new(0),
             release_first: futures::lock::Mutex::new(Some(wait)),
         };
@@ -2819,17 +3088,23 @@ mod tests {
         assert!(futures::poll!(cancelled.as_mut()).is_pending());
         drop(cancelled);
         assert_eq!(
-            execute_with_timeout_budget_and_checkpoint(
+            match execute_with_timeout_budget_and_checkpoint(
                 &time,
                 &budget,
                 || async { Ok(()) },
                 || async { Ok::<_, AuraError>(7) }
             )
             .await
-            .expect("cancelled query must release observation ownership"),
+            {
+                CheckpointExecution::Finished {
+                    operation: Ok(value),
+                    ..
+                } => value,
+                _ => panic!("cancelled query must release original observation lease"),
+            },
             7
         );
-        assert_eq!(time.reads.load(Ordering::SeqCst), 3);
+        assert_eq!(time.reads.load(Ordering::SeqCst), 5);
         assert_eq!(
             budget.deadline_at_ms(),
             500,
@@ -3789,6 +4064,280 @@ mod tests {
             ));
         }
     }
+    #[tokio::test]
+    async fn required_checkpoint_same_poll_expiry_retains_receipt_and_never_constructs_work() {
+        let (clock, release) =
+            ScriptedTimeEffects::new([physical_time(100)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let mut release = Some(release);
+        let constructed = std::cell::Cell::new(false);
+        let outcome = super::execute_with_timeout_budget_and_checkpoint(
+            &clock,
+            &budget,
+            || {
+                release
+                    .take()
+                    .unwrap()
+                    .send(Ok(physical_time(500)))
+                    .unwrap();
+                futures::future::ready(Ok(41u32))
+            },
+            || {
+                constructed.set(true);
+                futures::future::ready(Ok::<_, ()>(()))
+            },
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            super::CheckpointExecution::Negative {
+                validation: _,
+                source: TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    ..
+                },
+                operation: None,
+                checkpoint: super::CheckpointAttempt::Returned(41),
+            }
+        ));
+        assert!(!constructed.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_checkpoint_expiry_between_admission_and_work_does_not_construct_work() {
+        let (clock, release) =
+            ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_controlled_deadline();
+        let clock = clock.with_clock_reads(vec![
+            futures::future::ready(Ok(physical_time(100))).boxed(),
+            async move {
+                release.send(Ok(physical_time(500))).unwrap();
+                Ok(physical_time(100))
+            }
+            .boxed(),
+        ]);
+        let budget = terminal_test_budget();
+        let constructed = std::cell::Cell::new(false);
+        let outcome = super::execute_with_timeout_budget_and_checkpoint(
+            &clock,
+            &budget,
+            || futures::future::ready(Ok(41u32)),
+            || {
+                constructed.set(true);
+                futures::future::ready(Ok::<_, ()>(()))
+            },
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            super::CheckpointExecution::Negative {
+                validation: _,
+                source: TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 500,
+                    ..
+                },
+                operation: None,
+                checkpoint: super::CheckpointAttempt::Returned(41),
+            }
+        ));
+        assert!(!constructed.get());
+    }
+
+    #[tokio::test]
+    async fn required_checkpoint_rollback_survives_stalled_checkpoint_deadline() {
+        let (clock, release) =
+            ScriptedTimeEffects::new([physical_time(99)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let constructed = std::cell::Cell::new(false);
+        let mut execution = Box::pin(super::execute_with_timeout_budget_and_checkpoint(
+            &clock,
+            &budget,
+            futures::future::pending::<TimeoutBudgetResult<u32>>,
+            || {
+                constructed.set(true);
+                futures::future::ready(Ok::<_, ()>(()))
+            },
+        ));
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        release.send(Ok(physical_time(500))).unwrap();
+        assert!(matches!(
+            execution.await,
+            super::CheckpointExecution::Negative {
+                validation: _,
+                source: TimeoutBudgetError::ClockRollback {
+                    previous_observed_at_ms: 100,
+                    observed_at_ms: 99,
+                },
+                operation: None,
+                checkpoint: super::CheckpointAttempt::Interrupted,
+            }
+        ));
+        assert!(!constructed.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_checkpoint_final_receipt_cannot_be_replaced_by_preoperation_receipt() {
+        let clock = ScriptedTimeEffects::new(
+            [
+                physical_time(100),
+                physical_time(100),
+                physical_time(100),
+                physical_time(100),
+            ],
+            SleepBehavior::Immediate,
+        );
+        let budget = terminal_test_budget();
+        let mut calls = 0u32;
+        let outcome = super::execute_with_timeout_budget_and_checkpoint(
+            &clock,
+            &budget,
+            || {
+                calls += 1;
+                futures::future::ready(Ok(calls))
+            },
+            || futures::future::ready(Ok::<_, ()>(7u32)),
+        )
+        .await;
+        assert!(matches!(
+            outcome,
+            super::CheckpointExecution::Finished {
+                operation: Ok(7),
+                checkpoint: 2,
+            }
+        ));
+        assert_eq!(calls, 2);
+    }
+
+    #[tokio::test]
+    async fn required_checkpoint_completed_operation_error_survives_postclock_failure() {
+        let clock = ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_clock_reads(vec![
+            futures::future::ready(Ok(physical_time(100))).boxed(),
+            futures::future::ready(Ok(physical_time(100))).boxed(),
+            futures::future::ready(Err(TimeError::ServiceUnavailable)).boxed(),
+        ]);
+        let budget = terminal_test_budget();
+        let outcome = super::execute_with_timeout_budget_and_checkpoint(
+            &clock,
+            &budget,
+            || futures::future::ready(Ok(41u32)),
+            || futures::future::ready(Err::<(), _>("original operation error")),
+        )
+        .await;
+        match outcome {
+            super::CheckpointExecution::Negative {
+                validation: _,
+                source,
+                operation: Some(Err("original operation error")),
+                checkpoint: super::CheckpointAttempt::NotAttempted,
+            } => {
+                use std::error::Error;
+                assert!(matches!(
+                    source
+                        .source()
+                        .and_then(|cause| cause.source())
+                        .and_then(|cause| cause.downcast_ref::<TimeError>()),
+                    Some(TimeError::ServiceUnavailable)
+                ));
+            }
+            _ => panic!("actual operation error and selected clock failure must both survive"),
+        }
+    }
+    #[tokio::test]
+    async fn required_terminal_ack_forwards_original_nonclone_callback_receipt() {
+        struct ActualReceipt(Arc<()>);
+        let identity = Arc::new(());
+        let checkpoint_identity = identity.clone();
+        let clock = ScriptedTimeEffects::new(
+            [physical_time(100), physical_time(100)],
+            SleepBehavior::Immediate,
+        );
+        let budget = terminal_test_budget();
+        let retained = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async move { Ok(ActualReceipt(checkpoint_identity)) },
+            |receipt| Arc::ptr_eq(&identity, &receipt.0),
+        )
+        .await
+        .expect("actual receipt under original endpoint");
+        assert!(retained);
+    }
+    #[tokio::test]
+    async fn required_checkpoint_preserves_rollback_callback_and_timer_failures_independently() {
+        let (clock, endpoint) =
+            ScriptedTimeEffects::new([physical_time(99)], SleepBehavior::Immediate)
+                .with_controlled_deadline();
+        let budget = terminal_test_budget();
+        let mut endpoint = Some(endpoint);
+        let constructed = std::cell::Cell::new(false);
+        let result = super::execute_with_timeout_budget_and_checkpoint(
+            &clock,
+            &budget,
+            || {
+                endpoint
+                    .take()
+                    .expect("actual selected timer")
+                    .send(Err(TimeError::ServiceUnavailable))
+                    .expect("actual timer fault");
+                futures::future::ready(Err::<u32, _>(TimeoutBudgetError::checkpoint_failure(
+                    TimeError::AbsoluteDeadlineUnsupported,
+                )))
+            },
+            || {
+                constructed.set(true);
+                futures::future::ready(Ok::<_, ()>(()))
+            },
+        )
+        .await;
+        let super::CheckpointExecution::Negative {
+            source,
+            checkpoint,
+            validation,
+            operation: None,
+        } = result
+        else {
+            panic!("all original negative causes must remain separate");
+        };
+        assert!(matches!(
+            source,
+            TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 100,
+                observed_at_ms: 99
+            }
+        ));
+        let super::CheckpointAttempt::Failed {
+            source: checkpoint_source,
+        } = checkpoint
+        else {
+            panic!("actual callback failure must survive");
+        };
+        let timer_source = validation.expect_err("actual timer failure must survive");
+        use std::error::Error;
+        for (error, expected_callback) in [(&checkpoint_source, true), (&timer_source, false)] {
+            let mut current = error.source();
+            let mut retained = false;
+            while let Some(cause) = current {
+                retained |= if expected_callback {
+                    matches!(
+                        cause.downcast_ref::<TimeError>(),
+                        Some(TimeError::AbsoluteDeadlineUnsupported)
+                    )
+                } else {
+                    matches!(
+                        cause.downcast_ref::<TimeError>(),
+                        Some(TimeError::ServiceUnavailable)
+                    )
+                };
+                current = cause.source();
+            }
+            assert!(retained);
+        }
+        assert!(!constructed.get());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
 }
 
 #[cfg(test)]
@@ -3988,6 +4537,201 @@ mod rollback_owner_tests {
             Duration::from_millis(40)
         );
     }
+    #[test]
+    fn provider_rollback_preserves_first_latch_highwater_and_independent_cleanup() {
+        let original = budget();
+        original
+            .remaining_at(&physical_time(160))
+            .expect("actual higher original observation");
+        let cleanup = budget();
+        original
+            .clock
+            .retain_provider_rollback(&TimeError::PhysicalClockRollback {
+                previous_ms: 150,
+                observed_ms: 140,
+            });
+        let first = original
+            .remaining_at(&physical_time(180))
+            .expect_err("actual retained rollback");
+        assert!(matches!(
+            first,
+            TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 160,
+                observed_at_ms: 140
+            }
+        ));
+        original
+            .clock
+            .retain_provider_rollback(&TimeError::PhysicalClockRollback {
+                previous_ms: 190,
+                observed_ms: 120,
+            });
+        assert!(matches!(
+            original.remaining_at(&physical_time(190)),
+            Err(TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 160,
+                observed_at_ms: 140
+            })
+        ));
+        cleanup
+            .remaining_at(&physical_time(180))
+            .expect("independent cleanup has no inherited timer witness");
+        cleanup
+            .clock
+            .retain_provider_rollback(&TimeError::PhysicalClockRollback {
+                previous_ms: 180,
+                observed_ms: 170,
+            });
+        assert!(matches!(
+            cleanup.remaining_at(&physical_time(190)),
+            Err(TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 180,
+                observed_at_ms: 170
+            })
+        ));
+        let malformed = budget();
+        malformed
+            .clock
+            .retain_provider_rollback(&TimeError::PhysicalClockRollback {
+                previous_ms: 140,
+                observed_ms: 150,
+            });
+        malformed
+            .remaining_at(&physical_time(180))
+            .expect("invalid provider pair cannot fabricate rollback");
+    }
+
+    async fn assert_timer_rollback_sticky(repoll: bool, nested: bool, contended: bool) {
+        let original = budget();
+        let cloned = original.clone();
+        let child = original
+            .child_budget(&physical_time(150), Duration::from_millis(50))
+            .expect("actual original child");
+        let (time, endpoint) =
+            ScriptedTimeEffects::new([], SleepBehavior::Immediate).with_controlled_deadline();
+        let native = TimeError::PhysicalClockRollback {
+            previous_ms: 150,
+            observed_ms: 140,
+        };
+        let native = if nested {
+            TimeError::ProviderFailure {
+                operation: crate::effects::time::TimeProviderOperation::WaitTimer,
+                source: Some(Arc::new(native)),
+            }
+        } else {
+            native
+        };
+        let guard = if contended {
+            Some(
+                original
+                    .clock
+                    .state
+                    .try_lock()
+                    .expect("hold original snapshot"),
+            )
+        } else {
+            None
+        };
+        let (mut endpoint, external_endpoint) = if repoll {
+            (Some(endpoint), None)
+        } else {
+            (None, Some(endpoint))
+        };
+        let (mut native, external_native) = if repoll {
+            (Some(native), None)
+        } else {
+            (None, Some(native))
+        };
+        let execution = race_original_deadline(
+            &time,
+            &original,
+            async {
+                if repoll {
+                    endpoint
+                        .take()
+                        .expect("actual endpoint")
+                        .send(Err(native.take().expect("actual native source")))
+                        .expect("publish selected timer rollback in work-ready poll");
+                    Ok::<_, TimeoutRunError<std::convert::Infallible>>(())
+                } else {
+                    futures::future::pending().await
+                }
+            },
+            |witness| {
+                expire_witnessed_deadline::<std::convert::Infallible>(
+                    &original,
+                    witness.map_err(time_error)?,
+                )
+            },
+        );
+        futures::pin_mut!(execution);
+        if !repoll {
+            assert!(futures::poll!(execution.as_mut()).is_pending());
+            external_endpoint
+                .expect("external actual endpoint")
+                .send(Err(external_native.expect("external actual native source")))
+                .expect("publish selected timer rollback");
+        }
+        let error = execution
+            .await
+            .expect_err("actual timer failure remains failure");
+        let TimeoutRunError::Timeout(error @ TimeoutBudgetError::TimeSourceUnavailable { .. }) =
+            error
+        else {
+            panic!("native timer failure must retain its original error type");
+        };
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut found = false;
+        while let Some(actual) = source {
+            found |= matches!(
+                actual.downcast_ref::<TimeError>(),
+                Some(TimeError::PhysicalClockRollback {
+                    previous_ms: 150,
+                    observed_ms: 140
+                })
+            );
+            source = actual.source();
+        }
+        assert!(found, "native rollback cause survives exact source chain");
+        drop(guard);
+        for retained in [&original, &cloned, &child] {
+            assert_rollback(
+                retained
+                    .remaining_at(&physical_time(180))
+                    .expect_err("clock recovery cannot revive original custody"),
+            );
+        }
+        let bytes = serde_json::to_vec(&original).expect("serialize authentic retained rollback");
+        let restored: TimeoutBudget =
+            serde_json::from_slice(&bytes).expect("restore actual sticky snapshot");
+        assert_rollback(
+            restored
+                .remaining_at(&physical_time(180))
+                .expect_err("reopen cannot revive original custody"),
+        );
+    }
+
+    #[tokio::test]
+    async fn native_timer_rollback_latches_original_history_before_return() {
+        for nested in [false, true] {
+            assert_timer_rollback_sticky(false, nested, false).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn work_ready_timer_rollback_repoll_latches_original_history() {
+        for nested in [false, true] {
+            assert_timer_rollback_sticky(true, nested, false).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn contended_snapshot_cannot_lose_native_timer_rollback() {
+        for repoll in [false, true] {
+            assert_timer_rollback_sticky(repoll, true, true).await;
+        }
+    }
+
     #[tokio::test]
     async fn success_and_timer_branches_both_detect_rollback_above_original_start() {
         for timer_wins in [false, true] {
@@ -4146,7 +4890,7 @@ mod checkpoint_executor_tests {
         ));
     }
     #[tokio::test]
-    async fn rollback_is_checkpointed_before_failure_returns() {
+    async fn postcheckpoint_rollback_retains_receipt_without_claiming_durable_latch() {
         let time = ScriptedTimeEffects::new(
             [physical_time(150), physical_time(140)],
             SleepBehavior::Immediate,
@@ -4167,11 +4911,14 @@ mod checkpoint_executor_tests {
             },
             || async { Ok::<_, std::io::Error>(()) },
         )
-        .await
-        .expect_err("rollback cannot publish success");
+        .await;
         assert!(matches!(
             error,
-            TimeoutRunError::Timeout(TimeoutBudgetError::ClockRollback { .. })
+            CheckpointExecution::Negative {
+                source: TimeoutBudgetError::ClockRollback { .. },
+                checkpoint: CheckpointAttempt::Returned(()),
+                ..
+            }
         ));
         let restored: TimeoutBudget = serde_json::from_slice(
             snapshots
@@ -4181,8 +4928,12 @@ mod checkpoint_executor_tests {
                 .expect("failure checkpoint exists"),
         )
         .expect("validated rollback checkpoint");
+        assert!(
+            restored.remaining_at(&physical_time(180)).is_ok(),
+            "pre-validation checkpoint cannot prove durable final rollback"
+        );
         assert!(matches!(
-            restored.remaining_at(&physical_time(180)),
+            budget.remaining_at(&physical_time(180)),
             Err(TimeoutBudgetError::ClockRollback { .. })
         ));
     }

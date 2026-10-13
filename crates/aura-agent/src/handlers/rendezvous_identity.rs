@@ -540,7 +540,14 @@ mod required_identity_envelope_tests {
                 .unwrap(),
         );
         AgentRuntimeBridge::new(agent.clone())
-            .bootstrap_signing_keys()
+            .bootstrap_signing_keys(
+                crate::runtime::services::RuntimeServiceContext::test_original(
+                    agent.runtime().tasks(),
+                    agent.runtime().effects(),
+                )
+                .await
+                .startup_window(),
+            )
             .await
             .unwrap();
         let effects = agent.runtime().effects();

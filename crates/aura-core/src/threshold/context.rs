@@ -45,6 +45,17 @@ pub enum SignableOperation {
         message: Option<String>,
         transport: ShareableInvitationTransportMetadata,
     },
+    /// Exact response to an already issued recipient-bound invitation.
+    /// The canonical protocol transcript is hashed so each feature can keep
+    /// its own response wire schema while the quorum approves one exact reply.
+    InvitationResponse {
+        invitation_id: InvitationId,
+        recipient: AuthorityId,
+        recipient_device: Option<DeviceId>,
+        source_device: DeviceId,
+        kind: InvitationResponseKind,
+        transcript_digest: [u8; 32],
+    },
     /// Tree operation (commitment tree update)
     ///
     /// Used for: adding devices, changing policies, key rotation
@@ -100,6 +111,12 @@ pub enum SignableOperation {
         /// Timestamp of the readiness commitment
         committed_at_ms: u64,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InvitationResponseKind {
+    ContactDecision,
+    GuardianConfirmation,
 }
 
 /// Group action types for group proposals.
@@ -159,6 +176,37 @@ pub enum ApprovalContext {
 }
 
 impl SigningContext {
+    /// Exact native quorum response, bound to the original inviter device and
+    /// an external recipient. The returned context is independently auditable
+    /// by a co-signer and reconstructible by the recipient from its wire reply.
+    pub fn invitation_response(
+        authority: AuthorityId,
+        invitation_id: InvitationId,
+        recipient: AuthorityId,
+        recipient_device: Option<DeviceId>,
+        source_device: DeviceId,
+        kind: InvitationResponseKind,
+        transcript_digest: [u8; 32],
+    ) -> Option<Self> {
+        if authority == recipient || transcript_digest == [0; 32] {
+            return None;
+        }
+        Some(Self {
+            authority,
+            operation: SignableOperation::InvitationResponse {
+                invitation_id,
+                recipient,
+                recipient_device,
+                source_device,
+                kind,
+                transcript_digest,
+            },
+            approval_context: ApprovalContext::ElevatedOperation {
+                operation_type: "invitation_response".to_owned(),
+                value_context: Some(format!("recipient {recipient}")),
+            },
+        })
+    }
     /// Bind a final Contact/Guardian code and its intended recipient to an
     /// independently approved device-quorum operation.
     #[allow(clippy::too_many_arguments)]
@@ -296,6 +344,55 @@ mod tests {
             op: crate::tree::TreeOpKind::RotateEpoch { affected: vec![] },
             version: 1,
         }
+    }
+
+    #[test]
+    fn invitation_response_context_requires_external_recipient_and_exact_digest() {
+        let issuer = test_authority();
+        let recipient = AuthorityId::new_from_entropy([2; 32]);
+        let device = DeviceId::new_from_entropy([3; 32]);
+        let invitation = InvitationId::new("bound-response");
+        assert!(SigningContext::invitation_response(
+            issuer,
+            invitation.clone(),
+            issuer,
+            Some(device),
+            device,
+            InvitationResponseKind::ContactDecision,
+            [4; 32],
+        )
+        .is_none());
+        assert!(SigningContext::invitation_response(
+            issuer,
+            invitation.clone(),
+            recipient,
+            Some(device),
+            device,
+            InvitationResponseKind::ContactDecision,
+            [0; 32],
+        )
+        .is_none());
+        let context = SigningContext::invitation_response(
+            issuer,
+            invitation.clone(),
+            recipient,
+            Some(device),
+            device,
+            InvitationResponseKind::GuardianConfirmation,
+            [5; 32],
+        )
+        .expect("external exact response context");
+        assert!(matches!(
+            context.operation,
+            SignableOperation::InvitationResponse {
+                invitation_id,
+                recipient: actual_recipient,
+                source_device,
+                kind: InvitationResponseKind::GuardianConfirmation,
+                transcript_digest,
+                ..
+            } if invitation_id == invitation && actual_recipient == recipient && source_device == device && transcript_digest == [5; 32]
+        ));
     }
 
     #[test]

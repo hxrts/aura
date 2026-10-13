@@ -127,6 +127,8 @@ See [Distributed Maintenance Guide](808_maintenance_guide.md) for cache configur
 
 ## Security Model
 
+Signature-chain verification establishes token integrity under the supplied root key. Authorization additionally requires that root to be selected independently from trusted authority state. A root carried alongside serialized capability bytes is algebraic metadata and cannot establish its own issuer trust or authorize an operation.
+
 Cryptographic signature verification prevents token forgery. Epoch scoping limits token lifetime and replay attacks. Attenuation preserves security while growing verification cost proportional to chain length. Root key compromise invalidates all derived tokens.
 
 Authority-based `ResourceScope` prevents cross-authority access. Local sovereign policy integration provides an additional security layer. Guard chain isolation ensures authorization failures leak no sensitive information.

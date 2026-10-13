@@ -16,6 +16,18 @@ exact operation identity; subsequent notification failure belongs to the
 accepted owner. This primitive alone does not establish terminal delivery or
 required task disposal, which remain responsibilities of the workflow owner.
 
+Submitted terminal publication transfers the exact operation/instance/status
+intent synchronously to its publisher before returning an observation future.
+Dropping an unpolled observer cannot replace that intent with a generic drop
+failure. The resulting acknowledgment identifies the same operation and
+instance and states only whether a channel accepted, controller applied, or
+component observed it; none is protocol completion or durable storage proof.
+Retained terminal custody is released at the publisher's actual acknowledgment.
+The shared frontend task root separately retains required obligations through
+worker interruption, cancellation and failed cleanup. Drainage reports the
+original domain and cleanup failures, and disposal succeeds only after actual
+cleanup acknowledgment or explicit reconciliation.
+
 | Belongs here | Does not belong here |
 |---|---|
 | Pure workflow logic (intents, reducers, views) | Runtime assembly or lifecycle management (`aura-agent`) |
@@ -283,6 +295,13 @@ Converted semantic-owner paths also follow two stricter publication rules:
   completion observation and reattachment across frontend remount and runtime
   restart; terminal publication consumes the runtime's typed outcome exactly
   once. A frontend-local monitor cannot own this lifecycle.
+- Explicit post-enrollment shortcut issuance takes a typed external recipient,
+  recipient device and Contact or Guardian purpose with the user-transferred
+  setup pin. The runtime bridge returns the original move-only enrollment
+  continuation alongside the start result. The app admits that continuation
+  to required task custody before publishing enrollment-start success, then
+  publishes the shortcut's separate invitation success, failure or cancellation
+  from its own semantic owner. Start success never asserts shortcut delivery.
 - `OperationSnapshot` retains the authoritative operation instance, state,
   and stable failure domain/code. Cancellation remains distinct from failure,
   and guardian acceptance cannot publish success until the runtime supplies
@@ -395,6 +414,15 @@ Native AMP checkpoint resolution, staged transition diagnostics, materialized na
 
 The app owns explicit independently transferred initiator manifest selection and one ImportDeviceEnrollmentCode operation covering pin, runtime import, acceptance, and convergence. Raw form/semantic inputs are not trust tokens. A completion result has private fields and is minted only after verified acceptance/adoption; frontend identity persistence consumes that result. Typed missing-pin causes survive the workflow and handoff error chain.
 
+The bootstrap batch receiver is admitted to required app task custody before
+broker retrieval. It preserves each delivery's purpose and typed disposition,
+and cancellation of its observer does not discard an earlier failure or an
+unsettled delivery. The original enrollment import similarly retains one app
+semantic owner through verification, acceptance, convergence and the browser
+host's durable identity-write acknowledgment. Frontends hand over the exact
+operation instance before those awaits; a disconnected observer requests
+cancellation but cannot publish a substitute terminal result.
+
 See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
 
 ### Native settings and identity failures
@@ -499,9 +527,13 @@ Regression coverage must exercise actual storage production and observe the orig
 
 Shared workflows select a versioned transfer intent and issue a move-only
 `UserApprovedEnrollmentSigningIntent` only for explicit local approval through
-its original runtime bridge. Consent covers exact manifest, public v3 invitation
-transport and initial Request transcripts. The runtime independently validates
-current active membership, native policy and local share custody. Public bytes,
+its original runtime bridge. Transfer prefix `aura-enrollment-signing-intent:v3:`
+identifies the canonical v3 declaration. Selection requires exact canonical
+reencoding and carries the manifest, public v4 invitation transport, initial
+Request and finite negative terminal policy unchanged into local approval.
+The policy is conditional consent, not terminal decision evidence. The runtime
+independently validates current active membership, native policy and local share
+custody. Public bytes,
 remote packets, parsed transfer data and matching ids cannot manufacture this
 approval. Its public API forbids construction, Clone and deserialization.
 

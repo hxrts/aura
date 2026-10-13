@@ -139,7 +139,7 @@ impl CryptoSubsystem {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, target_arch = "wasm32"))]
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "ProfileSecretLifetimeRecoveryCapability",
@@ -175,7 +175,7 @@ impl CryptoSubsystem {
         inventory.get_mut().root = Some(root);
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, target_arch = "wasm32")))]
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "ProfileSecretLifetimeRecoveryCapability",
@@ -354,6 +354,29 @@ impl SelectedProfileSecretInventory {
         self.owners.push(owner);
         Ok(reference)
     }
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(in crate::runtime) async fn observe_original_for_test(
+        &self,
+        reference: &SecretAllocationReference,
+    ) -> Result<
+        (
+            aura_core::effects::secret_lifetime::SecretLifetimeState,
+            bool,
+        ),
+        AuraError,
+    > {
+        let owner = self.owned(reference)?;
+        let state = owner.state().await?;
+        let readable = match owner.read_live_secret().await {
+            Ok(mut secret) => {
+                zeroize::Zeroize::zeroize(&mut secret);
+                true
+            }
+            Err(AuraError::PermissionDenied { .. }) => false,
+            Err(source) => return Err(source),
+        };
+        Ok((state, readable))
+    }
     pub(in crate::runtime) fn references(&self) -> Vec<SecretAllocationReference> {
         self.owners
             .iter()
@@ -497,7 +520,7 @@ mod tests {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, target_arch = "wasm32"))]
 #[derive(Debug, thiserror::Error)]
 enum SecretLifetimeHandoffError {
     #[error("original selected secret lifetime handoff already consumed")]

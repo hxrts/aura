@@ -96,9 +96,10 @@ pub mod scenarios {
     pub use crate::scenario_contract::{
         ActorId, EnvironmentAction, Expectation, ExtractSource, InputKey, IntentAction,
         ScenarioAction, ScenarioDefinition, ScenarioStep, SemanticBarrierRef,
-        SemanticCommandRequest, SemanticCommandResponse, SemanticCommandSupport,
-        SemanticCommandValue, SemanticSubmissionHandle, SettingsSection, SubmissionState,
-        SubmittedAction, UiAction, UiOperationHandle, VariableAction, SEMANTIC_COMMAND_SUPPORT,
+        SemanticCommandRejection, SemanticCommandRequest, SemanticCommandResponse,
+        SemanticCommandSupport, SemanticCommandValue, SemanticRejectionReason,
+        SemanticSubmissionHandle, SettingsSection, SubmissionState, SubmittedAction, UiAction,
+        UiOperationHandle, VariableAction, SEMANTIC_COMMAND_SUPPORT,
     };
 }
 
@@ -152,7 +153,8 @@ pub mod types {
     pub use crate::runtime_bridge::{
         BootstrapCandidateInfo, BootstrapCandidateOrigin, BoxedRuntimeBridge, CausalStampKey,
         CeremonyKind, DeviceSigningConsent, InvitationBridgeStatus, InvitationBridgeType,
-        InvitationInfo, KeyRotationCeremonyStatus, RendezvousStatus, RuntimeBridge, RuntimeStatus,
+        InvitationInfo, KeyRotationCeremonyStatus, PostEnrollmentShortcutPurpose,
+        PostEnrollmentShortcutSelection, RendezvousStatus, RuntimeBridge, RuntimeStatus,
         SyncStatus as RuntimeSyncStatus,
     };
     pub use crate::thresholds::{

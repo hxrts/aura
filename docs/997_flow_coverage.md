@@ -29,10 +29,10 @@ row does not imply simulator, fault/restart or cross-machine evidence. See
 
 | Metric | Count |
 |--------|-------|
-| Harness User Flow Scenarios | 16 |
+| Harness User Flow Scenarios | 17 |
 | Shared Semantic Scenarios | 11 |
 | Mixed-Runtime Scenarios (TUI + Web distinct keys) | 3 |
-| Frontend-Conformance Scenarios | 5 |
+| Frontend-Conformance Scenarios | 6 |
 | Core User Flow Domains | 13 |
 
 ## Coverage Classes
@@ -120,6 +120,7 @@ publication and convergence through both frontends remain unproven.
 | TUI Global Navigation/Help Hotkeys | `scenarios/harness/tui-conformance-global-navigation-help-hotkeys.toml` | TUI frontend-conformance: global navigation, key mappings, and help modal behavior |
 | TUI Neighborhood Keypaths/Detail | `scenarios/harness/tui-conformance-neighborhood-keypaths-and-detail.toml` | TUI frontend-conformance: neighborhood keypaths, rendered map/detail text, and toast wiring |
 | Scenario 12 | `scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml` | Mixed TUI/Web device enrollment + removal |
+| Browser Enrollment Approved Transfer/Reopen | `scenarios/harness/web-conformance-enrollment-approved-transfer-reopen.toml` | Browser-only mounted approval of a real signed enrollment transfer, host persistence, and same-profile reopen |
 | Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | Shared contact invite + channel messaging |
 | Contact Invite Notification Roundtrip | `scenarios/harness/mixed-contact-invite-notification-roundtrip.toml` | Mixed TUI/Web symmetric contact invite acceptance notifications |
 | Shared Settings | `scenarios/harness/shared-settings-parity.toml` | Shared semantic settings parity |
@@ -133,7 +134,9 @@ publication and convergence through both frontends remain unproven.
 | TUI Observation | `scenarios/harness/semantic-observation-tui-smoke.toml` | TUI semantic observation contract smoke |
 | Quint Observation | `scenarios/harness/quint-semantic-observation-smoke.toml` | Quint-origin semantic observation reference |
 
-The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend-conformance coverage. All harness scenarios in this inventory now use the semantic scenario format.
+The TUI-only conformance scenarios and browser enrollment transfer/reopen are
+frontend-conformance coverage; Scenario 13 remains the shared contact/chat
+anchor. All harness scenarios in this inventory use the semantic scenario format.
 
 ## User Flow Matrix
 
@@ -154,7 +157,7 @@ The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend
 | Create home | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Join channel | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Send chat message | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
-| Add device | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
+| Add device | Scenario 12 | `shared-settings-parity.toml`, `web-conformance-enrollment-approved-transfer-reopen.toml` (browser mounted control and reopen) | Mixed runtime + browser conformance |
 | Remove device | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
 | Switch authority | `shared-notifications-and-authority.toml` | `shared-settings-parity.toml` | TUI + Web |
 | Global navigation/help | TUI Global Navigation/Help Hotkeys | None | TUI frontend-conformance |
@@ -225,6 +228,12 @@ and continue to map to the same canonical coverage anchors:
   fabricating a selected device row, so mixed browser runs must resolve
   `remove_selected_device` from the authoritative removable device in settings
   state when no explicit `ListId::Devices` selection exists.
+- The browser enrollment approved-transfer/reopen scenario supplements Scenario
+  12 with mounted Settings import control, explicit code/manifest/independent
+  verifier entry and approval, the original import operation's success, and
+  same-profile restart with two retained devices. Its `web_conformance`
+  classification tests browser control and persistence wiring; it does not
+  replace the mixed-runtime parity anchor or prove threshold protocol closure.
 - Scenario 13 now also carries the mixed-runtime sealed-message receive rule:
   the current TUI/browser shared-channel receive path may converge on sealed
   authoritative placeholders, so the canonical receive assertions for the
@@ -263,6 +272,7 @@ These scenarios are maintained outside the main shared semantic lane:
 | `semantic-observation-browser-smoke.toml` | Browser observation contract smoke |
 | `semantic-observation-tui-smoke.toml` | TUI observation contract smoke |
 | `quint-semantic-observation-smoke.toml` | Reference semantic observation smoke |
+| `web-conformance-enrollment-approved-transfer-reopen.toml` | Browser mounted enrollment transfer approval, host persistence and same-profile reopen |
 
 ## Planned Release And Update Validation Matrix
 

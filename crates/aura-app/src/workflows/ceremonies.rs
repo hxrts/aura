@@ -33,9 +33,10 @@ use crate::ui_contract::{
 use crate::workflows::runtime::{timeout_runtime_call, workflow_retry_policy};
 use crate::workflows::semantic_facts::{
     issue_device_enrollment_completed_proof, issue_device_enrollment_started_proof,
-    SemanticWorkflowOwner,
+    issue_invitation_created_proof, SemanticWorkflowOwner,
 };
 use crate::AppCore;
+use aura_core::effects::task::{RequiredTaskExit, RequiredTaskSettlement};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
 use aura_core::{AttemptBudget, AuraError, OperationContext, TraceContext};
@@ -207,18 +208,37 @@ pub async fn pin_user_transferred_enrollment_manifest(
         .runtime()
         .cloned()
         .ok_or(EnrollmentManifestError::Unavailable)?;
-    let verification_runtime = runtime.clone();
-    let signed_code = manifest_code.clone();
-    let verified = timeout_runtime_call(
+    let budget = crate::workflows::runtime::workflow_timeout_budget(
         &runtime,
+        DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT,
+    )
+    .await
+    .map_err(|error| EnrollmentManifestError::Boundary(error.into()))?;
+    pin_user_transferred_enrollment_manifest_with_budget(
+        &runtime,
+        &budget,
+        manifest_code,
+        initiator_verifier_code,
+    )
+    .await
+}
+
+pub(crate) async fn pin_user_transferred_enrollment_manifest_with_budget(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    budget: &aura_core::TimeoutBudget,
+    manifest_code: String,
+    initiator_verifier_code: String,
+) -> Result<UserTransferredEnrollmentManifest, EnrollmentManifestError> {
+    if initiator_verifier_code.trim().is_empty() {
+        return Err(EnrollmentManifestError::MissingPin);
+    }
+    let signed_code = manifest_code.clone();
+    let verified = crate::workflows::runtime::timeout_runtime_call_under_budget(
+        runtime,
+        budget,
         "pin_user_transferred_enrollment_manifest",
         "verify_enrollment_manifest_transfer",
-        DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT,
-        move || async move {
-            verification_runtime
-                .verify_enrollment_manifest_transfer(manifest_code, initiator_verifier_code)
-                .await
-        },
+        || runtime.verify_enrollment_manifest_transfer(manifest_code, initiator_verifier_code),
     )
     .await
     .map_err(EnrollmentManifestError::Boundary)??;
@@ -794,6 +814,248 @@ fn device_enrollment_handle_from_start(
     }
 }
 
+struct PostEnrollmentShortcutCoordinator {
+    runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    owner: SemanticWorkflowOwner,
+    original: crate::runtime_bridge::OriginalEnrollmentPostCompletion,
+    outcome: Option<Result<aura_core::InvitationId, AuraError>>,
+}
+
+impl PostEnrollmentShortcutCoordinator {
+    async fn execute_original(&mut self) -> Result<(), AuraError> {
+        self.owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let result = self
+            .runtime
+            .deliver_post_enrollment_shortcut(&mut self.original)
+            .await;
+        let failure = result.as_ref().err().cloned();
+        self.outcome = Some(result);
+        failure.map_or(Ok(()), Err)
+    }
+
+    async fn settle_original(
+        &mut self,
+        exit: &RequiredTaskExit,
+    ) -> Result<RequiredTaskSettlement, AuraError> {
+        // The broker delivery result was retained only after the actual send
+        // succeeded. If shutdown cancellation wins the task select just after
+        // that point, the completed delivery remains the original terminal
+        // witness; the scheduler's exit label cannot revoke it.
+        if let (RequiredTaskExit::Completed | RequiredTaskExit::Cancelled, Some(Ok(id))) =
+            (exit, self.outcome.as_ref())
+        {
+            self.owner
+                .publish_success_with(issue_invitation_created_proof(id.clone()))
+                .await?;
+            return Ok(RequiredTaskSettlement::Resolved);
+        }
+        let failure = match self.outcome.as_ref() {
+            Some(Err(error)) => Some(error.clone()),
+            _ => match exit {
+                RequiredTaskExit::Failed(error) => Some(error.clone()),
+                RequiredTaskExit::Cancelled => None,
+                RequiredTaskExit::Panicked | RequiredTaskExit::Completed => Some(
+                    AuraError::invalid("post-enrollment shortcut task ended without delivery"),
+                ),
+            },
+        };
+        if let Some(error) = failure {
+            self.owner
+                .publish_failure(
+                    SemanticOperationError::new(
+                        SemanticFailureDomain::Invitation,
+                        enrollment_boundary_code(&error),
+                    )
+                    .with_detail(error.to_string()),
+                )
+                .await?;
+            Ok(RequiredTaskSettlement::ResolvedWithDomainFailure(error))
+        } else {
+            self.owner
+                .publish_phase(SemanticOperationPhase::Cancelled)
+                .await?;
+            Ok(RequiredTaskSettlement::Resolved)
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl aura_core::effects::task::RequiredTaskCustody for PostEnrollmentShortcutCoordinator {
+    fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), AuraError>> {
+        Box::pin(self.execute_original())
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        exit: &'a RequiredTaskExit,
+    ) -> futures::future::BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+        Box::pin(self.settle_original(exit))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl aura_core::effects::task::LocalRequiredTaskCustody for PostEnrollmentShortcutCoordinator {
+    fn execute(&mut self) -> futures::future::LocalBoxFuture<'_, Result<(), AuraError>> {
+        Box::pin(self.execute_original())
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        exit: &'a RequiredTaskExit,
+    ) -> futures::future::LocalBoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+        Box::pin(self.settle_original(exit))
+    }
+}
+
+/// RPC-facing, explicit external selection. The original continuation is
+/// transferred into a required app task before the enrollment start succeeds.
+pub async fn start_device_enrollment_with_external_shortcut(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    setup_code: String,
+    selection: crate::runtime_bridge::PostEnrollmentShortcutSelection,
+) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment(),
+        None,
+        SemanticOperationKind::StartDeviceEnrollment,
+    );
+    start_device_enrollment_with_external_shortcut_owned(
+        app_core,
+        nickname_suggestion,
+        setup_code,
+        selection,
+        &owner,
+        None,
+    )
+    .await
+}
+
+#[aura_macros::semantic_owner(
+    owner = "start_device_enrollment_with_external_shortcut_owned",
+    wrapper = "start_device_enrollment_with_external_shortcut",
+    terminal = "publish_success_with", postcondition = "device_enrollment_started",
+    proof = crate::workflows::semantic_facts::DeviceEnrollmentStartedProof,
+    authoritative_inputs = "user_selected_external_recipient,original_issuer_continuation",
+    depends_on = "runtime_device_enrollment_started,required_shortcut_admission",
+    child_ops = "", category = "move_owned"
+)]
+async fn start_device_enrollment_with_external_shortcut_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    setup_code: String,
+    selection: crate::runtime_bridge::PostEnrollmentShortcutSelection,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    let setup = match pin_user_transferred_device_enrollment_setup(app_core, setup_code).await {
+        Ok(setup) => setup,
+        Err(error) => {
+            owner
+                .publish_failure(enrollment_setup_failure(&error))
+                .await?;
+            return Err(AuraError::Invalid {
+                message: error.to_string(),
+                source: Some(Arc::new(error)),
+            });
+        }
+    };
+    let runtime_option = { app_core.read().await.runtime().cloned() };
+    let runtime = match runtime_option {
+        Some(runtime) => runtime,
+        None => {
+            owner
+                .publish_failure(SemanticOperationError::new(
+                    SemanticFailureDomain::Ceremony,
+                    SemanticFailureCode::Unavailable,
+                ))
+                .await?;
+            return Err(AuraError::from(WorkflowError::RuntimeUnavailable));
+        }
+    };
+    let issue_runtime = runtime.clone();
+    let issue_selection = selection.clone();
+    let issued = match timeout_runtime_call(
+        &runtime,
+        "start_device_enrollment_with_external_shortcut",
+        "initiate_device_enrollment_with_shortcut",
+        DEVICE_ENROLLMENT_START_TIMEOUT,
+        move || async move {
+            issue_runtime
+                .initiate_device_enrollment_with_shortcut(
+                    nickname_suggestion,
+                    setup,
+                    issue_selection,
+                )
+                .await
+        },
+    )
+    .await
+    {
+        Ok(Ok(issued)) => issued,
+        Ok(Err(error)) => {
+            owner
+                .publish_failure(enrollment_issuance_failure(&error))
+                .await?;
+            return Err(AuraError::Internal {
+                message: error.to_string(),
+                source: Some(Arc::new(error)),
+            });
+        }
+        Err(error) => {
+            owner
+                .publish_failure(enrollment_runtime_failure(&error))
+                .await?;
+            return Err(error);
+        }
+    };
+    let start = issued.start;
+    let shortcut_kind = match selection.purpose() {
+        crate::runtime_bridge::PostEnrollmentShortcutPurpose::Contact => {
+            SemanticOperationKind::CreateContactInvitation
+        }
+        crate::runtime_bridge::PostEnrollmentShortcutPurpose::Guardian => {
+            SemanticOperationKind::CreateGuardianInvitation
+        }
+    };
+    let shortcut_owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        None,
+        shortcut_kind,
+    );
+    let spawner = runtime.task_spawner();
+    let custody = Box::new(PostEnrollmentShortcutCoordinator {
+        runtime,
+        owner: shortcut_owner,
+        original: issued.post_completion,
+        outcome: None,
+    });
+    #[cfg(not(target_arch = "wasm32"))]
+    let admitted = spawner.spawn_required_custody("app.post_enrollment_shortcut", custody);
+    #[cfg(target_arch = "wasm32")]
+    let admitted = spawner.spawn_local_required_custody("app.post_enrollment_shortcut", custody);
+    if let Err(refusal) = admitted {
+        let error = refusal.source;
+        owner
+            .publish_failure(enrollment_runtime_failure(&error))
+            .await?;
+        return Err(error);
+    }
+    owner
+        .publish_success_with(issue_device_enrollment_started_proof(
+            start.ceremony_id.clone(),
+        ))
+        .await?;
+    Ok(device_enrollment_handle_from_start(start))
+}
+
 pub async fn start_device_enrollment_ceremony_with_terminal_status(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
@@ -1348,6 +1610,77 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn acknowledged_shortcut_delivery_wins_simultaneous_task_cancellation() {
+        let authority = AuthorityId::new_from_entropy([147; 32]);
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> =
+            Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let app = Arc::new(RwLock::new(
+            AppCore::with_runtime(crate::AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        let id = aura_core::InvitationId::new("acknowledged-shortcut");
+        let owner = SemanticWorkflowOwner::new(
+            &app,
+            OperationId::invitation_create(),
+            None,
+            SemanticOperationKind::CreateContactInvitation,
+        );
+        let mut coordinator = PostEnrollmentShortcutCoordinator {
+            runtime,
+            owner,
+            original: crate::runtime_bridge::OriginalEnrollmentPostCompletion::from_runtime(()),
+            outcome: Some(Ok(id)),
+        };
+        let result = coordinator
+            .settle_original(&RequiredTaskExit::Cancelled)
+            .await
+            .expect("actual retained delivery must settle despite scheduler cancellation");
+        assert!(matches!(result, RequiredTaskSettlement::Resolved));
+        assert_eq!(
+            coordinator
+                .owner
+                .terminal_status()
+                .await
+                .unwrap()
+                .status
+                .phase,
+            SemanticOperationPhase::Succeeded,
+        );
+
+        let contradictory = SemanticWorkflowOwner::new(
+            &app,
+            OperationId::invitation_create(),
+            Some(OperationInstanceId("failed-shortcut-worker".into())),
+            SemanticOperationKind::CreateContactInvitation,
+        );
+        let mut failed = PostEnrollmentShortcutCoordinator {
+            runtime: coordinator.runtime.clone(),
+            owner: contradictory,
+            original: crate::runtime_bridge::OriginalEnrollmentPostCompletion::from_runtime(()),
+            outcome: Some(Ok(aura_core::InvitationId::new("contradictory-worker"))),
+        };
+        let native = AuraError::invalid("actual worker failed after contradictory observation");
+        let result = failed
+            .settle_original(&RequiredTaskExit::Failed(native))
+            .await
+            .expect("actual failed worker settles with domain failure");
+        assert!(matches!(
+            result,
+            RequiredTaskSettlement::ResolvedWithDomainFailure(_)
+        ));
+        assert_eq!(
+            failed.owner.terminal_status().await.unwrap().status.phase,
+            SemanticOperationPhase::Failed,
+        );
+    }
 
     #[test]
     fn enrollment_setup_failure_codes_are_structural() {

@@ -30,13 +30,11 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "simulation")] {
         use aura_core::effects::{
             SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
-            TransportEnvelope,
         };
         use std::sync::Arc;
 
         use super::effects::AuraEffectSystem;
         use crate::core::AgentConfig;
-        use parking_lot::RwLock;
     }
 }
 
@@ -95,6 +93,7 @@ impl EffectSystemFactory {
 #[async_trait::async_trait]
 impl SimulationEnvironmentFactory for EffectSystemFactory {
     type EffectSystem = AuraEffectSystem;
+    type SharedInbox = crate::runtime::SimulationSharedInbox;
 
     async fn create_simulation_environment(
         &self,
@@ -118,7 +117,7 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
     async fn create_simulation_environment_with_shared_transport(
         &self,
         config: SimulationEnvironmentConfig,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_inbox: Arc<Self::SharedInbox>,
     ) -> Result<Arc<Self::EffectSystem>, SimulationEnvironmentError> {
         let agent_config = self.to_agent_config(&config);
 
@@ -300,9 +299,9 @@ pub async fn rekey_simulated_channel(
 #[cfg(all(test, feature = "simulation"))]
 mod tests {
     use super::*;
+    use crate::runtime::SimulationSharedInbox;
     use aura_core::effects::RuntimeEffectsBundle;
     use aura_core::{AuthorityId, DeviceId};
-    use parking_lot::RwLock;
 
     #[tokio::test]
     async fn test_factory_creates_effect_system() {
@@ -327,7 +326,7 @@ mod tests {
         let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let authority_id = AuthorityId::new_from_entropy([12u8; 32]);
         let config = SimulationEnvironmentConfig::new(42, device_id, authority_id);
-        let shared_inbox = Arc::new(RwLock::new(Vec::new()));
+        let shared_inbox = Arc::new(SimulationSharedInbox::new());
 
         let result = factory
             .create_simulation_environment_with_shared_transport(config, shared_inbox)

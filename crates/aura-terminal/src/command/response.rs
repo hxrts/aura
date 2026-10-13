@@ -197,6 +197,12 @@ pub enum Response {
     CeremonyStarted {
         ceremony_id: String,
     },
+    DeviceEnrollmentStarted {
+        ceremony_id: String,
+        enrollment_code: String,
+        manifest_code: Option<String>,
+        initiator_verifier_code: Option<String>,
+    },
     CeremonyStatus(CeremonyStatusView),
     OtaReleases(Vec<OtaReleaseView>),
     OtaUpgrades(Vec<OtaUpgradeView>),

@@ -464,15 +464,8 @@ impl<T> SimulationEffects for T where
 // Simulation Environment Factory Abstraction
 // ============================================================================
 
-use crate::effects::transport::TransportEnvelope;
 use crate::types::identifiers::AuthorityId;
 use crate::DeviceId;
-// Allow parking_lot::RwLock here because:
-// 1. The simulation feature is only used by Layer 6-8 (runtime/test layers)
-// 2. The shared transport inbox is accessed synchronously for deterministic simulation
-// 3. This maintains compatibility with the Layer 6 SharedTransport implementation
-#[allow(clippy::disallowed_types)]
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 /// Configuration for creating a simulation environment
@@ -534,15 +527,12 @@ pub enum SimulationEnvironmentError {
 ///     // Use effects for simulation...
 /// }
 /// ```
-// Allow parking_lot::RwLock in this trait because:
-// 1. The simulation feature is only used by Layer 6-8 (runtime/test layers)
-// 2. The shared transport inbox is accessed synchronously for deterministic simulation
-// 3. This maintains compatibility with the Layer 6 SharedTransport implementation
-#[allow(clippy::disallowed_types)]
 #[async_trait::async_trait]
 pub trait SimulationEnvironmentFactory: Send + Sync {
     /// The effect system type produced by this factory
     type EffectSystem: RuntimeEffectsBundle + Send + Sync + 'static;
+    /// One typed owner for both shared frames and their return reservations.
+    type SharedInbox: Send + Sync + 'static;
 
     /// Create an effect system for simulation with the given configuration
     async fn create_simulation_environment(
@@ -557,7 +547,7 @@ pub trait SimulationEnvironmentFactory: Send + Sync {
     async fn create_simulation_environment_with_shared_transport(
         &self,
         config: SimulationEnvironmentConfig,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_inbox: Arc<Self::SharedInbox>,
     ) -> std::result::Result<Arc<Self::EffectSystem>, SimulationEnvironmentError>;
 }
 

@@ -1,6 +1,7 @@
 use super::types::{
     CeremonyMonitorHandoffRelease, CeremonySubmissionTerminalOutcome, SubmittedOperationPublisher,
-    SubmittedOperationRelease, WorkflowHandoffRelease,
+    SubmittedOperationRelease, SubmittedTerminalCustody, SubmittedTerminalIntent,
+    SubmittedTerminalObservation, WorkflowHandoffRelease,
 };
 use crate::ui_contract::{
     OperationId, OperationInstanceId, SemanticOperationCausality, SemanticOperationError,
@@ -51,10 +52,19 @@ where
         kind: SemanticOperationKind,
         instance_id: OperationInstanceId,
     ) -> Self {
-        publisher
-            .publish_dispatched(&operation_id, &instance_id, kind)
+        // Establish the original owner before awaiting publication. Cancelling
+        // that await must dispose this exact submission, not lose its identity.
+        let submission =
+            Self::submit_with_instance_unpublished(publisher, operation_id, kind, instance_id);
+        submission
+            .publisher
+            .publish_dispatched(
+                &submission.operation_id,
+                &submission.instance_id,
+                submission.kind,
+            )
             .await;
-        Self::submit_with_instance_unpublished(publisher, operation_id, kind, instance_id)
+        submission
     }
 
     pub fn submit_with_instance_unpublished(
@@ -87,44 +97,55 @@ where
         self.kind
     }
 
-    pub async fn succeed(mut self, causality: Option<SemanticOperationCausality>) {
+    fn terminal(
+        mut self,
+        causality: Option<SemanticOperationCausality>,
+        status: SemanticOperationStatus,
+        retained: Option<SubmittedTerminalCustody>,
+    ) -> SubmittedTerminalObservation {
+        let observation = self.publisher.publish_terminal(SubmittedTerminalIntent {
+            operation_id: self.operation_id.clone(),
+            instance_id: self.instance_id.clone(),
+            causality,
+            status,
+            retained,
+        });
+        // The publisher now owns the original intent; observation cancellation
+        // cannot take terminal ownership back from that registration.
         self.settled = true;
-        self.publisher
-            .publish_terminal(
-                &self.operation_id,
-                &self.instance_id,
-                causality,
-                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded),
-            )
-            .await;
+        observation
     }
 
-    pub async fn fail(mut self, error: SemanticOperationError) {
-        self.settled = true;
-        self.publisher
-            .publish_terminal(
-                &self.operation_id,
-                &self.instance_id,
-                None,
-                SemanticOperationStatus::failed(self.kind, error),
-            )
-            .await;
+    pub fn succeed(
+        self,
+        causality: Option<SemanticOperationCausality>,
+    ) -> SubmittedTerminalObservation {
+        let status = SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded);
+        self.terminal(causality, status, None)
     }
 
-    pub async fn cancel(mut self) {
-        self.settled = true;
-        self.publisher
-            .publish_terminal(
-                &self.operation_id,
-                &self.instance_id,
-                None,
-                SemanticOperationStatus::cancelled(self.kind),
-            )
-            .await;
+    pub fn fail(self, error: SemanticOperationError) -> SubmittedTerminalObservation {
+        self.fail_with_custody(error, None)
+    }
+
+    pub fn fail_with_custody(
+        self,
+        error: SemanticOperationError,
+        retained: Option<SubmittedTerminalCustody>,
+    ) -> SubmittedTerminalObservation {
+        let status = SemanticOperationStatus::failed(self.kind, error);
+        self.terminal(None, status, retained)
+    }
+
+    pub fn cancel(self) -> SubmittedTerminalObservation {
+        let status = SemanticOperationStatus::cancelled(self.kind);
+        self.terminal(None, status, None)
     }
 
     #[must_use]
     pub fn handoff(mut self) -> SubmittedOperationRelease {
+        self.publisher
+            .relinquish(&self.operation_id, &self.instance_id, self.kind);
         self.settled = true;
         SubmittedOperationRelease::new(
             self.operation_id.clone(),
@@ -202,16 +223,27 @@ where
         self.0.kind()
     }
 
-    pub async fn succeed(self, causality: Option<SemanticOperationCausality>) {
-        self.0.succeed(causality).await;
+    pub fn succeed(
+        self,
+        causality: Option<SemanticOperationCausality>,
+    ) -> SubmittedTerminalObservation {
+        self.0.succeed(causality)
     }
 
-    pub async fn fail(self, error: SemanticOperationError) {
-        self.0.fail(error).await;
+    pub fn fail(self, error: SemanticOperationError) -> SubmittedTerminalObservation {
+        self.0.fail(error)
     }
 
-    pub async fn cancel(self) {
-        self.0.cancel().await;
+    pub fn fail_with_custody(
+        self,
+        error: SemanticOperationError,
+        retained: Option<SubmittedTerminalCustody>,
+    ) -> SubmittedTerminalObservation {
+        self.0.fail_with_custody(error, retained)
+    }
+
+    pub fn cancel(self) -> SubmittedTerminalObservation {
+        self.0.cancel()
     }
 }
 
@@ -283,8 +315,16 @@ where
         self.0.kind()
     }
 
-    pub async fn fail(self, error: SemanticOperationError) {
-        self.0.fail(error).await;
+    pub fn fail(self, error: SemanticOperationError) -> SubmittedTerminalObservation {
+        self.0.fail(error)
+    }
+
+    pub fn fail_with_custody(
+        self,
+        error: SemanticOperationError,
+        retained: Option<SubmittedTerminalCustody>,
+    ) -> SubmittedTerminalObservation {
+        self.0.fail_with_custody(error, retained)
     }
 
     #[must_use]
@@ -308,6 +348,9 @@ where
         ));
         match accept(&release) {
             Ok(()) => {
+                self.0
+                    .publisher
+                    .relinquish(&self.0.operation_id, &self.0.instance_id, self.0.kind);
                 self.0.settled = true;
                 Ok(release)
             }
@@ -384,21 +427,41 @@ where
         self.0.kind()
     }
 
-    pub async fn fail(self, error: SemanticOperationError) {
-        self.0.fail(error).await;
+    pub fn fail(self, error: SemanticOperationError) -> SubmittedTerminalObservation {
+        self.0.fail(error)
     }
 
-    pub async fn monitor_started(
+    pub fn fail_with_custody(
+        self,
+        error: SemanticOperationError,
+        retained: Option<SubmittedTerminalCustody>,
+    ) -> SubmittedTerminalObservation {
+        self.0.fail_with_custody(error, retained)
+    }
+
+    pub fn monitor_started(
         self,
         causality: Option<SemanticOperationCausality>,
-    ) -> CeremonySubmissionTerminalOutcome {
-        self.0.succeed(causality).await;
-        CeremonySubmissionTerminalOutcome::MonitorStarted
+    ) -> impl std::future::Future<
+        Output = Result<CeremonySubmissionTerminalOutcome, aura_core::AuraError>,
+    > + Send {
+        let publication = self.0.succeed(causality);
+        async move {
+            publication.await?;
+            Ok(CeremonySubmissionTerminalOutcome::MonitorStarted)
+        }
     }
 
-    pub async fn cancel(self) -> CeremonySubmissionTerminalOutcome {
-        self.0.cancel().await;
-        CeremonySubmissionTerminalOutcome::Cancelled
+    pub fn cancel(
+        self,
+    ) -> impl std::future::Future<
+        Output = Result<CeremonySubmissionTerminalOutcome, aura_core::AuraError>,
+    > + Send {
+        let publication = self.0.cancel();
+        async move {
+            publication.await?;
+            Ok(CeremonySubmissionTerminalOutcome::Cancelled)
+        }
     }
 
     #[must_use]
@@ -415,7 +478,12 @@ where
         if self.settled {
             return;
         }
-        self.publisher
-            .publish_drop_failure(&self.operation_id, &self.instance_id, self.kind);
+        drop(self.publisher.publish_terminal(SubmittedTerminalIntent {
+            operation_id: self.operation_id.clone(),
+            instance_id: self.instance_id.clone(),
+            causality: None,
+            status: super::types::dropped_owner_error(self.kind),
+            retained: None,
+        }));
     }
 }

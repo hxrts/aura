@@ -1065,6 +1065,9 @@ pub struct UiController {
     model: RwLock<UiModel>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
+    enrollment_import_admission:
+        Option<aura_app::ui::workflows::invitation::EnrollmentImportAdmission>,
+    enrollment_import_host: Mutex<aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy>,
     ui_snapshot_sink: Mutex<Option<UiSnapshotSink>>,
     last_published_ui_snapshot: Mutex<SnapshotPublicationOwner>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -1120,6 +1123,32 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn enrollment_import_admission(
+        &self,
+    ) -> Option<&aura_app::ui::workflows::invitation::EnrollmentImportAdmission> {
+        self.enrollment_import_admission.as_ref()
+    }
+
+    /// Configure host storage acknowledgment inside the app-owned import operation.
+    pub fn set_enrollment_import_host_policy(
+        &self,
+        policy: aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy,
+    ) {
+        *self
+            .enrollment_import_host
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = policy;
+    }
+
+    pub fn enrollment_import_host_policy(
+        &self,
+    ) -> aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy {
+        self.enrollment_import_host
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+
     pub fn new(app_core: Arc<AsyncRwLock<AppCore>>, clipboard: Arc<dyn ClipboardPort>) -> Self {
         Self::with_authority_switcher(app_core, clipboard, None)
     }
@@ -1129,6 +1158,9 @@ impl UiController {
         clipboard: Arc<dyn ClipboardPort>,
         authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     ) -> Self {
+        let enrollment_import_admission = app_core
+            .try_read()
+            .and_then(|core| core.enrollment_import_admission().cloned());
         let authority_id = app_core
             .try_read()
             .and_then(|core| core.authority().cloned())
@@ -1140,6 +1172,10 @@ impl UiController {
             model: RwLock::new(UiModel::new(authority_id)),
             clipboard,
             authority_switcher,
+            enrollment_import_admission,
+            enrollment_import_host: Mutex::new(
+                aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy::RuntimeOnly,
+            ),
             ui_snapshot_sink: Mutex::new(None),
             last_published_ui_snapshot: Mutex::new(SnapshotPublicationOwner::default()),
             rerender: Mutex::new(None),

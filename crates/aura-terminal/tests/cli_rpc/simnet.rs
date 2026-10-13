@@ -47,6 +47,14 @@ impl SimNet {
 
     /// A simulation runtime on the shared transport and clock.
     pub async fn peer(&self, seed: u8) -> Result<Peer> {
+        // One selected-provider startup root precedes runtime construction and
+        // restoration, including same-profile reopen. Signal attachment follows
+        // restored keys; it must not start bootstrap and then renew its budget.
+        let startup_time = self.clock.provider();
+        let startup_budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &startup_time.physical_time().await?,
+            Duration::from_secs(30),
+        )?;
         let temp = tempfile::tempdir()?;
         let id = AuthorityId::new_from_entropy([seed; 32]);
         let ctx = EffectContext::new(
@@ -63,7 +71,7 @@ impl SimNet {
             AgentBuilder::new()
                 .with_authority(id)
                 .with_config(config)
-                .with_physical_time_provider(self.clock.provider())
+                .with_physical_time_provider(startup_time.clone())
                 .build_simulation_async_with_shared_transport(
                     u64::from(seed),
                     &ctx,
@@ -76,12 +84,12 @@ impl SimNet {
             AppConfig::default(),
             agent.clone().as_runtime_bridge(),
         )?));
-        AppCore::init_signals_with_hooks(&app).await?;
         app.read()
             .await
-            .bootstrap_signing_keys()
+            .bootstrap_signing_keys(&startup_budget)
             .await
             .map_err(|e| anyhow!("bootstrap: {e}"))?;
+        AppCore::init_signals_with_hooks(&app).await?;
         let ctx = CommandContext::new(app.clone(), agent.runtime().effects(), id);
         Ok(Peer {
             _temp: temp,

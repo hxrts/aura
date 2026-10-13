@@ -1346,6 +1346,13 @@ pub enum VariableAction {
         name: String,
         list: ListId,
     },
+    CaptureOperationInstance {
+        name: String,
+        operation_id: OperationId,
+    },
+    AssertOperationAbsent {
+        operation_id: OperationId,
+    },
     Extract {
         name: String,
         regex: String,

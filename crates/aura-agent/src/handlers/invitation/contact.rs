@@ -587,7 +587,7 @@ impl<'a> InvitationContactHandler<'a> {
                         if let Err(error) = self
                             .handler
                             .send_contact_invitation_response(
-                                effects.as_ref(),
+                                effects.clone(),
                                 &acceptance.invitation_id,
                                 acceptance.acceptor_id,
                                 acceptor_device_id,
@@ -720,7 +720,7 @@ impl<'a> InvitationContactHandler<'a> {
                     if let Err(error) = self
                         .handler
                         .send_contact_invitation_response(
-                            effects.as_ref(),
+                            effects.clone(),
                             &acceptance.invitation_id,
                             acceptance.acceptor_id,
                             acceptor_device_id,

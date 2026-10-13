@@ -28,7 +28,9 @@ mod policy;
 mod signature;
 mod types;
 
-pub use context::{ApprovalContext, GroupAction, SignableOperation, SigningContext};
+pub use context::{
+    ApprovalContext, GroupAction, InvitationResponseKind, SignableOperation, SigningContext,
+};
 pub use lifecycle::{
     ConsensusLifecycle, CoordinatorLifecycle, ProvisionalLifecycle, RotationLifecycle,
     ThresholdLifecycle,

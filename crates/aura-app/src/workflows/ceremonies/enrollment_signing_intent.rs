@@ -10,7 +10,7 @@ use base64::Engine;
 
 use crate::core::AppCore;
 
-const PREFIX: &str = "aura-enrollment-signing-intent:v2:";
+const PREFIX: &str = "aura-enrollment-signing-intent:v3:";
 const MAXIMUM_INTENT_BYTES: usize = 131_072;
 
 /// Identification selected by the original device's explicit local user action.
@@ -20,10 +20,17 @@ pub struct UserTransferredEnrollmentSigningIntent {
     transport: PublicEnrollmentTransportSigningIntent,
     initial_request:
         aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript,
+    negative_terminal_policy:
+        aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
     canonical: Vec<u8>,
 }
 
 impl UserTransferredEnrollmentSigningIntent {
+    pub fn negative_terminal_policy(
+        &self,
+    ) -> &aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy {
+        &self.negative_terminal_policy
+    }
     /// Read-only exact reviewed subject, device, policy and domain data.
     pub fn manifest(&self) -> &EnrollmentTrustManifest {
         &self.manifest
@@ -38,9 +45,14 @@ impl UserTransferredEnrollmentSigningIntent {
     }
     pub fn domains(
         &self,
-    ) -> [aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain; 3] {
-        use aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::*;
-        [Manifest, PublicTransport, InitialRequest]
+    ) -> [aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain; 4] {
+        use aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::*;
+        [
+            Manifest,
+            PublicTransport,
+            InitialRequest,
+            NegativeTerminalPolicy,
+        ]
     }
 }
 
@@ -70,12 +82,19 @@ pub struct UserApprovedEnrollmentSigningIntent {
     transport: PublicEnrollmentTransportSigningIntent,
     initial_request:
         aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript,
+    negative_terminal_policy:
+        aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
     canonical: Vec<u8>,
     setup: super::UserTransferredEnrollmentSetup,
     runtime_owner: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
 }
 
 impl UserApprovedEnrollmentSigningIntent {
+    pub fn negative_terminal_policy(
+        &self,
+    ) -> &aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy {
+        &self.negative_terminal_policy
+    }
     pub fn initial_request(
         &self,
     ) -> &aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript {
@@ -144,6 +163,7 @@ pub fn select_user_transferred_enrollment_signing_intent(
     let manifest = intent.manifest().clone();
     let transport = intent.transport().clone();
     let initial_request = intent.initial_request().clone();
+    let negative_terminal_policy = intent.negative_terminal_policy().clone();
     let reencoded = aura_core::util::serialization::to_vec(&intent).map_err(|source| {
         AuraError::Serialization {
             message: "verify canonical enrollment signing intent".into(),
@@ -173,6 +193,7 @@ pub fn select_user_transferred_enrollment_signing_intent(
         manifest,
         transport,
         initial_request,
+        negative_terminal_policy,
         canonical,
     })
 }
@@ -214,6 +235,7 @@ pub async fn approve_user_selected_enrollment_signing_intent(
         manifest: selected.manifest,
         transport: selected.transport,
         initial_request: selected.initial_request,
+        negative_terminal_policy: selected.negative_terminal_policy,
         canonical: selected.canonical,
         setup,
         runtime_owner,

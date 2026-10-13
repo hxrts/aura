@@ -606,7 +606,11 @@ Enrollment acceptance binds the original setup and the independently admitted si
 
 ### Durable enrollment time windows
 
+Retirement after original enrollment cancellation requires the sealed original terminal decision, the same registered allocation and runtime, and the original authorized negative-cleanup window. Completed retirement writes remain in their original receipt destination before readiness is published, independently of later observation failure. This retention does not change signing authority or establish a full resource acknowledgment: that acknowledgment requires original-window validation and durable cleanup evidence.
+
 Enrollment execution retains the original allocated local deadline and acknowledged clock history across retries and restart. A child allowance cannot replace its parent's durable window. Required clock observations and sticky failures are durably acknowledged before protocol progression or terminal result publication. Missing retained observation state is a required recovery failure. A reimport preserves its original admitted window. Historical completed evidence retains its immutable acknowledged window and cannot grant fresh protocol or signing authority.
+
+An authentic rollback reported by the original selected provider's required timer irreversibly refuses positive execution under that budget. Returning the native timer failure preserves its concrete cause independently of the shared refusal history. Clones, child budgets and validated serialized recovery retain that history, including when snapshot access was contended; later forward time cannot renew the original allowance. Retaining local refusal does not establish durable acknowledgment or authorize a replacement cleanup window.
 
 The original durable allocation birth records pending execution in the same bound clock record before handing out a usable root. Only the actual in-process birth acknowledgment transfers that nonserialized root custody. Initial provider time may establish the allocation deadline; no required observation of an existing window or potentially state-changing operation may precede the pending acknowledgment. Restart with pending state refuses positive execution; a previously usable budget cannot be restored across an unacknowledged observation. An uncertain, failed, or stalled allocation publication grants no usable root or semantic success. Nested children retain the same pending root and may persist its observation high-water mark, but cannot clear it.
 
@@ -647,6 +651,8 @@ Reads and mutations reject descendant directory aliases. Durable acknowledgment 
 Required timeout checkpoints preserve storage and codec causes in `TimeoutBudgetError::CheckpointFailure`. This failure does not represent clock unavailability or elapsed time. Native and semantic classification follows its retained cause; unclassified checkpoint faults remain internal. Serialized diagnostics omit native error sources and grant no checkpoint authority.
 
 ### Required one-shot runtime work
+
+Enrollment issuer cleanup retains the original accepted task control across cancelled or failed reconciliation. Once the exact cancelled generation is retired, any remaining resource reconciliation uses that same control and its original authorized negative-cleanup window. Actual reconciliation failure and final selected-provider validation remain independently required. Observing already completed resource disposal grants no positive domain completion or new execution authority.
 
 Required owned tasks retain their concrete execution failure in supervisor health and drain. Terminal lifecycle settlement does not erase that failure. If terminal publication also fails, both causes remain available, with the original execution cause preserved in the standard error chain and the secondary publication cause retained as typed evidence.
 
@@ -730,6 +736,14 @@ it grants neither device membership nor profile activation. Cancellation
 preserves the original deadline and acknowledged clock observations, including
 sticky expiry and rollback. Required record, codec, guard, budget, and clock
 failures retain their native cause and cannot be interpreted as absence.
+
+Before negative resource acknowledgment, the durable clock checkpoint retains
+the latest history of the original positive interval, including rollback detected
+after its earlier checkpoint write. The live history must continue the retained
+interval, highwater and sticky refusal evidence. Negative cleanup retains its
+separately born original budget; persistence and readback must succeed before
+acknowledgment. Reopening a terminal cancellation restores negative observations
+and cannot recreate positive execution authority.
 
 ### Pre-live enrollment clock continuity
 
@@ -1306,3 +1320,26 @@ sealed birth and positive capabilities. Required reads verify the original
 receipt, imported generation and exact allocation reference. A recovered original
 scope without its required envelope is a storage failure; retry or reopening
 cannot allocate a replacement wrapping secret for that scope.
+
+### Consuming enrollment execution and terminal custody
+
+Admitted, held-issuer, registered and approved-signing execution require their
+actual original durable Pending birth. The consuming root retains its native
+material acquisition, task admission and protocol continuation. Closed requires
+its independent domain evidence, exact sealed descendant disposal and original
+durable acknowledgment. Approved-signing completion additionally binds the
+actual native participant completion to the same approved intent and effect
+owner. A successful checkpoint alone, transcript bytes, task disposal or a
+historical Closed record cannot reconstruct that authority.
+
+Negative or unresolved execution retains the completed operation, actual
+checkpoint disposition, first native failure and independent final validation
+without minting a new cleanup owner. Cleanup belongs to the originally retained
+negative-only custody, including partial acquisition and refused task admission.
+Observation cancellation does not release that obligation, renew the physical
+endpoint or recover signing authority. Packet progress and completed native IO
+remain in their original holder before final validation; unresolved started sends
+cannot be replaced by another send under a reconstructed owner. Opaque disposal
+observations identify the exact original required task and grant no terminal
+authority. The original runtime and approved finite negative policy remain
+required for conditional negative signing (`100_crypto.md`).

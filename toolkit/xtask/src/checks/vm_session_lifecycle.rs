@@ -56,6 +56,19 @@ const TERMINAL_OBSERVATION_SUITES: &[LifecycleSuite] = &[
     LifecycleSuite {
         source: "crates/aura-core/src/time/timeout.rs",
         functions: &[
+            "required_checkpoint_same_poll_expiry_retains_receipt_and_never_constructs_work",
+            "required_checkpoint_expiry_between_admission_and_work_does_not_construct_work",
+            "required_checkpoint_rollback_survives_stalled_checkpoint_deadline",
+            "required_checkpoint_final_receipt_cannot_be_replaced_by_preoperation_receipt",
+            "required_checkpoint_completed_operation_error_survives_postclock_failure",
+            "required_checkpoint_preserves_rollback_callback_and_timer_failures_independently",
+        ],
+        harness_prefix: "time::timeout::tests::",
+        filter: "time::timeout::tests::required_checkpoint_",
+    },
+    LifecycleSuite {
+        source: "crates/aura-core/src/time/timeout.rs",
+        functions: &[
             "required_negative_work_releases_original_gate_for_descendant_disposal",
             "required_negative_work_same_poll_endpoint_retains_completed_result",
             "required_negative_work_bounds_hung_disposal_and_drops_losing_work",
@@ -551,7 +564,7 @@ LifecycleSuite {
     },
     LifecycleSuite {
         source: "crates/aura-agent/src/runtime/effects/crypto.rs",
-        functions: &["truly_old_missing_response_policy_uses_protected_original_registration_and_preserves_bytes"],
+        functions: &["missing_response_policy_refuses_current_owner_without_supplementation"],
         harness_prefix: "runtime::effects::crypto::missing_response_policy_history_tests::",
         filter: "runtime::effects::crypto::missing_response_policy_history_tests::",
     },
@@ -573,7 +586,7 @@ LifecycleSuite {
     LifecycleSuite {
         source: "crates/aura-agent/src/runtime/effects/crypto.rs",
         functions: &[
-            "protected_legacy_profile_migration_preserves_registered_first_decision",
+            "retired_generation_namespace_cannot_restore_current_registered_owner",
             "same_epoch_reissue_preserves_original_history_and_rejects_mutable_registration_forgery",
         ],
         harness_prefix: "runtime::effects::crypto::enrollment_generation_history_tests::",
@@ -587,9 +600,68 @@ LifecycleSuite {
     },
     LifecycleSuite {
         source: "crates/aura-agent/src/handlers/invitation/enrollment_vm_admission.rs",
-        functions: &["real_committed_confirmation_is_durable_and_reverified_before_activation_capability"],
+        functions: &[
+            "real_committed_confirmation_is_durable_and_reverified_before_activation_capability",
+            "original_native_acquisition_failure_survives_disposal_and_negative_transition",
+            "original_registration_commit_drop_retains_actual_cleanup_owner",
+            "original_allocation_commit_before_ack_drop_retains_actual_cleanup_owner",
+            "original_allocation_before_write_drop_retains_unwritten_disposition",
+            "original_allocation_wrap_birth_drop_retires_actual_original_lifetime",
+            "real_single_signer_committed_cancellation_closes_original_resources_without_confirmation",
+            "real_quorum_positive_retirement_waits_for_canonical_existing_device_response",
+            "real_quorum_peer_commit_postread_drop_reenters_same_admission_without_early_ack",
+            "real_quorum_positive_material_cleanup_preserves_refusal_without_positive_completion",
+            "real_quorum_positive_actor_consumed_nonce_drop_retains_original_interruption",
+            "real_quorum_positive_actor_native_failure_survives_postread_drop",
+        ],
         harness_prefix: "handlers::invitation::enrollment_vm_admission::committed_receipt_tests::",
-        filter: "handlers::invitation::enrollment_vm_admission::committed_receipt_tests::real_committed_confirmation_is_durable_and_reverified_before_activation_capability",
+        filter: "handlers::invitation::enrollment_vm_admission::committed_receipt_tests::",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/launch_contract_tests.rs",
+        functions: &[
+            "original_launch_transfers_same_window_once_and_refuses_foreign_runtime",
+            "original_launch_ready_slot_survives_observer_drop_and_original_expiry",
+            "original_launch_negative_work_uses_original_cleanup_endpoint",
+            "original_launch_selection_retains_concrete_provider_failure",
+            "original_launch_cleanup_checkpoint_failure_retains_original_source",
+            "original_launch_cleanup_checkpoint_expiry_preserves_unattempted_state",
+        ],
+        harness_prefix: "runtime::services::enrollment_window::launch_contract_tests::",
+        filter: "runtime::services::enrollment_window::launch_contract_tests::",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &[
+            "issued_observation_waits_for_actual_cleanup_and_survives_dropped_wait",
+            "issued_disposal_observation_rejects_foreign_same_named_control",
+        ],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/threshold_signing/enrollment_transcript_signing.rs",
+        functions: &[
+            "retirement_admission_drop_resumes_original_reply_without_reenqueue",
+            "cancelled_reply_drop_resumes_original_terminal_without_repoll_or_reenqueue",
+        ],
+        harness_prefix: "runtime::services::threshold_signing::enrollment_transcript_signing::retained_call_drop_tests::",
+        filter: "runtime::services::threshold_signing::enrollment_transcript_signing::retained_call_drop_tests::",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/ceremony_tracker.rs",
+        functions: &["registered_clock_checkpoint_restores_highwater_and_latched_rollback"],
+        harness_prefix: "runtime::services::ceremony_tracker::tests::",
+        filter: "runtime::services::ceremony_tracker::tests::registered_clock_checkpoint_restores_highwater_and_latched_rollback",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/threshold_signing/peer_contract_tests.rs",
+        functions: &[
+            "activated_configuration_preserves_original_pending_commitment",
+            "original_peer_continuation_cannot_clone_or_deserialize_custody",
+        ],
+        harness_prefix: "runtime::services::threshold_signing::peer_contract_tests::",
+        filter: "runtime::services::threshold_signing::peer_contract_tests::",
     },
     LifecycleSuite {
         source: "crates/aura-agent/src/task_registry.rs",
@@ -603,6 +675,21 @@ LifecycleSuite {
         harness_prefix: "handlers::invitation_service::required_enrollment_task_tests::",
         filter: "handlers::invitation_service::required_enrollment_task_tests::public_live_cancellation_retry_preserves_primary_and_original_window",
     },
+LifecycleSuite {
+    source: "crates/aura-agent/src/handlers/invitation_service.rs",
+    functions: &[
+        "canonical_cancellation_negative_ack_preserves_rollback_on_same_profile_reopen",
+        "canonical_cancellation_negative_checkpoint_write_failure_retains_original_custody_without_ack",
+    ],
+    harness_prefix: "handlers::invitation_service::required_enrollment_task_tests::",
+    filter: "handlers::invitation_service::required_enrollment_task_tests::canonical_cancellation_negative_",
+},
+LifecycleSuite {
+    source: "crates/aura-agent/src/handlers/invitation_service.rs",
+    functions: &["canonical_original_negative_cleanup_clock_rollback_retains_custody_without_ack"],
+    harness_prefix: "handlers::invitation_service::required_enrollment_task_tests::",
+    filter: "handlers::invitation_service::required_enrollment_task_tests::canonical_original_negative_cleanup_clock_rollback_retains_custody_without_ack",
+},
     LifecycleSuite {
         source: "crates/aura-agent/src/handlers/invitation/tests.rs",
         functions: &["two_runtime_cancelled_notice_recovers_original_window_after_restart"],
@@ -921,6 +1008,36 @@ pub fn run() -> Result<()> {
     let mut sync = common.clone();
     sync.extend(["-p".into(), "hxrts-aura-sync".into()]);
     run_suites(&root, &sync, SYNC_NATIVE_SOURCE_SUITES)?;
+    run_suites(&root, &sync, &[LifecycleSuite {
+        source: "crates/aura-sync/src/protocols/device_epoch_rotation.rs",
+        functions: &["proposal_consent_decoder_requires_current_canonical_bound_scope"],
+        harness_prefix: "protocols::device_epoch_rotation::tests::",
+        filter: "protocols::device_epoch_rotation::tests::proposal_consent_decoder_requires_current_canonical_bound_scope",
+    }])?;
+    let mut invitation = common.clone();
+    invitation.extend(["-p".into(), "hxrts-aura-invitation".into()]);
+    run_suites(&root, &invitation, &[
+        LifecycleSuite {
+            source: "crates/aura-invitation/src/facts.rs",
+            functions: &["required_invitation_decoder_requires_current_schema_and_preserves_sources"],
+            harness_prefix: "facts::tests::",
+            filter: "facts::tests::required_invitation_decoder_requires_current_schema_and_preserves_sources",
+        },
+        LifecycleSuite {
+            source: "crates/aura-invitation/src/enrollment_manifest.rs",
+            functions: &["reviewed_negative_terminal_policy_rejects_schema_scope_and_outcome_substitution"],
+            harness_prefix: "enrollment_manifest::tests::",
+            filter: "enrollment_manifest::tests::reviewed_negative_terminal_policy_rejects_schema_scope_and_outcome_substitution",
+        },
+    ])?;
+    let mut protocol = common.clone();
+    protocol.extend(["-p".into(), "hxrts-aura-protocol".into()]);
+    run_suites(&root, &protocol, &[LifecycleSuite {
+        source: "crates/aura-protocol/src/handlers/tree.rs",
+        functions: &["owned_decision_lease_retains_original_handler_and_excludes_replacement"],
+        harness_prefix: "handlers::tree::tests::",
+        filter: "handlers::tree::tests::owned_decision_lease_retains_original_handler_and_excludes_replacement",
+    }])?;
     for (item, count) in [
         ("core::errors::SyncDiagnostic", 1),
         ("core::errors::sync_error_with_cause", 2),

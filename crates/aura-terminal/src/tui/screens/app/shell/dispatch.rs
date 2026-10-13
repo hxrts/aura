@@ -134,7 +134,8 @@ pub(super) fn submit_local_terminal_operation(
     update_tx: UiUpdateSender,
     operation_id: OperationId,
     kind: SemanticOperationKind,
-) -> LocalTerminalOperationOwner {
+) -> Result<LocalTerminalOperationOwner, crate::tui::semantic_lifecycle::PublicationAdmissionRefusal>
+{
     LocalTerminalOperationOwner::submit(app_core, tasks, update_tx, operation_id, kind)
 }
 
@@ -144,7 +145,10 @@ pub(super) fn submit_workflow_handoff_operation(
     update_tx: UiUpdateSender,
     operation_id: OperationId,
     kind: SemanticOperationKind,
-) -> WorkflowHandoffOperationOwner {
+) -> Result<
+    WorkflowHandoffOperationOwner,
+    crate::tui::semantic_lifecycle::PublicationAdmissionRefusal,
+> {
     WorkflowHandoffOperationOwner::submit(app_core, tasks, update_tx, operation_id, kind)
 }
 
@@ -154,7 +158,7 @@ pub(super) fn submit_ceremony_operation(
     update_tx: UiUpdateSender,
     operation_id: OperationId,
     kind: SemanticOperationKind,
-) -> CeremonySubmissionOwner {
+) -> Result<CeremonySubmissionOwner, crate::tui::semantic_lifecycle::PublicationAdmissionRefusal> {
     CeremonySubmissionOwner::submit(app_core, tasks, update_tx, operation_id, kind)
 }
 
@@ -337,7 +341,10 @@ pub(super) fn execute_harness_followup_command(
     state: &mut TuiState,
     command: TuiCommand,
     ctx: HarnessDispatchContext<'_>,
-) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>, String> {
+) -> Result<
+    Option<aura_app::ui_contract::HarnessUiOperationHandle>,
+    crate::tui::harness_state::HarnessSubmissionFailure,
+> {
     let callbacks = ctx.callbacks;
     let app_ctx = ctx.app_ctx;
     let update_tx = ctx.update_tx;
@@ -364,18 +371,25 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("App callbacks are unavailable".to_string());
+                return Err("App callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::account_create(),
                 SemanticOperationKind::CreateAccount,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             set_authoritative_operation_state_sanctioned(
                 state,
@@ -389,18 +403,25 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::CreateHome { name, description }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Neighborhood callbacks are unavailable".to_string());
+                return Err("Neighborhood callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::create_home(),
                 SemanticOperationKind::CreateHome,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.neighborhood.on_create_home)(name, description, operation);
             Ok(Some(handle))
@@ -412,19 +433,26 @@ pub(super) fn execute_harness_followup_command(
             threshold_k,
         }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Chat callbacks are unavailable".to_string());
+                return Err("Chat callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
             state.router.go_to(Screen::Chat);
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::create_channel(),
                 SemanticOperationKind::CreateChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.chat.on_create_channel)(
                 name,
@@ -443,7 +471,7 @@ pub(super) fn execute_harness_followup_command(
                 *selected_channel.write() =
                     channels.get(idx).map(authoritative_committed_selection);
             } else {
-                return Err("Selected channel is no longer visible".to_string());
+                return Err("Selected channel is no longer visible".to_string().into());
             }
             Ok(None)
         }
@@ -452,18 +480,25 @@ pub(super) fn execute_harness_followup_command(
             manifest_transfer,
         }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("App callbacks are unavailable".to_string());
+                return Err("App callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.app.on_import_device_enrollment_during_onboarding)(
                 code,
@@ -481,23 +516,30 @@ pub(super) fn execute_harness_followup_command(
             ttl_secs,
         }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Invitation callbacks are unavailable".to_string());
+                return Err("Invitation callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
             let kind = match invitation_type {
                 InvitationKind::Contact => SemanticOperationKind::CreateContactInvitation,
                 InvitationKind::Guardian => SemanticOperationKind::CreateGuardianInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::invitation_create(),
                 kind,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::InvitationCodeReady);
             (cb.invitations.on_create)(
@@ -513,18 +555,25 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::AcceptContactInvitation { code }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Invitation callbacks are unavailable".to_string());
+                return Err("Invitation callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::invitation_accept_contact(),
                 SemanticOperationKind::AcceptContactInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_accept_contact_code)(code, operation);
@@ -532,18 +581,25 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::ImportInvitation { code }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Invitation callbacks are unavailable".to_string());
+                return Err("Invitation callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::invitation_import(),
                 SemanticOperationKind::ImportInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_import)(code, operation);
@@ -551,10 +607,10 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::AcceptInvitation) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Invitation callbacks are unavailable".to_string());
+                return Err("Invitation callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
             let selected = read_selected_notification(
                 state.notifications.selected_index,
@@ -569,7 +625,7 @@ pub(super) fn execute_harness_followup_command(
                 &state.runtime_facts,
             );
             let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
-                return Err("Select a received invitation to accept".to_string());
+                return Err("Select a received invitation to accept".to_string().into());
             };
             let accept_kind =
                 semantic_accept_kind_for_invitation(shared_invitations, &invitation_id);
@@ -582,13 +638,20 @@ pub(super) fn execute_harness_followup_command(
                 }
                 _ => OperationId::invitation_accept_contact(),
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 operation_id,
                 accept_kind,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_accept)(invitation_id, operation);
@@ -596,18 +659,25 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Chat callbacks are unavailable".to_string());
+                return Err("Chat callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::join_channel(),
                 SemanticOperationKind::JoinChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.router.go_to(Screen::Chat);
             (cb.chat.on_join_channel)(channel_name, operation);
@@ -615,18 +685,25 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::AcceptPendingChannelInvitation) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Chat callbacks are unavailable".to_string());
+                return Err("Chat callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::invitation_accept_channel(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.router.go_to(Screen::Chat);
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
@@ -635,7 +712,7 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Chat callbacks are unavailable".to_string());
+                return Err("Chat callbacks are unavailable".to_string().into());
             };
             let is_slash_command = content.trim_start().starts_with('/');
             let channels = shared_channels.read().clone();
@@ -652,36 +729,45 @@ pub(super) fn execute_harness_followup_command(
             }
             let Some(channel_id) = committed_channel_id else {
                 return Err(
-                    "Select a channel before sending a message (Chat: ↑/↓ to choose)".to_string(),
+                    "Select a channel before sending a message (Chat: ↑/↓ to choose)"
+                        .to_string()
+                        .into(),
                 );
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::send_message(),
                 SemanticOperationKind::SendChatMessage,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.chat.on_send_owned)(channel_id, content, operation);
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::InviteSelectedContactToChannel) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Contact callbacks are unavailable".to_string());
+                return Err("Contact callbacks are unavailable".to_string().into());
             };
             let contact_idx = state.contacts.selected_index;
             let channel_idx = state.chat.selected_channel;
             let contacts = shared_contacts.read().clone();
             let channels = shared_channels.read().clone();
             let Some(contact) = contacts.get(contact_idx) else {
-                return Err("No contact selected".to_string());
+                return Err("No contact selected".to_string().into());
             };
             let Some(channel) = channels.get(channel_idx) else {
-                return Err("No channel selected".to_string());
+                return Err("No channel selected".to_string().into());
             };
             let selected = selected_channel.read().clone();
             let context_id =
@@ -691,18 +777,26 @@ pub(super) fn execute_harness_followup_command(
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",
                     channel.id
-                ));
+                )
+                .into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
@@ -734,20 +828,27 @@ pub(super) fn execute_harness_followup_command(
                     .and_then(|binding| binding.context_id)
             });
             let Some(context_id) = resolved_context_id else {
-                return Err(format!(
-                    "Selected channel lacks authoritative context: {channel_id}"
-                ));
+                return Err(
+                    format!("Selected channel lacks authoritative context: {channel_id}").into(),
+                );
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx.clone(),
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             let app_core = app_ctx.app_core.raw().clone();
@@ -758,12 +859,19 @@ pub(super) fn execute_harness_followup_command(
             let channel_id = channel_id
                 .parse::<aura_core::ChannelId>()
                 .map_err(|error| {
-                    format!("selected channel id is not canonical for harness invite: {error}")
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(error)
+                            .context("selected channel id is not canonical for harness invite"),
+                    )
                 })?;
             let context_id = context_id
                 .parse::<aura_core::ContextId>()
                 .map_err(|error| {
-                    format!("selected channel context is not canonical for harness invite: {error}")
+                    crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(error).context(
+                            "selected channel context is not canonical for harness invite",
+                        ),
+                    )
                 })?;
             let (operation_instance_id, transfer) = prepare_workflow_handoff_transfer(
                 operation,
@@ -801,36 +909,50 @@ pub(super) fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::AddDevice { name, setup_code }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Settings callbacks are unavailable".to_string());
+                return Err("Settings callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::StartDeviceEnrollment,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.settings.on_add_device)(name, setup_code, operation);
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id }) => {
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Settings callbacks are unavailable".to_string());
+                return Err("Settings callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::remove_device(),
                 SemanticOperationKind::RemoveDevice,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.settings.on_remove_device)(device_id, operation);
             Ok(Some(handle))
@@ -839,12 +961,12 @@ pub(super) fn execute_harness_followup_command(
             let current_devices = shared_devices.read().clone();
 
             if current_devices.is_empty() {
-                return Err("No devices to remove".to_string());
+                return Err("No devices to remove".to_string().into());
             }
 
             let has_removable = current_devices.iter().any(|device| !device.is_current);
             if !has_removable {
-                return Err("Cannot remove the current device".to_string());
+                return Err("Cannot remove the current device".to_string().into());
             }
 
             let devices = current_devices
@@ -909,21 +1031,29 @@ pub(super) fn execute_harness_followup_command(
                         .map(|device| format!("{}:current={}", device.id, device.is_current))
                         .collect::<Vec<_>>()
                         .join(",")
-                ));
+                )
+                .into());
             };
             let Some(cb) = callbacks.as_ref() else {
-                return Err("Settings callbacks are unavailable".to_string());
+                return Err("Settings callbacks are unavailable".to_string().into());
             };
             let Some(update_tx) = update_tx.clone() else {
-                return Err("UI update sender is unavailable".to_string());
+                return Err("UI update sender is unavailable".to_string().into());
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
                 OperationId::remove_device(),
                 SemanticOperationKind::RemoveDevice,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    return Err(crate::tui::harness_state::HarnessSubmissionFailure::Native(
+                        anyhow::Error::new(source),
+                    ));
+                }
+            };
             let handle = operation.harness_handle();
             (cb.settings.on_remove_device)(device_id.into(), operation);
             Ok(Some(handle))
@@ -1364,7 +1494,7 @@ mod tests {
             }
         }
         io.tasks().shutdown();
-        io.tasks().wait_drained().await;
+        io.tasks().wait_required_disposed().await.unwrap();
     }
 
     #[test]

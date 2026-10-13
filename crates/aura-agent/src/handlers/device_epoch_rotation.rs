@@ -36,8 +36,8 @@ use aura_sync::protocols::device_epoch_rotation::{
     DeviceEnrollmentEpochCommitTranscript, DeviceEnrollmentEpochCommitTranscriptPayload,
     DeviceEpochAcceptance, DeviceEpochAcceptanceTranscript, DeviceEpochAcceptanceTranscriptPayload,
     DeviceEpochCommit, DeviceEpochCommitTranscript, DeviceEpochCommitTranscriptPayload,
-    DeviceEpochProposal, DeviceEpochProposalTranscript, EncryptedDeviceEpochKeyPackage,
-    MAX_DEVICE_EPOCH_COMMIT_BYTES,
+    DeviceEpochProposal, DeviceEpochProposalPurpose, DeviceEpochProposalTranscript,
+    EncryptedDeviceEpochKeyPackage, MAX_DEVICE_EPOCH_COMMIT_BYTES,
 };
 use aura_sync::protocols::DeviceEpochRotationKind;
 use std::{collections::BTreeMap, fmt};
@@ -45,20 +45,154 @@ use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const PROTOCOL_ID: &str = "aura.sync.device_epoch_rotation";
+
+enum ParticipantInboundLease<'a> {
+    Transport(crate::runtime::effects::InboundEnvelopeLease<'a>),
+    Session(crate::runtime::effects::UnclaimedChoreographyEnvelopeLease<'a>),
+}
+
+impl ParticipantInboundLease<'_> {
+    fn consume(self) -> TransportEnvelope {
+        match self {
+            Self::Transport(lease) => lease.consume(),
+            Self::Session(lease) => lease.consume(),
+        }
+    }
+}
 const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
-const PROPOSAL_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.proposal";
+const PROPOSAL_SIGNING_DOMAIN: &str =
+    aura_sync::protocols::device_epoch_rotation::DEVICE_EPOCH_PROPOSAL_SIGNING_DOMAIN;
 const ENROLLMENT_COMMIT_SIGNING_DOMAIN: &str =
     "aura.sync.device_epoch_rotation.enrollment_commit.v2";
 const COMMIT_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.commit";
+
+/// Canonical proposal data for both signing and exact local-consent matching.
+/// Constructing this context grants neither approval nor signing authority.
+pub(crate) fn device_epoch_proposal_signing_context(
+    proposal: &DeviceEpochProposal,
+) -> AgentResult<SigningContext> {
+    use aura_signature::SecurityTranscript;
+    let payload = DeviceEpochProposalTranscript::new(proposal)
+        .transcript_bytes()
+        .map_err(map_internal_error)?;
+    Ok(SigningContext::message(
+        proposal.subject_authority,
+        PROPOSAL_SIGNING_DOMAIN.to_string(),
+        payload,
+    ))
+}
+
+pub(crate) struct OriginalEnrollmentRotationContext {
+    pub(super) issued:
+        std::sync::Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+    pub(super) original: crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    pub(super) children: crate::task_registry::TaskGroup,
+}
+
+enum DeviceEpochSigningOwner<'a> {
+    Enrollment(
+        &'a crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        &'a crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ),
+    Ordinary,
+}
+
+impl OriginalEnrollmentRotationContext {
+    fn require_request(
+        &self,
+        effects: &AuraEffectSystem,
+        request: &DeviceEpochRotationInitRequest,
+    ) -> AgentResult<()> {
+        self.issued.require_runtime_owner(effects)?;
+        self.original.require_issued_notice_owner(&self.issued)?;
+        let manifest = self.issued.manifest();
+        if request.ceremony_id != manifest.ceremony
+            || request.pending_epoch != manifest.pending_epoch
+            || Hash32::from_bytes(&request.threshold_config)
+                != manifest.pending_threshold_config_digest
+            || hash::hash(&request.public_key_package) != manifest.pending_public_key_package_digest
+            || request.participant_device_id == manifest.initiator_device
+            || !manifest.final_inventory.iter().any(|parent| {
+                parent
+                    .participants
+                    .contains(&ParticipantIdentity::device(request.participant_device_id))
+            })
+        {
+            return Err(AgentError::invalid(
+                "rotation request differs from original enrollment owner",
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_proposal(
+        &self,
+        effects: &AuraEffectSystem,
+        request: &DeviceEpochRotationInitRequest,
+        proposal: &DeviceEpochProposal,
+    ) -> AgentResult<()> {
+        self.require_request(effects, request)?;
+        let manifest = self.issued.manifest();
+        if proposal.purpose
+            != (DeviceEpochProposalPurpose::Enrollment {
+                manifest_digest: Hash32::new(self.issued.digest()),
+                enrolling_device_id: manifest.invitee_device,
+            })
+            || proposal.subject_authority != manifest.subject
+            || proposal.ceremony_id != request.ceremony_id
+            || proposal.pending_epoch != request.pending_epoch
+            || proposal.initiator_device_id != manifest.initiator_device
+            || proposal.participant_device_id != request.participant_device_id
+            || proposal.key_package_hash != Hash32::from_bytes(&request.key_package)
+            || proposal.threshold_config_hash != manifest.pending_threshold_config_digest
+            || proposal.public_key_package_hash
+                != Hash32::new(manifest.pending_public_key_package_digest)
+        {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) enum DeviceEpochRotationOrigin {
+    Enrollment(OriginalEnrollmentRotationContext),
+    Rotation,
+    Removal,
+}
+
+impl DeviceEpochRotationOrigin {
+    pub(crate) fn original_children(&self) -> Option<crate::task_registry::TaskGroup> {
+        match self {
+            Self::Enrollment(context) => Some(context.children.clone()),
+            Self::Rotation | Self::Removal => None,
+        }
+    }
+
+    fn signing_owner(&self) -> DeviceEpochSigningOwner<'_> {
+        match self {
+            Self::Enrollment(context) => {
+                DeviceEpochSigningOwner::Enrollment(&context.issued, &context.original)
+            }
+            Self::Rotation | Self::Removal => DeviceEpochSigningOwner::Ordinary,
+        }
+    }
+    fn kind(&self) -> DeviceEpochRotationKind {
+        match self {
+            Self::Enrollment(_) => DeviceEpochRotationKind::Enrollment,
+            Self::Rotation => DeviceEpochRotationKind::Rotation,
+            Self::Removal => DeviceEpochRotationKind::Removal,
+        }
+    }
+}
 
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DeviceEpochRotationInitRequest {
     #[zeroize(skip)]
     pub ceremony_id: CeremonyId,
     #[zeroize(skip)]
-    pub kind: DeviceEpochRotationKind,
+    pub(crate) origin: DeviceEpochRotationOrigin,
     #[zeroize(skip)]
     pub pending_epoch: u64,
     #[zeroize(skip)]
@@ -78,7 +212,7 @@ impl fmt::Debug for DeviceEpochRotationInitRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeviceEpochRotationInitRequest")
             .field("ceremony_id", &self.ceremony_id)
-            .field("kind", &self.kind)
+            .field("kind", &self.origin.kind())
             .field("pending_epoch", &self.pending_epoch)
             .field("participant_device_id", &self.participant_device_id)
             .field("key_package_len", &self.key_package.len())
@@ -135,9 +269,173 @@ fn enrollment_fence_failure(source: EnrollmentEpochFenceError) -> AgentError {
 }
 /// Actual tree custody is retained through key activation and terminal commit.
 /// Serialized preparation by itself is never an activation capability.
-struct PreparedEnrollmentActivationCapability<'a> {
+pub(crate) struct AuthenticatedPreparedEnrollmentActivation {
+    effects: std::sync::Arc<AuraEffectSystem>,
+    tracker: CeremonyTracker,
+    stored: StoredEnrollmentActivation,
+    baseline_length: usize,
+    candidate: Vec<AttestedOp>,
+}
+impl AuthenticatedPreparedEnrollmentActivation {
+    pub(crate) fn require_original(
+        &self,
+        decision: &crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'_>,
+    ) -> Result<(), aura_core::AuraError> {
+        decision.require_tracker(&self.tracker)?;
+        decision.require_effects(self.effects.as_ref())
+    }
+    pub(crate) fn ceremony_id(&self) -> &CeremonyId {
+        &self.stored.ceremony
+    }
+}
+
+pub(crate) struct AuthenticatedPreparedEnrollmentRecovery<'a> {
+    authenticated: AuthenticatedPreparedEnrollmentActivation,
+    decision:
+        crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'a>,
+}
+impl<'a> AuthenticatedPreparedEnrollmentRecovery<'a> {
+    pub(crate) fn into_original_decision(
+        self,
+    ) -> (
+        AuthenticatedPreparedEnrollmentActivation,
+        crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'a>,
+    ) {
+        (self.authenticated, self.decision)
+    }
+}
+
+pub(crate) struct PreparedEnrollmentActivationCapability<'a> {
+    effects: &'a AuraEffectSystem,
+    tracker: CeremonyTracker,
     stored: StoredEnrollmentActivation,
     _tree: aura_protocol::handlers::tree::TreeDecisionLease<'a>,
+}
+impl PreparedEnrollmentActivationCapability<'_> {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "PreparedEnrollmentActivationCapability", receiver_type = PreparedEnrollmentActivationCapability, family = "runtime_helper")]
+    pub(crate) async fn require_pending_generation(
+        &self,
+        effects: &AuraEffectSystem,
+        activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
+    ) -> AgentResult<()> {
+        if !std::ptr::eq(self.effects, effects) || activation.ceremony_id() != &self.stored.ceremony
+        {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
+        activation.require_effects(effects)?;
+        activation.require_tracker(&self.tracker)?;
+        activation
+            .require_generation(self.stored.subject, self.stored.pending_epoch)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) fn subject(&self) -> AuthorityId {
+        self.stored.subject
+    }
+    pub(crate) fn pending_epoch(&self) -> u64 {
+        self.stored.pending_epoch
+    }
+    pub(crate) fn prestate(&self) -> Hash32 {
+        self.stored.prestate
+    }
+    pub(crate) fn ceremony_id(&self) -> &CeremonyId {
+        &self.stored.ceremony
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "PreparedEnrollmentActivationCapability", receiver_type = PreparedEnrollmentActivationCapability, family = "runtime_helper")]
+    pub(crate) async fn original_committed_ops(
+        &self,
+        effects: &AuraEffectSystem,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> AgentResult<Vec<AttestedOp>> {
+        issued.require_runtime_owner(effects)?;
+        let manifest = issued.manifest();
+        if !std::ptr::eq(self.effects, effects)
+            || self.stored.manifest_digest != issued.digest()
+            || self.stored.subject != manifest.subject
+            || self.stored.ceremony != manifest.ceremony
+            || self.stored.pending_epoch != manifest.pending_epoch
+        {
+            #[cfg(test)]
+            eprintln!(
+                "original activation binding: effects={} manifest={} subject={} ceremony={} epoch={}",
+                std::ptr::eq(self.effects, effects),
+                self.stored.manifest_digest == issued.digest(),
+                self.stored.subject == manifest.subject,
+                self.stored.ceremony == manifest.ceremony,
+                self.stored.pending_epoch == manifest.pending_epoch,
+            );
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
+        let mut expected = self.stored.baseline.clone();
+        expected.push(self.stored.attested.clone());
+        expected.push(self.stored.epoch_fence.clone());
+        let actual = effects
+            .export_tree_ops()
+            .await
+            .map_err(map_internal_error)?;
+        if to_vec(&actual).map_err(map_encode_error)?
+            != to_vec(&expected).map_err(map_encode_error)?
+        {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::HistoryChanged,
+            ));
+        }
+        let epoch = effects
+            .secure_retrieve(
+                &SecureStorageLocation::new("epoch_state", manifest.subject.to_string()),
+                &[SecureStorageCapability::Read],
+            )
+            .await?;
+        if epoch.as_slice() != manifest.pending_epoch.to_le_bytes().as_slice() {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::EpochMismatch,
+            ));
+        }
+        for (namespace, digest) in [
+            (
+                "threshold_config",
+                *manifest.pending_threshold_config_digest.as_bytes(),
+            ),
+            (
+                "threshold_pubkey",
+                manifest.pending_public_key_package_digest,
+            ),
+        ] {
+            let bytes = effects
+                .secure_retrieve(
+                    &SecureStorageLocation::with_sub_key(
+                        namespace,
+                        manifest.subject.to_string(),
+                        manifest.pending_epoch.to_string(),
+                    ),
+                    &[SecureStorageCapability::Read],
+                )
+                .await?;
+            let actual_digest = if namespace == "threshold_config" {
+                let metadata: crate::runtime::effects::ThresholdConfigMetadata =
+                    serde_json::from_slice(&bytes).map_err(|source| {
+                        AgentError::from(aura_core::AuraError::Serialization {
+                            message: "decode original activated signing generation".into(),
+                            source: Some(std::sync::Arc::new(source)),
+                        })
+                    })?;
+                metadata.require_activated_pending_generation(digest)?;
+                digest
+            } else {
+                hash::hash(&bytes)
+            };
+            if actual_digest != digest {
+                #[cfg(test)]
+                eprintln!("original activation binding: stored {namespace} digest differs");
+                return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+            }
+        }
+        Ok(vec![
+            self.stored.attested.clone(),
+            self.stored.epoch_fence.clone(),
+        ])
+    }
 }
 fn enrollment_activation_prestate(
     authority: AuthorityId,
@@ -184,6 +482,36 @@ fn enrollment_activation_location(ceremony: &CeremonyId) -> SecureStorageLocatio
 }
 
 impl DeviceEpochRotationService {
+    pub(crate) async fn requires_original_sole_finalization(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> AgentResult<bool> {
+        issued.require_runtime_owner(self.effects.as_ref())?;
+        original.require_issued_notice_owner(issued)?;
+        original
+            .execute(self.effects.as_ref(), || async {
+                let state = self
+                    .ceremony_tracker
+                    .get(&issued.manifest().ceremony)
+                    .await
+                    .map_err(AgentError::from)?;
+                let invitee = ParticipantIdentity::device(issued.manifest().invitee_device);
+                if state.kind != aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
+                    || state.initiator_id != issued.manifest().subject
+                    || state.new_epoch != issued.manifest().pending_epoch
+                    || state.enrollment_device_id != Some(issued.manifest().invitee_device)
+                    || !state.participants.contains(&invitee)
+                {
+                    return Err(AgentError::invalid(
+                        "original finalizer roster binding differs",
+                    ));
+                }
+                Ok(state.participants.len() == 1)
+            })
+            .await
+            .map_err(|source| original.map_run_error("select original finalizer role", source))
+    }
     pub fn new(
         authority_id: AuthorityId,
         effects: std::sync::Arc<AuraEffectSystem>,
@@ -206,6 +534,9 @@ impl DeviceEpochRotationService {
         self,
         request: DeviceEpochRotationInitRequest,
     ) -> AgentResult<()> {
+        if let DeviceEpochRotationOrigin::Enrollment(context) = &request.origin {
+            context.require_request(self.effects.as_ref(), &request)?;
+        }
         let initiator_device_id = self.effects.device_id();
         let participant_role = role(self.authority_id, request.participant_device_id, 1);
         let roles = vec![
@@ -239,12 +570,43 @@ impl DeviceEpochRotationService {
         .map_err(map_session_error)?;
         session.queue_send_bytes(to_vec(&proposal).map_err(map_encode_error)?);
 
+        // A verified refusal ends the enrollment ceremony without a rotation
+        // acceptance. Retire this original child and its VM session so the
+        // issuer can acknowledge disposal of its exact child subtree.
+        let enrollment_origin = matches!(&request.origin, DeviceEpochRotationOrigin::Enrollment(_));
+        let terminal_runner = self.ceremony_runner.clone();
+        let terminal_ceremony = request.ceremony_id.clone();
+        let rejected = async move {
+            if enrollment_origin {
+                let outcome = terminal_runner
+                    .await_enrollment_terminal_outcome(&terminal_ceremony)
+                    .await?;
+                if outcome
+                    == aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                        aura_app::runtime_bridge::CeremonyFailureReason::Rejected,
+                    )
+                {
+                    return Ok::<(), aura_core::AuraError>(());
+                }
+            }
+            futures::future::pending().await
+        };
+        tokio::pin!(rejected);
+
         let mut acceptance: Option<VerifiedIngress<DeviceEpochAcceptance>> = None;
         loop {
-            let round = session
-                .advance_round("Initiator", &peer_roles)
-                .await
-                .map_err(map_internal_error)?;
+            let round = tokio::select! {
+                biased;
+                result = &mut rejected => {
+                    let close = session.close().await.map_err(map_internal_error);
+                    close?;
+                    result.map_err(map_internal_error)?;
+                    return Ok(());
+                }
+                round = session.advance_round("Initiator", &peer_roles) => {
+                    round.map_err(map_internal_error)?
+                }
+            };
 
             if let Some(blocked) = round.blocked_receive {
                 let decoded: DeviceEpochAcceptance =
@@ -310,7 +672,16 @@ impl DeviceEpochRotationService {
             .await?;
         let mut proposal = DeviceEpochProposal {
             ceremony_id: request.ceremony_id.clone(),
-            kind: request.kind,
+            purpose: match &request.origin {
+                DeviceEpochRotationOrigin::Enrollment(context) => {
+                    DeviceEpochProposalPurpose::Enrollment {
+                        manifest_digest: Hash32::new(context.issued.digest()),
+                        enrolling_device_id: context.issued.manifest().invitee_device,
+                    }
+                }
+                DeviceEpochRotationOrigin::Rotation => DeviceEpochProposalPurpose::Rotation,
+                DeviceEpochRotationOrigin::Removal => DeviceEpochProposalPurpose::Removal,
+            },
             subject_authority: self.authority_id,
             pending_epoch: request.pending_epoch,
             initiator_device_id,
@@ -344,15 +715,21 @@ impl DeviceEpochRotationService {
         )
         .await
         .map_err(map_internal_error)?;
-        let transcript = DeviceEpochProposalTranscript::new(&proposal);
+        if let DeviceEpochRotationOrigin::Enrollment(context) = &request.origin {
+            context.require_proposal(self.effects.as_ref(), request, &proposal)?;
+        }
         proposal.authority_signature = self
-            .sign_authority_transcript(PROPOSAL_SIGNING_DOMAIN, &transcript)
+            .sign_rotation_context(
+                &request.origin.signing_owner(),
+                device_epoch_proposal_signing_context(&proposal)?,
+            )
             .await?;
         Ok(proposal)
     }
 
     async fn build_signed_commit(
         &self,
+        owner: &DeviceEpochSigningOwner<'_>,
         proposal: &DeviceEpochProposal,
         attested_leaf_op: Option<AttestedOp>,
         attested_epoch_op: Option<AttestedOp>,
@@ -374,7 +751,7 @@ impl DeviceEpochRotationService {
             .map(Hash32::from_value)
             .transpose()
             .map_err(map_internal_error)?;
-        let authority_signature = match proposal.kind {
+        let authority_signature = match proposal.purpose.kind() {
             DeviceEpochRotationKind::Enrollment => {
                 let transcript = DeviceEnrollmentEpochCommitTranscript::new(
                     DeviceEnrollmentEpochCommitTranscriptPayload {
@@ -390,7 +767,7 @@ impl DeviceEpochRotationService {
                         })?,
                     },
                 );
-                self.sign_authority_transcript(ENROLLMENT_COMMIT_SIGNING_DOMAIN, &transcript)
+                self.sign_authority_transcript(owner, ENROLLMENT_COMMIT_SIGNING_DOMAIN, &transcript)
                     .await?
             }
             DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
@@ -405,7 +782,7 @@ impl DeviceEpochRotationService {
                         committed_at_ms,
                         attested_leaf_op_hash,
                     });
-                self.sign_authority_transcript(COMMIT_SIGNING_DOMAIN, &transcript)
+                self.sign_authority_transcript(owner, COMMIT_SIGNING_DOMAIN, &transcript)
                     .await?
             }
         };
@@ -424,18 +801,65 @@ impl DeviceEpochRotationService {
 
     async fn sign_authority_transcript<T: aura_signature::SecurityTranscript + ?Sized>(
         &self,
+        owner: &DeviceEpochSigningOwner<'_>,
         domain: &str,
         transcript: &T,
     ) -> AgentResult<aura_core::threshold::ThresholdSignature> {
         let payload = transcript.transcript_bytes().map_err(map_internal_error)?;
-        self.signing_service
-            .sign_with_device_quorum(SigningContext::message(
-                self.authority_id,
-                domain.to_string(),
-                payload,
-            ))
+        self.sign_rotation_context(
+            owner,
+            SigningContext::message(self.authority_id, domain.to_string(), payload),
+        )
+        .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "DeviceEpochSigningOwner",
+        family = "runtime_helper"
+    )]
+    async fn sign_rotation_context(
+        &self,
+        owner: &DeviceEpochSigningOwner<'_>,
+        context: SigningContext,
+    ) -> AgentResult<aura_core::threshold::ThresholdSignature> {
+        let DeviceEpochSigningOwner::Enrollment(issued, original) = owner else {
+            return self
+                .signing_service
+                .sign_with_device_quorum(context)
+                .await
+                .map_err(AgentError::from);
+        };
+        if !issued.original_conditional_signing_required(self.effects.as_ref(), original)? {
+            return original
+                .execute(self.effects.as_ref(), || async {
+                    self.signing_service
+                        .sign(context)
+                        .await
+                        .map_err(AgentError::from)
+                })
+                .await
+                .map_err(|source| {
+                    original.map_run_error("original single-signer rotation", source)
+                });
+        }
+        let observed = original
+            .acquire_original_conditional_signing(self.effects.as_ref(), issued)
+            .await?;
+        issued.retain_original_conditional_acquisition(&observed)?;
+        observed.validation.map_err(|source| {
+            aura_core::AuraError::crypto_with_source(
+                "original quorum signing-state acquisition validation",
+                std::sync::Arc::new(source),
+            )
+        })?;
+        let mut state = observed.operation.ok_or_else(|| {
+            aura_core::AuraError::invalid("original quorum signing-state acquisition interrupted")
+        })??;
+        state
+            .sign_original_device_quorum(&self.signing_service, issued, original, context)
             .await
-            .map_err(map_internal_error)
+            .map_err(AgentError::from)
     }
 
     async fn current_authority_signature_material(&self) -> AgentResult<(u64, TrustedPublicKey)> {
@@ -466,7 +890,7 @@ impl DeviceEpochRotationService {
         Ok((state.epoch, trusted_key))
     }
 
-    async fn verify_device_epoch_proposal(
+    fn verify_device_epoch_proposal_route(
         &self,
         proposal: &DeviceEpochProposal,
         initiator_device_id: DeviceId,
@@ -491,15 +915,6 @@ impl DeviceEpochRotationService {
                 proposal.participant_device_id
             )));
         }
-        let local_device_public_key = self
-            .resolve_device_leaf_public_key(self.effects.device_id())
-            .await?;
-        if proposal.encrypted_key_package.recipient_public_key != local_device_public_key {
-            return Err(AgentError::invalid(
-                "device epoch proposal recipient key does not match the enrolled device key"
-                    .to_string(),
-            ));
-        }
         if device_epoch_rotation_session_id(&proposal.ceremony_id, proposal.participant_device_id)
             != expected_session_uuid
         {
@@ -510,6 +925,29 @@ impl DeviceEpochRotationService {
         if !verify_device_epoch_proposal_hashes(proposal) {
             return Err(AgentError::invalid(
                 "device epoch proposal hashes do not match key material".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn verify_device_epoch_proposal(
+        &self,
+        proposal: &DeviceEpochProposal,
+        initiator_device_id: DeviceId,
+        expected_session_uuid: Uuid,
+    ) -> AgentResult<()> {
+        self.verify_device_epoch_proposal_route(
+            proposal,
+            initiator_device_id,
+            expected_session_uuid,
+        )?;
+        let local_device_public_key = self
+            .resolve_device_leaf_public_key(self.effects.device_id())
+            .await?;
+        if proposal.encrypted_key_package.recipient_public_key != local_device_public_key {
+            return Err(AgentError::invalid(
+                "device epoch proposal recipient key does not match the enrolled device key"
+                    .to_string(),
             ));
         }
         let current_tree_state = self
@@ -578,7 +1016,7 @@ impl DeviceEpochRotationService {
 
         let (expected_epoch, trusted_public_key_package) =
             self.current_authority_signature_material().await?;
-        let verified = match proposal.kind {
+        let verified = match proposal.purpose.kind() {
             DeviceEpochRotationKind::Enrollment => {
                 let transcript = DeviceEnrollmentEpochCommitTranscript::from_commit(commit)
                     .map_err(map_internal_error)?;
@@ -626,27 +1064,52 @@ impl DeviceEpochRotationService {
         loop {
             // Take only rotation envelopes; sync and other traffic stay queued for
             // their own consumers instead of blocking a proposal behind them.
-            let envelope = match self
+            let (envelope, return_lease) = match self
                 .effects
-                .take_inbound_envelope(is_device_epoch_rotation_envelope)
+                .take_inbound_envelope_retained(is_device_epoch_rotation_envelope)
             {
-                Ok(envelope) => envelope,
+                Ok(lease) => {
+                    // VM startup awaits before it reads this frame. Keep the
+                    // original return slot reserved until the VM is ready;
+                    // cancellation restores the frame at its original index.
+                    let verified = match verified_device_epoch_envelope((*lease).clone()) {
+                        Ok(verified) => verified,
+                        Err(error) => {
+                            // Rejected wire input was consumed by the old receive
+                            // path; do not restore an invalid frame forever.
+                            let _ = lease.consume();
+                            return Err(error);
+                        }
+                    };
+                    (verified, Some(ParticipantInboundLease::Transport(lease)))
+                }
                 // Choreography envelopes are buffered per session on arrival; a
                 // rotation this device only participates in waits there.
-                Err(TransportError::NoMessage) => match self
-                    .effects
-                    .take_unclaimed_choreography_envelope(is_device_epoch_rotation_envelope)
-                {
-                    Some(envelope) => envelope,
-                    None => break,
-                },
+                Err(TransportError::NoMessage) => {
+                    match self.effects.take_unclaimed_choreography_envelope_retained(
+                        is_device_epoch_rotation_envelope,
+                    ) {
+                        Some(lease) => {
+                            let verified = match verified_device_epoch_envelope((*lease).clone()) {
+                                Ok(verified) => verified,
+                                Err(error) => {
+                                    let _ = lease.consume();
+                                    return Err(error);
+                                }
+                            };
+                            (verified, Some(ParticipantInboundLease::Session(lease)))
+                        }
+                        None => break,
+                    }
+                }
                 Err(error) => return Err(AgentError::internal(error.to_string())),
             };
 
-            let envelope = verified_device_epoch_envelope(envelope)?;
-
             processed += 1;
-            if self.execute_participant_from_envelope(envelope).await? {
+            if self
+                .execute_participant_from_envelope(envelope, return_lease)
+                .await?
+            {
                 completed += 1;
             }
         }
@@ -657,6 +1120,7 @@ impl DeviceEpochRotationService {
     async fn execute_participant_from_envelope(
         &self,
         envelope: VerifiedIngress<TransportEnvelope>,
+        return_lease: Option<ParticipantInboundLease<'_>>,
     ) -> AgentResult<bool> {
         let (envelope, _) = envelope.into_parts();
         let session_uuid = envelope_session_uuid(&envelope)?;
@@ -677,7 +1141,7 @@ impl DeviceEpochRotationService {
         let local_types =
             aura_sync::protocols::device_epoch_rotation::telltale_session_types_device_epoch_rotation::vm_artifacts::local_types();
 
-        let mut session = open_owned_manifest_vm_session_admitted(
+        let opened = open_owned_manifest_vm_session_admitted(
             self.effects.clone(),
             session_uuid,
             roles,
@@ -687,17 +1151,29 @@ impl DeviceEpochRotationService {
             &local_types,
             crate::runtime::AuraVmSchedulerSignals::default(),
         )
-        .await
-        .map_err(|error| match error {
-            SessionIngressError::SessionStart { .. } => {
-                self.effects.requeue_envelope(envelope.clone());
-                map_session_error(error)
+        .await;
+        let mut session = match opened {
+            Ok(session) => session,
+            Err(error @ SessionIngressError::SessionStart { .. }) => {
+                // A failed VM start has not taken ownership of the packet.
+                // The retained branch returns it at its original slot.
+                return Err(map_session_error(error));
             }
-            other => map_session_error(other),
-        })?;
-        self.effects.requeue_envelope(envelope);
+            Err(other) => {
+                // Later VM admission failures may have taken ownership. Keep
+                // the prior consume-on-error policy rather than replaying it.
+                if let Some(lease) = return_lease {
+                    let _ = lease.consume();
+                }
+                return Err(map_session_error(other));
+            }
+        };
+        drop(return_lease);
 
         let mut staged_proposal: Option<DeviceEpochProposal> = None;
+        let mut enrollment_peer: Option<
+            crate::runtime::services::threshold_signing::OriginalEnrollmentPeerAdmission,
+        > = None;
 
         loop {
             let round = session
@@ -712,7 +1188,20 @@ impl DeviceEpochRotationService {
                     }
                     let commit: DeviceEpochCommit =
                         from_slice(&blocked.payload).map_err(map_decode_error)?;
-                    self.apply_commit(proposal, &commit).await?;
+                    if let Some(original) = enrollment_peer.as_ref() {
+                        #[cfg(not(test))]
+                        original
+                            .apply_verified_commit(proposal, &commit)
+                            .await
+                            .map_err(AgentError::from)?;
+                        #[cfg(test)]
+                        original
+                            .apply_verified_commit_with_postread_drop_test(proposal, &commit)
+                            .await
+                            .map_err(AgentError::from)?;
+                    } else {
+                        self.apply_commit(proposal, &commit).await?;
+                    }
                     self.record_native_session(session_uuid).await;
                     // Deliver the commit to the VM; the session completes
                     // through its own protocol end.
@@ -723,17 +1212,34 @@ impl DeviceEpochRotationService {
                 }
                 let proposal: DeviceEpochProposal =
                     from_slice(&blocked.payload).map_err(map_decode_error)?;
-                self.verify_device_epoch_proposal(&proposal, initiator_device_id, session_uuid)
-                    .await?;
-                // An existing device accepts a rotation or removal with a
-                // proof of its current share; enrollment acceptance has its
-                // own signed path.
-                if proposal.kind == DeviceEpochRotationKind::Enrollment {
-                    let _ = session.close().await;
-                    return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
-                }
-                self.stage_proposal(&proposal).await?;
-                let acceptance = self.build_signed_acceptance(&proposal).await?;
+                let acceptance = if proposal.purpose.kind() == DeviceEpochRotationKind::Enrollment {
+                    self.verify_device_epoch_proposal_route(
+                        &proposal,
+                        initiator_device_id,
+                        session_uuid,
+                    )?;
+                    let original = self
+                        .signing_service
+                        .admit_original_enrollment_peer(&proposal)
+                        .await
+                        .map_err(AgentError::from)?;
+                    // Retain the finite admission before its first staging await.
+                    // Its native state remains in the original task's peer cell.
+                    enrollment_peer = Some(original);
+                    enrollment_peer
+                        .as_ref()
+                        .ok_or_else(|| {
+                            enrollment_fence_failure(EnrollmentEpochFenceError::Binding)
+                        })?
+                        .prepare_acceptance(&proposal)
+                        .await
+                        .map_err(AgentError::from)?
+                } else {
+                    self.verify_device_epoch_proposal(&proposal, initiator_device_id, session_uuid)
+                        .await?;
+                    self.stage_proposal(&proposal).await?;
+                    self.build_signed_acceptance(&proposal).await?
+                };
                 session
                     .inject_blocked_receive(blocked)
                     .map_err(map_internal_error)?;
@@ -759,7 +1265,14 @@ impl DeviceEpochRotationService {
         request: &DeviceEpochRotationInitRequest,
         proposal: &DeviceEpochProposal,
     ) -> AgentResult<DeviceEpochCommit> {
-        let activation = if request.kind == DeviceEpochRotationKind::Enrollment {
+        let enrollment = match &request.origin {
+            DeviceEpochRotationOrigin::Enrollment(context) => {
+                context.require_proposal(self.effects.as_ref(), request, proposal)?;
+                Some(context)
+            }
+            DeviceEpochRotationOrigin::Rotation | DeviceEpochRotationOrigin::Removal => None,
+        };
+        let activation = if enrollment.is_some() {
             self.ceremony_tracker
                 .begin_enrollment_activation(&request.ceremony_id)
                 .await
@@ -767,45 +1280,45 @@ impl DeviceEpochRotationService {
         } else {
             None
         };
-        if request.kind == DeviceEpochRotationKind::Enrollment && activation.is_none() {
+        if enrollment.is_some() && activation.is_none() {
             return self.load_commit(&request.ceremony_id).await;
         }
-        if activation.is_some() {
-            crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
+        if let (Some(context), Some(activation)) = (enrollment, activation.as_ref()) {
+            self.retire_original_conditional_signing(
+                &context.issued,
+                &context.original,
+                activation,
+            )
+            .await?;
+            crate::handlers::invitation::enrollment_trust::restore_original_pending_signing_generation(
                 self.effects.as_ref(),
                 &self.signing_service,
-                &request.ceremony_id,
-                self.authority_id,
-                self.ceremony_tracker
-                    .get(&request.ceremony_id)
-                    .await
-                    .map_err(map_internal_error)?
-                    .new_epoch,
-                self.ceremony_tracker
-                    .get(&request.ceremony_id)
-                    .await
-                    .map_err(map_internal_error)?
-                    .prestate_hash,
+                &context.issued,
+                &context.original,
+                activation,
             )
             .await?;
         }
-        let prepared_activation =
-            if request.kind == DeviceEpochRotationKind::Enrollment {
-                Some(
-                    self.finalize_enrollment(activation.as_ref().ok_or_else(|| {
+        let prepared_activation = if enrollment.is_some() {
+            Some(
+                self.finalize_enrollment(
+                    &request.origin.signing_owner(),
+                    activation.as_ref().ok_or_else(|| {
                         enrollment_fence_failure(EnrollmentEpochFenceError::Binding)
-                    })?)
-                    .await?,
+                    })?,
                 )
-            } else {
-                None
-            };
-        let commit = match request.kind {
+                .await?,
+            )
+        } else {
+            None
+        };
+        let commit = match request.origin.kind() {
             DeviceEpochRotationKind::Enrollment => {
                 let owned = prepared_activation
                     .as_ref()
                     .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
                 self.build_signed_commit(
+                    &request.origin.signing_owner(),
                     proposal,
                     Some(owned.stored.attested.clone()),
                     Some(owned.stored.epoch_fence.clone()),
@@ -813,15 +1326,29 @@ impl DeviceEpochRotationService {
                 .await?
             }
             DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
-                self.build_signed_commit(proposal, None, None).await?
+                self.build_signed_commit(&request.origin.signing_owner(), proposal, None, None)
+                    .await?
             }
         };
 
-        self.commit_local_rotation(&request.ceremony_id, activation.as_ref())
-            .await?;
+        if let (Some(context), Some(activation)) = (enrollment, activation.as_ref()) {
+            self.commit_original_local_rotation(&context.issued, &context.original, activation)
+                .await?;
+        } else {
+            self.commit_ordinary_local_rotation(&request.ceremony_id)
+                .await?;
+        }
         self.store_commit(&commit).await?;
         if let Some(activation) = activation {
-            activation.commit().await.map_err(AgentError::from)?;
+            let context = enrollment
+                .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
+            let prepared = prepared_activation
+                .as_ref()
+                .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
+            activation
+                .commit_original(&context.issued, &context.original, prepared)
+                .await
+                .map_err(AgentError::from)?;
         } else {
             self.ceremony_runner
                 .commit(&request.ceremony_id, CeremonyCommitMetadata::default())
@@ -837,83 +1364,201 @@ impl DeviceEpochRotationService {
     /// With no other devices there is no device-epoch rotation session to run
     /// `coordinate_commit`, so the initiator waits for the new device's verified
     /// acceptance and then adds its leaf and commits the rotation itself.
-    pub async fn finalize_sole_device_enrollment(
+    pub(crate) async fn finalize_sole_device_enrollment(
         &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> AgentResult<()> {
+        issued.require_runtime_owner(self.effects.as_ref())?;
+        original.require_issued_notice_owner(issued)?;
+        #[cfg(test)]
+        eprintln!("sole activation: entering original executor");
+        let result = original
+            .execute(self.effects.as_ref(), || async {
+                let registered = self
+                    .ceremony_tracker
+                    .get(&issued.manifest().ceremony)
+                    .await
+                    .map_err(AgentError::from)?;
+                // Existing devices own their rotation protocol. The dedicated sole
+                // device finalizer only owns the exact one-invitee roster.
+                if registered.participants.len() != 1
+                    || registered.participants.iter().any(|participant| {
+                        participant
+                            != &ParticipantIdentity::device(issued.manifest().invitee_device)
+                    })
+                {
+                    return Err(AgentError::invalid(
+                        "sole finalizer requires exact original invitee roster",
+                    ));
+                }
+                self.ceremony_tracker
+                    .await_original_enrollment_acceptance(issued, original)
+                    .await
+                    .map_err(AgentError::from)?;
+                let ceremony_id = &issued.manifest().ceremony;
+                #[cfg(test)]
+                eprintln!("sole activation: acceptance observed; acquiring activation");
+                let Some(activation) = self
+                    .ceremony_tracker
+                    .begin_enrollment_activation(ceremony_id)
+                    .await
+                    .map_err(AgentError::from)?
+                else {
+                    return Ok(());
+                };
+                self.retire_original_conditional_signing(issued, original, &activation)
+                    .await?;
+                #[cfg(test)]
+                eprintln!("sole activation: conditional retirement complete; restoring generation");
+                crate::handlers::invitation::enrollment_trust::restore_original_pending_signing_generation(
+                    self.effects.as_ref(),
+                    &self.signing_service,
+                    issued,
+                    original,
+                    &activation,
+                )
+                .await?;
+                #[cfg(test)]
+                eprintln!("sole activation: generation restored; preparing signed leaf and fence");
+                let prepared_activation = self
+                    .finalize_enrollment(
+                        &DeviceEpochSigningOwner::Enrollment(issued, original),
+                        &activation,
+                    )
+                    .await?;
+                #[cfg(test)]
+                eprintln!("sole activation: leaf and fence prepared; committing local rotation");
+                self.commit_original_local_rotation(issued, original, &activation)
+                    .await?;
+                #[cfg(test)]
+                eprintln!(
+                    "sole activation: local rotation committed; publishing original decision"
+                );
+                activation
+                    .commit_original(issued, original, &prepared_activation)
+                    .await
+                    .map_err(AgentError::from)?;
+                Ok(())
+            })
+            .await
+            .map_err(|source| original.map_run_error("finalize original issuer", source));
+        #[cfg(test)]
+        eprintln!("sole activation: original executor result {result:?}");
+        result
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentActivationCapability",
+        family = "runtime_helper"
+    )]
+    async fn retire_original_conditional_signing(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+        activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
+    ) -> AgentResult<()> {
+        if !issued.original_conditional_signing_required(self.effects.as_ref(), original)? {
+            return Ok(());
+        }
+        let observed = original
+            .acquire_original_conditional_signing(self.effects.as_ref(), issued)
+            .await?;
+        issued.retain_original_conditional_acquisition(&observed)?;
+        observed.validation.map_err(|source| {
+            AgentError::from(aura_core::AuraError::crypto_with_source(
+                "original activation signing-state acquisition validation",
+                std::sync::Arc::new(source),
+            ))
+        })?;
+        let mut state = observed.operation.ok_or_else(|| {
+            aura_core::AuraError::invalid(
+                "original activation signing-state acquisition interrupted",
+            )
+        })??;
+        state
+            .retire_original_conditional_for_activation(issued, original, activation)
+            .await?;
+        Ok(())
+    }
+
+    /// Startup bounds only acquisition and reconciliation of an authenticated
+    /// prepared decision. It never restores Pending execution or signs anew.
+    pub(crate) async fn recover_prepared_enrollment(
+        &self,
+        context: &crate::runtime::services::RuntimeServiceContext,
         ceremony_id: &CeremonyId,
     ) -> AgentResult<()> {
-        loop {
-            let ceremony = self
-                .ceremony_tracker
-                .get(ceremony_id)
-                .await
-                .map_err(map_internal_error)?;
-            if ceremony.is_committed {
-                return Ok(());
-            }
-            if ceremony.has_failed {
-                return Err(AgentError::invalid(format!(
-                    "enrollment ceremony {ceremony_id} failed before acceptance"
-                )));
-            }
-            if ceremony.threshold_k > 0
-                && ceremony.accepted_participants.len() >= usize::from(ceremony.threshold_k)
-            {
-                self.ceremony_tracker
-                    .require_verified_enrollment_response(ceremony_id)
-                    .await
-                    .map_err(map_internal_error)?;
-                break;
-            }
-            let now = self
-                .effects
-                .physical_time()
-                .await
-                .map_err(map_internal_error)?
-                .ts_ms;
-            if now.saturating_sub(ceremony.started_at.ts_ms)
-                >= u64::try_from(ceremony.timeout.as_millis())
-                    .map_err(|_| AgentError::invalid("enrollment deadline overflow"))?
-            {
-                return Err(AgentError::timeout(format!(
-                    "timed out waiting for enrollment acceptance on {ceremony_id}"
-                )));
-            }
-            self.effects
-                .sleep_ms(COMMIT_STATUS_POLL_MS)
-                .await
-                .map_err(map_internal_error)?;
+        let selected: std::sync::Arc<dyn PhysicalTimeEffects + Send + Sync> = self.effects.clone();
+        if !std::sync::Arc::ptr_eq(&selected, &context.time_effects()) {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
         }
-
-        let Some(activation) = self
-            .ceremony_tracker
-            .begin_enrollment_activation(ceremony_id)
-            .await
-            .map_err(AgentError::from)?
-        else {
-            return Ok(());
-        };
-        crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
+        aura_core::time::timeout::execute_with_timeout_budget(
             self.effects.as_ref(),
-            &self.signing_service,
-            ceremony_id,
-            self.authority_id,
-            self.ceremony_tracker
-                .get(ceremony_id)
-                .await
-                .map_err(map_internal_error)?
-                .new_epoch,
-            self.ceremony_tracker
-                .get(ceremony_id)
-                .await
-                .map_err(map_internal_error)?
-                .prestate_hash,
+            context.startup_window(),
+            || async {
+                let decision = self
+                    .ceremony_tracker
+                    .acquire_enrollment_generation_decision(self.effects.as_ref())
+                    .await
+                    .map_err(AgentError::from)?;
+                let ceremony = self
+                    .ceremony_tracker
+                    .get(ceremony_id)
+                    .await
+                    .map_err(AgentError::from)?;
+                if ceremony.kind != aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
+                    || ceremony.is_superseded
+                    || matches!(
+                        ceremony.terminal_outcome,
+                        Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(_))
+                    )
+                {
+                    return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+                }
+                let authenticated = self
+                    .authenticate_prepared_enrollment_activation(&ceremony, &decision)
+                    .await?
+                    .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
+                let tree = self.effects.lock_tree_decision().await;
+                self.install_prepared_enrollment(&authenticated, &tree, &decision)
+                    .await?;
+                // A previously committed decision is observationally idempotent
+                // only after the same protected record and tree were verified.
+                if ceremony.terminal_outcome
+                    == Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed)
+                {
+                    return Ok(());
+                }
+                let recovery = AuthenticatedPreparedEnrollmentRecovery {
+                    authenticated,
+                    decision,
+                };
+                let (activation, authenticated) = self
+                    .ceremony_tracker
+                    .retain_prepared_enrollment_activation(recovery)
+                    .map_err(AgentError::from)?;
+                let prepared = PreparedEnrollmentActivationCapability {
+                    effects: self.effects.as_ref(),
+                    tracker: self.ceremony_tracker.clone(),
+                    stored: authenticated.stored,
+                    _tree: tree,
+                };
+                let generation = crate::handlers::invitation::enrollment_trust::restore_prepared_pending_signing_generation(
+                    self.effects.as_ref(), &self.signing_service, &prepared, &activation,
+                ).await?;
+                self.signing_service.commit_verified_pending_generation(&generation, &activation).await?;
+                activation.commit().await.map_err(AgentError::from)
+            },
         )
-        .await?;
-        let _prepared_activation = self.finalize_enrollment(&activation).await?;
-        self.commit_local_rotation(ceremony_id, Some(&activation))
-            .await?;
-        activation.commit().await.map_err(AgentError::from)?;
-        Ok(())
+        .await
+        .map_err(|source| {
+            AgentError::from(aura_core::AuraError::Internal {
+                message: "reconcile authenticated prepared enrollment".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        })
     }
 
     async fn wait_for_commit(&self, ceremony_id: &CeremonyId) -> AgentResult<DeviceEpochCommit> {
@@ -1030,7 +1675,7 @@ impl DeviceEpochRotationService {
     ) -> AgentResult<()> {
         // Existing-device peer activation requires its own held signing/tree
         // custody. The old generic path must never discard the signed fence.
-        if proposal.kind == DeviceEpochRotationKind::Enrollment {
+        if proposal.purpose.kind() == DeviceEpochRotationKind::Enrollment {
             return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
         }
         self.verify_device_epoch_commit(proposal, commit).await?;
@@ -1054,11 +1699,17 @@ impl DeviceEpochRotationService {
     }
 
     // The exact original activation owner and tree lease exclude local mutation.
-    async fn recover_prepared_enrollment_activation(
+    async fn authenticate_prepared_enrollment_activation(
         &self,
         ceremony: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
-        tree: &aura_protocol::handlers::tree::TreeDecisionLease<'_>,
-    ) -> AgentResult<Option<StoredEnrollmentActivation>> {
+        decision: &crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'_>,
+    ) -> AgentResult<Option<AuthenticatedPreparedEnrollmentActivation>> {
+        decision
+            .require_tracker(&self.ceremony_tracker)
+            .map_err(AgentError::from)?;
+        decision
+            .require_effects(self.effects.as_ref())
+            .map_err(AgentError::from)?;
         let location = enrollment_activation_location(&ceremony.ceremony_id);
         if !self
             .effects
@@ -1129,15 +1780,8 @@ impl DeviceEpochRotationService {
             .collect_enrollment_parent_inventory(&candidate)
             .await
             .map_err(map_internal_error)?;
-        let current = tree
-            .install_authenticated_extension(baseline.len(), &candidate)
-            .await
-            .map_err(AgentError::from)?;
-        self.effects
-            .collect_enrollment_parent_inventory(&current)
-            .await
-            .map_err(map_internal_error)?;
-        let state = aura_journal::commitment_tree::reduce(&current).map_err(map_internal_error)?;
+        let state =
+            aura_journal::commitment_tree::reduce(&candidate).map_err(map_internal_error)?;
         if state.epoch.value() != raw.pending_epoch
             || ![self.effects.device_id(), leaf.device_id]
                 .iter()
@@ -1152,7 +1796,79 @@ impl DeviceEpochRotationService {
                 EnrollmentEpochFenceError::Membership,
             ));
         }
-        Ok(Some(raw))
+        Ok(Some(AuthenticatedPreparedEnrollmentActivation {
+            effects: self.effects.clone(),
+            tracker: self.ceremony_tracker.clone(),
+            baseline_length: baseline.len(),
+            candidate,
+            stored: raw,
+        }))
+    }
+
+    // The caller holds the original generation decision and tree lease through
+    // authentication, installation, generation activation and terminal commit.
+    async fn recover_prepared_enrollment_activation(
+        &self,
+        ceremony: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
+        tree: &aura_protocol::handlers::tree::TreeDecisionLease<'_>,
+        decision: &crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'_>,
+    ) -> AgentResult<Option<StoredEnrollmentActivation>> {
+        let Some(authenticated) = self
+            .authenticate_prepared_enrollment_activation(ceremony, decision)
+            .await?
+        else {
+            return Ok(None);
+        };
+        self.install_prepared_enrollment(&authenticated, tree, decision)
+            .await?;
+        Ok(Some(authenticated.stored))
+    }
+    async fn install_prepared_enrollment(
+        &self,
+        authenticated: &AuthenticatedPreparedEnrollmentActivation,
+        tree: &aura_protocol::handlers::tree::TreeDecisionLease<'_>,
+        decision: &crate::runtime::services::ceremony_tracker::EnrollmentGenerationDecisionCapability<'_>,
+    ) -> AgentResult<()> {
+        authenticated
+            .require_original(decision)
+            .map_err(AgentError::from)?;
+        decision
+            .require_tracker(&self.ceremony_tracker)
+            .map_err(AgentError::from)?;
+        decision
+            .require_effects(self.effects.as_ref())
+            .map_err(AgentError::from)?;
+        let current = tree
+            .install_authenticated_extension(
+                authenticated.baseline_length,
+                &authenticated.candidate,
+            )
+            .await
+            .map_err(AgentError::from)?;
+        self.effects
+            .collect_enrollment_parent_inventory(&current)
+            .await
+            .map_err(map_internal_error)?;
+        let state = aura_journal::commitment_tree::reduce(&current).map_err(map_internal_error)?;
+        let aura_core::TreeOpKind::AddLeaf { leaf, .. } = &authenticated.stored.attested.op.op
+        else {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        };
+        if state.epoch.value() != authenticated.stored.pending_epoch
+            || ![self.effects.device_id(), leaf.device_id]
+                .iter()
+                .all(|device| {
+                    state
+                        .leaves
+                        .values()
+                        .any(|entry| entry.device_id == *device && entry.role == LeafRole::Device)
+                })
+        {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::Membership,
+            ));
+        }
+        Ok(())
     }
 
     #[aura_macros::capability_boundary(
@@ -1163,6 +1879,7 @@ impl DeviceEpochRotationService {
     )]
     async fn finalize_enrollment<'a>(
         &'a self,
+        owner: &DeviceEpochSigningOwner<'_>,
         activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
     ) -> AgentResult<PreparedEnrollmentActivationCapability<'a>> {
         activation
@@ -1188,10 +1905,12 @@ impl DeviceEpochRotationService {
             .await
             .map_err(AgentError::from)?;
         if let Some(attested) = self
-            .recover_prepared_enrollment_activation(&ceremony_state, &tree)
+            .recover_prepared_enrollment_activation(&ceremony_state, &tree, activation.decision())
             .await?
         {
             return Ok(PreparedEnrollmentActivationCapability {
+                effects: self.effects.as_ref(),
+                tracker: self.ceremony_tracker.clone(),
                 stored: attested,
                 _tree: tree,
             });
@@ -1314,8 +2033,10 @@ impl DeviceEpochRotationService {
             version: 1,
         };
         let signature = self
-            .signing_service
-            .sign_with_device_quorum(SigningContext::self_tree_op(self.authority_id, op.clone()))
+            .sign_rotation_context(
+                owner,
+                SigningContext::self_tree_op(self.authority_id, op.clone()),
+            )
             .await
             .map_err(map_internal_error)?;
         let attested = AttestedOp {
@@ -1338,11 +2059,10 @@ impl DeviceEpochRotationService {
         // The original active signing context signs this exact parent before
         // crypto activation. Quorum signing follows the actual signing service.
         let fence_signature = self
-            .signing_service
-            .sign_with_device_quorum(SigningContext::self_tree_op(
-                self.authority_id,
-                fence_op.clone(),
-            ))
+            .sign_rotation_context(
+                owner,
+                SigningContext::self_tree_op(self.authority_id, fence_op.clone()),
+            )
             .await
             .map_err(map_internal_error)?;
         let epoch_fence = AttestedOp {
@@ -1409,44 +2129,37 @@ impl DeviceEpochRotationService {
         #[cfg(all(test, not(target_arch = "wasm32")))]
         inject_activation_fault(self.effects.as_ref(), ceremony_id, true).await?;
         Ok(PreparedEnrollmentActivationCapability {
+            effects: self.effects.as_ref(),
+            tracker: self.ceremony_tracker.clone(),
             stored: prepared,
             _tree: tree,
         })
     }
 
-    async fn commit_local_rotation(
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", capability_type = crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl, family = "runtime_helper")]
+    async fn commit_original_local_rotation(
         &self,
-        ceremony_id: &CeremonyId,
-        activation: Option<
-            &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
-        >,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+        activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
     ) -> AgentResult<()> {
+        let generation = crate::handlers::invitation::enrollment_trust::restore_original_pending_signing_generation(
+            self.effects.as_ref(), &self.signing_service, issued, original, activation,
+        ).await?;
+        self.signing_service
+            .commit_verified_pending_generation(&generation, activation)
+            .await?;
+        Ok(())
+    }
+
+    async fn commit_ordinary_local_rotation(&self, ceremony_id: &CeremonyId) -> AgentResult<()> {
         let ceremony_state = self
             .ceremony_tracker
             .get(ceremony_id)
             .await
             .map_err(map_internal_error)?;
         if ceremony_state.kind == aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment {
-            let generation =
-                crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
-                    self.effects.as_ref(),
-                    &self.signing_service,
-                    ceremony_id,
-                    self.authority_id,
-                    ceremony_state.new_epoch,
-                    ceremony_state.prestate_hash,
-                )
-                .await?;
-            self.signing_service
-                .commit_verified_pending_generation(
-                    &generation,
-                    activation.ok_or_else(|| {
-                        AgentError::invalid("missing enrollment activation lease")
-                    })?,
-                )
-                .await
-                .map_err(AgentError::from)?;
-            return Ok(());
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
         }
         self.effects
             .commit_key_rotation(&self.authority_id, ceremony_state.new_epoch)
@@ -1634,8 +2347,10 @@ impl DeviceEpochRotationService {
         acceptance: DeviceEpochAcceptance,
     ) -> AgentResult<VerifiedIngress<DeviceEpochAcceptance>> {
         use aura_signature::SecurityTranscript;
-        if request.kind == DeviceEpochRotationKind::Enrollment
-            || acceptance.ceremony_id != request.ceremony_id
+        if let DeviceEpochRotationOrigin::Enrollment(context) = &request.origin {
+            context.require_proposal(self.effects.as_ref(), request, proposal)?;
+        }
+        if acceptance.ceremony_id != request.ceremony_id
             || acceptance.acceptor_device_id != request.participant_device_id
             || acceptance.proposal_hash
                 != device_epoch_proposal_hash(proposal).map_err(map_internal_error)?
@@ -1663,20 +2378,46 @@ impl DeviceEpochRotationService {
         let message = DeviceEpochAcceptanceTranscript::new(&acceptance)
             .transcript_bytes()
             .map_err(map_internal_error)?;
-        self.signing_service
-            .verify_device_possession(
-                &self.authority_id,
-                acceptance.acceptor_device_id,
-                &crate::runtime::services::threshold_signing::DevicePossessionProof {
-                    epoch,
-                    index,
-                    package_digest,
-                    proof: acceptance.signature.clone(),
-                },
-                &message,
-            )
-            .await
-            .map_err(AgentError::from)?;
+        let claimed = crate::runtime::services::threshold_signing::DevicePossessionProof {
+            epoch,
+            index,
+            package_digest,
+            proof: acceptance.signature.clone(),
+        };
+        match &request.origin {
+            DeviceEpochRotationOrigin::Enrollment(context) => {
+                context
+                    .original
+                    .execute(self.effects.as_ref(), || async {
+                        self.signing_service
+                            .verify_original_enrollment_peer_possession(
+                                &context.issued,
+                                &context.original,
+                                acceptance.acceptor_device_id,
+                                &claimed,
+                                &message,
+                            )
+                            .map_err(AgentError::from)
+                    })
+                    .await
+                    .map_err(|source| {
+                        context
+                            .original
+                            .map_run_error("verify original enrollment peer acceptance", source)
+                    })?;
+            }
+            DeviceEpochRotationOrigin::Rotation | DeviceEpochRotationOrigin::Removal => {
+                self.signing_service
+                    .verify_device_possession(
+                        &self.authority_id,
+                        acceptance.acceptor_device_id,
+                        &claimed,
+                        &message,
+                    )
+                    .await
+                    .map_err(AgentError::from)?;
+            }
+        }
         let encoded = to_vec(&acceptance).map_err(map_encode_error)?;
         let metadata = VerifiedIngressMetadata::new(
             IngressSource::Device(acceptance.acceptor_device_id),
@@ -1693,7 +2434,7 @@ impl DeviceEpochRotationService {
                 builder.envelope_authenticity(true, "acceptance carries a verified share proof")
             })
             .and_then(|builder| {
-                builder.capability_authorization(true, "acceptor is in the current device roster")
+                builder.capability_authorization(true, "acceptor is in the retained device roster")
             })
             .and_then(|builder| builder.namespace_scope(true, "acceptance binds this ceremony"))
             .and_then(|builder| builder.schema_version(true, "acceptance schema"))
@@ -1810,27 +2551,66 @@ fn map_decode_error(error: impl std::error::Error + Send + Sync + 'static) -> Ag
 }
 
 fn map_session_error(error: SessionIngressError) -> AgentError {
-    AgentError::internal(format!("device epoch rotation session failed: {error}"))
+    AgentError::from(aura_core::AuraError::Internal {
+        message: "device epoch rotation session failed".into(),
+        source: Some(std::sync::Arc::new(error)),
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-fn activation_faults(
-) -> &'static async_lock::Mutex<std::collections::HashMap<(std::path::PathBuf, CeremonyId), bool>> {
+pub(crate) struct OriginalPreparedActivationInterruption {
+    profile: std::path::PathBuf,
+    ceremony: CeremonyId,
+    pub(crate) after_tree: bool,
+    pub(crate) source: std::sync::Arc<std::io::Error>,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl OriginalPreparedActivationInterruption {
+    pub(crate) fn require_original(
+        &self,
+        effects: &AuraEffectSystem,
+        ceremony: &CeremonyId,
+    ) -> Result<(), aura_core::AuraError> {
+        if self.profile != effects.config().storage.base_path || &self.ceremony != ceremony {
+            return Err(aura_core::AuraError::invalid(
+                "foreign original prepared interruption",
+            ));
+        }
+        Ok(())
+    }
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+struct PreparedActivationFault {
+    after_tree: bool,
+    readiness: Option<tokio::sync::oneshot::Sender<OriginalPreparedActivationInterruption>>,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn activation_faults() -> &'static async_lock::Mutex<
+    std::collections::HashMap<(std::path::PathBuf, CeremonyId), PreparedActivationFault>,
+> {
     static FAULTS: std::sync::OnceLock<
-        async_lock::Mutex<std::collections::HashMap<(std::path::PathBuf, CeremonyId), bool>>,
+        async_lock::Mutex<
+            std::collections::HashMap<(std::path::PathBuf, CeremonyId), PreparedActivationFault>,
+        >,
     > = std::sync::OnceLock::new();
     FAULTS.get_or_init(Default::default)
 }
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) async fn fail_activation_for_test(
+pub(crate) async fn observe_activation_fault_for_test(
     effects: &AuraEffectSystem,
     ceremony: CeremonyId,
     after_tree: bool,
-) {
-    let owner = (effects.config().storage.base_path.clone(), ceremony);
-    activation_faults().lock().await.insert(owner, after_tree);
+) -> tokio::sync::oneshot::Receiver<OriginalPreparedActivationInterruption> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    activation_faults().lock().await.insert(
+        (effects.config().storage.base_path.clone(), ceremony),
+        PreparedActivationFault {
+            after_tree,
+            readiness: Some(sender),
+        },
+    );
+    receiver
 }
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 async fn inject_activation_fault(
     effects: &AuraEffectSystem,
@@ -1838,21 +2618,30 @@ async fn inject_activation_fault(
     after_tree: bool,
 ) -> AgentResult<()> {
     let owner = (effects.config().storage.base_path.clone(), ceremony.clone());
-    let inject = {
+    let fault = {
         let mut faults = activation_faults().lock().await;
-        if faults.get(&owner) == Some(&after_tree) {
-            faults.remove(&owner);
-            true
+        if faults
+            .get(&owner)
+            .is_some_and(|fault| fault.after_tree == after_tree)
+        {
+            faults.remove(&owner)
         } else {
-            false
+            None
         }
     };
-    if inject {
+    if let Some(fault) = fault {
+        let source = std::sync::Arc::new(std::io::Error::from(std::io::ErrorKind::Interrupted));
+        if let Some(readiness) = fault.readiness {
+            let _ = readiness.send(OriginalPreparedActivationInterruption {
+                profile: owner.0,
+                ceremony: owner.1,
+                after_tree,
+                source: source.clone(),
+            });
+        }
         return Err(AgentError::from(aura_core::AuraError::Internal {
             message: "injected activation interruption".into(),
-            source: Some(std::sync::Arc::new(std::io::Error::from(
-                std::io::ErrorKind::Interrupted,
-            ))),
+            source: Some(source),
         }));
     }
     Ok(())
@@ -1866,6 +2655,73 @@ mod tests {
     use aura_core::threshold::ThresholdConfig;
     use std::sync::Arc;
 
+    #[tokio::test]
+    async fn retained_participant_admission_keeps_selected_start_fault_source() {
+        use crate::runtime::subsystems::transport::QueueEnvelopeOutcome;
+        use std::error::Error;
+
+        let selected = aura_testkit::time::ManualPhysicalClock::new(5_000);
+        let service = test_service_with_provider(0xe7, Some(Arc::new(selected.clone()))).await;
+        let session_id = uuid::Uuid::from_bytes([0xe8; 16]).to_string();
+        let original = TransportEnvelope {
+            source: service.authority_id,
+            destination: service.authority_id,
+            context: aura_core::ContextId::new_from_entropy([0xe7; 32]),
+            payload: vec![0xa5],
+            metadata: std::collections::HashMap::from([
+                (
+                    "content-type".into(),
+                    "application/aura-choreography".into(),
+                ),
+                ("session-id".into(), session_id),
+                ("protocol-id".into(), PROTOCOL_ID.into()),
+                (
+                    "aura-source-device-id".into(),
+                    test_device(0xe9).to_string(),
+                ),
+            ]),
+            receipt: None,
+        };
+        assert_eq!(
+            service.effects.queue_runtime_envelope(original.clone()),
+            QueueEnvelopeOutcome::Queued
+        );
+        selected
+            .fail_next_observation(aura_core::effects::TimeError::OperationFailed {
+                reason: "participant selected start read fault".into(),
+            })
+            .await;
+        let error = service
+            .process_pending_participant_sessions()
+            .await
+            .expect_err("actual retained participant must propagate selected start fault");
+        let mut cursor: &(dyn Error + 'static) = &error;
+        let mut ingress = false;
+        let mut choreography = false;
+        let mut physical = false;
+        loop {
+            ingress |= cursor.is::<SessionIngressError>();
+            choreography |= cursor.is::<aura_protocol::effects::ChoreographyError>();
+            physical |= matches!(
+                cursor.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::OperationFailed { reason })
+                    if reason == "participant selected start read fault"
+            );
+            let Some(source) = cursor.source() else { break };
+            cursor = source;
+        }
+        assert!(ingress && choreography && physical);
+        let restored = service.effects.peek_queued_choreography_envelopes();
+        assert_eq!(restored.len(), 1, "exactly the original packet returns");
+        assert_eq!(restored[0].payload, original.payload);
+        assert_eq!(restored[0].metadata, original.metadata);
+        assert_eq!(restored[0].source, original.source);
+        assert_eq!(restored[0].destination, original.destination);
+        assert_eq!(restored[0].context, original.context);
+        assert!(restored[0].receipt.is_none());
+        assert!(service.effects.vm_fragment_snapshot().is_empty());
+    }
+
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
     }
@@ -1875,19 +2731,28 @@ mod tests {
     }
 
     async fn test_service(seed: u8) -> DeviceEpochRotationService {
+        test_service_with_provider(seed, None).await
+    }
+
+    async fn test_service_with_provider(
+        seed: u8,
+        provider: Option<Arc<dyn PhysicalTimeEffects>>,
+    ) -> DeviceEpochRotationService {
         let authority_id = test_authority(seed);
         let config = AgentConfig {
             device_id: test_device(seed.wrapping_add(1)),
             ..Default::default()
         };
-        let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority_with_salt(
-                &config,
-                authority_id,
-                u64::from(seed),
-            )
-            .expect("effect system"),
-        );
+        let effects = AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+            &config,
+            authority_id,
+            u64::from(seed),
+        )
+        .expect("effect system");
+        let effects = Arc::new(match provider {
+            Some(provider) => effects.with_physical_time_provider(provider),
+            None => effects,
+        });
         let signing_service = ThresholdSigningService::new(effects.clone());
         signing_service
             .bootstrap_authority(&authority_id)
@@ -1906,6 +2771,168 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn malformed_selected_rotation_frame_is_consumed_without_replay() {
+        use crate::runtime::subsystems::transport::QueueEnvelopeOutcome;
+        let service = test_service(79).await;
+        let frame = TransportEnvelope {
+            source: test_authority(80),
+            destination: service.authority_id,
+            context: aura_core::ContextId::new_from_entropy([79; 32]),
+            payload: vec![1],
+            metadata: std::collections::HashMap::from([
+                (
+                    "content-type".to_string(),
+                    "application/aura-choreography".to_string(),
+                ),
+                ("protocol-id".to_string(), PROTOCOL_ID.to_string()),
+            ]),
+            receipt: None,
+        };
+        assert_eq!(
+            service.effects.queue_runtime_envelope(frame),
+            QueueEnvelopeOutcome::Queued
+        );
+        let error = service
+            .process_pending_participant_sessions()
+            .await
+            .expect_err("missing session and device evidence must be rejected");
+        assert!(error.to_string().contains("aura-source-device-id"));
+        assert!(matches!(
+            service
+                .effects
+                .take_inbound_envelope(is_device_epoch_rotation_envelope),
+            Err(TransportError::NoMessage)
+        ));
+    }
+
+    struct HeldVmOpenClock {
+        selected: aura_testkit::time::ManualPhysicalClock,
+        hold: tokio::sync::Mutex<
+            Option<(
+                tokio::sync::oneshot::Sender<()>,
+                tokio::sync::oneshot::Receiver<()>,
+            )>,
+        >,
+    }
+
+    impl HeldVmOpenClock {
+        fn new() -> Self {
+            Self {
+                selected: aura_testkit::time::ManualPhysicalClock::new(5_000),
+                hold: tokio::sync::Mutex::new(None),
+            }
+        }
+
+        async fn hold_next_observation(
+            &self,
+        ) -> (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ) {
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            *self.hold.lock().await = Some((entered_tx, release_rx));
+            (entered_rx, release_tx)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for HeldVmOpenClock {
+        async fn physical_time(
+            &self,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            if let Some((entered, release)) = self.hold.lock().await.take() {
+                let _ = entered.send(());
+                let _ = release.await;
+            }
+            self.selected.physical_time().await
+        }
+
+        async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::TimeError> {
+            self.selected.sleep_ms(ms).await
+        }
+
+        async fn wait_until_physical_deadline(
+            &self,
+            deadline: aura_core::types::window::WindowPosition<
+                aura_core::types::window::PhysicalMillis,
+            >,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            self.selected.wait_until_physical_deadline(deadline).await
+        }
+    }
+
+    #[tokio::test]
+    async fn participant_vm_open_cancel_restores_original_session_slot() {
+        use crate::runtime::subsystems::transport::QueueEnvelopeOutcome;
+        let clock = Arc::new(HeldVmOpenClock::new());
+        let service = Arc::new(test_service_with_provider(77, Some(clock.clone())).await);
+        let effects = service.effects.clone();
+        let (entered, _release) = clock.hold_next_observation().await;
+        let session_id = Uuid::from_bytes([7; 16]).to_string();
+        for index in 0..256usize {
+            let mut metadata = std::collections::HashMap::from([
+                (
+                    "content-type".to_string(),
+                    "application/aura-choreography".to_string(),
+                ),
+                ("session-id".to_string(), session_id.clone()),
+            ]);
+            if index == 7 {
+                metadata.insert("protocol-id".into(), PROTOCOL_ID.into());
+                metadata.insert("aura-source-device-id".into(), test_device(79).to_string());
+            }
+            let frame = TransportEnvelope {
+                source: test_authority(77),
+                destination: service.authority_id,
+                context: aura_core::ContextId::new_from_entropy([77; 32]),
+                payload: vec![index as u8],
+                metadata,
+                receipt: None,
+            };
+            assert_eq!(
+                effects.queue_runtime_envelope(frame),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let participant =
+            tokio::spawn(async move { service.process_pending_participant_sessions().await });
+        entered
+            .await
+            .expect("selected provider reached actual VM session start");
+        let extra = TransportEnvelope {
+            source: test_authority(77),
+            destination: test_authority(77),
+            context: aura_core::ContextId::new_from_entropy([77; 32]),
+            payload: vec![0xEE],
+            metadata: std::collections::HashMap::from([
+                (
+                    "content-type".to_string(),
+                    "application/aura-choreography".to_string(),
+                ),
+                ("session-id".to_string(), session_id),
+            ]),
+            receipt: None,
+        };
+        assert_eq!(
+            effects.queue_runtime_envelope(extra),
+            QueueEnvelopeOutcome::Queued,
+            "session-local ingress is not the bounded transport inbox"
+        );
+        participant.abort();
+        assert!(participant
+            .await
+            .expect_err("actual participant cancellation")
+            .is_cancelled());
+        let restored = effects.peek_queued_choreography_envelopes();
+        assert_eq!(restored.len(), 257);
+        for (index, envelope) in restored.iter().take(256).enumerate() {
+            assert_eq!(envelope.payload, [index as u8]);
+        }
+        assert_eq!(restored[256].payload, [0xEE]);
+    }
+
     fn test_request(
         ceremony_id: &'static str,
         pending_epoch: u64,
@@ -1915,7 +2942,7 @@ mod tests {
     ) -> DeviceEpochRotationInitRequest {
         DeviceEpochRotationInitRequest {
             ceremony_id: CeremonyId::new(ceremony_id),
-            kind: DeviceEpochRotationKind::Rotation,
+            origin: DeviceEpochRotationOrigin::Rotation,
             pending_epoch,
             participant_device_id,
             key_package,
@@ -2048,7 +3075,7 @@ mod tests {
             .await
             .expect("signed proposal");
         let mut commit = service
-            .build_signed_commit(&proposal, None, None)
+            .build_signed_commit(&DeviceEpochSigningOwner::Ordinary, &proposal, None, None)
             .await
             .expect("signed commit");
         commit.authority_signature.signature[0] ^= 0x55;
@@ -2091,7 +3118,7 @@ mod tests {
             .expect("proposal should verify");
 
         let commit = service
-            .build_signed_commit(&proposal, None, None)
+            .build_signed_commit(&DeviceEpochSigningOwner::Ordinary, &proposal, None, None)
             .await
             .expect("signed commit");
         service
@@ -2179,24 +3206,28 @@ mod tests {
                         issuer.runtime().threshold_signing(),
                         issuer.runtime().reconfiguration().clone(),
                     );
-                    let tree = effects.lock_tree_decision().await;
-                    let error = match service
-                        .recover_prepared_enrollment_activation(&state, &tree)
+                    let acquisition =
+                        crate::runtime::services::RuntimeServiceContext::test_original(
+                            issuer.runtime().tasks(),
+                            effects.clone(),
+                        )
+                        .await;
+                    let error = service
+                        .recover_prepared_enrollment(&acquisition, &state.ceremony_id)
                         .await
-                    {
-                        Ok(_) => panic!("missing or null {field} cannot resume activation"),
-                        Err(error) => error,
-                    };
-                    let AgentError::Aura(aura_core::AuraError::Internal {
-                        source: Some(source),
-                        ..
-                    }) = error
-                    else {
-                        panic!("persisted decoder must preserve its concrete cause")
-                    };
-                    assert!(source
-                        .downcast_ref::<aura_core::util::serialization::SerializationError>()
-                        .is_some());
+                        .expect_err("missing or null persisted field cannot resume activation");
+                    let mut cause: &(dyn std::error::Error + 'static) = &error;
+                    loop {
+                        if cause
+                            .downcast_ref::<aura_core::util::serialization::SerializationError>()
+                            .is_some()
+                        {
+                            break;
+                        }
+                        cause = cause.source().expect(
+                            "actual persisted decoder source must survive bounded recovery",
+                        );
+                    }
                     assert_eq!(
                         effects
                             .secure_retrieve(&location, &[SecureStorageCapability::Read])

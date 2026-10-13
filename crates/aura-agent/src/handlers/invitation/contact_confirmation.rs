@@ -13,7 +13,6 @@
 //! party that issued the code the invitee chose to accept.
 
 use super::*;
-use aura_core::effects::CryptoCoreEffects;
 use aura_signature::SecurityTranscript;
 
 pub(super) const CONTACT_INVITATION_RESPONSE_CONTENT_TYPE: &str =
@@ -131,6 +130,10 @@ pub(super) struct ContactInvitationResponse {
     /// Digest of the acceptance payload this responds to.
     pub(super) acceptance_digest: [u8; 32],
     pub(super) signature: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) quorum_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) recipient_device_id: Option<DeviceId>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -221,19 +224,61 @@ async fn verify_contact_response_signature_required(
                 source: Some(Arc::new(source)),
             })
         })?;
-    effects
-        .ed25519_verify(
-            &bytes,
+    if original.stored.shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION {
+        let epoch = original
+            .stored
+            .sender_proof_epoch
+            .ok_or_else(|| AgentError::invalid("imported quorum contact lacks original epoch"))?;
+        let source_device = original.stored.sender_proof_device.ok_or_else(|| {
+            AgentError::invalid("imported quorum contact lacks original issuer device")
+        })?;
+        if original.response.quorum_epoch != Some(epoch)
+            || original.response.recipient_device_id != Some(effects.device_id())
+        {
+            return Err(AgentError::invalid(
+                "quorum contact response changed original route or epoch",
+            ));
+        }
+        let context = aura_core::threshold::SigningContext::invitation_response(
+            original.response.inviter_id,
+            original.response.invitation_id.clone(),
+            original.response.acceptor_id,
+            original.response.recipient_device_id,
+            source_device,
+            aura_core::threshold::InvitationResponseKind::ContactDecision,
+            aura_core::hash::hash(&bytes),
+        )
+        .ok_or_else(|| AgentError::invalid("invalid quorum contact response intent"))?;
+        return aura_signature::verify_threshold_signing_context_transcript(
+            effects,
+            &context,
+            epoch,
             &original.response.signature,
             original.original_sender_key(effects)?,
         )
         .await
         .map_err(|source| {
-            AgentError::Aura(aura_core::AuraError::Crypto {
-                message: "verify contact response against original invitation issuer".into(),
-                source: Some(Arc::new(source)),
-            })
+            AgentError::invalid(format!("verify quorum contact response: {source}"))
+        });
+    }
+    if original.response.quorum_epoch.is_some() || original.response.recipient_device_id.is_some() {
+        return Err(AgentError::invalid(
+            "solo contact response carries quorum metadata",
+        ));
+    }
+    aura_signature::verify_ed25519_transcript(
+        effects,
+        &ContactInvitationResponseTranscript(&original.response),
+        &original.response.signature,
+        original.original_sender_key(effects)?,
+    )
+    .await
+    .map_err(|source| {
+        AgentError::Aura(aura_core::AuraError::Crypto {
+            message: "verify contact response against original invitation issuer".into(),
+            source: Some(Arc::new(source)),
         })
+    })
 }
 
 /// Unverified response plus its original required import and physical lease.
@@ -661,7 +706,7 @@ impl InvitationHandler {
     /// errors; no unauthenticated response is sent.
     pub(super) async fn send_contact_invitation_response(
         &self,
-        effects: &AuraEffectSystem,
+        effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
         acceptor_id: AuthorityId,
         acceptor_device_id: Option<aura_core::DeviceId>,
@@ -670,7 +715,8 @@ impl InvitationHandler {
     ) -> AgentResult<()> {
         let inviter_id = self.context.authority.authority_id();
         let issued =
-            super::issued_identity::select_original_identity(effects, invitation_id).await?;
+            super::issued_identity::select_original_sender_proof(effects.as_ref(), invitation_id)
+                .await?;
         if issued.invitation().sender_id != inviter_id
             || !matches!(
                 issued.invitation().invitation_type,
@@ -681,16 +727,6 @@ impl InvitationHandler {
                 "contact response differs from original issued invitation",
             ));
         }
-        let identity =
-            crate::handlers::rendezvous_identity::require_issued_identity_signing_context(
-                effects, &issued,
-            )
-            .await
-            .map_err(AgentError::EnrollmentManifest)?;
-        let (private_key, _public_key) =
-            crate::handlers::rendezvous_identity::require_identity_keys(&identity)
-                .await
-                .map_err(AgentError::EnrollmentManifest)?;
         let transcript = ContactInvitationResponseTranscriptPayload {
             invitation_id: invitation_id.clone(),
             inviter_id,
@@ -704,16 +740,79 @@ impl InvitationHandler {
                 source: Some(Arc::new(source)),
             })
         })?;
-        let private_key = zeroize::Zeroizing::new(private_key);
-        let signature = effects
-            .ed25519_sign(&bytes, private_key.as_ref())
-            .await
-            .map_err(|source| {
-                AgentError::Aura(aura_core::AuraError::Crypto {
-                    message: "sign contact response".into(),
-                    source: Some(Arc::new(source)),
-                })
-            })?;
+        let (signature, quorum_epoch, recipient_device_id) = match issued {
+            super::issued_identity::IssuedSenderProofCapability::Solo(ref issued) => {
+                let identity =
+                    crate::handlers::rendezvous_identity::require_issued_identity_signing_context(
+                        effects.as_ref(),
+                        issued,
+                    )
+                    .await
+                    .map_err(AgentError::EnrollmentManifest)?;
+                let (private_key, _) =
+                    crate::handlers::rendezvous_identity::require_identity_keys(&identity)
+                        .await
+                        .map_err(AgentError::EnrollmentManifest)?;
+                let private_key = zeroize::Zeroizing::new(private_key);
+                let signature = aura_signature::sign_ed25519_transcript(
+                    effects.as_ref(),
+                    &transcript,
+                    private_key.as_ref(),
+                )
+                .await
+                .map_err(|source| {
+                    AgentError::Aura(aura_core::AuraError::Crypto {
+                        message: "sign contact response".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })?;
+                (signature, None, None)
+            }
+            super::issued_identity::IssuedSenderProofCapability::Quorum(ref issued) => {
+                issued.require_runtime_owner(effects.as_ref())?;
+                let recipient_device = acceptor_device_id.ok_or_else(|| {
+                    AgentError::invalid("quorum contact response requires exact acceptor device")
+                })?;
+                let context = aura_core::threshold::SigningContext::invitation_response(
+                    inviter_id,
+                    invitation_id.clone(),
+                    acceptor_id,
+                    Some(recipient_device),
+                    effects.device_id(),
+                    aura_core::threshold::InvitationResponseKind::ContactDecision,
+                    aura_core::hash::hash(&bytes),
+                )
+                .ok_or_else(|| AgentError::invalid("invalid quorum contact response intent"))?;
+                let signed = self
+                    .require_threshold_signing(effects.as_ref())?
+                    .sign_with_device_quorum(context.clone())
+                    .await?;
+                if signed.signer_count < 2 || signed.epoch != issued.epoch() {
+                    return Err(AgentError::invalid(
+                        "contact response quorum differs from original issuance",
+                    ));
+                }
+                let package =
+                    frost_ed25519::keys::PublicKeyPackage::deserialize(&signed.public_key_package)
+                        .map_err(|source| {
+                            AgentError::invalid(format!("invalid contact quorum package: {source}"))
+                        })?;
+                if package.verifying_key().serialize().as_slice() != issued.group_key() {
+                    return Err(AgentError::invalid(
+                        "contact response group key differs from original issuance",
+                    ));
+                }
+                issued
+                    .verify_response_transcript(
+                        effects.as_ref(),
+                        &context,
+                        signed.epoch,
+                        &signed.signature,
+                    )
+                    .await?;
+                (signed.signature, Some(signed.epoch), Some(recipient_device))
+            }
+        };
         let response = ContactInvitationResponse {
             invitation_id: transcript.invitation_id,
             inviter_id: transcript.inviter_id,
@@ -721,6 +820,8 @@ impl InvitationHandler {
             decision: transcript.decision,
             acceptance_digest: transcript.acceptance_digest,
             signature,
+            quorum_epoch,
+            recipient_device_id,
         };
         let payload = serde_json::to_vec(&response).map_err(|source| {
             AgentError::Aura(aura_core::AuraError::Serialization {
@@ -730,9 +831,13 @@ impl InvitationHandler {
         })?;
 
         let delivery_context = default_context_id_for_authority(acceptor_id);
-        let flow_receipt =
-            execute_charge_flow_budget(FlowCost::new(1), delivery_context, acceptor_id, effects)
-                .await?;
+        let flow_receipt = execute_charge_flow_budget(
+            FlowCost::new(1),
+            delivery_context,
+            acceptor_id,
+            effects.as_ref(),
+        )
+        .await?;
         let mut metadata = crate::handlers::shared::build_transport_metadata(
             CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
             [("invitation-id", invitation_id.to_string())],
@@ -751,14 +856,14 @@ impl InvitationHandler {
             metadata,
             receipt: flow_receipt.map(transport_receipt_from_flow),
         };
-        attach_invitation_test_receipt_if_needed(effects, &mut envelope);
+        attach_invitation_test_receipt_if_needed(effects.as_ref(), &mut envelope);
         tracing::info!(
             invitation_id = %invitation_id,
             acceptor_id = %acceptor_id,
             decision = ?decision,
             "Sending contact invitation response"
         );
-        send_guarded_transport_envelope(effects, envelope)
+        send_guarded_transport_envelope(effects.as_ref(), envelope)
             .await
             .map_err(aura_core::AuraError::from)
             .map_err(AgentError::from)
@@ -871,6 +976,8 @@ mod transcript_tests {
             decision: payload.decision,
             acceptance_digest: payload.acceptance_digest,
             signature: vec![44; 64],
+            quorum_epoch: None,
+            recipient_device_id: None,
         };
 
         assert_eq!(
@@ -885,6 +992,77 @@ mod transcript_tests {
 #[cfg(test)]
 mod required_contact_identity_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn quorum_response_requires_retained_signer_from_issuing_runtime() {
+        let pair = Box::pin(super::super::tests::contact_pair(233)).await;
+        assert!(
+            pair.sender_handler
+                .require_threshold_signing(pair.sender_effects.as_ref())
+                .is_err(),
+            "unbound handler cannot construct a quorum response"
+        );
+        let foreign = pair.sender_handler.clone().with_threshold_signing(
+            crate::runtime::services::ThresholdSigningService::new(pair.receiver_effects.clone()),
+        );
+        assert!(
+            foreign
+                .require_threshold_signing(pair.sender_effects.as_ref())
+                .is_err(),
+            "another runtime's signer cannot authorize this response"
+        );
+    }
+
+    #[tokio::test]
+    async fn retained_quorum_contact_response_rejects_foreign_epoch_and_device_before_signature() {
+        let pair = Box::pin(super::super::tests::contact_pair(218)).await;
+        let invitation = pair.create_contact_invitation().await;
+        let mut shareable = ShareableInvitation::from(&invitation);
+        shareable.version = ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION;
+        let mut stored = StoredImportedInvitation::pending(
+            shareable,
+            invitation.created_at,
+            ImportedSenderTrust::SelfCertified,
+        );
+        stored.sender_proof_key = Some(vec![1; 32]);
+        stored.sender_proof_epoch = Some(7);
+        stored.sender_proof_device = Some(pair.sender_effects.device_id());
+        let response = ContactInvitationResponse {
+            invitation_id: invitation.invitation_id.clone(),
+            inviter_id: pair.sender_id,
+            acceptor_id: pair.receiver_id,
+            decision: ContactInvitationDecision::Confirmed,
+            acceptance_digest: [2; 32],
+            signature: vec![3; 64],
+            quorum_epoch: Some(8),
+            recipient_device_id: Some(pair.receiver_effects.device_id()),
+        };
+        let lease = pair
+            .receiver_effects
+            .acquire_imported_invitation_decision()
+            .await;
+        let mut original = RequiredContactResponseVerificationCapability {
+            handler: &pair.receiver_handler,
+            effects: pair.receiver_effects.as_ref(),
+            stored,
+            response,
+            lease,
+        };
+        assert!(
+            verify_contact_response_signature_required(pair.receiver_effects.as_ref(), &original)
+                .await
+                .is_err(),
+            "foreign epoch must fail before signature verification"
+        );
+        original.response.quorum_epoch = Some(7);
+        original.response.recipient_device_id = Some(pair.sender_effects.device_id());
+        assert!(
+            verify_contact_response_signature_required(pair.receiver_effects.as_ref(), &original)
+                .await
+                .is_err(),
+            "foreign recipient device must fail before signature verification"
+        );
+    }
 
     #[tokio::test]
     async fn required_contact_verifier_retains_native_failure_and_distinguishes_invalid_signature()
@@ -936,6 +1114,8 @@ mod required_contact_identity_tests {
             decision: ContactInvitationDecision::Confirmed,
             acceptance_digest: continuation.acceptance_digest,
             signature: Vec::new(),
+            quorum_epoch: None,
+            recipient_device_id: None,
         };
         let bytes = ContactInvitationResponseTranscript(&response)
             .required_transcript_bytes()
@@ -1029,7 +1209,7 @@ mod required_contact_identity_tests {
             .expect("actual invitation handler");
         let error = handler
             .send_contact_invitation_response(
-                effects.as_ref(),
+                effects.clone(),
                 &InvitationId::new("required-contact-identity"),
                 AuthorityId::new_from_entropy([229; 32]),
                 None,

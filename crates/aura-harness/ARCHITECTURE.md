@@ -78,6 +78,11 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   submission receipt, operation-instance handle, value, and canonical contract.
   Required handles are checked against that contract; immediate account creation
   uses the new shell readiness/screen postcondition rather than its old handle.
+  A refusal before operation admission is a typed `SemanticCommandRejection`
+  with a stable failure domain/code and, when backed by a concrete native enum,
+  a typed reason; it carries no accepted operation handle. The harness must not
+  infer a rejection reason from diagnostic text or treat a refused submission
+  as an admitted terminal operation.
   `instance_metadata` exposes the exact coordinator-owned profile path without
   opening or modifying it. Serialized
   `wait_for_ui_snapshot_event` preserves the pushed snapshot and backend version;
@@ -87,6 +92,16 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Secure SSH defaults: strict host key checking stays enabled with enforced fingerprint policy.
 - Primary-lane policy: default lane targets real Aura runtime and real TUI/web surfaces.
 - Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
+- Shared scenarios can capture an observed operation instance before a later
+  submission and require `operation_state_is.after_instance` to observe a
+  different instance, so a setup result cannot satisfy the later operation.
+- Where an actor has no prior operation, `assert_operation_absent` checks that
+  actor's semantic snapshot before submission; a later terminal assertion then
+  observes that actor's operation.
+- Operation waits require the selected actor's observed ID/state and optional
+  fresh-instance condition before an available matching submission handle is
+  checked for exact instance/state. Browser approval activates the mounted
+  `modal_confirm_button` through the semantic control contract.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
 - Shared scenario inventory discipline: `scenarios/harness_inventory.toml` is semantic-only for shared flows. The remaining compatibility-step IR is justified only by `tests/phases/phase3_state_machine.rs` plus executor-internal metadata/wait shaping, and must not expand back into authoritative scenario coverage.
 - AMP transition shared scenarios observe reducer-derived transition facts

@@ -210,6 +210,14 @@ impl Peer {
         F: FnOnce(AgentBuilder, EffectContext) -> Fut,
         Fut: std::future::Future<Output = aura_agent::AgentResult<AuraAgent>>,
     {
+        // One selected-provider startup root precedes runtime construction and
+        // restoration, including same-profile reopen. Signal attachment follows
+        // restored keys; it must not start bootstrap and then renew its budget.
+        let startup_time = clock.provider();
+        let startup_budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &startup_time.physical_time().await?,
+            Duration::from_secs(30),
+        )?;
         let id = AuthorityId::new_from_entropy([seed; 32]);
         let ctx = Self::context(seed);
         let mut config = AgentConfig {
@@ -220,18 +228,18 @@ impl Peer {
         let builder = AgentBuilder::new()
             .with_authority(id)
             .with_config(config)
-            .with_physical_time_provider(clock.provider());
+            .with_physical_time_provider(startup_time.clone());
         let agent = Arc::new(assemble(builder, ctx).await?);
         let app = Arc::new(RwLock::new(AppCore::with_runtime(
             AppConfig::default(),
             agent.clone().as_runtime_bridge(),
         )?));
-        AppCore::init_signals_with_hooks(&app).await?;
         app.read()
             .await
-            .bootstrap_signing_keys()
+            .bootstrap_signing_keys(&startup_budget)
             .await
             .map_err(|e| anyhow!("bootstrap: {e}"))?;
+        AppCore::init_signals_with_hooks(&app).await?;
         RUNTIMES.with(|r| {
             r.borrow_mut()
                 .push((seed, Arc::downgrade(&agent), Arc::downgrade(&app)));

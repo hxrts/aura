@@ -1,0 +1,230 @@
+# Browser conformance for the same real enrollment producer as Scenario 12.
+# The initiator issues the signed code and independently transferred verifier;
+# the recipient uses mounted Settings controls and explicit user approval.
+# Browser storage is then exercised by a real same-profile actor restart.
+
+id = "web-conformance-enrollment-approved-transfer-reopen"
+goal = "Approve a real signed enrollment transfer in the browser modal, persist the adopted identity, and reopen the same profile."
+
+[[steps]]
+
+id = "launch"
+action = "launch_actors"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-onboarding-visible"
+action = "screen_is"
+actor = "bob"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-create-provisional-account"
+action = "create_account"
+actor = "bob"
+value = "BobEnrollmentSetup"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-provisional-account-ready"
+action = "screen_is"
+actor = "bob"
+screen_id = "neighborhood"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-prepare-device-enrollment-setup"
+action = "prepare_device_enrollment_setup"
+actor = "bob"
+name = "bob_setup_code"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "AliceOwner"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-open-settings"
+action = "open_screen"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-settings-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-start-device-enrollment"
+action = "start_device_enrollment"
+actor = "alice"
+value = "BobApp"
+name = "device_code"
+setup_code = "${bob_setup_code}"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-device-code-ready"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "device_enrollment_code_ready"
+name = "device_code"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-open-settings"
+action = "open_screen"
+actor = "bob"
+screen_id = "settings"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-open-devices-section"
+action = "open_settings_section"
+actor = "bob"
+section = "devices"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-mounted-import-control-visible"
+action = "control_visible"
+actor = "bob"
+control_id = "settings_import_device_code_button"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-import-operation-absent-before-approval"
+action = "assert_operation_absent"
+actor = "bob"
+operation_id = "device_enrollment"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-open-import-modal"
+action = "activate"
+actor = "bob"
+control_id = "settings_import_device_code_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-import-modal-visible"
+action = "modal_open"
+actor = "bob"
+modal_id = "import_device_enrollment_code"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-enter-original-code"
+action = "fill"
+actor = "bob"
+field_id = "device_import_code"
+value = "${device_code}"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-enter-signed-manifest"
+action = "fill"
+actor = "bob"
+field_id = "device_import_manifest"
+value = "${device_code_manifest}"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-enter-independent-verifier"
+action = "fill"
+actor = "bob"
+field_id = "device_import_initiator_verifier"
+value = "${device_code_initiator_verifier}"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-import-operation-absent-before-enter"
+action = "assert_operation_absent"
+actor = "bob"
+operation_id = "device_enrollment"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-mounted-import-confirm-visible"
+action = "control_visible"
+actor = "bob"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-approve-import"
+action = "activate"
+actor = "bob"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-original-import-succeeded"
+action = "operation_state_is"
+actor = "bob"
+operation_id = "device_enrollment"
+operation_state = "succeeded"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-restart-adopted-browser-profile"
+action = "restart_actor"
+actor = "bob"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-adopted-profile-ready-after-reopen"
+action = "readiness_is"
+actor = "bob"
+readiness = "ready"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-settings-after-reopen"
+action = "open_screen"
+actor = "bob"
+screen_id = "settings"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-devices-after-reopen"
+action = "open_settings_section"
+actor = "bob"
+section = "devices"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-two-authority-devices-retained"
+action = "list_count_is"
+actor = "bob"
+list_id = "devices"
+count = 2
+timeout_ms = 30000

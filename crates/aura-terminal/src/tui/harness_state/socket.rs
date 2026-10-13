@@ -47,6 +47,63 @@ pub(crate) enum HarnessCommandPlaneLifecycle {
     Stopped,
 }
 
+/// Original local refusal retained until its exact submission reply is published.
+/// Diagnostic-only failures never acquire a typed semantic projection.
+#[derive(Debug)]
+pub(crate) enum HarnessSubmissionFailure {
+    Diagnostic(String),
+    Native(anyhow::Error),
+}
+
+impl std::fmt::Display for HarnessSubmissionFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Diagnostic(reason) => formatter.write_str(reason),
+            Self::Native(source) => std::fmt::Display::fmt(source, formatter),
+        }
+    }
+}
+impl std::error::Error for HarnessSubmissionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Diagnostic(_) => None,
+            Self::Native(source) => Some(source.as_ref()),
+        }
+    }
+}
+impl From<String> for HarnessSubmissionFailure {
+    fn from(reason: String) -> Self {
+        Self::Diagnostic(reason)
+    }
+}
+
+impl From<anyhow::Error> for HarnessSubmissionFailure {
+    fn from(source: anyhow::Error) -> Self {
+        Self::Native(source)
+    }
+}
+
+impl HarnessSubmissionFailure {
+    fn into_receipt(self) -> HarnessUiCommandReceipt {
+        match self {
+            Self::Diagnostic(reason) => HarnessUiCommandReceipt::Rejected {
+                reason,
+                rejection: None,
+            },
+            Self::Native(source) => {
+                let rejection =
+                    aura_app::ui::scenarios::SemanticCommandRejection::from_native_source(
+                        source.as_ref(),
+                    );
+                HarnessUiCommandReceipt::Rejected {
+                    reason: source.to_string(),
+                    rejection,
+                }
+            }
+        }
+    }
+}
+
 enum HarnessCommandPlaneControl {
     Activate {
         sender: HarnessCommandSender,
@@ -71,7 +128,7 @@ enum HarnessCommandPlaneControl {
     },
     Reject {
         submission_id: String,
-        reason: String,
+        failure: HarnessSubmissionFailure,
     },
     CompletePendingSemanticValue {
         instance_id: OperationInstanceId,
@@ -293,11 +350,11 @@ pub(crate) async fn track_pending_semantic_submission(
 
 pub(crate) async fn reject_harness_command_submission(
     submission_id: String,
-    reason: String,
+    failure: impl Into<HarnessSubmissionFailure>,
 ) -> io::Result<()> {
     settle_harness_command_plane(HarnessCommandPlaneControl::Reject {
         submission_id,
-        reason,
+        failure: failure.into(),
     })
     .await
 }
@@ -350,6 +407,7 @@ async fn drive_harness_command_plane(
 
     fn reject_reply(reply: oneshot::Sender<HarnessUiCommandReceipt>, reason: impl Into<String>) {
         let _ = reply.send(HarnessUiCommandReceipt::Rejected {
+            rejection: None,
             reason: reason.into(),
         });
     }
@@ -489,10 +547,10 @@ async fn drive_harness_command_plane(
             }
             HarnessCommandPlaneControl::Reject {
                 submission_id,
-                reason,
+                failure,
             } => {
                 if let Some(reply) = pending_replies.remove(&submission_id) {
-                    reject_reply(reply, reason);
+                    let _ = reply.send(failure.into_receipt());
                 }
             }
             HarnessCommandPlaneControl::CompletePendingSemanticValue { instance_id, value } => {
@@ -682,6 +740,7 @@ async fn process_harness_command_stream(
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
+                    rejection: None,
                     reason: error.to_string(),
                 },
             )
@@ -699,6 +758,7 @@ async fn process_harness_command_stream(
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
+                    rejection: None,
                     reason: timeout_error_reason(error, "harness command read"),
                 },
             )
@@ -709,6 +769,7 @@ async fn process_harness_command_stream(
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
+                    rejection: None,
                     reason: format!("failed to read harness command payload: {error}"),
                 },
             )
@@ -722,6 +783,7 @@ async fn process_harness_command_stream(
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
+                    rejection: None,
                     reason: "harness command ingress is unavailable outside harness mode"
                         .to_string(),
                 },
@@ -733,6 +795,7 @@ async fn process_harness_command_stream(
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
+                    rejection: None,
                     reason: format!("invalid harness command configuration: {error}"),
                 },
             )
@@ -744,6 +807,7 @@ async fn process_harness_command_stream(
         let _ = write_harness_command_receipt(
             &mut stream,
             &HarnessUiCommandReceipt::Rejected {
+                rejection: None,
                 reason: "harness command authentication failed".to_string(),
             },
         )
@@ -757,6 +821,7 @@ async fn process_harness_command_stream(
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
+                    rejection: None,
                     reason: error.to_string(),
                 },
             )
@@ -791,9 +856,11 @@ async fn process_harness_command_stream(
     {
         Ok(receipt) => receipt,
         Err(TimeoutRunError::Timeout(error)) => HarnessUiCommandReceipt::Rejected {
+            rejection: None,
             reason: timeout_error_reason(error, "harness command submission"),
         },
         Err(TimeoutRunError::Operation(error)) => HarnessUiCommandReceipt::Rejected {
+            rejection: None,
             reason: error.to_string(),
         },
     };
@@ -807,4 +874,45 @@ async fn write_harness_command_receipt(
     let payload = encode_framed_json(receipt, "harness command receipt")?;
     stream.write_all(&payload).await?;
     stream.flush().await
+}
+
+#[cfg(test)]
+mod typed_rejection_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn actual_native_refusal_is_projected_before_diagnostic_conversion() {
+        use aura_app::ui::scenarios::SemanticRejectionReason;
+        use aura_app::ui::workflows::account::NicknameSuggestionError;
+        let receipt = HarnessSubmissionFailure::Native(
+            anyhow::Error::new(NicknameSuggestionError::Empty).context("original submission"),
+        )
+        .into_receipt();
+        let HarnessUiCommandReceipt::Rejected {
+            rejection: Some(rejection),
+            ..
+        } = receipt
+        else {
+            panic!("actual native validation cause must survive the reply boundary");
+        };
+        assert_eq!(
+            rejection.reason,
+            Some(SemanticRejectionReason::NicknameEmpty)
+        );
+    }
+
+    #[test]
+    fn identical_diagnostic_refusal_does_not_mint_typed_evidence() {
+        use aura_app::ui::workflows::account::NicknameSuggestionError;
+        let receipt =
+            HarnessSubmissionFailure::Diagnostic(NicknameSuggestionError::Empty.to_string())
+                .into_receipt();
+        assert!(matches!(
+            receipt,
+            HarnessUiCommandReceipt::Rejected {
+                rejection: None,
+                ..
+            }
+        ));
+    }
 }

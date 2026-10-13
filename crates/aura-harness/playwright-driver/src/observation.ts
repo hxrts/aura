@@ -42,6 +42,13 @@ export function uiStateStalenessReason(
   if (semanticRevision <= 0) {
     return 'missing_semantic_revision';
   }
+  const cachedRevision = uiSnapshotRevision(session.uiStateCache);
+  if (
+    cachedRevision > semanticRevision &&
+    (session.uiStateCacheGeneration ?? 0) === (session.currentUiGeneration ?? 0)
+  ) {
+    return `semantic_revision_regressed:${cachedRevision}`;
+  }
   const requiredRevision = session.requiredUiStateRevision ?? 0;
   if (requiredRevision > 0 && semanticRevision < requiredRevision) {
     return `required_revision_not_reached:${requiredRevision}`;

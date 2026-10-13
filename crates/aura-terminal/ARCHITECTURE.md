@@ -4,6 +4,10 @@
 
 Terminal-based CLI and TUI interfaces for account management, authentication, recovery, and diagnostics. Uses AppCore as unified backend while remaining platform-agnostic.
 
+The deterministic demo passes the same typed `SimulationSharedInbox` from
+`aura-agent` to simulated peers, preserving the runtime's shared return
+capacity owner across terminal-created environments.
+
 ## Scope
 
 | Belongs here | Does not belong here |
@@ -84,6 +88,12 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   Frontends forward it to the app-owned verification and issuance workflow;
   raw authority IDs, demo autofill and discovery metadata cannot replace the
   setup verifier pin or infer that the new device accepted enrollment.
+  The typed `device_enroll_with_shortcut` RPC request additionally selects an
+  external recipient authority, recipient device and Contact or Guardian
+  purpose before issuance. The command forwards that selection through
+  `aura_app::ui::workflows`; a matching broker destination is not authority to
+  complete enrollment or to send an invitation. Its start response reports
+  enrollment issuance, while the app owns the later shortcut result.
 
 - Terminal interfaces must remain a presentation layer over aura-app.
 - Home channel mode comes from the reduced app homes signal after the
@@ -113,6 +123,15 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - TUI subscriptions attach before reading their catch-up snapshot, and every shell or mounted-screen observer reports typed retry, healthy, and exhausted transitions through the shell update loop. The harness snapshot exposes this health; a fresh snapshot clears prior degradation.
 - Selected-channel bindings may only reflect the current authoritative channel projection; the shell must not preserve a missing `context_id` from prior UI state.
 - Parity-relevant terminal updates must choose an explicit publication class. Ordered-required and required-unordered updates must backpressure instead of silently degrading to best-effort `try_send`, while lossy publication is restricted to observed-only UI maintenance.
+- Native semantic terminal publication admits the original operation instance
+  and terminal intent to `NativePublication` under the TUI's required task root
+  before an observer awaits channel delivery. Its acknowledgment is scoped to
+  exact `UiUpdate` channel acceptance, not controller application, domain
+  completion or storage. A dropped or interrupted observer retains the
+  original intent and failure source for required reconciliation; channel
+  refusal cannot be reported as a successful terminal publication. TUI
+  shutdown closes admission and requires both worker drainage and actual
+  required-custody disposal under its original bounded cleanup window.
 - Shared channel projection must be recomputed by one owned coordinator from authoritative `CHAT`, `SETTINGS`, and neighborhood-scope inputs. A newer `CHAT_SIGNAL` snapshot removes channels absent from it, including selected DM-like channels; shell rendering must not restore entities from a prior snapshot.
 - Channel-targeting flows must consume either a committed selection token carried forward from authoritative UI focus or a typed workflow-returned `ChannelBindingWitness`. The shell may not re-resolve or repair targets from channel names, last visible messages, or other heuristic UI state.
 - Converted ceremony-monitoring paths must consume typed upstream lifecycle terminality and surface timeout or rollback-incomplete outcomes explicitly; the TUI may not silently discard those terminal states.
@@ -152,6 +171,20 @@ Verification hooks:
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines interface layer boundaries.
 - [Effect System and Runtime](../../docs/103_effect_system.md) defines signal and workflow integration.
+
+### Demo peer construction time ownership
+
+`DemoSimulator::with_physical_time_provider` selects one physical provider and
+issues one original construction budget shared by Alice, Carol and Mobile.
+`new` delegates to that constructor with the native physical provider. Peer
+assembly and actual signing-key bootstrap use the selected provider and the same
+original window; individual peers do not renew its endpoint.
+
+The later `enable_realistic_world` action issues a distinct original budget from
+the retained provider and shares it across all thirteen additional peers. This
+budget belongs to that peer-construction action, rather than extending the
+completed constructor window. Native provider, assembly, bootstrap and timeout
+failures retain their concrete sources through `TerminalError::native_operation`.
 
 ## Ownership Model
 

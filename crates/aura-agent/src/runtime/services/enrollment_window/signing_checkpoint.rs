@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 const ORIGINAL_SIGNING_POLICY: Duration = Duration::from_secs(30);
 const MAX_RECORD_BYTES: usize = 16_384;
 
+fn continues_original_shortcut(left: &TimeoutBudget, original: &TimeoutBudget) -> bool {
+    left.validate_checkpoint_continuation_from(original).is_ok()
+}
+
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct SigningBinding {
@@ -24,6 +28,10 @@ struct SigningBinding {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SigningClockRecord {
+    negative_cleanup_budget: TimeoutBudget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shortcut_budget: Option<TimeoutBudget>,
+    original_policy: OriginalEnrollmentWindowPolicy,
     version: u16,
     binding: SigningBinding,
     budget: TimeoutBudget,
@@ -47,13 +55,152 @@ fn rejected(source: SigningWindowError) -> AuraError {
 }
 
 pub(super) struct ApprovedSigningCheckpoint {
+    negative_cleanup_budget: TimeoutBudget,
+    shortcut_budget: TimeoutBudget,
+    original_policy: OriginalEnrollmentWindowPolicy,
     effects: Arc<AuraEffectSystem>,
     binding: SigningBinding,
     allocation_key: String,
     anchor: Vec<u8>,
     writes: Mutex<()>,
 }
+
+// Distinct from a checkpoint observation: owns actual domain completion
+// and the original Closed write/readback. No serialization or cloning.
+pub(super) struct OriginalSigningTerminalReceipt {
+    owner: Arc<ApprovedSigningCheckpoint>,
+    frozen: Vec<u8>,
+}
+
+pub(super) struct OriginalSigningNegativeCleanupReceipt {
+    owner: Arc<ApprovedSigningCheckpoint>,
+    frozen: Vec<u8>,
+    // Observed first durable terminal decision; never execution authority.
+    retained_decision: DurableEnrollmentExecutionState,
+}
+
+impl OriginalSigningTerminalReceipt {
+    pub(super) fn require_original(
+        &self,
+        owner: &Arc<ApprovedSigningCheckpoint>,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.owner, owner) {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        let record: SigningClockRecord =
+            serde_json::from_slice(&self.frozen).map_err(|source| AuraError::Serialization {
+                message: "decode retained original Closed signing receipt".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        if record.original_policy != owner.original_policy
+            || !record.shortcut_budget.as_ref().is_some_and(|shortcut| {
+                continues_original_shortcut(shortcut, &owner.shortcut_budget)
+            })
+        {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        let anchor: SigningClockRecord =
+            serde_json::from_slice(&owner.anchor).map_err(|source| AuraError::Serialization {
+                message: "decode original Closed signing anchor".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        ApprovedSigningCheckpoint::validate_record_phase(
+            &owner.binding,
+            &self.frozen,
+            &anchor.budget,
+            DurableEnrollmentExecutionState::Closed,
+        )
+    }
+}
+
+impl OriginalSigningNegativeCleanupReceipt {
+    pub(super) fn require_original(
+        &self,
+        owner: &Arc<ApprovedSigningCheckpoint>,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.owner, owner) {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        let record: SigningClockRecord =
+            serde_json::from_slice(&self.frozen).map_err(|source| AuraError::Serialization {
+                message: "decode actual negative signing receipt".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        if record.original_policy != owner.original_policy
+            || !record.shortcut_budget.as_ref().is_some_and(|shortcut| {
+                continues_original_shortcut(shortcut, &owner.shortcut_budget)
+            })
+            || record.execution != self.retained_decision
+            || !matches!(
+                record.execution,
+                DurableEnrollmentExecutionState::Closed | DurableEnrollmentExecutionState::Refused
+            )
+        {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        let anchor: SigningClockRecord =
+            serde_json::from_slice(&owner.anchor).map_err(|source| AuraError::Serialization {
+                message: "decode original negative signing anchor".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        ApprovedSigningCheckpoint::validate_record_phase(
+            &owner.binding,
+            &self.frozen,
+            &anchor.budget,
+            self.retained_decision,
+        )
+    }
+    pub(super) fn retained_decision(&self) -> DurableEnrollmentExecutionState {
+        self.retained_decision
+    }
+}
+
 impl ApprovedSigningCheckpoint {
+    pub(super) async fn require_pending(&self, original: &TimeoutBudget) -> Result<(), AuraError> {
+        for namespace in [
+            "enrollment_signing_clock_anchor_v1",
+            "enrollment_signing_clock_live_v1",
+        ] {
+            let bytes = self
+                .effects
+                .secure_retrieve(&self.location(namespace), &[SecureStorageCapability::Read])
+                .await?;
+            if bytes != self.anchor {
+                return Err(rejected(SigningWindowError::Binding));
+            }
+        }
+        let bytes = self
+            .effects
+            .secure_retrieve(
+                &self.location("enrollment_signing_clock_checkpoint_v1"),
+                &[SecureStorageCapability::Read],
+            )
+            .await?;
+        Self::validate_record(&self.binding, &bytes, original)?;
+        let record: SigningClockRecord =
+            serde_json::from_slice(&bytes).map_err(|source| AuraError::Serialization {
+                message: "decode original pending signing checkpoint".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        if record.original_policy != self.original_policy
+            || !record.shortcut_budget.as_ref().is_some_and(|shortcut| {
+                continues_original_shortcut(shortcut, &self.shortcut_budget)
+            })
+        {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        Ok(())
+    }
+    pub(super) fn require_approved_manifest(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        self.require_effects(approval.effects().as_ref())?;
+        if self.binding.approved_intent_digest != approval.canonical_intent_digest() {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        Ok(())
+    }
     pub(super) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
         if !std::ptr::eq(self.effects.as_ref(), effects) {
             return Err(rejected(SigningWindowError::Binding));
@@ -122,64 +269,54 @@ impl ApprovedSigningCheckpoint {
             return Err(rejected(SigningWindowError::AlreadyAllocated));
         }
         let now = effects.physical_time().await?;
-        let budget = TimeoutBudget::from_start_and_timeout(&now, ORIGINAL_SIGNING_POLICY)
-            .map_err(AuraError::from)?;
+        let shortcut_policy = OriginalShortcutWindowPolicy::bounded_extension(
+            ORIGINAL_SIGNING_POLICY,
+            ORIGINAL_SIGNING_POLICY,
+        )?;
+        let birth = OriginalEnrollmentWindowBirth::allocate(
+            &now,
+            ORIGINAL_SIGNING_POLICY,
+            shortcut_policy,
+        )?;
+        let budget = birth.execution;
+        let shortcut_budget = birth.shortcut;
+        let negative_cleanup_budget = birth.negative_cleanup;
+        let original_policy = birth.policy;
         let anchor = serde_json::to_vec(&SigningClockRecord {
-            version: 2,
+            negative_cleanup_budget: negative_cleanup_budget.clone(),
+            shortcut_budget: Some(shortcut_budget.clone()),
+            original_policy: original_policy.clone(),
+            version: 4,
             binding: binding.clone(),
             budget: budget.clone(),
-            execution: DurableEnrollmentExecutionState::Allocated,
+            execution: DurableEnrollmentExecutionState::Pending,
         })
         .map_err(|source| AuraError::Serialization {
             message: "encode original local signing clock".into(),
             source: Some(Arc::new(source)),
         })?;
-        if effects
-            .secure_store_immutable(&anchor_location, &anchor, &[SecureStorageCapability::Write])
-            .await?
-            != ImmutableSecureStoreOutcome::Created
-        {
-            return Err(rejected(SigningWindowError::AlreadyAllocated));
-        }
-        let owner = Self {
-            effects,
-            binding,
-            allocation_key,
-            anchor,
-            writes: Mutex::new(()),
-        };
-        owner
-            .effects
-            .secure_store(
-                &owner.location("enrollment_signing_clock_checkpoint_v1"),
-                &owner.anchor,
-                &[SecureStorageCapability::Write],
-            )
-            .await?;
-        // Required first observation and persisted acknowledgment precede live
-        // owner publication. A crash anywhere leaves the immutable allocation
-        // consumed; missing checkpoint cannot authorize a new clock.
-        let observation = budget.acquire_observation().await;
-        let observed = owner.effects.physical_time().await?;
-        let eligible = budget.remaining_at(&observed);
-        owner
-            .persist_checkpoint(&budget, false)
-            .await
-            .map_err(AuraError::from)?;
-        eligible.map_err(AuraError::from)?;
-        if owner
-            .effects
-            .secure_store_immutable(
-                &owner.location("enrollment_signing_clock_live_v1"),
-                &owner.anchor,
-                &[SecureStorageCapability::Write],
-            )
-            .await?
-            != ImmutableSecureStoreOutcome::Created
-        {
-            return Err(rejected(SigningWindowError::AlreadyAllocated));
-        }
-        drop(observation);
+        let publication_effects = Arc::clone(&effects);
+        let owner = aura_core::time::timeout::acknowledge_initial_publication_with_timeout_budget(
+            effects.as_ref(),
+            &budget,
+            || async move {
+                Self::publish_original_birth(
+                    publication_effects,
+                    binding,
+                    allocation_key,
+                    anchor,
+                    original_policy,
+                    negative_cleanup_budget,
+                    shortcut_budget,
+                )
+                .await
+            },
+        )
+        .await
+        .map_err(|source| match source {
+            TimeoutRunError::Operation(source) => source,
+            TimeoutRunError::Timeout(source) => AuraError::from(source),
+        })?;
         let lease = Arc::new(tokio::sync::Semaphore::new(1))
             .try_acquire_owned()
             .map_err(|source| AuraError::Internal {
@@ -189,10 +326,103 @@ impl ApprovedSigningCheckpoint {
         Ok((owner, budget, Arc::new(lease)))
     }
 
+    // Only this actual fresh protected publication can create the retained
+    // signing owner. All records are acknowledged before the first validation
+    // read in the canonical initial-publication boundary.
+    async fn publish_original_birth(
+        effects: Arc<AuraEffectSystem>,
+        binding: SigningBinding,
+        allocation_key: String,
+        anchor: Vec<u8>,
+        original_policy: OriginalEnrollmentWindowPolicy,
+        negative_cleanup_budget: TimeoutBudget,
+        shortcut_budget: TimeoutBudget,
+    ) -> Result<Self, AuraError> {
+        let permissions = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        let anchor_location = SecureStorageLocation::new(
+            "enrollment_signing_clock_anchor_v1",
+            allocation_key.clone(),
+        );
+        if effects
+            .secure_store_immutable(&anchor_location, &anchor, &permissions)
+            .await?
+            != ImmutableSecureStoreOutcome::Created
+        {
+            return Err(rejected(SigningWindowError::AlreadyAllocated));
+        }
+        if effects
+            .secure_retrieve(&anchor_location, &[SecureStorageCapability::Read])
+            .await?
+            != anchor
+        {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        let checkpoint_location = SecureStorageLocation::new(
+            "enrollment_signing_clock_checkpoint_v1",
+            allocation_key.clone(),
+        );
+        if effects
+            .secure_create_mutable(&checkpoint_location, &anchor, &permissions)
+            .await?
+            != ImmutableSecureStoreOutcome::Created
+        {
+            return Err(rejected(SigningWindowError::AlreadyAllocated));
+        }
+        if effects
+            .secure_retrieve(&checkpoint_location, &[SecureStorageCapability::Read])
+            .await?
+            != anchor
+        {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        let live_location =
+            SecureStorageLocation::new("enrollment_signing_clock_live_v1", allocation_key.clone());
+        if effects
+            .secure_store_immutable(&live_location, &anchor, &permissions)
+            .await?
+            != ImmutableSecureStoreOutcome::Created
+        {
+            return Err(rejected(SigningWindowError::AlreadyAllocated));
+        }
+        if effects
+            .secure_retrieve(&live_location, &[SecureStorageCapability::Read])
+            .await?
+            != anchor
+        {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        Ok(Self {
+            negative_cleanup_budget,
+            shortcut_budget,
+            original_policy,
+            effects,
+            binding,
+            allocation_key,
+            anchor,
+            writes: Mutex::new(()),
+        })
+    }
+
     fn validate_record(
         binding: &SigningBinding,
         bytes: &[u8],
         original: &TimeoutBudget,
+    ) -> Result<(), AuraError> {
+        Self::validate_record_phase(
+            binding,
+            bytes,
+            original,
+            DurableEnrollmentExecutionState::Pending,
+        )
+    }
+    fn validate_record_phase(
+        binding: &SigningBinding,
+        bytes: &[u8],
+        original: &TimeoutBudget,
+        expected: DurableEnrollmentExecutionState,
     ) -> Result<(), AuraError> {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(rejected(SigningWindowError::Bounds));
@@ -202,27 +432,94 @@ impl ApprovedSigningCheckpoint {
                 message: "decode original signing checkpoint".into(),
                 source: Some(Arc::new(source)),
             })?;
-        if record.version != 2 || &record.binding != binding {
+        if !matches!(
+            (record.version, record.shortcut_budget.as_ref()),
+            (3, None) | (4, Some(_))
+        ) || &record.binding != binding
+        {
             return Err(rejected(SigningWindowError::Binding));
         }
-        record.execution.require_unstarted_recovery()?;
+        if record.execution != expected {
+            return Err(rejected(SigningWindowError::Binding));
+        }
+        record.original_policy.require_original(original)?;
+        if let Some(shortcut) = &record.shortcut_budget {
+            if shortcut.started_at_ms() != original.started_at_ms()
+                || shortcut.deadline_at_ms() <= original.deadline_at_ms()
+                || shortcut.timeout_ms() > original.timeout_ms().saturating_mul(2)
+            {
+                return Err(rejected(SigningWindowError::Binding));
+            }
+        }
         original
             .validate_checkpoint_continuation_from(&record.budget)
             .map_err(AuraError::from)
     }
 
-    pub(super) async fn checkpoint(
-        &self,
+    // Only the consuming root invokes this after actual native domain
+    // completion and its exact sealed descendant disposal. The callback's
+    // receipt is then forwarded by the shared resource-ACK boundary.
+    pub(super) async fn close_original_participant(
+        self: &Arc<Self>,
         original: &TimeoutBudget,
-    ) -> Result<(), TimeoutBudgetError> {
-        self.persist_checkpoint(original, true).await
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        completion: &super::super::threshold_signing::OriginalParticipantCompletion,
+    ) -> Result<OriginalSigningTerminalReceipt, TimeoutBudgetError> {
+        completion
+            .require_original(approval)
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        self.require_effects(approval.effects().as_ref())
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        if self.binding.approved_intent_digest != approval.canonical_intent_digest() {
+            return Err(TimeoutBudgetError::checkpoint_failure(rejected(
+                SigningWindowError::Binding,
+            )));
+        }
+        let frozen = self
+            .persist_checkpoint(original, true, DurableEnrollmentExecutionState::Closed)
+            .await?;
+        Ok(OriginalSigningTerminalReceipt {
+            owner: self.clone(),
+            frozen,
+        })
+    }
+
+    pub(super) fn negative_cleanup_budget(&self) -> &TimeoutBudget {
+        &self.negative_cleanup_budget
+    }
+
+    // No signing or nonce generation is available on this path. The consuming
+    // original root has already cancelled and drained its actual descendants.
+    pub(super) async fn refuse_original_participant(
+        self: &Arc<Self>,
+        original: &TimeoutBudget,
+    ) -> Result<OriginalSigningNegativeCleanupReceipt, TimeoutBudgetError> {
+        let frozen = self
+            .persist_checkpoint(original, true, DurableEnrollmentExecutionState::Refused)
+            .await?;
+        let retained: SigningClockRecord =
+            serde_json::from_slice(&frozen).map_err(TimeoutBudgetError::checkpoint_failure)?;
+        if !matches!(
+            retained.execution,
+            DurableEnrollmentExecutionState::Closed | DurableEnrollmentExecutionState::Refused
+        ) {
+            return Err(TimeoutBudgetError::checkpoint_failure(rejected(
+                SigningWindowError::Binding,
+            )));
+        }
+        Ok(OriginalSigningNegativeCleanupReceipt {
+            owner: self.clone(),
+            frozen,
+            retained_decision: retained.execution,
+        })
     }
 
     async fn persist_checkpoint(
         &self,
         original: &TimeoutBudget,
         require_live: bool,
-    ) -> Result<(), TimeoutBudgetError> {
+        execution: DurableEnrollmentExecutionState,
+    ) -> Result<Vec<u8>, TimeoutBudgetError> {
         let _write = self.writes.lock().await;
         let anchor = self
             .effects
@@ -261,13 +558,54 @@ impl ApprovedSigningCheckpoint {
             )
             .await
             .map_err(TimeoutBudgetError::checkpoint_failure)?;
-        Self::validate_record(&self.binding, &retained, original)
+        let retained_record: SigningClockRecord =
+            serde_json::from_slice(&retained).map_err(TimeoutBudgetError::checkpoint_failure)?;
+        let expected = if execution == DurableEnrollmentExecutionState::Refused {
+            match retained_record.execution {
+                DurableEnrollmentExecutionState::Closed => DurableEnrollmentExecutionState::Closed,
+                DurableEnrollmentExecutionState::Refused => {
+                    DurableEnrollmentExecutionState::Refused
+                }
+                _ => DurableEnrollmentExecutionState::Pending,
+            }
+        } else {
+            DurableEnrollmentExecutionState::Pending
+        };
+        Self::validate_record_phase(&self.binding, &retained, original, expected)
             .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        if retained_record.original_policy != self.original_policy {
+            return Err(TimeoutBudgetError::checkpoint_failure(rejected(
+                SigningWindowError::Binding,
+            )));
+        }
+        if !retained_record
+            .shortcut_budget
+            .as_ref()
+            .is_some_and(|shortcut| continues_original_shortcut(shortcut, &self.shortcut_budget))
+        {
+            return Err(TimeoutBudgetError::checkpoint_failure(rejected(
+                SigningWindowError::Binding,
+            )));
+        }
+        if execution == DurableEnrollmentExecutionState::Refused
+            && matches!(
+                expected,
+                DurableEnrollmentExecutionState::Closed | DurableEnrollmentExecutionState::Refused
+            )
+        {
+            // First durable terminal decision wins. Actual original cleanup
+            // custody may acknowledge disposal, but cannot rewrite committed
+            // Closed as Refused or issue any positive execution root.
+            return Ok(retained);
+        }
         let bytes = serde_json::to_vec(&SigningClockRecord {
-            version: 2,
+            negative_cleanup_budget: self.negative_cleanup_budget.clone(),
+            shortcut_budget: Some(self.shortcut_budget.clone()),
+            original_policy: self.original_policy.clone(),
+            version: 4,
             binding: self.binding.clone(),
             budget: original.clone(),
-            execution: DurableEnrollmentExecutionState::Allocated,
+            execution,
         })
         .map_err(TimeoutBudgetError::checkpoint_failure)?;
         self.effects
@@ -277,7 +615,21 @@ impl ApprovedSigningCheckpoint {
                 &[SecureStorageCapability::Write],
             )
             .await
-            .map_err(TimeoutBudgetError::checkpoint_failure)
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        let readback = self
+            .effects
+            .secure_retrieve(
+                &self.location("enrollment_signing_clock_checkpoint_v1"),
+                &[SecureStorageCapability::Read],
+            )
+            .await
+            .map_err(TimeoutBudgetError::checkpoint_failure)?;
+        if readback != bytes {
+            return Err(TimeoutBudgetError::checkpoint_failure(rejected(
+                SigningWindowError::Binding,
+            )));
+        }
+        Ok(readback)
     }
 }
 
@@ -298,11 +650,24 @@ mod tests {
         }
     }
     fn record(binding: SigningBinding, budget: &TimeoutBudget) -> Vec<u8> {
+        let birth = OriginalEnrollmentWindowBirth::allocate(
+            &PhysicalTime::exact(budget.started_at_ms()),
+            ORIGINAL_SIGNING_POLICY,
+            OriginalShortcutWindowPolicy::bounded_extension(
+                ORIGINAL_SIGNING_POLICY,
+                ORIGINAL_SIGNING_POLICY,
+            )
+            .expect("original shortcut policy"),
+        )
+        .expect("actual original signing birth");
         serde_json::to_vec(&SigningClockRecord {
-            version: 2,
+            version: 4,
             binding,
             budget: budget.clone(),
-            execution: DurableEnrollmentExecutionState::Allocated,
+            negative_cleanup_budget: birth.negative_cleanup,
+            shortcut_budget: Some(birth.shortcut),
+            original_policy: birth.policy,
+            execution: DurableEnrollmentExecutionState::Pending,
         })
         .expect("encode actual original checkpoint")
     }
@@ -351,5 +716,72 @@ mod tests {
         assert!(original
             .child_budget(&PhysicalTime::exact(30_101), ORIGINAL_SIGNING_POLICY)
             .is_err());
+    }
+    #[test]
+    fn protected_shortcut_endpoint_survives_restart_and_expires_without_renewal() {
+        let original = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            ORIGINAL_SIGNING_POLICY,
+        )
+        .expect("original allocation");
+        let frozen = record(binding(), &original);
+        let restored: SigningClockRecord =
+            serde_json::from_slice(&frozen).expect("restore protected allocation");
+        let restored_shortcut = restored.shortcut_budget.as_ref().expect("new shortcut");
+        assert_eq!(restored_shortcut.started_at_ms(), original.started_at_ms());
+        assert_eq!(restored_shortcut.deadline_at_ms(), 60_100);
+        let retained_original = restored_shortcut.clone();
+        retained_original
+            .remaining_at(&PhysicalTime::exact(500))
+            .expect("original shortcut observation");
+        let reset: SigningClockRecord =
+            serde_json::from_slice(&frozen).expect("lookalike with reset observation");
+        assert!(!continues_original_shortcut(
+            reset.shortcut_budget.as_ref().expect("new shortcut"),
+            &retained_original
+        ));
+        assert!(restored_shortcut
+            .remaining_at(&PhysicalTime::exact(60_101))
+            .is_err());
+        let expired = serde_json::to_vec(&restored).expect("retain expired allocation");
+        let again: SigningClockRecord =
+            serde_json::from_slice(&expired).expect("restore same allocation");
+        let again_shortcut = again.shortcut_budget.as_ref().expect("new shortcut");
+        assert_eq!(again_shortcut.deadline_at_ms(), 60_100);
+        assert!(again
+            .shortcut_budget
+            .as_ref()
+            .expect("new shortcut")
+            .remaining_at(&PhysicalTime::exact(60_101))
+            .is_err());
+    }
+    #[test]
+    fn legacy_v3_signing_record_resumes_enrollment_without_shortcut_authority() {
+        let binding = binding();
+        let original = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            ORIGINAL_SIGNING_POLICY,
+        )
+        .expect("original allocation");
+        let mut legacy: SigningClockRecord =
+            serde_json::from_slice(&record(binding.clone(), &original))
+                .expect("new protected record");
+        legacy.version = 3;
+        legacy.shortcut_budget = None;
+        let frozen = serde_json::to_vec(&legacy).expect("legacy protected record");
+        let resumed: SigningClockRecord = serde_json::from_slice(&frozen).expect("legacy decode");
+        assert!(ApprovedSigningCheckpoint::validate_record(&binding, &frozen, &original).is_ok());
+        assert!(
+            resumed.shortcut_budget.is_none(),
+            "legacy cannot deliver shortcut"
+        );
+        let mut stripped_v4 = resumed;
+        stripped_v4.version = 4;
+        assert!(ApprovedSigningCheckpoint::validate_record(
+            &binding,
+            &serde_json::to_vec(&stripped_v4).expect("stripped v4"),
+            &original
+        )
+        .is_err());
     }
 }

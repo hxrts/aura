@@ -195,6 +195,10 @@ pub enum HarnessUiCommandReceipt {
     },
     Rejected {
         reason: String,
+        /// Actual typed pre-admission refusal, projected before diagnostic
+        /// flattening. Absent evidence cannot match an expected rejection.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rejection: Option<crate::scenario_contract::SemanticCommandRejection>,
     },
 }
 

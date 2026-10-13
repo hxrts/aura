@@ -122,11 +122,15 @@ fn location(record: &Archive) -> SecureStorageLocation {
 }
 /// Borrow retains the actual reverified receipt, not only its decoded archive.
 pub(crate) struct ConfirmedParentInventoryCapability<'runtime> {
-    effects: &'runtime AuraEffectSystem,
+    effects: crate::runtime::effects::EnrollmentRuntimeOrigin<'runtime>,
     _confirmed: DurableConfirmedEnrollmentCapability,
     tuples: Vec<EnrollmentParentVerifier>,
+    authenticated: bool,
 }
 impl ConfirmedParentInventoryCapability<'_> {
+    pub(crate) fn original_effects(&self) -> &AuraEffectSystem {
+        self.effects.effects()
+    }
     pub(crate) fn confirmed(&self) -> &DurableConfirmedEnrollmentCapability {
         &self._confirmed
     }
@@ -139,7 +143,8 @@ impl ConfirmedParentInventoryCapability<'_> {
         subject: aura_core::AuthorityId,
         history: &[aura_core::AttestedOp],
     ) -> Result<super::enrollment_vm_admission::VerifiedEnrollmentTreeExtension, AuraError> {
-        if !std::ptr::eq(effects, self.effects)
+        if !self.authenticated
+            || !std::ptr::eq(effects, self.effects.effects())
             || subject != self._confirmed.confirmation().manifest().subject
             || effects.device_id() != self._confirmed.confirmation().manifest().invitee_device
         {
@@ -160,7 +165,9 @@ impl ConfirmedParentInventoryCapability<'_> {
         &self,
         verified: &super::enrollment_vm_admission::VerifiedEnrollmentTreeExtension,
     ) -> Result<(), AuraError> {
-        if verified.manifest_digest() != self._confirmed.confirmation().manifest_digest() {
+        if !self.authenticated
+            || verified.manifest_digest() != self._confirmed.confirmation().manifest_digest()
+        {
             return Err(reject(ParentArchiveError::Binding));
         }
         for captured in verified.parent_inventory() {
@@ -221,34 +228,69 @@ pub(crate) async fn retain_confirmed_parent_archive(
 }
 /// IDs select the original receipt. Independent pin and actual committed proof
 /// are revalidated before the archive's public bytes become usable evidence.
+#[cfg(test)]
 pub(crate) async fn load_confirmed_parent_archive<'runtime>(
     effects: &'runtime AuraEffectSystem,
     provisional: AuthorityId,
     invitation: &aura_core::InvitationId,
 ) -> Result<ConfirmedParentInventoryCapability<'runtime>, AuraError> {
+    load_confirmed_parent_archive_with_origin(
+        crate::runtime::effects::EnrollmentRuntimeOrigin::Borrowed(effects),
+        provisional,
+        invitation,
+    )
+    .await
+}
+async fn load_confirmed_parent_archive_with_origin<'runtime>(
+    origin: crate::runtime::effects::EnrollmentRuntimeOrigin<'runtime>,
+    provisional: AuthorityId,
+    invitation: &aura_core::InvitationId,
+) -> Result<ConfirmedParentInventoryCapability<'runtime>, AuraError> {
+    let effects = origin.effects();
     let confirmed = load_confirmed_enrollment(effects, provisional, invitation)
         .await
         .map_err(|error| AuraError::Internal {
             message: "reverify original parent archive receipt".into(),
             source: Some(Arc::new(error)),
         })?;
-    let expected = source(effects, &confirmed)?;
-    let bytes = effects
-        .secure_retrieve(&location(&expected), &[SecureStorageCapability::Read])
-        .await?;
-    if bytes.len() > 2 * 1024 * 1024 + 4096 {
-        return Err(reject(ParentArchiveError::Shape));
-    }
-    let actual: Archive = aura_core::util::serialization::from_slice(&bytes)?;
-    if actual != expected {
-        return Err(reject(ParentArchiveError::Binding));
-    }
-    let tuples = aura_core::util::serialization::from_slice(&actual.tuples)?;
-    Ok(ConfirmedParentInventoryCapability {
-        effects,
+    let mut retained = Some(begin_original_confirmed_archive(origin, confirmed));
+    let actual = retained
+        .as_mut()
+        .ok_or_else(|| reject(ParentArchiveError::Binding))?;
+    actual.authenticate_original_archive().await?;
+    retained.ok_or_else(|| reject(ParentArchiveError::Binding))
+}
+
+pub(crate) fn begin_original_confirmed_archive<'runtime>(
+    origin: crate::runtime::effects::EnrollmentRuntimeOrigin<'runtime>,
+    confirmed: DurableConfirmedEnrollmentCapability,
+) -> ConfirmedParentInventoryCapability<'runtime> {
+    ConfirmedParentInventoryCapability {
+        effects: origin,
         _confirmed: confirmed,
-        tuples,
-    })
+        tuples: Vec::new(),
+        authenticated: false,
+    }
+}
+
+impl ConfirmedParentInventoryCapability<'_> {
+    pub(crate) async fn authenticate_original_archive(&mut self) -> Result<(), AuraError> {
+        let effects = self.effects.effects();
+        let expected = source(effects, &self._confirmed)?;
+        let bytes = effects
+            .secure_retrieve(&location(&expected), &[SecureStorageCapability::Read])
+            .await?;
+        if bytes.len() > 2 * 1024 * 1024 + 4096 {
+            return Err(reject(ParentArchiveError::Shape));
+        }
+        let actual: Archive = aura_core::util::serialization::from_slice(&bytes)?;
+        if actual != expected {
+            return Err(reject(ParentArchiveError::Binding));
+        }
+        self.tuples = aura_core::util::serialization::from_slice(&actual.tuples)?;
+        self.authenticated = true;
+        Ok(())
+    }
 }
 
 impl ConfirmedParentInventoryCapability<'_> {
@@ -268,10 +310,30 @@ pub(crate) async fn load_confirmed_parent_archive_from_confirmed<'runtime>(
     effects: &'runtime AuraEffectSystem,
     confirmed: &DurableConfirmedEnrollmentCapability,
 ) -> Result<ConfirmedParentInventoryCapability<'runtime>, AuraError> {
+    load_confirmed_parent_archive_from_original_origin(
+        crate::runtime::effects::EnrollmentRuntimeOrigin::Borrowed(effects),
+        confirmed,
+    )
+    .await
+}
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "DurableConfirmedEnrollmentCapability",
+    family = "runtime_helper"
+)]
+pub(crate) async fn load_confirmed_parent_archive_from_original_origin<'runtime>(
+    origin: crate::runtime::effects::EnrollmentRuntimeOrigin<'runtime>,
+    confirmed: &DurableConfirmedEnrollmentCapability,
+) -> Result<ConfirmedParentInventoryCapability<'runtime>, AuraError> {
+    let effects = origin.effects();
     let expected = source(effects, confirmed)?;
-    let loaded =
-        load_confirmed_parent_archive(effects, expected.provisional, &expected.invitation).await?;
-    if source(effects, &loaded._confirmed)? != expected {
+    let loaded = load_confirmed_parent_archive_with_origin(
+        origin,
+        expected.provisional,
+        &expected.invitation,
+    )
+    .await?;
+    if source(loaded.effects.effects(), &loaded._confirmed)? != expected {
         return Err(reject(ParentArchiveError::Binding));
     }
     Ok(loaded)

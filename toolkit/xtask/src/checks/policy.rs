@@ -9,6 +9,8 @@ use std::{
 mod authoritative_fact_scope;
 #[path = "cli_workflow_facade.rs"]
 mod cli_workflow_facade;
+#[path = "collection_membership.rs"]
+mod collection_membership;
 #[path = "runtime_entropy_scope.rs"]
 mod runtime_entropy_scope;
 #[path = "security_test_scope.rs"]
@@ -1807,9 +1809,18 @@ pub fn run_security_bug_class_regressions() -> Result<()> {
         if security_bug_class_skip_file(&rel) {
             continue;
         }
-        let lines = read_lines(&path)?;
+        let source = fs::read_to_string(&path)?;
+        let lines: Vec<String> = source.lines().map(str::to_owned).collect();
+        let test_lines = security_test_scope::test_lines(&source)?;
+        let membership_lines = collection_membership::mask_typed_membership(&source)?;
+        violations.extend(string_prefix_authorization_findings(
+            &rel,
+            &lines,
+            &test_lines,
+            &membership_lines,
+        ));
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let trimmed = line.trim_start();
@@ -1897,15 +1908,6 @@ pub fn run_security_bug_class_regressions() -> Result<()> {
                 ));
             }
 
-            if is_string_prefix_authorization(line, &context, &rel)
-                && !known_security_bug_class_violation(&rel, line, "string-prefix-authorization")
-            {
-                violations.push(format!(
-                    "{rel}:{} authorization/resource matching must use typed segment-aware matching, not starts_with/contains string checks",
-                    idx + 1
-                ));
-            }
-
             if is_deterministic_context_constructor_use(line)
                 && !known_security_bug_class_violation(
                     &rel,
@@ -1937,8 +1939,9 @@ pub fn run_sync_biscuit_boundary() -> Result<()> {
     for path in rust_files_under(&target) {
         let rel = security_rel_path(&repo_root, &path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let context = lines[idx.saturating_sub(8)..lines.len().min(idx + 9)].join("\n");
@@ -1967,8 +1970,9 @@ pub fn run_guard_operation_boundary() -> Result<()> {
     for path in rust_files_under(&target) {
         let rel = security_rel_path(&repo_root, &path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let window = lines[idx..lines.len().min(idx + 6)].join("\n");
@@ -1997,8 +2001,9 @@ pub fn run_flow_budget_fail_closed_boundary() -> Result<()> {
     for path in rust_files_under(&target) {
         let rel = security_rel_path(&repo_root, &path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let context = lines[idx.saturating_sub(4)..lines.len().min(idx + 5)].join("\n");
@@ -2030,8 +2035,9 @@ pub fn run_credential_transport_boundary() -> Result<()> {
     for path in rust_files_under(&target) {
         let rel = security_rel_path(&repo_root, &path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             if is_credential_transport_boundary_violation(line) {
@@ -2059,8 +2065,9 @@ pub fn run_runtime_service_io_boundary() -> Result<()> {
     for path in rust_files_under(&target) {
         let rel = security_rel_path(&repo_root, &path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let context = lines[idx.saturating_sub(10)..lines.len().min(idx + 12)].join("\n");
@@ -2264,6 +2271,33 @@ fn is_predictable_freshness_id(line: &str, rel: &str) -> bool {
             || line.contains("session_{}"))
 }
 
+fn string_prefix_authorization_findings(
+    rel: &str,
+    lines: &[String],
+    test_lines: &std::collections::BTreeSet<usize>,
+    membership_lines: &[String],
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    if membership_lines.len() != lines.len() {
+        violations.push(format!(
+            "{rel}: typed membership scanner lost source-line correspondence"
+        ));
+        return violations;
+    }
+    for (idx, line) in lines.iter().enumerate() {
+        if test_lines.contains(&(idx + 1)) || line.trim_start().starts_with("//") {
+            continue;
+        }
+        let context = lines[idx.saturating_sub(12)..lines.len().min(idx + 13)].join("\n");
+        if is_string_prefix_authorization(&membership_lines[idx], &context, rel)
+            && !known_security_bug_class_violation(rel, line, "string-prefix-authorization")
+        {
+            violations.push(format!("{rel}:{} authorization/resource matching must use typed segment-aware matching, not starts_with/contains string checks", idx + 1));
+        }
+    }
+    violations
+}
+
 fn is_string_prefix_authorization(line: &str, context: &str, rel: &str) -> bool {
     let sensitive_path = rel.starts_with("crates/aura-authorization/src/")
         || rel.starts_with("crates/aura-store/src/")
@@ -2317,6 +2351,65 @@ fn known_security_bug_class_violation(rel: &str, line: &str, class: &str) -> boo
     false
 }
 
+fn canonical_biscuit_parse_lines(
+    rel: &str,
+    source: &str,
+) -> Result<std::collections::BTreeSet<usize>> {
+    use syn::spanned::Spanned;
+    let mut lines = std::collections::BTreeSet::new();
+    if !rel.ends_with("crates/aura-core/src/crypto/verified_biscuit.rs") {
+        return Ok(lines);
+    }
+    for item in syn::parse_file(source)?.items {
+        let syn::Item::Impl(item) = item else {
+            continue;
+        };
+        if item.trait_.is_some() {
+            continue;
+        }
+        let syn::Type::Path(owner) = item.self_ty.as_ref() else {
+            continue;
+        };
+        if owner.qself.is_some() || !owner.path.is_ident("VerifiedBiscuitToken") {
+            continue;
+        }
+        for method in item.items {
+            let syn::ImplItem::Fn(method) = method else {
+                continue;
+            };
+            if method.sig.ident == "from_bytes" {
+                lines.extend(method.block.span().start().line..=method.block.span().end().line);
+            }
+        }
+    }
+    Ok(lines)
+}
+
+fn append_raw_biscuit_parse_violations(
+    rel: &str,
+    lines: &[String],
+    test_lines: &std::collections::BTreeSet<usize>,
+    parse_lines: &std::collections::BTreeSet<usize>,
+    violations: &mut Vec<String>,
+) {
+    if rel.contains("/tests/") || rel.ends_with("/tests.rs") {
+        return;
+    }
+    for (idx, line) in lines.iter().enumerate() {
+        if test_lines.contains(&(idx + 1)) {
+            continue;
+        }
+        if (line.contains("Biscuit::from(") || line.contains("biscuit_auth::Biscuit::from("))
+            && !parse_lines.contains(&(idx + 1))
+        {
+            violations.push(format!(
+                "{rel}:{} parses raw Biscuit bytes outside VerifiedBiscuitToken::from_bytes",
+                idx + 1
+            ));
+        }
+    }
+}
+
 pub fn run_biscuit_verifier_boundary() -> Result<()> {
     let repo_root = repo_root()?;
     let crates_dir = repo_root.join("crates");
@@ -2325,24 +2418,25 @@ pub fn run_biscuit_verifier_boundary() -> Result<()> {
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
+        let parse_lines = canonical_biscuit_parse_lines(&rel, &lines.join("\n"))?;
+        append_raw_biscuit_parse_violations(
+            &rel,
+            &lines,
+            &test_lines,
+            &parse_lines,
+            &mut violations,
+        );
         let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
 
         for (idx, line) in lines.iter().enumerate() {
-            if is_test_path || line_is_test_scoped(&lines, idx) {
+            if is_test_path || test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let local_window = lines[idx.saturating_sub(16)..=idx].join("\n");
-            if (line.contains("Biscuit::from(") || line.contains("biscuit_auth::Biscuit::from("))
-                && !rel.ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
-            {
-                violations.push(format!(
-                    "{rel}:{} parses raw Biscuit bytes outside VerifiedBiscuitToken::from_bytes",
-                    idx + 1
-                ));
-            }
             let verified_authorizer = (rel
                 .ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
-                && line.contains("self.token.authorizer()"))
+                && line.contains("self.token.token().authorizer()"))
                 || local_window.contains("VerifiedBiscuitToken")
                 || local_window.contains("verified_token")
                 || local_window.contains("verified token")
@@ -2426,8 +2520,9 @@ pub fn run_authorization_resource_scope_boundary() -> Result<()> {
                 continue;
             }
             let lines = read_lines(&path)?;
+            let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
             for (idx, line) in lines.iter().enumerate() {
-                if line_is_test_scoped(&lines, idx) {
+                if test_lines.contains(&(idx + 1)) {
                     continue;
                 }
                 let trimmed = line.trim_start();
@@ -2554,10 +2649,11 @@ pub fn run_signed_transcript_boundary() -> Result<()> {
             continue;
         }
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
 
         for (idx, line) in lines.iter().enumerate() {
-            if is_test_path || line_is_test_scoped(&lines, idx) {
+            if is_test_path || test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let trimmed = line.trim_start();
@@ -2818,8 +2914,9 @@ pub fn run_harness_mode_security_boundary() -> Result<()> {
             continue;
         }
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let trimmed = line.trim_start();
@@ -3088,12 +3185,13 @@ pub fn run_remote_ingress_boundary() -> Result<()> {
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
 
         for (idx, line) in lines.iter().enumerate() {
             if line.contains("IngressVerificationEvidence::complete")
                 && !is_test_path
-                && !line_is_test_scoped(&lines, idx)
+                && !test_lines.contains(&(idx + 1))
             {
                 violations.push(format!(
                     "{rel}:{} uses IngressVerificationEvidence::complete outside test scope",
@@ -3112,7 +3210,13 @@ pub fn run_remote_ingress_boundary() -> Result<()> {
             "verify_receipt_chain",
             "verify_response",
         ] {
-            require_verified_ingress_parameter(&rel, &lines, required, &mut violations);
+            require_verified_ingress_parameter(
+                &rel,
+                &lines,
+                &test_lines,
+                required,
+                &mut violations,
+            );
         }
     }
 
@@ -3284,12 +3388,13 @@ pub fn run_secret_field_wrappers() -> Result<()> {
         }
 
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             if trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("#[cfg(test)]")
-                || line_is_test_scoped(&lines, idx)
+                || test_lines.contains(&(idx + 1))
             {
                 continue;
             }
@@ -3357,8 +3462,9 @@ pub fn run_secret_persistence_boundary() -> Result<()> {
             continue;
         }
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let trimmed = line.trim_start();
@@ -3395,8 +3501,9 @@ pub fn run_secure_storage_filesystem_boundary() -> Result<()> {
     if secure_file.exists() {
         let rel = repo_relative(&secure_file);
         let lines = read_lines(&secure_file)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
-            if line_is_test_scoped(&lines, idx) {
+            if test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let trimmed = line.trim_start();
@@ -3459,8 +3566,9 @@ pub fn run_rendezvous_descriptor_validation_boundary() -> Result<()> {
                 continue;
             }
             let lines = read_lines(&path)?;
+            let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
             for (idx, line) in lines.iter().enumerate() {
-                if line_is_test_scoped(&lines, idx) {
+                if test_lines.contains(&(idx + 1)) {
                     continue;
                 }
                 let trimmed = line.trim_start();
@@ -3544,12 +3652,13 @@ pub fn run_security_boolean_escape_hatch_boundary() -> Result<()> {
         }
 
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             if trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("#[cfg(test)]")
-                || line_is_test_scoped(&lines, idx)
+                || test_lines.contains(&(idx + 1))
             {
                 continue;
             }
@@ -3804,7 +3913,6 @@ fn fail_open_security_evidence_pattern(lines: &[String], idx: usize) -> bool {
     if security_evidence_context
         && (line == "continue;"
             || line.starts_with("return Ok(true")
-            || line.starts_with("return None")
             || line.contains("valid: true")
             || line.contains("unwrap_or(true)")
             || line.contains("unwrap_or(Ok(true"))
@@ -3814,6 +3922,26 @@ fn fail_open_security_evidence_pattern(lines: &[String], idx: usize) -> bool {
 
     lower_window.contains("verify")
         && (line.contains("unwrap_or(true)") || line.contains("unwrap_or_else(|_| true)"))
+}
+
+#[cfg(test)]
+mod security_boolean_evidence_tests {
+    use super::fail_open_security_evidence_pattern;
+
+    #[test]
+    fn missing_key_incomparable_is_not_success_but_success_fallback_is_rejected() {
+        let absent: Vec<String> = ["// missing key", "return None;"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert!(!fail_open_security_evidence_pattern(&absent, 1));
+
+        let success: Vec<String> = ["// missing key", "return Ok(true);"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert!(fail_open_security_evidence_pattern(&success, 1));
+    }
 }
 
 pub fn run_raw_transport_send_boundary() -> Result<()> {
@@ -3857,12 +3985,13 @@ pub fn run_raw_transport_send_boundary() -> Result<()> {
         }
 
         let lines = read_lines(&path)?;
+        let test_lines = security_test_scope::test_lines(&lines.join("\n"))?;
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             if trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("#[cfg(test)]")
-                || line_is_test_scoped(&lines, idx)
+                || test_lines.contains(&(idx + 1))
             {
                 continue;
             }
@@ -3885,6 +4014,35 @@ pub fn run_raw_transport_send_boundary() -> Result<()> {
     Ok(())
 }
 
+fn canonical_remote_apply_violations(rel: &str, source: &str) -> Result<Vec<String>> {
+    let mut violations = Vec::new();
+    let lines: Vec<String> = source.lines().map(str::to_owned).collect();
+    let test_lines = security_test_scope::test_lines(source)?;
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("#[cfg(test)]")
+            || test_lines.contains(&(idx + 1))
+        {
+            continue;
+        }
+
+        if line.contains(".apply_verified_delta(")
+            || line.contains(".accept_verified_relational_facts(")
+        {
+            let window = lines[idx.saturating_sub(3)..=idx].join("\n");
+            if !window.contains("JournalApplyService::new()") {
+                violations.push(format!(
+                    "{rel}:{} remote journal apply must go through JournalApplyService",
+                    idx + 1
+                ));
+            }
+        }
+    }
+    Ok(violations)
+}
+
 pub fn run_canonical_remote_apply_boundary() -> Result<()> {
     let repo_root = repo_root()?;
     let crates_dir = repo_root.join("crates");
@@ -3903,29 +4061,8 @@ pub fn run_canonical_remote_apply_boundary() -> Result<()> {
             continue;
         }
 
-        let lines = read_lines(&path)?;
-        for (idx, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.is_empty()
-                || trimmed.starts_with("//")
-                || trimmed.starts_with("#[cfg(test)]")
-                || line_is_test_scoped(&lines, idx)
-            {
-                continue;
-            }
-
-            if line.contains(".apply_verified_delta(")
-                || line.contains(".accept_verified_relational_facts(")
-            {
-                let window = lines[idx.saturating_sub(3)..=idx].join("\n");
-                if !window.contains("JournalApplyService::new()") {
-                    violations.push(format!(
-                        "{rel}:{} remote journal apply must go through JournalApplyService",
-                        idx + 1
-                    ));
-                }
-            }
-        }
+        let source = std::fs::read_to_string(&path)?;
+        violations.extend(canonical_remote_apply_violations(&rel, &source)?);
     }
 
     if !violations.is_empty() {
@@ -4068,19 +4205,10 @@ fn secret_field_name_requires_wrapper(name: &str) -> bool {
     .any(|keyword| lower.contains(keyword))
 }
 
-fn line_is_test_scoped(lines: &[String], idx: usize) -> bool {
-    let start = idx.saturating_sub(20);
-    lines[..=idx].iter().any(|line| line.contains("mod tests"))
-        || lines[start..=idx].iter().any(|line| {
-            line.contains("#[cfg(test)]")
-                || line.contains("_for_tests")
-                || line.contains("fn verified_ops(")
-        })
-}
-
 fn require_verified_ingress_parameter(
     rel: &str,
     lines: &[String],
+    test_lines: &std::collections::BTreeSet<usize>,
     fn_name: &str,
     violations: &mut Vec<String>,
 ) {
@@ -4097,7 +4225,7 @@ fn require_verified_ingress_parameter(
         if !is_function {
             continue;
         }
-        if line_is_test_scoped(lines, idx) {
+        if test_lines.contains(&(idx + 1)) {
             continue;
         }
         let window = lines[idx..lines.len().min(idx + 12)].join("\n");
@@ -9132,5 +9260,250 @@ mod service_surface_scan_tests {
             .expect_err("existing scratch retains metadata enforcement");
         assert!(error.to_string().contains("work/scratch.md"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod canonical_remote_apply_scope_tests {
+    use super::canonical_remote_apply_violations;
+
+    #[test]
+    fn real_scanner_rejects_production_after_test_scope_decoys() {
+        let cases = [
+            "#[cfg(test)]\nmod tests { fn fixture() { effects.apply_verified_delta(delta); } }\nfn production() { effects.apply_verified_delta(delta); }",
+            "// mod tests\nfn production() { effects.apply_verified_delta(delta); }",
+            "const NOTE: &str = \"mod tests #[cfg(test)]\";\nfn production() { effects.apply_verified_delta(delta); }",
+            "fn helper_for_tests() {}\nfn production() { effects.apply_verified_delta(delta); }",
+            "#[cfg(any(test, feature = \"production\"))]\nfn production() { effects.accept_verified_relational_facts(facts); }",
+            "#[cfg(test)]\nmod tests {}\nproduction_macro! { effects.apply_verified_delta(delta); }",
+        ];
+        for source in cases {
+            let violations =
+                canonical_remote_apply_violations("crates/aura-agent/src/production.rs", source)
+                    .unwrap();
+            assert_eq!(
+                violations.len(),
+                1,
+                "actual scanner must reject production: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_scanner_accepts_positive_test_scope_and_canonical_owner() {
+        for source in [
+            "#[cfg(all(unix, test))]\nmod fixtures { fn fixture() { effects.apply_verified_delta(delta); } }",
+            "fn production() {\nlet owner = JournalApplyService::new();\neffects.apply_verified_delta(delta);\n}",
+        ] {
+            assert!(canonical_remote_apply_violations("crates/aura-agent/src/production.rs", source).unwrap().is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod foundational_biscuit_parse_scope_tests {
+    use super::canonical_biscuit_parse_lines;
+
+    #[test]
+    fn raw_parse_permission_is_only_exact_foundational_constructor() {
+        let source = "impl VerifiedBiscuitToken {\nfn from_bytes() { Biscuit::from(bytes, root); }\nfn other() { Biscuit::from(bytes, root); }\n}\n// mod tests #[cfg(test)]\nfn helper_for_tests() { Biscuit::from(bytes, root); }\n#[cfg(any(test, feature = \"production\"))]\nfn production() { Biscuit::from(bytes, root); }\n";
+        let allowed = canonical_biscuit_parse_lines(
+            "crates/aura-core/src/crypto/verified_biscuit.rs",
+            source,
+        )
+        .unwrap();
+        assert!(allowed.contains(&2));
+        for line in [3, 6, 8] {
+            assert!(!allowed.contains(&line));
+        }
+        for path in [
+            "crates/aura-core/src/domain/journal.rs",
+            "crates/aura-authorization/src/biscuit_evaluator.rs",
+        ] {
+            assert!(canonical_biscuit_parse_lines(path, source)
+                .unwrap()
+                .is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod raw_biscuit_scanner_wiring_tests {
+    use super::{
+        append_raw_biscuit_parse_violations, canonical_biscuit_parse_lines, security_test_scope,
+    };
+
+    #[test]
+    fn production_raw_parser_scanner_rejects_scope_and_path_decoys() {
+        let source = "impl VerifiedBiscuitToken {\nfn from_bytes() { Biscuit::from(bytes, root); }\nfn other() { Biscuit::from(bytes, root); }\n}\n#[cfg(test)]\nmod tests { fn fixture() { Biscuit::from(bytes, root); } }\n// mod tests #[cfg(test)]\nconst NOTE: &str = \"mod tests\";\nfn helper_for_tests() { Biscuit::from(bytes, root); }\n#[cfg(any(test, feature = \"production\"))]\nproduction_macro! { Biscuit::from(bytes, root); }\n";
+        let lines = source.lines().map(str::to_owned).collect::<Vec<_>>();
+        let test_lines = security_test_scope::test_lines(source).unwrap();
+        for (path, expected) in [
+            ("crates/aura-core/src/crypto/verified_biscuit.rs", 3),
+            ("crates/aura-core/src/domain/journal.rs", 4),
+            ("crates/aura-authorization/src/biscuit_evaluator.rs", 4),
+        ] {
+            let parse_lines = canonical_biscuit_parse_lines(path, source).unwrap();
+            let mut violations = Vec::new();
+            append_raw_biscuit_parse_violations(
+                path,
+                &lines,
+                &test_lines,
+                &parse_lines,
+                &mut violations,
+            );
+            assert_eq!(
+                violations.len(),
+                expected,
+                "actual raw-parser scanner: {path}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod typed_membership_scanner_tests {
+    use super::{collection_membership, security_test_scope, string_prefix_authorization_findings};
+
+    #[test]
+    fn trailing_blank_line_keeps_scanner_aligned_and_mismatch_fails_closed() {
+        let source = "fn check(resource: &str, scope: &str) { if resource.starts_with(scope) { authorize(); } }\n\n";
+        let lines: Vec<String> = source.lines().map(str::to_owned).collect();
+        let tests = security_test_scope::test_lines(source).unwrap();
+        let membership = collection_membership::mask_typed_membership(source).unwrap();
+        assert_eq!(membership.len(), lines.len());
+        assert_eq!(
+            string_prefix_authorization_findings(
+                "crates/aura-sync/src/synthetic.rs",
+                &lines,
+                &tests,
+                &membership,
+            )
+            .len(),
+            1
+        );
+        let truncated = membership[..membership.len() - 1].to_vec();
+        assert!(string_prefix_authorization_findings(
+            "crates/aura-sync/src/synthetic.rs",
+            &lines,
+            &tests,
+            &truncated,
+        )
+        .iter()
+        .any(|finding| finding.contains("lost source-line correspondence")));
+    }
+
+    fn actual_prefix_findings(source: &str) -> Vec<String> {
+        let lines: Vec<_> = source.lines().map(str::to_owned).collect();
+        let membership = collection_membership::mask_typed_membership(source).unwrap();
+        let tests = security_test_scope::test_lines(source).unwrap();
+        string_prefix_authorization_findings(
+            "crates/aura-sync/src/synthetic.rs",
+            &lines,
+            &tests,
+            &membership,
+        )
+    }
+
+    #[test]
+    fn actual_session_device_collection_membership_is_not_string_authorization() {
+        let source = include_str!("../../../../crates/aura-sync/src/core/session.rs");
+        let mask = collection_membership::mask_typed_membership(source).unwrap();
+        let mut checked = 0;
+        for (idx, line) in source.lines().enumerate() {
+            if line.contains("participants.contains(&peer)") {
+                assert!(
+                    !mask[idx].contains("participants.contains"),
+                    "typed actual source: {line}"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 2);
+        assert!(
+            actual_prefix_findings(source).is_empty(),
+            "actual scanner must permit typed session membership"
+        );
+    }
+
+    #[test]
+    fn string_participants_and_scope_decoys_stay_rejected_by_actual_prefix_predicate() {
+        for prelude in [
+            "",
+            "#[cfg(test)]\nmod tests {}\n",
+            "const NOTE: &str = \"mod tests #[cfg(test)]\";\n",
+            "// Vec<DeviceId> participants\n",
+        ] {
+            let source = format!("{prelude}enum SessionState {{ Active {{ participants: String }} }}\nfn helper_for_tests(peer: &str, state: SessionState) {{ match state {{ SessionState::Active {{ participants }} => {{ if participants.contains(peer) {{ authorize(); }} }} }} }}");
+            assert_eq!(actual_prefix_findings(&source).len(), 1, "{source}");
+        }
+        let mixed = "#[cfg(any(test, feature = \"production\"))]\nfn check(participants: String, peer: &str) { if participants.contains(peer) { authorize(); } }";
+        assert_eq!(actual_prefix_findings(mixed).len(), 1);
+        let prefix = "fn check(resource: &str, scope: &str) { if resource.starts_with(scope) { authorize(); } }";
+        assert_eq!(actual_prefix_findings(prefix).len(), 1);
+        let typed_and_string = "use aura_core::DeviceId;\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState, peer: DeviceId, resource: &str) { match state { SessionState::Active { participants } => { if participants.contains(&peer) && resource.starts_with(\"auth\") { authorize(); } } } }";
+        assert_eq!(
+            actual_prefix_findings(typed_and_string).len(),
+            1,
+            "same-line string check must survive typed masking"
+        );
+        let nested_prefix = "use aura_core::DeviceId;\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState, peer: DeviceId, other: DeviceId, resource: &str) { match state { SessionState::Active { participants } => { participants.contains({ if resource.starts_with(\"auth\") { &peer } else { &other } }); } } }";
+        assert_eq!(
+            actual_prefix_findings(nested_prefix).len(),
+            1,
+            "nested argument prefix must remain checked"
+        );
+        let nested_substring = "use aura_core::DeviceId;\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState, peer: DeviceId, other: DeviceId, resource: &str) { match state { SessionState::Active { participants } => { participants.contains({ if resource.contains(\"auth\") { &peer } else { &other } }); } } }";
+        assert_eq!(
+            actual_prefix_findings(nested_substring).len(),
+            1,
+            "nested argument substring must remain checked"
+        );
+        for declaration in [
+            "#[cfg(feature = \"typed\")] enum SessionState { Active { participants: Vec<DeviceId> } }",
+            "#[cfg_attr(feature = \"typed\", replacement)] enum SessionState { Active { participants: Vec<DeviceId> } }",
+            "enum SessionState { #[cfg(feature = \"typed\")] Active { participants: Vec<DeviceId> } }",
+            "enum SessionState { Active { #[cfg(feature = \"typed\")] participants: Vec<DeviceId>, #[cfg(not(feature = \"typed\"))] participants: String } }",
+        ] {
+            let source = format!("use aura_core::DeviceId;\n{declaration}\nfn check(state: SessionState, peer: DeviceId) {{ match state {{ SessionState::Active {{ participants }} => {{ participants.contains(&peer); }} }} }}");
+            assert_eq!(actual_prefix_findings(&source).len(), 1, "conditional type origin stays unresolved: {source}");
+        }
+        let conditional_import = "#[cfg(feature = \"typed\")] use aura_core::DeviceId;\n#[cfg(not(feature = \"typed\"))] use alternate::DeviceId;\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState, peer: DeviceId) { match state { SessionState::Active { participants } => { participants.contains(&peer); } } }";
+        assert_eq!(actual_prefix_findings(conditional_import).len(), 1);
+        let item_expansion = "install_matches!();\nuse aura_core::DeviceId;\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState, peer: DeviceId) { matches!(state, SessionState::Active { participants } if participants.contains(&peer)) }";
+        assert_eq!(actual_prefix_findings(item_expansion).len(), 1);
+        let local_expansion = "use aura_core::DeviceId;\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState, peer: DeviceId) { install_matches!(); matches!(state, SessionState::Active { participants } if participants.contains(&peer)) }";
+        assert_eq!(actual_prefix_findings(local_expansion).len(), 1);
+        let local_binding_expansion = "use aura_core::DeviceId;\nmacro_rules! shadow { ($name:ident) => { let $name = String::from(\"auth\"); } }\nenum SessionState { Active { participants: Vec<DeviceId> } }\nfn check(state: SessionState) { match state { SessionState::Active { participants } => { shadow!(participants); participants.contains(\"auth\"); } } }";
+        assert_eq!(
+            actual_prefix_findings(local_binding_expansion).len(),
+            1,
+            "opaque statement expansion cannot establish retained receiver binding"
+        );
+
+        for shadow in [
+            "mod aura_core { pub struct DeviceId; }",
+            "mod std { pub mod vec { pub struct Vec<T>(T); } }",
+            "use alternate as aura_core;",
+        ] {
+            let source = format!("{shadow}\nuse aura_core::DeviceId;\nenum SessionState {{ Active {{ participants: Vec<DeviceId> }} }}\nfn check(state: SessionState, peer: DeviceId) {{ match state {{ SessionState::Active {{ participants }} => {{ participants.contains(&peer); }} }} }}");
+            assert_eq!(
+                actual_prefix_findings(&source).len(),
+                1,
+                "shadowed type origin stays unresolved: {source}"
+            );
+        }
+        for shadow in [
+            "macro_rules! matches { ($($tokens:tt)*) => { false } }",
+            "use alternate::matches;",
+            "use alternate::predicate as matches;",
+        ] {
+            let source = format!("{shadow}\nuse aura_core::DeviceId;\nenum SessionState {{ Active {{ participants: Vec<DeviceId> }} }}\nfn check(state: SessionState, peer: DeviceId) {{ matches!(state, SessionState::Active {{ participants }} if participants.contains(&peer)); }}");
+            assert_eq!(
+                actual_prefix_findings(&source).len(),
+                1,
+                "unknown macro origin cannot prove binding: {source}"
+            );
+        }
     }
 }

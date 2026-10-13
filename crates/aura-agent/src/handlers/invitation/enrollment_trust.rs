@@ -473,7 +473,7 @@ impl RetainedEnrollmentVerifier {
             || initiator_device != effects.device_id()
             || record.setup.public_key_package.is_empty()
             || record.setup.public_key_package.len() > aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::MAX_PUBLIC_KEY_PACKAGE_BYTES
-            || record.setup.expires_at_ms.checked_sub(record.setup.issued_at_ms).is_none_or(|lifetime| lifetime == 0 || lifetime > aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::MAX_VALIDITY_MS)
+            || record.setup.expires_at_ms.checked_sub(record.setup.issued_at_ms).map_or(true, |lifetime| lifetime == 0 || lifetime > aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::MAX_VALIDITY_MS)
             || record.setup.issued_at_ms >= record.setup.expires_at_ms
             || match record.setup.signing_mode {
                 SigningMode::SingleSigner => record.setup.threshold != 1 || record.setup.participants != 1,
@@ -675,6 +675,10 @@ struct StoredEnrollmentRegistration {
     started_at: aura_core::time::PhysicalTime,
     timeout_ms: u64,
     budget: aura_core::TimeoutBudget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shortcut_budget: Option<aura_core::TimeoutBudget>,
+    negative_cleanup_budget: aura_core::TimeoutBudget,
+    original_policy: crate::runtime::services::enrollment_window::OriginalEnrollmentWindowPolicy,
 }
 
 impl StoredEnrollmentRegistration {
@@ -714,6 +718,9 @@ impl StoredEnrollmentRegistration {
             nickname: state.enrollment_nickname_suggestion.clone(),
             started_at: state.started_at.clone(),
             budget: state.timeout_budget.clone(),
+            shortcut_budget: state.shortcut_budget.clone(),
+            negative_cleanup_budget: state.negative_cleanup_budget.clone(),
+            original_policy: state.original_window_policy.clone(),
             timeout_ms: u64::try_from(state.timeout.as_millis())
                 .map_err(|_| EnrollmentVerifierError::RecordBinding)?,
         })
@@ -744,6 +751,9 @@ impl StoredEnrollmentRegistration {
         prestate_hash: aura_core::Hash32,
     ) -> AgentResult<crate::runtime::services::ceremony_tracker::TrackedCeremony> {
         use aura_core::threshold::ParticipantIdentity;
+        self.original_policy
+            .require_cleanup(&self.budget, &self.negative_cleanup_budget)
+            .map_err(aura_core::AuraError::from)?;
         let participants: std::collections::HashSet<_> =
             self.participants.iter().cloned().collect();
         let mut accepted: std::collections::HashSet<_> =
@@ -763,6 +773,11 @@ impl StoredEnrollmentRegistration {
             || !participants.contains(&ParticipantIdentity::device(self.device))
             || self.budget.started_at_ms() != self.started_at.ts_ms
             || self.budget.timeout_ms() != self.timeout_ms
+            || self.shortcut_budget.as_ref().is_some_and(|shortcut| {
+                shortcut.started_at_ms() != self.budget.started_at_ms()
+                    || shortcut.deadline_at_ms() <= self.budget.deadline_at_ms()
+                    || shortcut.timeout_ms() > self.timeout_ms.saturating_mul(2)
+            })
             || self.timeout_ms == 0
             || self.timeout_ms > 86_400_000
             || self.nickname.as_ref().is_some_and(|name| name.len() > 4096)
@@ -803,6 +818,9 @@ impl StoredEnrollmentRegistration {
                 failure_reason: None,
                 timeout: std::time::Duration::from_millis(self.timeout_ms),
                 timeout_budget: self.budget,
+                shortcut_budget: self.shortcut_budget,
+                negative_cleanup_budget: self.negative_cleanup_budget,
+                original_window_policy: self.original_policy,
                 enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
                 prestate_hash,
                 committed_at: None,
@@ -1046,6 +1064,135 @@ mod real_crypto_tests {
     use aura_core::ContextId;
 
     struct AcceptanceProbe;
+
+    #[test]
+    fn legacy_registration_restores_original_enrollment_without_shortcut_window() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let ((issuer, _invitee, _invitation, start, _, _), _original) =
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                    "legacy-registration-without-shortcut", None, None,
+                ).await;
+            let effects = issuer.runtime().effects();
+            let recovered =
+                recover_enrollment_registration_for_admission(effects.as_ref(), &start.ceremony_id)
+                    .await
+                    .expect("actual original registration recovery");
+            let state = recovered.registration();
+            let current = StoredEnrollmentRegistration::from_state(state)
+                .expect("current protected registration");
+            let mut legacy = serde_json::to_value(current).expect("encode registration");
+            legacy
+                .as_object_mut()
+                .expect("record object")
+                .remove("shortcut_budget");
+            let legacy: StoredEnrollmentRegistration =
+                serde_json::from_value(legacy).expect("legacy registration decode");
+            let resumed = legacy
+                .restore_bound(
+                    state.initiator_id,
+                    &state.ceremony_id,
+                    state.enrollment_device_id.expect("enrolled device"),
+                    state.new_epoch,
+                    None,
+                    state.prestate_hash,
+                )
+                .expect("legacy original enrollment remains resumable");
+            assert!(
+                resumed.shortcut_budget.is_none(),
+                "legacy cannot issue shortcut"
+            );
+            assert_eq!(
+                resumed.timeout_budget.deadline_at_ms(),
+                state.timeout_budget.deadline_at_ms()
+            );
+        });
+    }
+
+    #[test]
+    fn recovered_pending_generation_requires_original_runtime_and_signer() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            fn require_cause<T: std::error::Error + 'static>(
+                mut source: &(dyn std::error::Error + 'static),
+            ) {
+                loop {
+                    if source.is::<T>() {
+                        return;
+                    }
+                    source = source
+                        .source()
+                        .expect("original typed refusal remains reachable");
+                }
+            }
+            let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+            let ((issuer, invitee, invitation, start, _, _), original) =
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                    "recovered-pending-original-runtime", Some(Arc::new(clock.clone())), None,
+                ).await;
+            let effects = issuer.runtime().effects();
+            let signing = issuer.threshold_signing();
+            let recovered =
+                recover_enrollment_registration_for_admission(effects.as_ref(), &start.ceremony_id)
+                    .await
+                    .expect("actual protected registration admission");
+            let generation = restore_recovered_pending_signing_generation(
+                effects.as_ref(),
+                &signing,
+                &recovered,
+            )
+            .await
+            .expect("same admitted runtime and signer restore original pending generation");
+            assert_eq!(generation.authority(), issuer.authority_id());
+            assert_eq!(generation.epoch(), recovered.registration().new_epoch);
+
+            let foreign_runtime = restore_recovered_pending_signing_generation(
+                invitee.runtime().effects().as_ref(),
+                &signing,
+                &recovered,
+            )
+            .await
+            .expect_err("foreign runtime cannot reuse recovered admission");
+            require_cause::<EnrollmentVerifierError>(&foreign_runtime);
+            let mut source: &(dyn std::error::Error + 'static) = &foreign_runtime;
+            loop {
+                if let Some(actual) = source.downcast_ref::<EnrollmentVerifierError>() {
+                    assert!(matches!(actual, EnrollmentVerifierError::RuntimeOwner));
+                    break;
+                }
+                source = source.source().unwrap();
+            }
+            let foreign_signer = restore_recovered_pending_signing_generation(
+                effects.as_ref(),
+                &invitee.threshold_signing(),
+                &recovered,
+            )
+            .await
+            .expect_err("foreign signing service cannot satisfy original admission");
+            require_cause::<
+                crate::runtime::services::threshold_signing::ForeignThresholdSigningRuntime,
+            >(&foreign_signer);
+            drop(recovered);
+
+            invitee
+                .invitations()
+                .unwrap()
+                .accept(&invitation.invitation_id)
+                .await
+                .expect("canonical original acceptance and VM exchange");
+            let delivery = original.original_disposal_for_test().unwrap();
+            let disposed = delivery.await_disposal().await;
+            delivery.require_positive(&disposed).unwrap();
+            assert_eq!(clock.now_ms(), 5_000);
+            for agent in [issuer, invitee] {
+                agent
+                    .runtime()
+                    .tasks()
+                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                    .await
+                    .expect("original resource tree closes without abort");
+            }
+        });
+    }
+
     impl SecurityTranscript for AcceptanceProbe {
         type Payload = &'static str;
         const DOMAIN_SEPARATOR: &'static str = "aura.test.retained-enrollment-response";
@@ -1069,7 +1216,14 @@ mod real_crypto_tests {
                 .expect("build actual runtime"),
         );
         AgentRuntimeBridge::new(agent.clone())
-            .bootstrap_signing_keys()
+            .bootstrap_signing_keys(
+                crate::runtime::services::RuntimeServiceContext::test_original(
+                    agent.runtime().tasks(),
+                    agent.runtime().effects(),
+                )
+                .await
+                .startup_window(),
+            )
             .await
             .expect("bootstrap retained signing identity");
         agent
@@ -1607,7 +1761,7 @@ pub(crate) async fn retain_pending_signing_generation(
     Ok(())
 }
 
-pub(crate) async fn restore_pending_signing_generation(
+async fn restore_bound_pending_signing_generation(
     effects: &AuraEffectSystem,
     signing: &crate::runtime::services::threshold_signing::ThresholdSigningService,
     ceremony: &CeremonyId,
@@ -1615,6 +1769,7 @@ pub(crate) async fn restore_pending_signing_generation(
     epoch: u64,
     prestate: aura_core::Hash32,
 ) -> AgentResult<crate::runtime::services::threshold_signing::VerifiedPendingSigningGeneration> {
+    signing.require_effects(effects)?;
     let bytes = effects
         .secure_retrieve(
             &pending_generation_location(ceremony),
@@ -1643,6 +1798,129 @@ pub(crate) async fn restore_pending_signing_generation(
         )
         .await
         .map_err(AgentError::from)
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "RetainedEnrollmentVmControl",
+    family = "runtime_helper"
+)]
+pub(crate) async fn restore_original_pending_signing_generation(
+    effects: &AuraEffectSystem,
+    signing: &crate::runtime::services::threshold_signing::ThresholdSigningService,
+    issued: &RetainedEnrollmentVmControl,
+    original: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
+) -> AgentResult<crate::runtime::services::threshold_signing::VerifiedPendingSigningGeneration> {
+    issued.require_runtime_owner(effects)?;
+    let prestate = original.require_activation_generation(effects, issued, activation)?;
+    let manifest = issued.manifest();
+    activation
+        .require_generation(manifest.subject, manifest.pending_epoch)
+        .await?;
+    let generation = restore_bound_pending_signing_generation(
+        effects,
+        signing,
+        &manifest.ceremony,
+        manifest.subject,
+        manifest.pending_epoch,
+        prestate,
+    )
+    .await?;
+    if generation.package_digest() != manifest.pending_public_key_package_digest
+        || generation.config_digest() != manifest.pending_threshold_config_digest.0
+    {
+        return Err(EnrollmentVerifierError::RecordBinding.into());
+    }
+    Ok(generation)
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "PreparedEnrollmentActivationCapability",
+    family = "runtime_helper"
+)]
+pub(crate) async fn restore_prepared_pending_signing_generation(
+    effects: &AuraEffectSystem,
+    signing: &crate::runtime::services::threshold_signing::ThresholdSigningService,
+    prepared: &crate::handlers::device_epoch_rotation::PreparedEnrollmentActivationCapability<'_>,
+    activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
+) -> AgentResult<crate::runtime::services::threshold_signing::VerifiedPendingSigningGeneration> {
+    prepared
+        .require_pending_generation(effects, activation)
+        .await?;
+    restore_bound_pending_signing_generation(
+        effects,
+        signing,
+        prepared.ceremony_id(),
+        prepared.subject(),
+        prepared.pending_epoch(),
+        prepared.prestate(),
+    )
+    .await
+}
+
+/// Recovery admission retains the actual verified loader result and runtime.
+/// A decoded ceremony snapshot cannot construct this owner.
+pub(crate) struct RecoveredEnrollmentRegistration<'a> {
+    effects: &'a AuraEffectSystem,
+    registration: crate::runtime::services::ceremony_tracker::TrackedCeremony,
+    response: Option<VerifiedEnrollmentResponse>,
+}
+impl RecoveredEnrollmentRegistration<'_> {
+    pub(crate) fn registration(
+        &self,
+    ) -> &crate::runtime::services::ceremony_tracker::TrackedCeremony {
+        &self.registration
+    }
+    pub(crate) fn into_response(self) -> Option<VerifiedEnrollmentResponse> {
+        self.response
+    }
+}
+
+pub(crate) async fn recover_enrollment_registration_for_admission<'a>(
+    effects: &'a AuraEffectSystem,
+    ceremony: &CeremonyId,
+) -> AgentResult<RecoveredEnrollmentRegistration<'a>> {
+    let (response, registration) = if has_response_receipt(effects, ceremony).await? {
+        let (response, registration) = recover_verified_response_receipt(effects, ceremony).await?;
+        (Some(response), registration)
+    } else {
+        (
+            None,
+            recover_pending_enrollment_registration(effects, ceremony).await?,
+        )
+    };
+    Ok(RecoveredEnrollmentRegistration {
+        effects,
+        registration,
+        response,
+    })
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "RecoveredEnrollmentRegistration",
+    family = "runtime_helper"
+)]
+pub(crate) async fn restore_recovered_pending_signing_generation(
+    effects: &AuraEffectSystem,
+    signing: &crate::runtime::services::threshold_signing::ThresholdSigningService,
+    recovered: &RecoveredEnrollmentRegistration<'_>,
+) -> AgentResult<crate::runtime::services::threshold_signing::VerifiedPendingSigningGeneration> {
+    if !std::ptr::eq(effects, recovered.effects) {
+        return Err(EnrollmentVerifierError::RuntimeOwner.into());
+    }
+    let registration = &recovered.registration;
+    restore_bound_pending_signing_generation(
+        effects,
+        signing,
+        &registration.ceremony_id,
+        registration.initiator_id,
+        registration.new_epoch,
+        registration.prestate_hash,
+    )
+    .await
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2313,13 +2591,184 @@ pub(crate) async fn recover_allocated_enrollment_registration(
 /// Immutable issuer-selected ceremony control authority. Its private fields
 /// cannot be restored from peer wire data or deserialized as an admission.
 pub(crate) struct RetainedEnrollmentVmControl {
+    // Synchronous before-Ready outcome deposit; this guard never crosses await.
+    #[allow(clippy::disallowed_types)]
+    conditional_acquisition: std::sync::Mutex<OriginalConditionalAcquisitionCustody>,
+    conditional_signing: std::sync::OnceLock<
+        Arc<
+            tokio::sync::Mutex<
+                crate::runtime::services::threshold_signing::OriginalIssuerTranscriptSigningCustody,
+            >,
+        >,
+    >,
     runtime_owner: Arc<AuraEffectSystem>,
     manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     expected_request_verifier: Vec<u8>,
     digest: [u8; 32],
     canonical_invitation: super::Invitation,
 }
+#[derive(Default)]
+struct OriginalConditionalAcquisitionCustody {
+    actual_lock_acquired: bool,
+    latest:
+        Option<aura_core::time::timeout::NegativeCleanupExecution<(), (), aura_core::AuraError>>,
+    first_operation_failure: Option<aura_core::AuraError>,
+    first_validation_failure: Option<aura_core::TimeoutBudgetError>,
+}
 impl RetainedEnrollmentVmControl {
+    pub(crate) fn retain_original_conditional_lock_ready(
+        &self,
+    ) -> Result<(), aura_core::AuraError> {
+        self.conditional_acquisition
+            .lock()
+            .map_err(|_| {
+                aura_core::AuraError::invalid(
+                    "original conditional acquisition observation is poisoned",
+                )
+            })?
+            .actual_lock_acquired = true;
+        Ok(())
+    }
+    pub(crate) fn retain_original_conditional_acquisition<T>(
+        &self,
+        observed: &aura_core::time::timeout::NegativeCleanupExecution<
+            &Self,
+            T,
+            aura_core::AuraError,
+        >,
+    ) -> Result<(), aura_core::AuraError> {
+        if !std::ptr::eq(observed.primary, self) {
+            return Err(aura_core::AuraError::permission_denied(
+                "conditional acquisition belongs to another original control",
+            ));
+        }
+        let mut retained = self.conditional_acquisition.lock().map_err(|_| {
+            aura_core::AuraError::invalid(
+                "original conditional acquisition observation is poisoned",
+            )
+        })?;
+        if matches!(&observed.operation, Some(Ok(_))) && !retained.actual_lock_acquired {
+            return Err(aura_core::AuraError::permission_denied(
+                "conditional acquisition has no original callback observation",
+            ));
+        }
+        let operation = observed
+            .operation
+            .as_ref()
+            .map(|actual| actual.as_ref().map(|_| ()).map_err(Clone::clone));
+        if let Some(Err(source)) = &operation {
+            retained
+                .first_operation_failure
+                .get_or_insert_with(|| source.clone());
+        }
+        if let Err(source) = &observed.validation {
+            retained
+                .first_validation_failure
+                .get_or_insert_with(|| source.clone());
+        }
+        retained.latest = Some(aura_core::time::timeout::NegativeCleanupExecution {
+            primary: (),
+            operation,
+            validation: observed.validation.clone(),
+        });
+        // The cursor records only outcomes; it never retains a mutex guard or
+        // grants signing authority from an observed successful acquisition.
+        Ok(())
+    }
+
+    fn require_original_conditional_acquisition(&self) -> Result<(), aura_core::AuraError> {
+        let retained = self.conditional_acquisition.lock().map_err(|_| {
+            aura_core::AuraError::invalid(
+                "original conditional acquisition observation is poisoned",
+            )
+        })?;
+        if let Some(source) = &retained.first_operation_failure {
+            return Err(source.clone());
+        }
+        if let Some(source) = &retained.first_validation_failure {
+            return Err(aura_core::AuraError::crypto_with_source(
+                "original conditional acquisition validation failed",
+                Arc::new(source.clone()),
+            ));
+        }
+        Ok(())
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", receiver_type = RetainedEnrollmentVmControl, family = "runtime_helper")]
+    pub(crate) fn original_conditional_signing_required(
+        &self,
+        effects: &AuraEffectSystem,
+        child: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<bool, aura_core::AuraError> {
+        self.require_runtime_owner(effects)?;
+        child.require_issued_notice_owner(self)?;
+        if self.conditional_signing.get().is_some() {
+            return Ok(true);
+        }
+        if self
+            .manifest
+            .final_inventory
+            .iter()
+            .any(|entry| entry.mode == aura_core::crypto::single_signer::SigningMode::Threshold)
+        {
+            return Err(aura_core::AuraError::permission_denied(
+                "original threshold control has no retained conditional signer",
+            ));
+        }
+        Ok(false)
+    }
+
+    pub(crate) fn original_conditional_signing_state(
+        &self,
+        effects: &AuraEffectSystem,
+        child: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<
+        Arc<
+            tokio::sync::Mutex<
+                crate::runtime::services::threshold_signing::OriginalIssuerTranscriptSigningCustody,
+            >,
+        >,
+        aura_core::AuraError,
+    > {
+        self.require_runtime_owner(effects)?;
+        child.require_issued_notice_owner(self)?;
+        self.require_original_conditional_acquisition()?;
+        self.conditional_signing.get().cloned().ok_or_else(|| {
+            aura_core::AuraError::permission_denied(
+                "original control has no retained conditional signer",
+            )
+        })
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", receiver_type = RetainedEnrollmentVmControl, family = "runtime_helper")]
+    pub(crate) fn bind_original_conditional_signing(
+        &self,
+        original: Arc<
+            tokio::sync::Mutex<
+                crate::runtime::services::threshold_signing::OriginalIssuerTranscriptSigningCustody,
+            >,
+        >,
+        child: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), aura_core::AuraError> {
+        child.require_issued_notice_owner(self)?;
+        original
+            .try_lock()
+            .map_err(|source| aura_core::AuraError::Internal {
+                message: "original conditional signing state is borrowed".into(),
+                source: Some(Arc::new(source)),
+            })?
+            .require_original_issued_control(self, child)?;
+        if let Some(retained) = self.conditional_signing.get() {
+            return if Arc::ptr_eq(retained, &original) {
+                Ok(())
+            } else {
+                Err(aura_core::AuraError::permission_denied(
+                    "original conditional signing state already bound",
+                ))
+            };
+        }
+        self.conditional_signing.set(original).map_err(|_| {
+            aura_core::AuraError::permission_denied("original conditional signing binding raced")
+        })
+    }
     pub(crate) fn expected_request_verifier(&self) -> &[u8] {
         &self.expected_request_verifier
     }
@@ -2461,6 +2910,11 @@ impl RetainedEnrollmentVmControl {
         }
         Ok(Self {
             expected_request_verifier: stored.confirmation_verifier,
+            conditional_signing: std::sync::OnceLock::new(),
+            #[allow(clippy::disallowed_types)] // Constructor for the synchronous outcome slot above.
+            conditional_acquisition: std::sync::Mutex::new(
+                OriginalConditionalAcquisitionCustody::default(),
+            ),
             runtime_owner,
             manifest: signed.manifest,
             digest,

@@ -29,6 +29,7 @@ use serde::Serialize;
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::ops::Deref;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 #[cfg(not(target_arch = "wasm32"))]
@@ -49,6 +50,100 @@ const ENCRYPTED_AURA_CONTENT_TYPES: &[&str] = &[
     "application/aura-opaque-object",
     "application/aura-encrypted-envelope",
 ];
+
+/// One original inbound frame and its reserved return slot. Dropping a
+/// borrowed receive restores the exact frame; successful processing must
+/// explicitly consume it. This capability cannot be cloned or rebuilt from
+/// envelope metadata.
+pub(crate) struct InboundEnvelopeLease<'a> {
+    effects: &'a AuraEffectSystem,
+    envelope: Option<TransportEnvelope>,
+    return_index: Option<usize>,
+    reserved: bool,
+}
+
+/// Deferred frames return in reverse take order so every original inbox index
+/// is restored, including when a caller is cancelled during an awaited check.
+pub(crate) struct DeferredInboundEnvelopeReturns<'a>(Vec<InboundEnvelopeLease<'a>>);
+
+impl<'a> DeferredInboundEnvelopeReturns<'a> {
+    pub(crate) fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub(crate) fn push(&mut self, lease: InboundEnvelopeLease<'a>) {
+        self.0.push(lease);
+    }
+}
+
+impl Drop for DeferredInboundEnvelopeReturns<'_> {
+    fn drop(&mut self) {
+        while let Some(lease) = self.0.pop() {
+            drop(lease);
+        }
+    }
+}
+
+impl<'a> InboundEnvelopeLease<'a> {
+    fn taken(effects: &'a AuraEffectSystem, envelope: TransportEnvelope, index: usize) -> Self {
+        Self {
+            effects,
+            envelope: Some(envelope),
+            return_index: Some(index),
+            reserved: true,
+        }
+    }
+
+    fn pending(effects: &'a AuraEffectSystem) -> Option<Self> {
+        effects.transport.reserve_external_return().then_some(Self {
+            effects,
+            envelope: None,
+            return_index: None,
+            reserved: true,
+        })
+    }
+
+    pub(crate) fn consume(mut self) -> TransportEnvelope {
+        let envelope = self.envelope.take().expect("admitted inbound frame");
+        self.effects.transport.consume_reserved();
+        self.reserved = false;
+        envelope
+    }
+
+    pub(crate) fn envelope_mut(&mut self) -> &mut TransportEnvelope {
+        self.envelope.as_mut().expect("admitted inbound frame")
+    }
+}
+
+impl Deref for InboundEnvelopeLease<'_> {
+    type Target = TransportEnvelope;
+
+    fn deref(&self) -> &Self::Target {
+        self.envelope.as_ref().expect("admitted inbound frame")
+    }
+}
+
+impl Drop for InboundEnvelopeLease<'_> {
+    fn drop(&mut self) {
+        if !self.reserved {
+            return;
+        }
+        if let Some(envelope) = self.envelope.take() {
+            if let Some(receipt) = envelope.receipt.as_ref() {
+                let device = envelope
+                    .metadata
+                    .get("aura-source-device-id")
+                    .map(String::as_str);
+                self.effects.transport.flow().allow_readmit(receipt, device);
+            }
+            self.effects
+                .transport
+                .return_reserved(envelope, self.return_index);
+        } else {
+            self.effects.transport.consume_reserved();
+        }
+    }
+}
 #[cfg(not(target_arch = "wasm32"))]
 async fn execute_transport_timeout<F, Fut, T>(
     timeout: std::time::Duration,
@@ -1104,6 +1199,39 @@ fn browser_target_uses_harness_transport(current_host: &str, normalized_target: 
 }
 
 impl AuraEffectSystem {
+    /// Receive with retained return capacity for callers that may discover an
+    /// unrelated frame or be cancelled before deciding to consume it.
+    pub(crate) async fn receive_envelope_retained(
+        &self,
+    ) -> Result<InboundEnvelopeLease<'_>, TransportError> {
+        self.drain_flow_checkpoint_envelopes();
+        loop {
+            let Some((envelope, index)) =
+                self.transport.take_reserved(|env| self.addressed_here(env))
+            else {
+                break;
+            };
+            let lease = InboundEnvelopeLease::taken(self, envelope, index);
+            match self.admit_inbound_envelope(&lease) {
+                Ok(true) => {
+                    self.transport.record_receive();
+                    return Ok(lease);
+                }
+                Ok(false) => {
+                    let _ = lease.consume();
+                }
+                Err(error) => {
+                    let _ = lease.consume();
+                    return Err(error);
+                }
+            }
+        }
+        let mut lease = InboundEnvelopeLease::pending(self).ok_or(TransportError::NoMessage)?;
+        lease.envelope = Some(self.receive_configured_envelope().await?);
+        self.transport.record_receive();
+        Ok(lease)
+    }
+
     /// Take the first inbound envelope addressed to this device that also
     /// satisfies `accept`, leaving every other envelope queued in order.
     pub(crate) fn take_inbound_envelope(
@@ -1126,6 +1254,37 @@ impl AuraEffectSystem {
             if self.admit_inbound_envelope(&env)? {
                 self.transport.record_receive();
                 return Ok(env);
+            }
+        }
+    }
+
+    /// Selectively borrow one addressed frame with its original inbox slot
+    /// reserved until the caller consumes it or returns it by dropping the lease.
+    pub(crate) fn take_inbound_envelope_retained(
+        &self,
+        accept: impl Fn(&TransportEnvelope) -> bool,
+    ) -> Result<InboundEnvelopeLease<'_>, TransportError> {
+        self.drain_flow_checkpoint_envelopes();
+        loop {
+            let Some((envelope, index)) = self
+                .transport
+                .take_reserved(|env| self.addressed_here(env) && accept(env))
+            else {
+                return Err(TransportError::NoMessage);
+            };
+            let lease = InboundEnvelopeLease::taken(self, envelope, index);
+            match self.admit_inbound_envelope(&lease) {
+                Ok(true) => {
+                    self.transport.record_receive();
+                    return Ok(lease);
+                }
+                Ok(false) => {
+                    let _ = lease.consume();
+                }
+                Err(error) => {
+                    let _ = lease.consume();
+                    return Err(error);
+                }
             }
         }
     }
@@ -1774,6 +1933,90 @@ mod original_readiness_tests {
             matches!(ready.await, Err(TransportError::ProtocolError { .. })),
             "native selected-provider failure survives readiness"
         );
+    }
+
+    #[tokio::test]
+    async fn configured_receive_failure_releases_original_return_reservation() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        let provider = Arc::new(CustomProviderProbe::default());
+        let effects = configured("configured-reservation-failure", vec![provider.clone()]);
+        provider.set_fault(true);
+        let error = match effects.receive_envelope_retained().await {
+            Err(error) => error,
+            Ok(_) => panic!("selected provider failure must not become a frame"),
+        };
+        assert!(matches!(error, TransportError::ProtocolError { .. }));
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            let frame = TransportEnvelope {
+                source: AuthorityId::new_from_entropy([index as u8; 32]),
+                destination: effects.authority_id,
+                context: ContextId::new_from_entropy([3; 32]),
+                payload: vec![index as u8],
+                metadata: std::collections::HashMap::new(),
+                receipt: None,
+            };
+            assert_eq!(
+                effects.queue_runtime_envelope(frame),
+                QueueEnvelopeOutcome::Queued,
+                "failed configured receive must release its reserved slot"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_native_receive_cancel_restores_original_full_inbox_slot() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        let effects = configured(
+            "selected-rotation-cancel-full-inbox",
+            vec![Arc::new(CustomProviderProbe::default())],
+        );
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            let frame = TransportEnvelope {
+                source: AuthorityId::new_from_entropy([index as u8; 32]),
+                destination: effects.authority_id,
+                context: ContextId::new_from_entropy([4; 32]),
+                payload: vec![index as u8],
+                metadata: std::collections::HashMap::new(),
+                receipt: None,
+            };
+            assert_eq!(
+                effects.queue_runtime_envelope(frame),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let waiting_for_vm = async {
+            let lease = effects
+                .take_inbound_envelope_retained(|frame| frame.payload == [7])
+                .expect("selected admitted frame");
+            std::future::pending::<()>().await;
+            lease.consume()
+        };
+        let mut waiting_for_vm = Box::pin(waiting_for_vm);
+        assert!(futures::poll!(waiting_for_vm.as_mut()).is_pending());
+        assert_eq!(effects.transport.inbox().read().len(), 255);
+        let extra = TransportEnvelope {
+            source: AuthorityId::new_from_entropy([9; 32]),
+            destination: effects.authority_id,
+            context: ContextId::new_from_entropy([4; 32]),
+            payload: vec![99],
+            metadata: std::collections::HashMap::new(),
+            receipt: None,
+        };
+        assert_eq!(
+            effects.queue_runtime_envelope(extra),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "fresh arrival cannot steal the selected frame's return slot"
+        );
+        drop(waiting_for_vm);
+        let inbox = effects.transport.inbox();
+        let inbox = inbox.read();
+        assert_eq!(inbox.len(), usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY));
+        assert_eq!(inbox[7].payload, [7]);
+        assert_eq!(inbox.iter().filter(|frame| frame.payload == [7]).count(), 1);
     }
 
     #[tokio::test]

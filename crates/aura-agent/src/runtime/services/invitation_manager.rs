@@ -30,17 +30,29 @@ enum CachedInvitationEntry {
         invitation: Invitation,
         root: Box<EnrollmentExecutionRoot<AdmittedEnrollmentManifest>>,
     },
+    RecoveredNegative {
+        invitation: Invitation,
+        admitted: std::sync::Arc<AdmittedEnrollmentManifest>,
+        // Keeps actual required custody alive even when no external observer exists.
+        _task: crate::task_registry::OriginalRequiredTaskHandle,
+    },
 }
 
 impl CachedInvitationEntry {
     fn invitation(&self) -> &Invitation {
         match self {
-            Self::Observed(invitation) | Self::AdmittedEnrollment { invitation, .. } => invitation,
+            Self::Observed(invitation)
+            | Self::AdmittedEnrollment { invitation, .. }
+            | Self::RecoveredNegative { invitation, .. } => invitation,
         }
     }
     fn commit_update(&mut self, updated: Invitation) -> Result<(), aura_core::AuraError> {
-        if let Self::AdmittedEnrollment { root, .. } = self {
-            let original = root.origin().canonical_invitation();
+        let original = match self {
+            Self::AdmittedEnrollment { root, .. } => Some(root.origin().canonical_invitation()),
+            Self::RecoveredNegative { admitted, .. } => Some(admitted.canonical_invitation()),
+            Self::Observed(_) => None,
+        };
+        if let Some(original) = original {
             // Exhaustive classification forces new invitation fields to choose
             // between immutable admission binding and mutable lifecycle state.
             let Invitation {
@@ -68,7 +80,9 @@ impl CachedInvitationEntry {
             }
         }
         match self {
-            Self::Observed(invitation) | Self::AdmittedEnrollment { invitation, .. } => {
+            Self::Observed(invitation)
+            | Self::AdmittedEnrollment { invitation, .. }
+            | Self::RecoveredNegative { invitation, .. } => {
                 *invitation = updated;
             }
         }
@@ -141,6 +155,11 @@ impl Default for InvitationState {
     category = "actor_owned"
 )]
 pub struct InvitationManager {
+    #[cfg(test)]
+    #[allow(clippy::disallowed_types)]
+    // Test gate transfer is synchronous and released before any await.
+    recovered_notice_crash_gate:
+        parking_lot::Mutex<Option<crate::handlers::invitation::RecoveredNoticeCrashGate>>,
     state: RwLock<InvitationState>,
     max_invitations: usize,
 }
@@ -160,6 +179,9 @@ impl InvitationManager {
     /// Create a new invitation manager with an explicit cache bound.
     pub fn with_capacity(max_invitations: usize) -> Self {
         Self {
+            #[cfg(test)]
+            #[allow(clippy::disallowed_types)] // Synchronous test gate slot declared above.
+            recovered_notice_crash_gate: parking_lot::Mutex::new(None),
             state: RwLock::new(InvitationState::default()),
             max_invitations: max_invitations.max(1),
         }
@@ -183,7 +205,13 @@ impl InvitationManager {
         while state.invitations.len() > max_invitations {
             let Some((oldest_tick, oldest_invitation_id)) = state
                 .invitation_lru
-                .first_key_value()
+                .iter()
+                .find(|(_, id)| {
+                    matches!(
+                        state.invitations.get(*id),
+                        Some(CachedInvitationEntry::Observed(_))
+                    )
+                })
                 .map(|(tick, invitation_id)| (*tick, invitation_id.clone()))
             else {
                 break;
@@ -321,7 +349,10 @@ impl InvitationManager {
                 let id = invitation.invitation_id.clone();
                 if matches!(
                     state.invitations.get(&id),
-                    Some(CachedInvitationEntry::AdmittedEnrollment { .. })
+                    Some(
+                        CachedInvitationEntry::AdmittedEnrollment { .. }
+                            | CachedInvitationEntry::RecoveredNegative { .. }
+                    )
                 ) {
                     return Err(owner_refused(
                         InvitationExecutionOwnerError::AlreadyRetained,
@@ -343,6 +374,90 @@ impl InvitationManager {
         .await
     }
 
+    #[cfg(test)]
+    pub(crate) fn install_recovered_notice_crash_gate_for_test(
+        &self,
+        invitation: InvitationId,
+        phase: crate::handlers::invitation::RecoveredNoticeCrashPhase,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut slot = self.recovered_notice_crash_gate.lock();
+        assert!(slot.is_none(), "one original test boundary");
+        *slot = Some(crate::handlers::invitation::RecoveredNoticeCrashGate {
+            invitation,
+            phase,
+            entered,
+            release: released,
+        });
+        (observed, release)
+    }
+    pub(crate) async fn launch_recovered_negative(
+        &self,
+        effects: std::sync::Arc<crate::runtime::AuraEffectSystem>,
+        admitted: std::sync::Arc<AdmittedEnrollmentManifest>,
+        window: super::enrollment_window::RecoveredEnrollmentNoticeWindowCapability,
+        tasks: &crate::task_registry::TaskGroup,
+    ) -> Result<(), aura_core::AuraError> {
+        window.require_admitted_owner(&admitted, effects.as_ref())?;
+        let mut state = self.state.write().await;
+        let invitation = admitted.canonical_invitation().clone();
+        let id = invitation.invitation_id.clone();
+        if matches!(
+            state.invitations.get(&id),
+            Some(
+                CachedInvitationEntry::AdmittedEnrollment { .. }
+                    | CachedInvitationEntry::RecoveredNegative { .. }
+            )
+        ) {
+            return Err(owner_refused(
+                InvitationExecutionOwnerError::AlreadyRetained,
+            ));
+        }
+        if state.invitations.len() >= self.max_invitations && !state.invitations.contains_key(&id) {
+            return Err(owner_refused(
+                InvitationExecutionOwnerError::AlreadyRetained,
+            ));
+        }
+        let task = crate::handlers::invitation::launch_recovered_enrollment_notice(
+            effects,
+            admitted.clone(),
+            window,
+            tasks,
+            #[cfg(test)]
+            self.recovered_notice_crash_gate.lock().take(),
+        )?;
+        // No suspension separates actual required admission from owner deposit.
+        state.invitations.insert(
+            id.clone(),
+            CachedInvitationEntry::RecoveredNegative {
+                invitation,
+                admitted,
+                _task: task,
+            },
+        );
+        Self::touch_invitation(&mut state, &id);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn recovered_negative_disposal(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, aura_core::AuraError>
+    {
+        let state = self.state.read().await;
+        match state.invitations.get(invitation) {
+            Some(CachedInvitationEntry::RecoveredNegative { _task: task, .. }) => {
+                Ok(task.disposal_observer())
+            }
+            _ => Err(owner_refused(InvitationExecutionOwnerError::Missing)),
+        }
+    }
+
     /// Transfer the same retained root exactly once. Later canonical queries
     /// return observations; they cannot recreate execution after handoff/drop.
     pub(crate) async fn take_admitted_enrollment(
@@ -357,10 +472,18 @@ impl InvitationManager {
                     .get_mut(invitation_id)
                     .ok_or_else(|| owner_refused(InvitationExecutionOwnerError::Missing))?;
                 let observation = entry.invitation().clone();
+                if matches!(entry, CachedInvitationEntry::RecoveredNegative { .. }) {
+                    return Err(owner_refused(
+                        InvitationExecutionOwnerError::AlreadyRetained,
+                    ));
+                }
                 match std::mem::replace(entry, CachedInvitationEntry::Observed(observation)) {
                     CachedInvitationEntry::AdmittedEnrollment { root, .. } => Ok(*root),
                     CachedInvitationEntry::Observed(_) => {
                         Err(owner_refused(InvitationExecutionOwnerError::Missing))
+                    }
+                    CachedInvitationEntry::RecoveredNegative { .. } => {
+                        unreachable!("checked before transfer")
                     }
                 }
             },

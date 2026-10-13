@@ -16,7 +16,8 @@ pub(crate) use socket::{
     accept_harness_command_submission, clear_harness_command_sender,
     complete_pending_semantic_submission, ensure_harness_command_listener,
     fail_pending_semantic_submission, register_harness_command_sender,
-    reject_harness_command_submission, track_pending_semantic_submission, PendingSemanticValueKind,
+    reject_harness_command_submission, track_pending_semantic_submission, HarnessSubmissionFailure,
+    PendingSemanticValueKind,
 };
 
 #[cfg(test)]
@@ -1146,6 +1147,7 @@ mod tests {
         assert_eq!(
             receipt,
             HarnessUiCommandReceipt::Rejected {
+                rejection: None,
                 reason: "harness command authentication failed".to_string(),
             }
         );
@@ -1198,7 +1200,7 @@ mod tests {
         });
         let receipt = read_framed_json::<HarnessUiCommandReceipt>(&mut stream).await;
         match receipt {
-            HarnessUiCommandReceipt::Rejected { reason } => {
+            HarnessUiCommandReceipt::Rejected { reason, .. } => {
                 assert!(
                     reason.contains("frame limit"),
                     "unexpected reason: {reason}"

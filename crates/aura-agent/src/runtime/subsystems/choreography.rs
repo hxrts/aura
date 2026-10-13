@@ -471,12 +471,31 @@ impl ChoreographyState {
 
     /// Cancel one session by explicit runtime session id and wake any blocked waiters.
     pub fn cancel_session(&mut self, session_id: RuntimeChoreographySessionId) -> bool {
+        self.cancel_session_owner(session_id, false)
+    }
+
+    /// Retire an opening owner without consuming packets still awaiting VM admission.
+    /// The caller's intake lease may restore its packet before or after this cleanup.
+    pub(crate) fn cancel_opening_session(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+    ) -> bool {
+        self.cancel_session_owner(session_id, true)
+    }
+
+    fn cancel_session_owner(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        preserve_inbox: bool,
+    ) -> bool {
         let removed = self.sessions.remove(&session_id).is_some();
         if let Some(notify) = self.session_inbox_notifiers.remove(&session_id) {
             notify.notify_waiters();
         }
         self.session_owners.remove(&session_id);
-        self.session_inboxes.remove(&session_id);
+        if !preserve_inbox {
+            self.session_inboxes.remove(&session_id);
+        }
         self.task_bindings.retain(|_, sid| *sid != session_id);
         removed
     }
@@ -554,19 +573,34 @@ impl ChoreographyState {
     pub fn take_unclaimed_session_envelope(
         &mut self,
         accept: impl Fn(&TransportEnvelope) -> bool,
-    ) -> Option<TransportEnvelope> {
+    ) -> Option<(RuntimeChoreographySessionId, usize, TransportEnvelope)> {
         let session_id = self
             .session_inboxes
             .iter()
             .filter(|(session_id, _)| !self.sessions.contains_key(session_id))
-            .find_map(|(session_id, inbox)| inbox.iter().any(&accept).then_some(*session_id))?;
+            .filter_map(|(session_id, inbox)| inbox.iter().any(&accept).then_some(*session_id))
+            .min()?;
         let inbox = self.session_inboxes.get_mut(&session_id)?;
         let position = inbox.iter().position(&accept)?;
         let envelope = inbox.remove(position);
         if inbox.is_empty() {
             self.session_inboxes.remove(&session_id);
         }
-        Some(envelope)
+        Some((session_id, position, envelope))
+    }
+
+    /// Return a borrowed unclaimed frame to its original session-local slot.
+    /// A session started while it was borrowed may now have a content waiter;
+    /// wake that waiter without routing this as a fresh transport arrival.
+    pub fn return_unclaimed_session_envelope(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        position: usize,
+        envelope: TransportEnvelope,
+    ) {
+        let inbox = self.session_inboxes.entry(session_id).or_default();
+        inbox.insert(position.min(inbox.len()), envelope);
+        self.notify_session_inbox(session_id);
     }
 
     /// Remove one matching choreography envelope from one session-local inbox.
@@ -898,9 +932,11 @@ mod tests {
         state.queue_session_envelope(open, envelope(1));
         state.queue_session_envelope(pending, envelope(2));
 
-        let taken = state
+        let (taken_session, taken_position, taken) = state
             .take_unclaimed_session_envelope(|_| true)
             .expect("unclaimed envelope");
+        assert_eq!(taken_session, pending);
+        assert_eq!(taken_position, 0);
         assert_eq!(taken.payload, vec![2]);
         assert!(state.take_unclaimed_session_envelope(|_| true).is_none());
         assert_eq!(state.session_inbox_len(open), 1);

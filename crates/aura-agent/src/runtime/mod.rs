@@ -177,7 +177,9 @@ pub use subsystems::choreography::{
     RuntimeChoreographySessionId, SessionOwnerCapability, SessionOwnerCapabilityScope,
 };
 #[allow(unused_imports)]
-pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
+pub use subsystems::{
+    ChoreographyState, CryptoSubsystem, JournalSubsystem, SimulationSharedInbox, TransportSubsystem,
+};
 
 pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;

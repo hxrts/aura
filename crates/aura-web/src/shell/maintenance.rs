@@ -376,15 +376,19 @@ async fn run_background_sync_pass(app_core: Arc<RwLock<AppCore>>) {
             log_web_error("warn", &error);
             return;
         }
-        if let Err(error) = runtime_workflows::timeout_runtime_call(
-            &runtime,
-            "web_background_sync",
-            "refresh_bootstrap_candidate_registration",
-            std::time::Duration::from_secs(3),
-            || runtime.refresh_bootstrap_candidate_registration(),
-        )
-        .await
-        {
+        let registration = async {
+            let original = runtime_workflows::workflow_timeout_budget(
+                &runtime,
+                std::time::Duration::from_secs(3),
+            )
+            .await
+            .map_err(aura_core::AuraError::from)?;
+            runtime
+                .refresh_bootstrap_candidate_registration(&original)
+                .await
+                .map_err(aura_core::AuraError::from)
+        };
+        if let Err(error) = registration.await {
             log_web_error(
                 "warn",
                 &WebUiError::operation(

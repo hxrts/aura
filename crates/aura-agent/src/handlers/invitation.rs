@@ -45,7 +45,7 @@ use aura_core::types::identifiers::{
 use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
-use aura_core::Receipt;
+use aura_core::{AuraError, Receipt};
 use aura_core::CapabilityName;
 use aura_core::{
     execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
@@ -102,6 +102,7 @@ mod contact;
 pub(crate) mod contact_confirmation;
 mod context_sync;
 mod device_enrollment;
+#[cfg(test)]
 pub(crate) use device_enrollment::EnrollmentVmTeardownFailure;
 pub(crate) mod enrollment_manifest_admission;
 pub(crate) mod enrollment_parent_archive;
@@ -157,7 +158,72 @@ pub(crate) struct AuthorizedInvitationCancellationCapability {
     runtime_owner: Arc<AuraEffectSystem>,
 
     invitation: Invitation,
-    outcome: aura_invitation::guards::GuardOutcome,
+    guard: RetainedCancellationGuardExecution,
+}
+/// The actual prepared cancellation retains command position and any native
+/// receipt through enclosing future disposal. A failed command stays latched;
+/// destructive reconciliation does not replay business guard commands.
+struct RetainedCancellationGuardExecution {
+    commands: Vec<aura_invitation::guards::EffectCommand>,
+    next: usize,
+    pending_receipt: Option<Receipt>,
+    first_failure: Option<AuraError>,
+}
+impl RetainedCancellationGuardExecution {
+    fn new(original: aura_invitation::guards::GuardOutcome) -> Self {
+        Self {
+            commands: original.effects,
+            next: 0,
+            pending_receipt: None,
+            first_failure: None,
+        }
+    }
+    async fn execute(
+        &mut self,
+        authority: &AuthorityContext,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<()> {
+        if let Some(source) = &self.first_failure {
+            return Err(AgentError::from(source.clone()));
+        }
+        let charge_peer = resolve_charge_peer(
+            &self.commands,
+            authority.authority_id(),
+            |command| match command {
+                aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+                aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+                _ => None,
+            },
+        );
+        while let Some(command) = self.commands.get(self.next).cloned() {
+            let result = execute_effect_command(
+                command,
+                authority,
+                authority.default_context_id(),
+                default_context_id_for_authority(charge_peer),
+                effects,
+                charge_peer,
+                &mut self.pending_receipt,
+                false,
+            )
+            .await;
+            match result {
+                Ok(()) => self.next += 1,
+                Err(source) => {
+                    let source = match source {
+                        AgentError::Aura(source) => source,
+                        source => AuraError::Internal {
+                            message: "original cancellation guard command failed".into(),
+                            source: Some(Arc::new(source)),
+                        },
+                    };
+                    self.first_failure = Some(source.clone());
+                    return Err(AgentError::from(source));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 impl AuthorizedInvitationCancellationCapability {
     pub(crate) fn invitation(&self) -> &Invitation {
@@ -167,15 +233,17 @@ impl AuthorizedInvitationCancellationCapability {
 
 mod enrollment_terminal_notice;
 pub(crate) use enrollment_terminal_notice::{
-    deliver_settled_cancelled_notice, settle_cancelled_notice,
+    launch_recovered_enrollment_notice, AcknowledgedCancelledNotice,
+    IssuerEnrollmentTerminalOutcome, OriginalIssuerCancellationTerminal, RetainedCancelledNotice,
+    SignedCancelledNotice,
 };
+#[cfg(test)]
+pub(crate) use enrollment_terminal_notice::{RecoveredNoticeCrashGate, RecoveredNoticeCrashPhase};
 pub(crate) mod enrollment_trust;
 mod enrollment_vm_admission;
 pub(super) use enrollment_vm_admission::retain_quorum_initial_request;
 mod required_channel_read;
 pub(crate) use enrollment_trust::VerifiedEnrollmentResponse;
-#[cfg(test)]
-pub(crate) use enrollment_vm_admission::issue_original_terminal_receipt;
 pub(crate) use enrollment_vm_admission::{
     EnrollmentVmAdmissionError, IssuerEnrollmentTerminalReceipt, VerifiedEnrollmentConfirmation,
     VerifiedEnrollmentFailureCapability,
@@ -577,6 +645,7 @@ pub struct InvitationHandler {
     /// Cache of pending invitations (for quick lookup)
     invitation_cache: Arc<InvitationManager>,
     trusted_key_resolver: TrustedKeyResolutionService,
+    threshold_signing: Option<crate::runtime::services::ThresholdSigningService>,
 }
 
 impl Clone for InvitationHandler {
@@ -590,6 +659,7 @@ impl Clone for InvitationHandler {
             service,
             invitation_cache: Arc::clone(&self.invitation_cache),
             trusted_key_resolver: self.trusted_key_resolver.clone(),
+            threshold_signing: self.threshold_signing.clone(),
         }
     }
 }
@@ -610,7 +680,31 @@ impl InvitationHandler {
             service,
             invitation_cache: Arc::new(InvitationManager::new()),
             trusted_key_resolver: TrustedKeyResolutionService::new(),
+            threshold_signing: None,
         })
+    }
+
+    /// Bind the initialized runtime signer retained by the agent. A newly
+    /// constructed signer has no adopted threshold state or quorum custody.
+    pub(crate) fn with_threshold_signing(
+        mut self,
+        signing: crate::runtime::services::ThresholdSigningService,
+    ) -> Self {
+        self.threshold_signing = Some(signing);
+        self
+    }
+
+    fn require_threshold_signing(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<&crate::runtime::services::ThresholdSigningService> {
+        let signing = self.threshold_signing.as_ref().ok_or_else(|| {
+            AgentError::invalid(
+                "required invitation quorum response has no retained runtime signer",
+            )
+        })?;
+        signing.require_effects(effects)?;
+        Ok(signing)
     }
 
     async fn persist_created_invitation(
@@ -831,10 +925,32 @@ impl InvitationHandler {
             .invitation_cache
             .contact_exists(local_authority, shareable.sender_id)
             .await
+            || self
+                .trusted_key_resolver
+                .has_retained_authority_trust(shareable.sender_id)
         {
             let proof = sender_proof.ok_or_else(|| {
                 AgentError::invalid("known sender invitation requires trusted sender proof")
             })?;
+            if shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION {
+                let epoch = proof.key_epoch.ok_or_else(|| {
+                    AgentError::invalid("quorum invitation requires an exact key epoch")
+                })?;
+                let trusted_key = self
+                    .trusted_key_resolver
+                    .resolve_authority_threshold_key(shareable.sender_id, epoch)
+                    .map_err(|source| {
+                        AgentError::invalid(format!(
+                            "known sender quorum key is not independently retained: {source}"
+                        ))
+                    })?;
+                if trusted_key.bytes() != proof.public_key.as_slice() {
+                    return Err(AgentError::invalid(
+                        "quorum invitation group key differs from trusted authority key",
+                    ));
+                }
+                return Ok(ImportedSenderTrust::TrustedThresholdGroupKey { epoch });
+            }
             let device_id = proof.sender_device_id.ok_or_else(|| {
                 AgentError::invalid("known sender invitation requires sender device id")
             })?;
@@ -1053,7 +1169,7 @@ impl InvitationHandler {
     }
 
     /// Resolve the effective invitation context for the outgoing invitation type.
-    async fn resolve_invitation_context(
+    pub(crate) async fn resolve_invitation_context(
         &self,
         effects: &AuraEffectSystem,
         invitation_type: &InvitationType,
@@ -1246,6 +1362,33 @@ impl InvitationHandler {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<PreparedInvitation> {
+        self.prepare_reserved_invitation_with_proof(
+            effects,
+            reserved,
+            receiver_id,
+            invitation_type,
+            receiver_nickname,
+            context_override,
+            message,
+            expires_in_ms,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn prepare_reserved_invitation_with_proof(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        reserved: ReservedInvitationIssuance,
+        receiver_id: AuthorityId,
+        invitation_type: InvitationType,
+        receiver_nickname: Option<String>,
+        context_override: Option<ContextId>,
+        message: Option<String>,
+        expires_in_ms: Option<u64>,
+        mut quorum: Option<issued_identity::VerifiedQuorumInvitationIssuance>,
+    ) -> AgentResult<PreparedInvitation> {
         #[cfg(test)]
         eprintln!("enrollment reserved handler stage: enter required reserved handler");
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
@@ -1306,11 +1449,27 @@ impl InvitationHandler {
             receiver_nickname,
         };
 
+        if quorum.is_some()
+            && !matches!(
+                invitation.invitation_type,
+                InvitationType::Contact { .. } | InvitationType::Guardian { .. }
+            )
+        {
+            return Err(AgentError::invalid(
+                "quorum issuance requires an external Contact or Guardian invitation",
+            ));
+        }
+
         let deferred_network_effects = if is_generic_contact_invitation(
             invitation.sender_id,
             invitation.receiver_id,
             &invitation.invitation_type,
         ) {
+            if quorum.is_some() {
+                return Err(AgentError::invalid(
+                    "recipient-bound quorum invitation cannot use generic contact issuance",
+                ));
+            }
             timeout_prepare_invitation_stage(
                 effects.as_ref(),
                 "retain_original_contact_identity",
@@ -1370,12 +1529,26 @@ impl InvitationHandler {
                     | InvitationType::Contact { .. }
                     | InvitationType::Channel { .. }
             ) {
-                timeout_prepare_invitation_stage(
-                    effects.as_ref(),
-                    "retain_original_guardian_identity",
-                    issued_identity::birth_original_identity(&reserved, &invitation),
-                )
-                .await?;
+                if let Some(verified) = quorum.take() {
+                    timeout_prepare_invitation_stage(
+                        effects.as_ref(),
+                        "retain_original_quorum_invitation_proof",
+                        verified.retain(&reserved, &invitation),
+                    )
+                    .await?;
+                } else {
+                    timeout_prepare_invitation_stage(
+                        effects.as_ref(),
+                        "retain_original_guardian_identity",
+                        issued_identity::birth_original_identity(&reserved, &invitation),
+                    )
+                    .await?;
+                }
+            }
+            if quorum.is_some() {
+                return Err(AgentError::invalid(
+                    "quorum invitation proof was not consumed before guard effects",
+                ));
             }
             tracing::debug!(
                 authority = %self.context.authority.authority_id(),
@@ -2214,9 +2387,23 @@ impl InvitationHandler {
         );
 
         let invitation_id = shareable.invitation_id.clone();
+        if shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION
+            && ShareableInvitation::recipient_device_from_code(code)
+                .map_err(|source| imported_invitation_verification_failure(source.into()))?
+                != Some(effects.device_id())
+        {
+            return Err(AgentError::invalid(
+                "quorum invitation is addressed to another device",
+            ));
+        }
 
         // Fast path: already cached.
-        if let Some(existing) = self.invitation_cache.get_invitation(&invitation_id).await {
+        if let Some(existing) = self
+            .invitation_cache
+            .get_invitation(&invitation_id)
+            .await
+            .filter(|_| shareable.version != ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION)
+        {
             tracing::debug!(
                 invitation_id = %invitation_id,
                 status = ?existing.status,
@@ -2238,14 +2425,17 @@ impl InvitationHandler {
         let own_id = self.context.authority.authority_id();
         let default_context_id = self.context.effect_context.context_id();
         #[cfg(test)]
-        let validated_import = if effects.is_testing() {
+        let validated_import = if effects.is_testing()
+            && shareable.version != ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION
+        {
             None
         } else {
             Some(
-                ValidatedImportedInvitation::verify_code(
+                ValidatedImportedInvitation::verify_code_for_device(
                     effects,
                     code,
                     own_id,
+                    effects.device_id(),
                     default_context_id,
                     now_ms,
                 )
@@ -2254,10 +2444,11 @@ impl InvitationHandler {
             )
         };
         #[cfg(not(test))]
-        let validated_import = ValidatedImportedInvitation::verify_code(
+        let validated_import = ValidatedImportedInvitation::verify_code_for_device(
             effects,
             code,
             own_id,
+            effects.device_id(),
             default_context_id,
             now_ms,
         )
@@ -2300,6 +2491,20 @@ impl InvitationHandler {
                     StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust);
                 stored.sender_proof_key =
                     sender_proof.as_ref().map(|proof| proof.public_key.clone());
+                stored.sender_proof_epoch =
+                    if shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION {
+                        sender_proof.as_ref().and_then(|proof| proof.key_epoch)
+                    } else {
+                        None
+                    };
+                stored.sender_proof_device =
+                    if shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION {
+                        sender_proof
+                            .as_ref()
+                            .and_then(|proof| proof.sender_device_id)
+                    } else {
+                        None
+                    };
                 InvitationCacheHandler::persist_imported_invitation_with_decision_lease(
                     effects, own_id, &stored, &lease,
                 )
@@ -2759,8 +2964,8 @@ impl InvitationHandler {
     pub(crate) async fn publish_verified_enrollment_cancellation(
         &self,
         effects: Arc<AuraEffectSystem>,
-        prepared: AuthorizedInvitationCancellationCapability,
-        cancelled: crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
+        prepared: &mut AuthorizedInvitationCancellationCapability,
+        cancelled: &crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
     ) -> AgentResult<InvitationResult> {
         cancelled
             .require_runtime_owner(&effects)
@@ -2808,8 +3013,9 @@ impl InvitationHandler {
             ));
         }
         let effects = record.runtime_owner();
-        let prepared = self.prepare_invitation_cancellation(record).await?;
-        self.publish_cancelled_invitation(effects, prepared).await
+        let mut prepared = self.prepare_invitation_cancellation(&record).await?;
+        self.publish_cancelled_invitation(effects, &mut prepared)
+            .await
     }
 
     #[aura_macros::capability_boundary(
@@ -2821,7 +3027,7 @@ impl InvitationHandler {
     pub(crate) async fn prepare_enrollment_cancellation(
         &self,
         issued: &enrollment_trust::RetainedEnrollmentVmControl,
-        record: SenderInvitationRecordCapability,
+        record: &SenderInvitationRecordCapability,
     ) -> AgentResult<AuthorizedInvitationCancellationCapability> {
         issued
             .require_runtime_owner(record.runtime_owner.as_ref())
@@ -2845,12 +3051,10 @@ impl InvitationHandler {
     )]
     pub(crate) async fn prepare_invitation_cancellation(
         &self,
-        record: SenderInvitationRecordCapability,
+        record: &SenderInvitationRecordCapability,
     ) -> AgentResult<AuthorizedInvitationCancellationCapability> {
-        let SenderInvitationRecordCapability {
-            runtime_owner,
-            invitation,
-        } = record;
+        let runtime_owner = Arc::clone(&record.runtime_owner);
+        let invitation = record.invitation.clone();
 
         if invitation.status != InvitationStatus::Pending
             && invitation.status != InvitationStatus::Cancelled
@@ -2879,7 +3083,7 @@ impl InvitationHandler {
         Ok(AuthorizedInvitationCancellationCapability {
             runtime_owner,
             invitation,
-            outcome,
+            guard: RetainedCancellationGuardExecution::new(outcome),
         })
     }
 
@@ -2892,7 +3096,7 @@ impl InvitationHandler {
     async fn publish_cancelled_invitation(
         &self,
         effects: Arc<AuraEffectSystem>,
-        prepared: AuthorizedInvitationCancellationCapability,
+        prepared: &mut AuthorizedInvitationCancellationCapability,
     ) -> AgentResult<InvitationResult> {
         if !Arc::ptr_eq(&effects, &prepared.runtime_owner) {
             return Err(AgentError::from(aura_core::AuraError::Invalid {
@@ -2902,19 +3106,18 @@ impl InvitationHandler {
                 )),
             }));
         }
-        let AuthorizedInvitationCancellationCapability {
-            runtime_owner: _,
-            invitation,
-            outcome,
-        } = prepared;
+        let invitation = &prepared.invitation;
         if invitation.status == InvitationStatus::Cancelled {
             return Ok(InvitationResult::new(
-                invitation.invitation_id,
+                invitation.invitation_id.clone(),
                 InvitationStatus::Cancelled,
             ));
         }
-        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
-        let mut cancelled = invitation;
+        prepared
+            .guard
+            .execute(&self.context.authority, effects.as_ref())
+            .await?;
+        let mut cancelled = invitation.clone();
         cancelled.status = InvitationStatus::Cancelled;
         // The required record may contain redacted enrollment secrets. Updating
         // this status must not replace the separately retained secret payload.
@@ -2993,6 +3196,39 @@ impl InvitationHandler {
             u64::from(budget.epoch),
             now.ts_ms,
         ))
+    }
+
+    pub(crate) async fn launch_recovered_negative_notice(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        admitted: Arc<enrollment_manifest_admission::AdmittedEnrollmentManifest>,
+        window: crate::runtime::services::enrollment_window::RecoveredEnrollmentNoticeWindowCapability,
+        tasks: &crate::task_registry::TaskGroup,
+    ) -> Result<(), aura_core::AuraError> {
+        self.invitation_cache
+            .launch_recovered_negative(effects, admitted, window, tasks)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_recovered_notice_crash_gate_for_test(
+        &self,
+        invitation: InvitationId,
+        phase: RecoveredNoticeCrashPhase,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        self.invitation_cache
+            .install_recovered_notice_crash_gate_for_test(invitation, phase)
+    }
+    #[cfg(test)]
+    pub(crate) async fn recovered_negative_notice_disposal_for_test(
+        &self,
+        id: &InvitationId,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, aura_core::AuraError>
+    {
+        self.invitation_cache.recovered_negative_disposal(id).await
     }
 
     /// List pending invitations (from cache)
@@ -3406,14 +3642,18 @@ async fn execute_effect_command_owned(
             .await
         }
         aura_invitation::guards::EffectCommand::RecordReceipt { operation, peer } => {
+            // Keep the original charged receipt in its owner while the journal
+            // write is pending. Cancellation of this future cannot consume it.
             execute_record_receipt(
                 operation,
                 peer,
                 charge_context_id,
-                pending_receipt.take(),
+                pending_receipt.clone(),
                 effects,
             )
-            .await
+            .await?;
+            *pending_receipt = None;
+            Ok(())
         }
     }
 }

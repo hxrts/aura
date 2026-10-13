@@ -78,6 +78,7 @@ pub struct CompatibilityStep {
     pub runtime_event_kind: Option<RuntimeEventKind>,
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
+    pub operation_after_instance: Option<String>,
     pub list_id: Option<ListId>,
     pub item_id: Option<String>,
     pub count: Option<u32>,

@@ -654,6 +654,7 @@ function resetUiObservationState(session, reason, options = {}) {
   rejectDomStateWaiters(session, reason);
   session.uiStateCache = null;
   session.uiStateCacheJson = null;
+  session.uiStateCacheGeneration = null;
   session.uiStateVersion = 0;
   session.domState = normalizeDomState({ text: "", ids: [] });
   session.renderHeartbeat = null;
@@ -783,10 +784,19 @@ function storeUiState(session, payload, source = "unknown") {
     return false;
   }
 
+  const rejection = uiStateStalenessReason(session, parsed);
+  if (rejection?.startsWith("semantic_revision_regressed:")) {
+    console.error(
+      `[driver] ui_state_reject_regression instance=${session.id} source=${source} reason=${rejection} generation=${session.currentUiGeneration ?? 0}`,
+    );
+    return false;
+  }
+
   const nextJson = trySerializeUiState(parsed);
   const changed = nextJson !== session.uiStateCacheJson;
   session.uiStateCache = parsed;
   session.uiStateCacheJson = nextJson;
+  session.uiStateCacheGeneration = session.currentUiGeneration ?? 0;
   session.lastUiStateSource = source;
   clearObservationMutationIfSatisfied(session, parsed);
   console.error(
@@ -1341,6 +1351,32 @@ function runSelfTest() {
     mutableSession.uiStateVersion ===
       observationVersionBeforeEquivalentSemanticPublish + 1,
     "authoritative ui publication changes must advance the browser observation version even when semantic revision does not",
+  );
+  mutableSession.currentUiGeneration = 2;
+  storeUiState(
+    mutableSession,
+    { screen: "settings", revision: { semantic_seq: 82, render_seq: 24 } },
+    "selftest_current_generation",
+  );
+  const beforeStalePublication = mutableSession.uiStateVersion;
+  assert(
+    !storeUiState(
+      mutableSession,
+      { screen: "neighborhood", revision: { semantic_seq: 13, render_seq: 30 } },
+      "selftest_stale_console_push",
+    ) &&
+      mutableSession.uiStateVersion === beforeStalePublication &&
+      mutableSession.uiStateCache?.screen === "settings",
+    "a lower semantic revision in the same generation must not erase accepted operation/event state",
+  );
+  mutableSession.currentUiGeneration = 3;
+  assert(
+    storeUiState(
+      mutableSession,
+      { screen: "neighborhood", revision: { semantic_seq: 13, render_seq: 2 } },
+      "selftest_new_generation",
+    ) && mutableSession.uiStateCache?.screen === "neighborhood",
+    "a newly observed generation may start with a lower semantic revision",
   );
   assert(
     uiStatePushWaitBaseline(mutableSession, 3) === 3 &&

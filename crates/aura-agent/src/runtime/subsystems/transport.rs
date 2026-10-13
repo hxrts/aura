@@ -21,9 +21,42 @@ use aura_core::AuthorityId;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
+
+/// Canonical simulation inbox owner. Every runtime sharing these frames also
+/// shares their reserved-return count; a bare inbox Arc cannot supply that
+/// custody when a borrowed receive is cancelled.
+#[derive(Debug)]
+pub struct SimulationSharedInbox {
+    inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    reserved_returns: Arc<AtomicUsize>,
+}
+
+impl SimulationSharedInbox {
+    pub fn new() -> Self {
+        Self {
+            inbox: Arc::new(RwLock::new(Vec::new())),
+            reserved_returns: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    pub(crate) fn from_unbounded_shared_transport(
+        inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Self {
+        Self {
+            inbox,
+            reserved_returns: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl Default for SimulationSharedInbox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub(crate) const LOCAL_TRANSPORT_INBOX_CAPACITY: u16 = 256;
 /// Bound on peers tracked for reachability; the stalest is evicted first.
@@ -94,6 +127,8 @@ impl TransportStatsCounters {
 struct TransportSubsystemShared {
     inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     inbox_notify: Arc<tokio::sync::Notify>,
+    fresh_arrival_notify: Arc<tokio::sync::Notify>,
+    reserved_returns: Arc<AtomicUsize>,
     shared_transport: Option<SharedTransport>,
     stats: Arc<TransportStatsCounters>,
     /// Last time each peer authority was verified reachable (ms).
@@ -119,6 +154,8 @@ impl TransportSubsystem {
             shared: Arc::new(TransportSubsystemShared {
                 inbox: Arc::new(RwLock::new(Vec::new())),
                 inbox_notify: Arc::new(tokio::sync::Notify::new()),
+                fresh_arrival_notify: Arc::new(tokio::sync::Notify::new()),
+                reserved_returns: Arc::new(AtomicUsize::new(0)),
                 shared_transport: None,
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
@@ -138,6 +175,8 @@ impl TransportSubsystem {
             shared: Arc::new(TransportSubsystemShared {
                 inbox: shared.inbox_for(authority),
                 inbox_notify: shared.inbox_notify(authority),
+                fresh_arrival_notify: shared.fresh_arrival_notify(authority),
+                reserved_returns: Arc::new(AtomicUsize::new(0)),
                 shared_transport: Some(shared),
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
@@ -151,14 +190,16 @@ impl TransportSubsystem {
     /// Stats are created internally since `TransportStatsCounters` is a private type.
     pub fn from_parts(
         handler: aura_effects::transport::RealTransportHandler,
-        inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        inbox: Arc<SimulationSharedInbox>,
         shared_transport: Option<SharedTransport>,
     ) -> Self {
         Self {
             handler,
             shared: Arc::new(TransportSubsystemShared {
-                inbox,
+                inbox: Arc::clone(&inbox.inbox),
                 inbox_notify: Arc::new(tokio::sync::Notify::new()),
+                fresh_arrival_notify: Arc::new(tokio::sync::Notify::new()),
+                reserved_returns: Arc::clone(&inbox.reserved_returns),
                 shared_transport,
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
@@ -191,6 +232,16 @@ impl TransportSubsystem {
         }
     }
 
+    /// New ingress only. Returned frames change inbox content but do not
+    /// constitute another transport arrival.
+    #[cfg(test)]
+    pub fn fresh_arrival_notify(&self, authority: AuthorityId) -> Arc<tokio::sync::Notify> {
+        match self.shared.shared_transport.as_ref() {
+            Some(shared) => shared.fresh_arrival_notify(authority),
+            None => Arc::clone(&self.shared.fresh_arrival_notify),
+        }
+    }
+
     /// Get shared stats reference
     #[allow(dead_code)] // Retained for stats-focused tests until production code reads counters directly.
     fn stats(&self) -> Arc<TransportStatsCounters> {
@@ -215,13 +266,86 @@ impl TransportSubsystem {
         }
 
         let mut inbox = self.shared.inbox.write();
-        if inbox.len() >= usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+        if inbox.len() + self.shared.reserved_returns.load(Ordering::Relaxed)
+            >= usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+        {
+            return QueueEnvelopeOutcome::DroppedOverflow;
+        }
+        inbox.push(envelope);
+        drop(inbox);
+        self.shared.inbox_notify.notify_waiters();
+        self.shared.fresh_arrival_notify.notify_waiters();
+        QueueEnvelopeOutcome::Queued
+    }
+
+    /// Return a previously admitted envelope to the same canonical inbox.
+    /// Matching consumers wake, while fresh-arrival observers stay asleep.
+    pub(crate) fn restore_envelope(&self, envelope: TransportEnvelope) -> QueueEnvelopeOutcome {
+        if let Some(shared) = self.shared.shared_transport.as_ref() {
+            shared.restore_envelope(envelope);
+            return QueueEnvelopeOutcome::Queued;
+        }
+        let mut inbox = self.shared.inbox.write();
+        if inbox.len() + self.shared.reserved_returns.load(Ordering::Relaxed)
+            >= usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+        {
             return QueueEnvelopeOutcome::DroppedOverflow;
         }
         inbox.push(envelope);
         drop(inbox);
         self.shared.inbox_notify.notify_waiters();
         QueueEnvelopeOutcome::Queued
+    }
+
+    /// Take one frame and reserve its exact inbox slot until explicit consume
+    /// or return. Queue admission observes this count under the same inbox lock.
+    pub(crate) fn take_reserved(
+        &self,
+        accept: impl Fn(&TransportEnvelope) -> bool,
+    ) -> Option<(TransportEnvelope, usize)> {
+        let mut inbox = self.shared.inbox.write();
+        let position = inbox.iter().position(accept)?;
+        let envelope = inbox.remove(position);
+        self.shared.reserved_returns.fetch_add(1, Ordering::Relaxed);
+        Some((envelope, position))
+    }
+
+    /// Reserve capacity before a configured provider's awaited receive.
+    pub(crate) fn reserve_external_return(&self) -> bool {
+        let inbox = self.shared.inbox.write();
+        if self.shared.shared_transport.is_none()
+            && inbox.len() + self.shared.reserved_returns.load(Ordering::Relaxed)
+                >= usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+        {
+            return false;
+        }
+        self.shared.reserved_returns.fetch_add(1, Ordering::Relaxed);
+        true
+    }
+
+    pub(crate) fn consume_reserved(&self) {
+        self.shared.reserved_returns.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn return_reserved(
+        &self,
+        envelope: TransportEnvelope,
+        original_index: Option<usize>,
+    ) {
+        if let Some(shared) = self.shared.shared_transport.as_ref() {
+            shared.restore_envelope_at(envelope, original_index);
+        } else {
+            let mut inbox = self.shared.inbox.write();
+            debug_assert!(
+                inbox.len() + self.shared.reserved_returns.load(Ordering::Relaxed)
+                    <= usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+            );
+            let index = original_index.unwrap_or(inbox.len()).min(inbox.len());
+            inbox.insert(index, envelope);
+            drop(inbox);
+            self.shared.inbox_notify.notify_waiters();
+        }
+        self.consume_reserved();
     }
 
     /// Drain all envelopes from the inbox
@@ -343,6 +467,47 @@ mod bounded_queue_tests {
     }
 
     #[test]
+    fn returned_frame_wakes_content_waiters_without_faking_fresh_arrival() {
+        for subsystem in [
+            TransportSubsystem::new(),
+            TransportSubsystem::with_shared_transport(
+                SharedTransport::new(),
+                AuthorityId::new_from_entropy([1; 32]),
+            ),
+        ] {
+            let authority = AuthorityId::new_from_entropy([1; 32]);
+            assert_eq!(
+                subsystem.queue_envelope(envelope(7)),
+                QueueEnvelopeOutcome::Queued
+            );
+            let original = subsystem.inbox().write().remove(0);
+            let content = subsystem.inbox_notify(authority);
+            let fresh = subsystem.fresh_arrival_notify(authority);
+            let content_wait = content.notified();
+            let fresh_wait = fresh.notified();
+            futures::pin_mut!(content_wait, fresh_wait);
+            content_wait.as_mut().enable();
+            fresh_wait.as_mut().enable();
+            assert_eq!(
+                subsystem.restore_envelope(original),
+                QueueEnvelopeOutcome::Queued
+            );
+            assert!(futures::FutureExt::now_or_never(content_wait).is_some());
+            assert!(futures::FutureExt::now_or_never(fresh_wait).is_none());
+            assert_eq!(subsystem.inbox_len(), 1);
+
+            let fresh_wait = fresh.notified();
+            futures::pin_mut!(fresh_wait);
+            fresh_wait.as_mut().enable();
+            assert_eq!(
+                subsystem.queue_envelope(envelope(8)),
+                QueueEnvelopeOutcome::Queued
+            );
+            assert!(futures::FutureExt::now_or_never(fresh_wait).is_some());
+        }
+    }
+
+    #[test]
     fn local_transport_inbox_drops_when_capacity_is_exhausted() {
         let subsystem = TransportSubsystem::new();
 
@@ -365,6 +530,94 @@ mod bounded_queue_tests {
             subsystem.inbox_len(),
             usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
         );
+    }
+
+    #[test]
+    fn reserved_return_keeps_original_frame_at_full_capacity() {
+        let subsystem = TransportSubsystem::new();
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            assert_eq!(
+                subsystem.queue_envelope(envelope(index as u8)),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let (original, index) = subsystem
+            .take_reserved(|frame| frame.payload == [7])
+            .expect("original admitted frame");
+        assert_eq!(subsystem.inbox_len(), 255);
+        assert_eq!(
+            subsystem.queue_envelope(envelope(99)),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "new ingress cannot steal the original return slot"
+        );
+        subsystem.return_reserved(original, Some(index));
+        assert_eq!(subsystem.inbox_len(), 256);
+        let inbox = subsystem.inbox();
+        let inbox = inbox.read();
+        assert_eq!(inbox.iter().filter(|frame| frame.payload == [7]).count(), 1);
+        assert_eq!(inbox[7].payload, [7], "original order is retained");
+    }
+
+    #[test]
+    fn shared_return_keeps_original_order_across_same_authority_inbox_aliases() {
+        let shared = SharedTransport::new();
+        let authority = AuthorityId::new_from_entropy([1; 32]);
+        let first = TransportSubsystem::with_shared_transport(shared.clone(), authority);
+        let second = TransportSubsystem::with_shared_transport(shared, authority);
+        for index in [1, 2, 3] {
+            assert_eq!(
+                first.queue_envelope(envelope(index)),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let (original, index) = first
+            .take_reserved(|frame| frame.payload == [2])
+            .expect("same authority original frame");
+        assert_eq!(
+            second.queue_envelope(envelope(4)),
+            QueueEnvelopeOutcome::Queued
+        );
+        first.return_reserved(original, Some(index));
+        let payloads: Vec<_> = second
+            .inbox()
+            .read()
+            .iter()
+            .map(|frame| frame.payload[0])
+            .collect();
+        assert_eq!(payloads, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn typed_shared_inbox_aliases_preserve_reserved_capacity() {
+        let owner = Arc::new(SimulationSharedInbox::new());
+        let first = TransportSubsystem::from_parts(
+            aura_effects::transport::RealTransportHandler::default(),
+            owner.clone(),
+            None,
+        );
+        let second = TransportSubsystem::from_parts(
+            aura_effects::transport::RealTransportHandler::default(),
+            owner,
+            None,
+        );
+        for index in 0..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            assert_eq!(
+                first.queue_envelope(envelope(index as u8)),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let (original, index) = first
+            .take_reserved(|frame| frame.payload == [7])
+            .expect("first alias retains original frame");
+        assert_eq!(second.inbox_len(), 255);
+        assert_eq!(
+            second.queue_envelope(envelope(99)),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "second alias sees first alias's original reserved return"
+        );
+        first.return_reserved(original, Some(index));
+        assert_eq!(second.inbox_len(), 256);
+        assert_eq!(second.inbox().read()[7].payload, [7]);
     }
 }
 

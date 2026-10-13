@@ -294,6 +294,95 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
     });
 }
 
+fn spawn_enrollment_import_callback(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    code: String,
+    manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
+    operation: WorkflowHandoffOperationOwner,
+) {
+    use aura_app::ui::workflows::invitation::{
+        import_device_enrollment_with_terminal_status, EnrollmentImportAdmissionRefusal,
+    };
+    let app = ctx.app_core_raw().clone();
+    let admission = app
+        .try_read()
+        .and_then(|core| core.enrollment_import_admission().cloned());
+    let host = ctx.enrollment_import_host_policy();
+    let admitted = match admission {
+        Some(admission) => import_device_enrollment_with_terminal_status(
+            &app,
+            &admission,
+            code,
+            manifest_transfer,
+            operation.workflow_instance_id(),
+            host,
+        ),
+        None => Err(EnrollmentImportAdmissionRefusal::unavailable()),
+    };
+    let mut observer = match admitted {
+        Ok(observer) => observer,
+        Err(refused) => {
+            let detail = refused.source_error().to_string();
+            let publication =
+                operation.fail_before_handoff_with_custody(refused.semantic_error(), refused);
+            spawn_ctx(ctx, async move {
+                match publication.await {
+                    Ok(_) => emit_error_toast(&tx, "devices", detail).await,
+                    Err(source) => {
+                        tracing::error!(%source, "original enrollment refusal publication unresolved")
+                    }
+                }
+            });
+            return;
+        }
+    };
+    let transfer = match operation.handoff_enrollment_import(&mut observer) {
+        Ok(transfer) => transfer,
+        Err((operation, error)) => {
+            let publication =
+                operation.fail_before_handoff_with_custody(error.semantic_error(), error);
+            spawn_ctx(ctx, async move {
+                if let Err(source) = publication.await {
+                    tracing::error!(%source, "original enrollment import handoff refusal publication unresolved");
+                }
+            });
+            return;
+        }
+    };
+    spawn_ctx(ctx, async move {
+        match transfer
+            .run_workflow(
+                app,
+                tx.clone(),
+                "import device enrollment workflow",
+                observer,
+            )
+            .await
+        {
+            Ok(_completed) => {
+                send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
+                send_ui_update_required(
+                    &tx,
+                    UiUpdate::ToastAdded(ToastMessage::success(
+                        "devices",
+                        "Device enrollment invitation accepted",
+                    )),
+                )
+                .await;
+            }
+            Err(error) => {
+                emit_error_toast(
+                    &tx,
+                    "devices",
+                    format!("Import device enrollment failed: {error}"),
+                )
+                .await
+            }
+        }
+    });
+}
+
 fn invitation_import_success_updates(code: &str) -> Vec<UiUpdate> {
     vec![UiUpdate::InvitationImported {
         invitation_code: code.to_string(),
@@ -355,13 +444,19 @@ async fn run_invitation_import_flow(
     for update in invitation_import_success_updates(&code) {
         send_ui_update_required(&tx, update).await;
     }
-    let accept_owner = submit_verified_import_accept(
+    let accept_owner = match submit_verified_import_accept(
         app_core.clone(),
         ctx.tasks(),
         tx.clone(),
         accept_operation_id,
         accept_kind,
-    );
+    ) {
+        Ok(owner) => owner,
+        Err(source) => {
+            emit_error_toast(&tx, "invitation", source.to_string()).await;
+            return;
+        }
+    };
     let workflow_instance_id = accept_owner.workflow_instance_id();
     let transfer =
         accept_owner.handoff_to_app_workflow(SemanticOperationTransferScope::AcceptInvitation);
@@ -499,49 +594,12 @@ impl AppCallbacks {
                 aura_app::ui::contract::EnrollmentManifestTransferInput,
             >,
                   operation: WorkflowHandoffOperationOwner| {
-                let persist_ctx = ctx.clone();
-                spawn_handoff_workflow_callback_with_success(
+                spawn_enrollment_import_callback(
                     ctx.clone(),
                     tx.clone(),
+                    code,
+                    manifest_transfer,
                     operation,
-                    WorkflowHandoffSpec::new(
-                        SemanticOperationTransferScope::ImportDeviceEnrollment,
-                        "devices",
-                        "Import device enrollment failed",
-                        "import device enrollment workflow",
-                    ),
-                    move |app_core, instance| async move {
-                        aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
-                        &app_core,code,manifest_transfer,instance).await
-                    },
-                    move |tx, completion| async move {
-                        if let Err(error) = persist_ctx
-                            .persist_completed_enrollment_identity(&completion)
-                            .await
-                        {
-                            tracing::error!(error=%error,"Accepted enrollment profile persistence failed");
-                            send_ui_update_required(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "devices",
-                                    format!(
-                                        "Enrollment accepted; profile persistence failed: {error}"
-                                    ),
-                                )),
-                            )
-                            .await;
-                            return;
-                        }
-                        send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "devices",
-                                "Device enrollment invitation accepted",
-                            )),
-                        )
-                        .await;
-                    },
                 );
             },
         )

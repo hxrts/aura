@@ -28,7 +28,7 @@ pub mod vm_fragment;
 pub use choreography::ChoreographyState;
 pub use crypto::CryptoSubsystem;
 pub use journal::JournalSubsystem;
-pub use transport::TransportSubsystem;
+pub use transport::{SimulationSharedInbox, TransportSubsystem};
 pub use vm_bridge::VmBridgeState;
 #[allow(unused_imports)] // Re-exported for runtime-facing ownership helpers and tests.
 pub(in crate::runtime) use vm_fragment::{

@@ -563,7 +563,7 @@ async fn verify_authenticated_access_token(
 /// ```
 #[derive(Debug)]
 pub struct ProfileOwnedSecureStorage {
-    backend: Box<ProductionSecureStorageHandler>,
+    backend: std::sync::Arc<ProductionSecureStorageHandler>,
     _owner: std::sync::Arc<crate::profile_storage::OwnedProfileLease>,
 }
 impl ProfileOwnedSecureStorage {
@@ -714,7 +714,7 @@ impl ProductionSecureStorageHandler {
             );
         }
         Ok(Self::ProfileOwned(ProfileOwnedSecureStorage {
-            backend: Box::new(self),
+            backend: std::sync::Arc::new(self),
             _owner: owner,
         }))
     }
@@ -800,7 +800,7 @@ impl ProductionSecureStorageHandler {
             used_tokens: Mutex::new(HashSet::new()),
         };
         Ok(Self::ProfileOwned(ProfileOwnedSecureStorage {
-            backend: Box::new(Self::FilesystemFallback(handler)),
+            backend: std::sync::Arc::new(Self::FilesystemFallback(handler)),
             _owner: owner,
         }))
     }
@@ -4703,6 +4703,8 @@ mod platform_secure_record_fault_tests {
 
 #[cfg(unix)]
 mod allocation_lifetime;
+#[cfg(target_arch = "wasm32")]
+mod browser_allocation_lifetime;
 #[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]
 mod test_keyring;
 #[cfg(unix)]
@@ -4757,3 +4759,41 @@ impl ProductionSecureStorageHandler {
 
 #[cfg(all(unix, test))]
 pub(crate) use allocation_lifetime::initialization_cutover_checkpoint;
+
+#[cfg(target_arch = "wasm32")]
+impl ProductionSecureStorageHandler {
+    /// Match the exact selected browser writer, not a profile name.
+    pub fn owns_selected_profile_lifetime_channel(
+        &self,
+        root: &aura_core::effects::secret_lifetime::ProfileSecretLifetimeRecoveryCapability,
+    ) -> bool {
+        matches!(self, Self::ProfileOwned(owned)
+            if root.belongs_to_provider(&owned._owner.lifetime_provider_identity))
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "ProfileSecretLifetimeRecoveryCapability",
+        family = "runtime_helper"
+    )]
+    /// Transfer the selected browser writer into an allocation lifetime
+    /// channel. The returned ordinary storage and channel retain the same
+    /// Web Lock lease and encrypted IndexedDB backend.
+    pub fn into_selected_profile_lifetime_channel(
+        self,
+    ) -> Result<
+        (
+            Self,
+            aura_core::effects::secret_lifetime::ProfileSecretLifetimeRecoveryCapability,
+        ),
+        aura_core::AuraError,
+    > {
+        let Self::ProfileOwned(owned) = self else {
+            return Err(aura_core::AuraError::invalid(
+                "browser lifetime handoff requires selected profile owner",
+            ));
+        };
+        let channel = browser_allocation_lifetime::selected_profile_channel(&owned)?;
+        Ok((Self::ProfileOwned(owned), channel))
+    }
+}

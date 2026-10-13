@@ -378,6 +378,32 @@ mod tests {
     use aura_effects::crypto::RealCryptoHandler;
 
     #[test]
+    fn reviewed_negative_terminal_policy_rejects_schema_scope_and_outcome_substitution() {
+        use crate::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy;
+        let original = manifest(vec![114; 32]);
+        let policy = EnrollmentNegativeTerminalPolicy::from_manifest(&original).unwrap();
+        policy.require_manifest(&original).unwrap();
+        for field in ["version", "manifest_digest", "outcomes"] {
+            let mut wire = serde_json::to_value(&policy).unwrap();
+            match field {
+                "version" => wire[field] = serde_json::json!(2),
+                "manifest_digest" => wire[field][0] = serde_json::json!(255),
+                "outcomes" => wire[field][0] = serde_json::json!("Cancelled"),
+                _ => unreachable!(),
+            }
+            let substituted: EnrollmentNegativeTerminalPolicy =
+                serde_json::from_value(wire).unwrap();
+            assert!(substituted.require_manifest(&original).is_err());
+        }
+        let mut incomplete = serde_json::to_value(&policy).unwrap();
+        incomplete.as_object_mut().unwrap().remove("outcomes");
+        assert!(serde_json::from_value::<EnrollmentNegativeTerminalPolicy>(incomplete).is_err());
+        let mut other_enrollment = original;
+        other_enrollment.invitation = aura_core::InvitationId::new("another-enrollment");
+        assert!(policy.require_manifest(&other_enrollment).is_err());
+    }
+
+    #[test]
     fn missing_final_inventory_and_obsolete_manifest_versions_are_rejected() {
         let current = manifest(vec![114; 32]);
         let mut missing = serde_json::to_value(&current).unwrap();

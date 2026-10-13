@@ -4,6 +4,10 @@
 
 Deterministic simulation runtime for testing and protocol verification. Implements simulation-specific effect handlers enabling reproducible testing without real delays or inherent failures.
 
+The effect composer passes one `aura-agent::SimulationSharedInbox` owner to
+simulated peers sharing an inbox, keeping frame storage and reserved return
+capacity together across runtimes.
+
 ## Scope
 
 | Belongs here | Does not belong here |

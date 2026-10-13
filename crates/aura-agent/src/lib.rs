@@ -107,6 +107,8 @@ mod runtime;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::subsystems::transport::QueueEnvelopeOutcome;
 #[cfg(feature = "choreo-backend-telltale-machine")]
+pub use runtime::SimulationSharedInbox;
+#[cfg(feature = "choreo-backend-telltale-machine")]
 mod task_registry;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 mod token_profiles;

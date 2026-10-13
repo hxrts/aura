@@ -96,6 +96,48 @@ fn into_ui_operation_handle(
     ui_operation_handle_from_contract(handle)
 }
 
+fn rejected_command_error(
+    reason: String,
+    rejection: Option<aura_app::ui::scenarios::SemanticCommandRejection>,
+    operation_name: &str,
+) -> anyhow::Error {
+    let context = format!("{operation_name} rejected: {reason}");
+    match rejection {
+        Some(rejection) => anyhow::Error::new(rejection).context(context),
+        None => anyhow::anyhow!("{context}"),
+    }
+}
+
+#[cfg(test)]
+mod rejected_command_error_tests {
+    use super::*;
+
+    #[test]
+    fn native_rejection_survives_harness_context() {
+        let rejection = aura_app::ui::scenarios::SemanticCommandRejection {
+            error: aura_app::ui::contract::SemanticOperationError::new(
+                aura_app::ui::contract::SemanticFailureDomain::Command,
+                aura_app::ui::contract::SemanticFailureCode::InvalidArgument,
+            ),
+            reason: Some(aura_app::ui::scenarios::SemanticRejectionReason::NicknameEmpty),
+        };
+        let error = rejected_command_error(
+            "nickname is empty".to_owned(),
+            Some(rejection.clone()),
+            "create account",
+        );
+        assert_eq!(
+            error.downcast_ref::<aura_app::ui::scenarios::SemanticCommandRejection>(),
+            Some(&rejection),
+        );
+        let diagnostic =
+            rejected_command_error("nickname is empty".to_owned(), None, "create account");
+        assert!(diagnostic
+            .downcast_ref::<aura_app::ui::scenarios::SemanticCommandRejection>()
+            .is_none());
+    }
+}
+
 fn require_ui_operation_handle(
     receipt: HarnessUiCommandReceipt,
     operation_name: &str,
@@ -107,8 +149,8 @@ fn require_ui_operation_handle(
         HarnessUiCommandReceipt::Accepted { .. } => {
             anyhow::bail!("{operation_name} accepted without a canonical ui operation handle")
         }
-        HarnessUiCommandReceipt::Rejected { reason } => {
-            anyhow::bail!("{operation_name} rejected: {reason}")
+        HarnessUiCommandReceipt::Rejected { reason, rejection } => {
+            Err(rejected_command_error(reason, rejection, operation_name))
         }
     }
 }
@@ -186,8 +228,8 @@ fn require_channel_binding_submission(
         } => anyhow::bail!(
             "{operation_name} returned an unexpected contact invitation payload without a canonical operation handle"
         ),
-        HarnessUiCommandReceipt::Rejected { reason } => {
-            anyhow::bail!("{operation_name} rejected: {reason}")
+        HarnessUiCommandReceipt::Rejected { reason, rejection } => {
+            Err(rejected_command_error(reason, rejection, operation_name))
         }
     }
 }
@@ -253,8 +295,8 @@ fn require_contact_invitation_submission(
         } => anyhow::bail!(
             "{operation_name} returned an unexpected channel binding payload without a canonical operation handle"
         ),
-        HarnessUiCommandReceipt::Rejected { reason } => {
-            anyhow::bail!("{operation_name} rejected: {reason}")
+        HarnessUiCommandReceipt::Rejected { reason, rejection } => {
+            Err(rejected_command_error(reason, rejection, operation_name))
         }
     }
 }
@@ -893,9 +935,11 @@ impl LocalPtyBackend {
         command: &HarnessUiCommand,
     ) -> Result<HarnessUiCommandReceipt> {
         match self.send_harness_command_receipt(command)? {
-            HarnessUiCommandReceipt::Rejected { reason } => {
-                anyhow::bail!("TUI harness command rejected: {reason}")
-            }
+            HarnessUiCommandReceipt::Rejected { reason, rejection } => Err(rejected_command_error(
+                reason,
+                rejection,
+                "TUI harness command",
+            )),
             receipt => Ok(receipt),
         }
     }
@@ -1250,7 +1294,7 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         let deadline = Instant::now() + timeout;
-        let mut last_ping_error: Option<String> = None;
+        let mut last_ping_error: Option<anyhow::Error> = None;
         loop {
             if let Ok(snapshot) = self.ui_snapshot() {
                 if snapshot.readiness == UiReadiness::Ready {
@@ -1259,12 +1303,15 @@ impl InstanceBackend for LocalPtyBackend {
                         | Ok(HarnessUiCommandReceipt::AcceptedWithOperation { .. }) => {
                             return Ok(());
                         }
-                        Ok(HarnessUiCommandReceipt::Rejected { reason }) => {
-                            last_ping_error =
-                                Some(format!("command plane rejected readiness ping: {reason}"));
+                        Ok(HarnessUiCommandReceipt::Rejected { reason, rejection }) => {
+                            last_ping_error = Some(rejected_command_error(
+                                reason,
+                                rejection,
+                                "command plane readiness ping",
+                            ));
                         }
                         Err(error) => {
-                            last_ping_error = Some(error.to_string());
+                            last_ping_error = Some(error);
                         }
                     }
                 }
@@ -1287,8 +1334,14 @@ impl InstanceBackend for LocalPtyBackend {
             }
             if Instant::now() >= deadline {
                 let readiness = self.ui_snapshot().ok().map(|snapshot| snapshot.readiness);
+                if let Some(source) = last_ping_error {
+                    return Err(source.context(format!(
+                        "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}",
+                        self.config.id, timeout,
+                    )));
+                }
                 anyhow::bail!(
-                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}; command_plane={last_ping_error:?}",
+                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}",
                     self.config.id,
                     timeout,
                 );
@@ -1878,8 +1931,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     } => Ok(SemanticCommandResponse::accepted(
                         SemanticCommandValue::DeviceEnrollmentSetup { setup_code },
                     )),
-                    HarnessUiCommandReceipt::Rejected { reason } => {
-                        anyhow::bail!("setup export rejected: {reason}")
+                    HarnessUiCommandReceipt::Rejected { reason, rejection } => {
+                        Err(rejected_command_error(reason, rejection, "setup export"))
                     }
                     _ => anyhow::bail!(
                         "setup export did not return its declared immediate setup-code value"

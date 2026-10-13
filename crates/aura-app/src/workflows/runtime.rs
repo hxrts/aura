@@ -252,7 +252,7 @@ where
     timeout_runtime_call_under_budget(runtime, &budget, operation, stage, call).await
 }
 
-async fn timeout_runtime_call_under_budget<T, F, Fut>(
+pub(crate) async fn timeout_runtime_call_under_budget<T, F, Fut>(
     runtime: &Arc<dyn RuntimeBridge>,
     budget: &TimeoutBudget,
     operation: &'static str,

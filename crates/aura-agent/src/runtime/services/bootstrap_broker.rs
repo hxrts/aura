@@ -8,7 +8,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aura_core::types::identifiers::AuthorityId;
+#[cfg(test)]
+use aura_core::invitation::InvitationPurpose;
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::TaskGroup;
@@ -25,7 +27,6 @@ use tokio::time::{timeout, Instant};
 const DEFAULT_LOOPBACK_BIND_ADDR: &str = "127.0.0.1:0";
 #[cfg(not(target_arch = "wasm32"))]
 const AUTHORIZATION_HEADER: &str = "authorization";
-#[cfg(not(target_arch = "wasm32"))]
 const INVITATION_RETRIEVAL_HEADER: &str = "x-aura-invitation-retrieval-token";
 #[cfg(not(target_arch = "wasm32"))]
 const BEARER_PREFIX: &str = "Bearer ";
@@ -36,7 +37,8 @@ const MAX_BOOTSTRAP_CANDIDATES: usize = 256;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_PENDING_INVITATIONS: usize = 256;
 #[cfg(not(target_arch = "wasm32"))]
-const MAX_INVITATIONS_PER_RECIPIENT: usize = 16;
+const MAX_INVITATIONS_PER_RECIPIENT: usize =
+    aura_core::invitation::MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT;
 #[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_MAX_BOOTSTRAP_CONNECTIONS: usize = 64;
 #[cfg(not(target_arch = "wasm32"))]
@@ -161,6 +163,7 @@ impl BootstrapBrokerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BootstrapBrokerRegistration {
     pub authority_id: String,
+    pub device_id: DeviceId,
     pub address: String,
     pub invitation_retrieval_token: String,
     pub nickname_suggestion: Option<String>,
@@ -170,6 +173,7 @@ pub struct BootstrapBrokerRegistration {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BootstrapBrokerCandidateRecord {
     pub authority_id: String,
+    pub device_id: DeviceId,
     pub address: String,
     pub nickname_suggestion: Option<String>,
     pub discovered_at_ms: u64,
@@ -181,19 +185,14 @@ impl BootstrapBrokerCandidateRecord {
     }
 }
 
-/// Wire-format invitation payload relayed by the bootstrap broker.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BootstrapBrokerInvitation {
-    pub recipient_authority_id: String,
-    pub invitation_code: String,
-}
+pub use aura_core::invitation::BootstrapBrokerInvitation;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct BootstrapBrokerState {
     candidates: HashMap<String, BootstrapBrokerCandidateRecord>,
-    invitations: HashMap<String, Vec<String>>,
-    invitation_credentials: HashMap<String, String>,
+    invitations: HashMap<(String, DeviceId), Vec<BootstrapBrokerInvitation>>,
+    invitation_credentials: HashMap<(String, DeviceId), String>,
     started_at: Instant,
 }
 
@@ -313,9 +312,10 @@ impl LocalBootstrapBrokerService {
     pub async fn take_invitations(
         &self,
         authority_id: &str,
+        device_id: DeviceId,
         retrieval_token: &str,
-    ) -> Result<Vec<String>, String> {
-        take_invitations(&self.shared, authority_id, retrieval_token).await
+    ) -> Result<Vec<BootstrapBrokerInvitation>, String> {
+        take_invitations(&self.shared, authority_id, device_id, retrieval_token).await
     }
 
     pub fn start(&self, tasks: &TaskGroup) {
@@ -414,7 +414,10 @@ async fn insert_registration(
     if registration.invitation_retrieval_token.is_empty() {
         return Err("bootstrap broker invitation retrieval token must not be empty".to_string());
     }
-    let key = format!("{}@{}", registration.authority_id, registration.address);
+    let key = format!(
+        "{}:{}@{}",
+        registration.authority_id, registration.device_id, registration.address
+    );
     let mut state = shared.write().await;
     if !state.candidates.contains_key(&key) && state.candidates.len() >= MAX_BOOTSTRAP_CANDIDATES {
         if let Some(oldest_key) = state
@@ -427,13 +430,14 @@ async fn insert_registration(
         }
     }
     state.invitation_credentials.insert(
-        registration.authority_id.clone(),
+        (registration.authority_id.clone(), registration.device_id),
         registration.invitation_retrieval_token,
     );
     state.candidates.insert(
         key,
         BootstrapBrokerCandidateRecord {
             authority_id: registration.authority_id,
+            device_id: registration.device_id,
             address: registration.address,
             nickname_suggestion: registration.nickname_suggestion,
             discovered_at_ms: now_ms,
@@ -448,12 +452,12 @@ async fn queue_invitation(
     invitation: BootstrapBrokerInvitation,
 ) -> Result<(), String> {
     let mut state = shared.write().await;
+    let recipient = (
+        invitation.recipient_authority_id.clone(),
+        invitation.recipient_device_id,
+    );
     let pending_total: usize = state.invitations.values().map(Vec::len).sum();
-    let recipient_pending = state
-        .invitations
-        .get(&invitation.recipient_authority_id)
-        .map(Vec::len)
-        .unwrap_or(0);
+    let recipient_pending = state.invitations.get(&recipient).map(Vec::len).unwrap_or(0);
     if pending_total >= MAX_PENDING_INVITATIONS {
         return Err("bootstrap broker pending invitation limit reached".to_string());
     }
@@ -462,9 +466,9 @@ async fn queue_invitation(
     }
     state
         .invitations
-        .entry(invitation.recipient_authority_id)
+        .entry(recipient)
         .or_default()
-        .push(invitation.invitation_code);
+        .push(invitation);
     Ok(())
 }
 
@@ -472,16 +476,18 @@ async fn queue_invitation(
 async fn take_invitations(
     shared: &Arc<RwLock<BootstrapBrokerState>>,
     authority_id: &str,
+    device_id: DeviceId,
     retrieval_token: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<BootstrapBrokerInvitation>, String> {
     let mut state = shared.write().await;
-    match state.invitation_credentials.get(authority_id) {
+    let recipient = (authority_id.to_owned(), device_id);
+    match state.invitation_credentials.get(&recipient) {
         Some(expected) if constant_time_eq_str(expected, retrieval_token) => {}
         _ => return Err("bootstrap broker invitation credential rejected".to_string()),
     }
-    let invitations = state.invitations.remove(authority_id).unwrap_or_default();
+    let invitations = state.invitations.remove(&recipient).unwrap_or_default();
     if !invitations.is_empty() {
-        state.invitation_credentials.remove(authority_id);
+        state.invitation_credentials.remove(&recipient);
     }
     Ok(invitations)
 }
@@ -548,7 +554,7 @@ async fn handle_http_connection(
             )
             .await;
         }
-        ("POST", "/v1/bootstrap/register") => {
+        ("POST", "/v2/bootstrap/register") => {
             let registration: BootstrapBrokerRegistration =
                 match serde_json::from_slice(&request.body) {
                     Ok(registration) => registration,
@@ -579,7 +585,7 @@ async fn handle_http_connection(
             }
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
-        ("GET", "/v1/bootstrap/candidates") => {
+        ("GET", "/v2/bootstrap/candidates") => {
             let now_ms = broker_elapsed_ms(&shared).await;
             prune_candidates(&shared, now_ms, registration_ttl).await;
             let candidates: Vec<_> = shared.read().await.candidates.values().cloned().collect();
@@ -599,7 +605,7 @@ async fn handle_http_connection(
                 }
             }
         }
-        ("POST", "/v1/bootstrap/invitations") => {
+        ("POST", "/v2/bootstrap/invitations") => {
             let invitation: BootstrapBrokerInvitation = match serde_json::from_slice(&request.body)
             {
                 Ok(invitation) => invitation,
@@ -627,15 +633,15 @@ async fn handle_http_connection(
             }
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
-        ("GET", path) if path.starts_with("/v1/bootstrap/invitations/") => {
-            let Some(authority_id) =
-                invitation_request_authority(path.trim_start_matches("/v1/bootstrap/invitations/"))
+        ("GET", path) if path.starts_with("/v2/bootstrap/invitations/") => {
+            let Some((authority_id, device_id)) =
+                invitation_request_recipient(path.trim_start_matches("/v2/bootstrap/invitations/"))
             else {
                 let _ = write_http_response(
                     &mut stream,
                     400,
                     "text/plain; charset=utf-8",
-                    b"missing invitation authority",
+                    b"missing or invalid invitation authority/device",
                 )
                 .await;
                 return;
@@ -651,19 +657,20 @@ async fn handle_http_connection(
                 .await;
                 return;
             };
-            let invitations = match take_invitations(&shared, authority_id, retrieval_token).await {
-                Ok(invitations) => invitations,
-                Err(error) => {
-                    let _ = write_http_response(
-                        &mut stream,
-                        401,
-                        "text/plain; charset=utf-8",
-                        error.as_bytes(),
-                    )
-                    .await;
-                    return;
-                }
-            };
+            let invitations =
+                match take_invitations(&shared, authority_id, device_id, retrieval_token).await {
+                    Ok(invitations) => invitations,
+                    Err(error) => {
+                        let _ = write_http_response(
+                            &mut stream,
+                            401,
+                            "text/plain; charset=utf-8",
+                            error.as_bytes(),
+                        )
+                        .await;
+                        return;
+                    }
+                };
             match serde_json::to_vec(&invitations) {
                 Ok(body) => {
                     let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
@@ -697,11 +704,13 @@ struct HttpRequest {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn invitation_request_authority(path_tail: &str) -> Option<&str> {
+fn invitation_request_recipient(path_tail: &str) -> Option<(&str, DeviceId)> {
     if path_tail.is_empty() || path_tail.contains('?') {
         return None;
     }
-    Some(path_tail)
+    let (authority, device) = path_tail.split_once('/')?;
+    AuthorityId::from_str(authority).ok()?;
+    Some((authority, DeviceId::from_str(device).ok()?))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -816,7 +825,7 @@ async fn write_http_response(
         _ => "OK",
     };
     let headers = format!(
-        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n\r\n",
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, {INVITATION_RETRIEVAL_HEADER}\r\n\r\n",
         body.len()
     );
     stream.write_all(headers.as_bytes()).await?;
@@ -834,18 +843,19 @@ fn normalize_base_url(base_url: &str) -> String {
 }
 
 pub fn register_endpoint(base_url: &str) -> String {
-    format!("{}/v1/bootstrap/register", normalize_base_url(base_url))
+    format!("{}/v2/bootstrap/register", normalize_base_url(base_url))
 }
 
 pub fn candidates_endpoint(base_url: &str) -> String {
-    format!("{}/v1/bootstrap/candidates", normalize_base_url(base_url))
+    format!("{}/v2/bootstrap/candidates", normalize_base_url(base_url))
 }
 
-pub fn invitations_endpoint(base_url: &str, authority_id: &str) -> String {
+pub fn invitations_endpoint(base_url: &str, authority_id: &str, device_id: DeviceId) -> String {
     format!(
-        "{}/v1/bootstrap/invitations/{}",
+        "{}/v2/bootstrap/invitations/{}/{}",
         normalize_base_url(base_url),
-        authority_id
+        authority_id,
+        device_id
     )
 }
 
@@ -868,101 +878,171 @@ pub fn endpoint_is_loopback(raw: &str) -> bool {
             .unwrap_or(false)
 }
 
+/// Actual unsuccessful HTTP status observed at the broker client boundary.
+#[derive(Debug, thiserror::Error)]
+#[error("bootstrap broker returned HTTP {status}")]
+pub struct BootstrapBrokerHttpStatus {
+    status: u16,
+}
+impl BootstrapBrokerHttpStatus {
+    #[cfg(test)]
+    /// Status from the actual broker response.
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+}
+fn broker_client_failure(
+    stage: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> aura_core::AuraError {
+    aura_core::AuraError::Network {
+        message: stage.into(),
+        source: Some(std::sync::Arc::new(source)),
+    }
+}
+fn require_success_status(status: u16) -> Result<(), aura_core::AuraError> {
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        Err(broker_client_failure(
+            "bootstrap broker rejected request",
+            BootstrapBrokerHttpStatus { status },
+        ))
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_http_endpoint(url: &str) -> Result<(String, String), String> {
+fn parse_http_endpoint(url: &str) -> Result<(String, String), aura_core::AuraError> {
     if url.starts_with("https://") {
-        return Err(format!(
-            "unsupported native bootstrap broker url (HTTPS client not available in this build): {url}"
+        return Err(aura_core::AuraError::invalid(
+            "HTTPS client not available in this native build",
         ));
     }
-    let without_scheme = url.strip_prefix("http://").ok_or_else(|| {
-        format!("unsupported bootstrap broker url (expected http:// loopback): {url}")
-    })?;
+    let without_scheme = url
+        .strip_prefix("http://")
+        .ok_or_else(|| aura_core::AuraError::invalid("bootstrap broker URL requires http://"))?;
     if !endpoint_is_loopback(url) {
-        return Err(format!(
-            "plain HTTP bootstrap broker URLs are restricted to loopback endpoints: {url}"
+        return Err(aura_core::AuraError::invalid(
+            "plain HTTP bootstrap broker URLs are restricted to loopback endpoints",
         ));
     }
     let (host_port, path) = match without_scheme.split_once('/') {
-        Some((host_port, path)) => (host_port.to_string(), format!("/{}", path)),
+        Some((host_port, path)) => (host_port.to_string(), format!("/{path}")),
         None => (without_scheme.to_string(), "/".to_string()),
     };
     if host_port.is_empty() {
-        return Err(format!("bootstrap broker url missing host: {url}"));
+        return Err(aura_core::AuraError::invalid(
+            "bootstrap broker URL missing host",
+        ));
     }
     Ok((host_port, path))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn send_native_http_request(
+async fn send_http_request(
     method: &str,
     url: &str,
     auth_token: &str,
     extra_headers: &[(&str, &str)],
     body: Option<&[u8]>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, aura_core::AuraError> {
     let (host_port, path) = parse_http_endpoint(url)?;
     let mut stream = TcpStream::connect(&host_port)
         .await
-        .map_err(|error| format!("bootstrap broker connect failed ({host_port}): {error}"))?;
+        .map_err(|source| broker_client_failure("bootstrap broker connect failed", source))?;
     let body = body.unwrap_or_default();
     let mut extra_header_text = String::new();
     for (name, value) in extra_headers {
         extra_header_text.push_str(&format!("{name}: {value}\r\n"));
     }
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {auth_token}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{extra_header_text}\r\n",
-        body.len()
-    );
+    let request = format!("{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {auth_token}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{extra_header_text}\r\n", body.len());
     stream
         .write_all(request.as_bytes())
         .await
-        .map_err(|error| format!("bootstrap broker request write failed: {error}"))?;
+        .map_err(|source| broker_client_failure("bootstrap broker request write failed", source))?;
     if !body.is_empty() {
-        stream
-            .write_all(body)
-            .await
-            .map_err(|error| format!("bootstrap broker body write failed: {error}"))?;
+        stream.write_all(body).await.map_err(|source| {
+            broker_client_failure("bootstrap broker body write failed", source)
+        })?;
     }
     stream
         .flush()
         .await
-        .map_err(|error| format!("bootstrap broker flush failed: {error}"))?;
-
+        .map_err(|source| broker_client_failure("bootstrap broker flush failed", source))?;
     let mut response = Vec::new();
     stream
         .read_to_end(&mut response)
         .await
-        .map_err(|error| format!("bootstrap broker response read failed: {error}"))?;
+        .map_err(|source| broker_client_failure("bootstrap broker response read failed", source))?;
     let header_end = response
         .windows(4)
         .position(|chunk| chunk == b"\r\n\r\n")
         .map(|offset| offset + 4)
-        .ok_or_else(|| "bootstrap broker response missing headers".to_string())?;
+        .ok_or_else(|| {
+            aura_core::AuraError::invalid("bootstrap broker response missing headers")
+        })?;
     let header_text = std::str::from_utf8(&response[..header_end])
-        .map_err(|error| format!("bootstrap broker header decode failed: {error}"))?;
-    let status = header_text
+        .map_err(|source| broker_client_failure("bootstrap broker header decode failed", source))?;
+    let status_text = header_text
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|value| value.parse::<u16>().ok())
-        .ok_or_else(|| "bootstrap broker response missing status".to_string())?;
-    if !(200..300).contains(&status) {
-        let body_text = String::from_utf8_lossy(&response[header_end..]).to_string();
-        return Err(format!("bootstrap broker returned {status}: {body_text}"));
-    }
+        .ok_or_else(|| aura_core::AuraError::invalid("bootstrap broker response missing status"))?;
+    let status = status_text
+        .parse::<u16>()
+        .map_err(|source| broker_client_failure("bootstrap broker status decode failed", source))?;
+    require_success_status(status)?;
     Ok(response[header_end..].to_vec())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
+async fn send_http_request(
+    method: &str,
+    url: &str,
+    auth_token: &str,
+    extra_headers: &[(&str, &str)],
+    body: Option<&[u8]>,
+) -> Result<Vec<u8>, aura_core::AuraError> {
+    let mut builder = match method {
+        "GET" => gloo_net::http::Request::get(url),
+        "POST" => gloo_net::http::Request::post(url),
+        _ => {
+            return Err(aura_core::AuraError::invalid(
+                "unsupported bootstrap broker request method",
+            ))
+        }
+    }
+    .header("authorization", &format!("Bearer {auth_token}"));
+    for (name, value) in extra_headers {
+        builder = builder.header(name, value);
+    }
+    let request = match body {
+        Some(body) => builder.header("content-type", "application/json").body(
+            std::str::from_utf8(body).map_err(|source| {
+                broker_client_failure("bootstrap broker body decode failed", source)
+            })?,
+        ),
+        None => builder.build(),
+    }
+    .map_err(|source| broker_client_failure("bootstrap broker request build failed", source))?;
+    let response = request
+        .send()
+        .await
+        .map_err(|source| broker_client_failure("bootstrap broker request failed", source))?;
+    require_success_status(response.status())?;
+    response
+        .binary()
+        .await
+        .map_err(|source| broker_client_failure("bootstrap broker response read failed", source))
+}
+
 pub async fn register_remote_candidate(
     base_url: &str,
     auth_token: &str,
     registration: &BootstrapBrokerRegistration,
-) -> Result<(), String> {
-    let body = serde_json::to_vec(registration)
-        .map_err(|error| format!("serialize registration failed: {error}"))?;
-    let _ = send_native_http_request(
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(registration).map_err(aura_core::AuraError::from)?;
+    send_http_request(
         "POST",
         &register_endpoint(base_url),
         auth_token,
@@ -972,30 +1052,23 @@ pub async fn register_remote_candidate(
     .await?;
     Ok(())
 }
-
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_remote_candidates(
     base_url: &str,
     auth_token: &str,
-) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
+) -> Result<Vec<BootstrapBrokerCandidateRecord>, aura_core::AuraError> {
     let body =
-        send_native_http_request("GET", &candidates_endpoint(base_url), auth_token, &[], None)
-            .await?;
-    serde_json::from_slice(&body)
-        .map_err(|error| format!("broker candidate decode failed: {error}"))
+        send_http_request("GET", &candidates_endpoint(base_url), auth_token, &[], None).await?;
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
 }
-
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn send_remote_invitation(
     base_url: &str,
     auth_token: &str,
     invitation: &BootstrapBrokerInvitation,
-) -> Result<(), String> {
-    let body = serde_json::to_vec(invitation)
-        .map_err(|error| format!("serialize invitation failed: {error}"))?;
-    let _ = send_native_http_request(
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(invitation).map_err(aura_core::AuraError::from)?;
+    send_http_request(
         "POST",
-        &format!("{}/v1/bootstrap/invitations", normalize_base_url(base_url)),
+        &format!("{}/v2/bootstrap/invitations", normalize_base_url(base_url)),
         auth_token,
         &[],
         Some(&body),
@@ -1003,105 +1076,22 @@ pub async fn send_remote_invitation(
     .await?;
     Ok(())
 }
-
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn take_remote_invitations(
     base_url: &str,
     auth_token: &str,
     authority_id: &str,
+    device_id: DeviceId,
     retrieval_token: &str,
-) -> Result<Vec<String>, String> {
-    let body = send_native_http_request(
+) -> Result<Vec<BootstrapBrokerInvitation>, aura_core::AuraError> {
+    let body = send_http_request(
         "GET",
-        &invitations_endpoint(base_url, authority_id),
+        &invitations_endpoint(base_url, authority_id, device_id),
         auth_token,
         &[(INVITATION_RETRIEVAL_HEADER, retrieval_token)],
         None,
     )
     .await?;
-    serde_json::from_slice(&body)
-        .map_err(|error| format!("broker invitation decode failed: {error}"))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn register_remote_candidate(
-    base_url: &str,
-    auth_token: &str,
-    registration: &BootstrapBrokerRegistration,
-) -> Result<(), String> {
-    let body = serde_json::to_string(registration)
-        .map_err(|error| format!("serialize registration failed: {error}"))?;
-    let request = gloo_net::http::Request::post(&register_endpoint(base_url))
-        .header("content-type", "application/json")
-        .header("authorization", &format!("Bearer {auth_token}"))
-        .body(body)
-        .map_err(|error| format!("build broker register request failed: {error}"))?;
-    match request.send().await {
-        Ok(_) => Ok(()),
-        Err(error) if endpoint_is_loopback(base_url) => Ok(()),
-        Err(error) => Err(format!("broker register request failed: {error}")),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn fetch_remote_candidates(
-    base_url: &str,
-    auth_token: &str,
-) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
-    let request = gloo_net::http::Request::get(&candidates_endpoint(base_url))
-        .header("authorization", &format!("Bearer {auth_token}"));
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
-        Err(error) => return Err(format!("broker candidate request failed: {error}")),
-    };
-    response
-        .json::<Vec<BootstrapBrokerCandidateRecord>>()
-        .await
-        .map_err(|error| format!("broker candidate decode failed: {error}"))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn send_remote_invitation(
-    base_url: &str,
-    auth_token: &str,
-    invitation: &BootstrapBrokerInvitation,
-) -> Result<(), String> {
-    let body = serde_json::to_string(invitation)
-        .map_err(|error| format!("serialize invitation failed: {error}"))?;
-    gloo_net::http::Request::post(&format!(
-        "{}/v1/bootstrap/invitations",
-        normalize_base_url(base_url)
-    ))
-    .header("content-type", "application/json")
-    .header("authorization", &format!("Bearer {auth_token}"))
-    .body(body)
-    .map_err(|error| format!("build broker invitation request failed: {error}"))?
-    .send()
-    .await
-    .map_err(|error| format!("broker invitation request failed: {error}"))?;
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn take_remote_invitations(
-    base_url: &str,
-    auth_token: &str,
-    authority_id: &str,
-    retrieval_token: &str,
-) -> Result<Vec<String>, String> {
-    let request = gloo_net::http::Request::get(&invitations_endpoint(base_url, authority_id))
-        .header("authorization", &format!("Bearer {auth_token}"))
-        .header("x-aura-invitation-retrieval-token", retrieval_token);
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
-        Err(error) => return Err(format!("broker invitation request failed: {error}")),
-    };
-    response
-        .json::<Vec<String>>()
-        .await
-        .map_err(|error| format!("broker invitation decode failed: {error}"))
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
 }
 
 #[cfg(test)]
@@ -1112,6 +1102,375 @@ mod tests {
 
     const AUTH_TOKEN: &str = "test-broker-auth-token";
     const INVITE_TOKEN: &str = "test-invitation-retrieval-token";
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn broker_client_mixed_purposes_preserve_every_original_delivery() {
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("actual broker bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("broker_mixed_purposes"));
+        let authority = "fedcba98-7654-3210-fedc-ba9876543210";
+        let device = DeviceId::from_bytes([7; 32]);
+        register_remote_candidate(
+            broker.public_url(),
+            AUTH_TOKEN,
+            &BootstrapBrokerRegistration {
+                authority_id: authority.into(),
+                device_id: device,
+                address: "observed-browser-device".into(),
+                invitation_retrieval_token: INVITE_TOKEN.into(),
+                nickname_suggestion: None,
+            },
+        )
+        .await
+        .expect("actual registration receipt");
+        let deliveries = [
+            (InvitationPurpose::Contact, "original-contact"),
+            (InvitationPurpose::DeviceEnrollment, "original-enrollment"),
+            (InvitationPurpose::Guardian, "original-guardian"),
+            (InvitationPurpose::Channel, "original-channel"),
+        ]
+        .map(|(purpose, code)| BootstrapBrokerInvitation {
+            recipient_authority_id: authority.into(),
+            recipient_device_id: device,
+            purpose,
+            invitation_code: code.into(),
+        });
+        for delivery in &deliveries {
+            send_remote_invitation(broker.public_url(), AUTH_TOKEN, delivery)
+                .await
+                .expect("actual queue receipt");
+        }
+        let received = take_remote_invitations(
+            broker.public_url(),
+            AUTH_TOKEN,
+            authority,
+            device,
+            INVITE_TOKEN,
+        )
+        .await
+        .expect("actual one-use batch retrieval");
+        assert_eq!(received, deliveries);
+        let missing_purpose = serde_json::json!({
+            "recipient_authority_id": authority,
+            "recipient_device_id": device,
+            "invitation_code": "untyped-code"
+        });
+        assert!(serde_json::from_value::<BootstrapBrokerInvitation>(missing_purpose).is_err());
+        let replay = take_remote_invitations(
+            broker.public_url(),
+            AUTH_TOKEN,
+            authority,
+            device,
+            INVITE_TOKEN,
+        )
+        .await
+        .expect_err("nonempty retrieval consumes only its original credential");
+        let status = std::error::Error::source(&replay)
+            .and_then(|source| source.downcast_ref::<BootstrapBrokerHttpStatus>())
+            .expect("actual HTTP rejection retained");
+        assert_eq!(status.status(), 401);
+        supervisor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await
+            .expect("actual broker task disposal");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn broker_client_same_authority_devices_keep_independent_delivery_custody() {
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .unwrap();
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("broker_device_isolation"));
+        let authority = "fedcba98-7654-3210-fedc-ba9876543210";
+        let first = DeviceId::from_bytes([1; 32]);
+        let second = DeviceId::from_bytes([2; 32]);
+        for (device, token) in [(first, "first-token"), (second, "second-token")] {
+            register_remote_candidate(
+                broker.public_url(),
+                AUTH_TOKEN,
+                &BootstrapBrokerRegistration {
+                    authority_id: authority.into(),
+                    device_id: device,
+                    address: format!("observed-device-{device}"),
+                    invitation_retrieval_token: token.into(),
+                    nickname_suggestion: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let candidates = fetch_remote_candidates(broker.public_url(), AUTH_TOKEN)
+            .await
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.device_id == first));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.device_id == second));
+        assert!(take_remote_invitations(
+            broker.public_url(),
+            AUTH_TOKEN,
+            authority,
+            first,
+            "first-token"
+        )
+        .await
+        .unwrap()
+        .is_empty());
+        for (device, code) in [(first, "first-code"), (second, "second-code")] {
+            send_remote_invitation(
+                broker.public_url(),
+                AUTH_TOKEN,
+                &BootstrapBrokerInvitation {
+                    recipient_authority_id: authority.into(),
+                    recipient_device_id: device,
+                    purpose: InvitationPurpose::Contact,
+                    invitation_code: code.into(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        register_remote_candidate(
+            broker.public_url(),
+            AUTH_TOKEN,
+            &BootstrapBrokerRegistration {
+                authority_id: authority.into(),
+                device_id: second,
+                address: format!("observed-device-{second}"),
+                invitation_retrieval_token: "refreshed-second-token".into(),
+                nickname_suggestion: None,
+            },
+        )
+        .await
+        .unwrap();
+        for (device, wrong) in [
+            (first, "refreshed-second-token"),
+            (second, "first-token"),
+            (second, "second-token"),
+        ] {
+            let error =
+                take_remote_invitations(broker.public_url(), AUTH_TOKEN, authority, device, wrong)
+                    .await
+                    .unwrap_err();
+            assert_eq!(
+                std::error::Error::source(&error)
+                    .unwrap()
+                    .downcast_ref::<BootstrapBrokerHttpStatus>()
+                    .unwrap()
+                    .status(),
+                401
+            );
+        }
+        for (device, token, expected) in [
+            (first, "first-token", "first-code"),
+            (second, "refreshed-second-token", "second-code"),
+        ] {
+            assert_eq!(
+                take_remote_invitations(broker.public_url(), AUTH_TOKEN, authority, device, token)
+                    .await
+                    .unwrap(),
+                [BootstrapBrokerInvitation {
+                    recipient_authority_id: authority.into(),
+                    recipient_device_id: device,
+                    purpose: InvitationPurpose::Contact,
+                    invitation_code: expected.into()
+                }]
+            );
+            let error =
+                take_remote_invitations(broker.public_url(), AUTH_TOKEN, authority, device, token)
+                    .await
+                    .unwrap_err();
+            assert_eq!(
+                std::error::Error::source(&error)
+                    .unwrap()
+                    .downcast_ref::<BootstrapBrokerHttpStatus>()
+                    .unwrap()
+                    .status(),
+                401
+            );
+        }
+        supervisor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await
+            .unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn broker_client_preflight_response_allows_invitation_retrieval_header() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let serve = async {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).await.unwrap();
+                headers.push(byte[0]);
+                assert!(headers.len() < 8192);
+            }
+            assert!(headers.starts_with(b"OPTIONS "));
+            write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"")
+                .await
+                .unwrap();
+        };
+        let request = async {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            let request = format!("OPTIONS /v2/bootstrap/invitations/test HTTP/1.1\r\nHost: {address}\r\nOrigin: http://localhost\r\nAccess-Control-Request-Method: GET\r\nAccess-Control-Request-Headers: authorization,{INVITATION_RETRIEVAL_HEADER}\r\nContent-Length: 0\r\n\r\n");
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut response = Vec::new();
+            stream.read_to_end(&mut response).await.unwrap();
+            String::from_utf8(response).unwrap()
+        };
+        let ((), response) = futures::join!(serve, request);
+        assert!(response.starts_with("HTTP/1.1 204 "));
+        let allowed = response
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("access-control-allow-headers")
+                    .then_some(value)
+            })
+            .expect("preflight must advertise allowed headers");
+        for required in ["authorization", "content-type", INVITATION_RETRIEVAL_HEADER] {
+            assert!(
+                allowed
+                    .split(',')
+                    .any(|header| header.trim().eq_ignore_ascii_case(required)),
+                "preflight must allow actual client header {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn broker_client_status_requires_actual_success() {
+        for status in [200, 204, 299] {
+            require_success_status(status).expect("actual successful status");
+        }
+        for status in [199, 300, 401, 500] {
+            let error = require_success_status(status).expect_err("non-success must fail");
+            let observed = std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<BootstrapBrokerHttpStatus>())
+                .expect("retain actual observed HTTP status");
+            assert_eq!(observed.status(), status);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn broker_client_loopback_transport_failure_is_not_success() {
+        let endpoint = "http://127.0.0.1:0";
+        let registration = BootstrapBrokerRegistration {
+            authority_id: "fedcba98-7654-3210-fedc-ba9876543210".into(),
+            device_id: DeviceId::from_bytes([7; 32]),
+            address: "127.0.0.1:40125".into(),
+            invitation_retrieval_token: INVITE_TOKEN.into(),
+            nickname_suggestion: None,
+        };
+        let invitation = BootstrapBrokerInvitation {
+            recipient_authority_id: registration.authority_id.clone(),
+            recipient_device_id: DeviceId::from_bytes([7; 32]),
+            purpose: InvitationPurpose::Contact,
+            invitation_code: "actual-test-invitation".into(),
+        };
+        let errors = [
+            register_remote_candidate(endpoint, AUTH_TOKEN, &registration)
+                .await
+                .unwrap_err(),
+            fetch_remote_candidates(endpoint, AUTH_TOKEN)
+                .await
+                .unwrap_err(),
+            send_remote_invitation(endpoint, AUTH_TOKEN, &invitation)
+                .await
+                .unwrap_err(),
+            take_remote_invitations(
+                endpoint,
+                AUTH_TOKEN,
+                &registration.authority_id,
+                DeviceId::from_bytes([7; 32]),
+                INVITE_TOKEN,
+            )
+            .await
+            .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(
+                std::error::Error::source(&error)
+                    .and_then(|source| source.downcast_ref::<std::io::Error>())
+                    .is_some(),
+                "retain concrete connect failure: {error:?}"
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn broker_client_successful_http_preserves_json_decode_failure() {
+        for invitation_list in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let serve = async {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut headers = Vec::new();
+                while !headers.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).await.unwrap();
+                    headers.push(byte[0]);
+                    assert!(headers.len() < 8192);
+                }
+                assert!(headers.starts_with(b"GET "));
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n{",
+                    )
+                    .await
+                    .unwrap();
+                stream.shutdown().await.unwrap();
+            };
+            let query = async {
+                if invitation_list {
+                    take_remote_invitations(
+                        &endpoint,
+                        AUTH_TOKEN,
+                        "fedcba98-7654-3210-fedc-ba9876543210",
+                        DeviceId::from_bytes([7; 32]),
+                        INVITE_TOKEN,
+                    )
+                    .await
+                    .unwrap_err()
+                } else {
+                    fetch_remote_candidates(&endpoint, AUTH_TOKEN)
+                        .await
+                        .unwrap_err()
+                }
+            };
+            let ((), error) = futures::join!(serve, query);
+            assert!(
+                std::error::Error::source(&error)
+                    .and_then(|source| source.downcast_ref::<serde_json::Error>())
+                    .is_some(),
+                "retain concrete JSON failure after real HTTP success: {error:?}"
+            );
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
@@ -1127,6 +1486,7 @@ mod tests {
         broker
             .register(BootstrapBrokerRegistration {
                 authority_id: "01234567-89ab-cdef-0123-456789abcdef".to_string(),
+                device_id: DeviceId::from_bytes([7; 32]),
                 address: "127.0.0.1:40123".to_string(),
                 invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: Some("Alice".to_string()),
@@ -1164,6 +1524,7 @@ mod tests {
             AUTH_TOKEN,
             &BootstrapBrokerRegistration {
                 authority_id: "89abcdef-0123-4567-89ab-cdef01234567".to_string(),
+                device_id: DeviceId::from_bytes([7; 32]),
                 address: "127.0.0.1:40124".to_string(),
                 invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: Some("Browser".to_string()),
@@ -1203,6 +1564,7 @@ mod tests {
             AUTH_TOKEN,
             &BootstrapBrokerRegistration {
                 authority_id: "fedcba98-7654-3210-fedc-ba9876543210".to_string(),
+                device_id: DeviceId::from_bytes([7; 32]),
                 address: "127.0.0.1:40125".to_string(),
                 invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: None,
@@ -1216,6 +1578,8 @@ mod tests {
             AUTH_TOKEN,
             &BootstrapBrokerInvitation {
                 recipient_authority_id: "fedcba98-7654-3210-fedc-ba9876543210".to_string(),
+                recipient_device_id: DeviceId::from_bytes([7; 32]),
+                purpose: InvitationPurpose::Contact,
                 invitation_code: "invite-123".to_string(),
             },
         )
@@ -1226,25 +1590,38 @@ mod tests {
             broker.public_url(),
             AUTH_TOKEN,
             "fedcba98-7654-3210-fedc-ba9876543210",
+            DeviceId::from_bytes([7; 32]),
             INVITE_TOKEN,
         )
         .await
         .expect("remote invitation take should succeed");
-        assert_eq!(invitations, vec!["invite-123".to_string()]);
-        assert!(
-            !invitations_endpoint(broker.public_url(), "fedcba98-7654-3210-fedc-ba9876543210")
-                .contains(INVITE_TOKEN)
-        );
+        assert_eq!(invitations.len(), 1);
+        assert_eq!(invitations[0].invitation_code, "invite-123");
+        assert_eq!(invitations[0].purpose, InvitationPurpose::Contact);
+        assert!(!invitations_endpoint(
+            broker.public_url(),
+            "fedcba98-7654-3210-fedc-ba9876543210",
+            DeviceId::from_bytes([7; 32])
+        )
+        .contains(INVITE_TOKEN));
 
         let replay = take_remote_invitations(
             broker.public_url(),
             AUTH_TOKEN,
             "fedcba98-7654-3210-fedc-ba9876543210",
+            DeviceId::from_bytes([7; 32]),
             INVITE_TOKEN,
         )
         .await
         .expect_err("retrieval credential should be one-time after draining invitations");
-        assert!(replay.contains("401"));
+        assert_eq!(
+            std::error::Error::source(&replay)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1267,6 +1644,7 @@ mod tests {
             AUTH_TOKEN,
             &BootstrapBrokerRegistration {
                 authority_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".to_string(),
+                device_id: DeviceId::from_bytes([7; 32]),
                 address: "127.0.0.1:40126".to_string(),
                 invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: None,
@@ -1276,14 +1654,21 @@ mod tests {
         .expect("recipient registration should succeed");
 
         let query_url = format!(
-            "{}/v1/bootstrap/invitations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?credential={}",
+            "{}/v2/bootstrap/invitations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?credential={}",
             normalize_base_url(broker.public_url()),
             INVITE_TOKEN
         );
-        let error = send_native_http_request("GET", &query_url, AUTH_TOKEN, &[], None)
+        let error = send_http_request("GET", &query_url, AUTH_TOKEN, &[], None)
             .await
             .expect_err("query-string credential should be rejected");
-        assert!(error.contains("400"));
+        assert_eq!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            400
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1303,12 +1688,13 @@ mod tests {
 
         let registration = serde_json::to_vec(&BootstrapBrokerRegistration {
             authority_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
+            device_id: DeviceId::from_bytes([7; 32]),
             address: "127.0.0.1:43000".to_string(),
             invitation_retrieval_token: INVITE_TOKEN.to_string(),
             nickname_suggestion: None,
         })
         .expect("registration should encode");
-        let register_error = send_native_http_request(
+        let register_error = send_http_request(
             "POST",
             &register_endpoint(broker.public_url()),
             "wrong-token",
@@ -1317,22 +1703,38 @@ mod tests {
         )
         .await
         .expect_err("unauthorized register should be rejected");
-        assert!(register_error.contains("401"));
+        assert_eq!(
+            std::error::Error::source(&register_error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
 
         let list_error = fetch_remote_candidates(broker.public_url(), "wrong-token")
             .await
             .expect_err("unauthorized list should be rejected");
-        assert!(list_error.contains("401"));
+        assert_eq!(
+            std::error::Error::source(&list_error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
 
         let invitation = serde_json::to_vec(&BootstrapBrokerInvitation {
             recipient_authority_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
+            recipient_device_id: DeviceId::from_bytes([7; 32]),
+            purpose: InvitationPurpose::Contact,
             invitation_code: "invite-denied".to_string(),
         })
         .expect("invitation should encode");
-        let queue_error = send_native_http_request(
+        let queue_error = send_http_request(
             "POST",
             &format!(
-                "{}/v1/bootstrap/invitations",
+                "{}/v2/bootstrap/invitations",
                 normalize_base_url(broker.public_url())
             ),
             "wrong-token",
@@ -1341,17 +1743,32 @@ mod tests {
         )
         .await
         .expect_err("unauthorized queue should be rejected");
-        assert!(queue_error.contains("401"));
+        assert_eq!(
+            std::error::Error::source(&queue_error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
 
         let drain_error = take_remote_invitations(
             broker.public_url(),
             "wrong-token",
             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            DeviceId::from_bytes([7; 32]),
             INVITE_TOKEN,
         )
         .await
         .expect_err("unauthorized drain should be rejected");
-        assert!(drain_error.contains("401"));
+        assert_eq!(
+            std::error::Error::source(&drain_error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1395,20 +1812,22 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_bootstrap_broker_plain_http_is_loopback_only() {
-        assert!(parse_http_endpoint("http://127.0.0.1:3000/v1/bootstrap").is_ok());
-        assert!(parse_http_endpoint("http://localhost:3000/v1/bootstrap").is_ok());
+        assert!(parse_http_endpoint("http://127.0.0.1:3000/v2/bootstrap").is_ok());
+        assert!(parse_http_endpoint("http://localhost:3000/v2/bootstrap").is_ok());
 
-        let error = parse_http_endpoint("http://192.0.2.10:3000/v1/bootstrap")
+        let error = parse_http_endpoint("http://192.0.2.10:3000/v2/bootstrap")
             .expect_err("non-loopback HTTP must fail closed");
-        assert!(error.contains("plain HTTP bootstrap broker URLs are restricted to loopback"));
+        assert!(error
+            .to_string()
+            .contains("plain HTTP bootstrap broker URLs are restricted to loopback"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_bootstrap_broker_https_is_not_downgraded_to_http() {
-        let error = parse_http_endpoint("https://broker.example.test/v1/bootstrap")
+        let error = parse_http_endpoint("https://broker.example.test/v2/bootstrap")
             .expect_err("native HTTPS must not be parsed as plain HTTP");
-        assert!(error.contains("HTTPS client not available"));
+        assert!(error.to_string().contains("HTTPS client not available"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1474,7 +1893,7 @@ mod tests {
             .await
             .expect("broker should accept slow header connection");
         header_stream
-            .write_all(b"GET /v1/bootstrap/candidates HTTP/1.1\r\n")
+            .write_all(b"GET /v2/bootstrap/candidates HTTP/1.1\r\n")
             .await
             .expect("partial header should write");
         let mut response = Vec::new();
@@ -1509,46 +1928,51 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn bootstrap_broker_prunes_stale_and_bounds_candidates() {
-        let broker = LocalBootstrapBrokerService::bind(
-            "127.0.0.1:0",
-            Duration::from_millis(1),
-            AUTH_TOKEN,
-            BootstrapBrokerLanBindPolicy::LoopbackOnly,
-        )
-        .await
-        .expect("broker should bind");
-        broker
-            .register(BootstrapBrokerRegistration {
+        let shared = Arc::new(RwLock::new(BootstrapBrokerState::new()));
+        insert_registration(
+            &shared,
+            BootstrapBrokerRegistration {
                 authority_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+                device_id: DeviceId::from_bytes([7; 32]),
                 address: "127.0.0.1:41000".to_string(),
                 invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: None,
-            })
-            .await
-            .expect("registration should be accepted");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-        assert!(broker.list_candidates().await.is_empty());
-
-        let broker = LocalBootstrapBrokerService::bind(
-            "127.0.0.1:0",
-            Duration::from_secs(60),
-            AUTH_TOKEN,
-            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+            },
+            1000,
         )
         .await
-        .expect("broker should bind");
+        .expect("registration should be accepted");
+        prune_candidates(&shared, 1000, Duration::from_millis(1)).await;
+        assert_eq!(shared.read().await.candidates.len(), 1);
+        prune_candidates(&shared, 1001, Duration::from_millis(1)).await;
+        assert!(shared.read().await.candidates.is_empty());
+
         for index in 0..(MAX_BOOTSTRAP_CANDIDATES + 8) {
-            broker
-                .register(BootstrapBrokerRegistration {
+            insert_registration(
+                &shared,
+                BootstrapBrokerRegistration {
                     authority_id: format!("authority-{index}"),
+                    device_id: DeviceId::from_bytes([7; 32]),
                     address: format!("127.0.0.1:{}", 42000 + index),
                     invitation_retrieval_token: format!("invite-token-{index}"),
                     nickname_suggestion: None,
-                })
-                .await
-                .expect("registration should stay bounded");
+                },
+                2000 + index as u64,
+            )
+            .await
+            .expect("registration should stay bounded");
         }
-        assert!(broker.list_candidates().await.len() <= MAX_BOOTSTRAP_CANDIDATES);
+        let state = shared.read().await;
+        assert_eq!(state.candidates.len(), MAX_BOOTSTRAP_CANDIDATES);
+        assert!(!state
+            .candidates
+            .values()
+            .any(|candidate| candidate.authority_id == "authority-0"));
+        assert!(state
+            .candidates
+            .values()
+            .any(|candidate| candidate.authority_id
+                == format!("authority-{}", MAX_BOOTSTRAP_CANDIDATES + 7)));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

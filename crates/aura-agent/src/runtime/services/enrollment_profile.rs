@@ -268,9 +268,32 @@ pub(crate) async fn load_original_active_profile_archive<'runtime>(
     >,
     AuraError,
 > {
+    let mut retained = None;
+    load_original_active_profile_archive_from_origin(
+        crate::runtime::effects::EnrollmentRuntimeOrigin::Borrowed(effects),
+        &mut retained,
+    )
+    .await?;
+    Ok(retained)
+}
+pub(crate) async fn load_original_active_profile_archive_from_origin<'runtime>(
+    origin: crate::runtime::effects::EnrollmentRuntimeOrigin<'runtime>,
+    retained: &mut Option<
+        crate::handlers::invitation::enrollment_parent_archive::ConfirmedParentInventoryCapability<
+            'runtime,
+        >,
+    >,
+) -> Result<(), AuraError> {
+    let effects = origin.effects();
+    if let Some(actual) = retained.as_mut() {
+        if !std::ptr::eq(actual.original_effects(), effects) {
+            return Err(denied(ProfileHandoffError::Binding));
+        }
+        return actual.authenticate_original_archive().await;
+    }
     let committed_key = location(effects.device_id(), "committed");
     if !effects.secure_exists(&committed_key).await? {
-        return Ok(None);
+        return Ok(());
     }
     let record = decode(
         &effects
@@ -288,14 +311,22 @@ pub(crate) async fn load_original_active_profile_archive<'runtime>(
             message: "reverify original adopted profile history origin".into(),
             source: Some(Arc::new(source)),
         })?;
-    validate_binding(effects, &record, &confirmed)?;
+    // Deposit the real independently reverified receipt before profile or
+    // archive validation can fail or perform another required storage await.
+    *retained = Some(
+        crate::handlers::invitation::enrollment_parent_archive::begin_original_confirmed_archive(
+            origin, confirmed,
+        ),
+    );
+    let actual = retained
+        .as_mut()
+        .ok_or_else(|| denied(ProfileHandoffError::Binding))?;
+    let effects = actual.original_effects();
+    validate_binding(effects, &record, actual.confirmed())?;
     if aura_guards::GuardContextProvider::authority_id(effects) != record.subject {
         return Err(denied(ProfileHandoffError::Binding));
     }
-    let archive = crate::handlers::invitation::enrollment_parent_archive::load_confirmed_parent_archive_from_confirmed(
-        effects, &confirmed,
-    ).await?;
-    Ok(Some(archive))
+    actual.authenticate_original_archive().await
 }
 /// Read-only original committed-profile receipt. Provisional identity permits
 /// its own local secret read after commit; it never grants signing approval.

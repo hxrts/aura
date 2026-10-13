@@ -186,7 +186,8 @@ impl RuntimeMaintenanceService {
             self.authority_id,
             self.device_id,
         ))
-        .map_err(|error| ServiceError::startup_failed(self.name(), error.to_string()))?;
+        .map_err(|error| ServiceError::startup_failed(self.name(), error.to_string()))?
+        .with_threshold_signing(self.threshold_signing.clone());
         let device_rotation_service = DeviceEpochRotationService::new(
             self.authority_id,
             self.effects.clone(),
@@ -799,6 +800,7 @@ impl RuntimeMaintenanceService {
                 }
             }
 
+            let bootstrap_device_id = self.effects.device_id();
             let bootstrap_refresh_service = self.clone();
             let bootstrap_time_effects = time_effects.clone();
             let bootstrap_rendezvous_manager = rendezvous_manager.clone();
@@ -817,6 +819,7 @@ impl RuntimeMaintenanceService {
                                 if let Err(error) = register_bootstrap_candidate_with(
                                     &rendezvous_manager,
                                     lan_transport.as_ref(),
+                                    bootstrap_device_id,
                                 )
                                 .await
                                 {
@@ -851,6 +854,7 @@ impl RuntimeMaintenanceService {
                                 if let Err(error) = register_bootstrap_candidate_with(
                                     &rendezvous_manager,
                                     lan_transport.as_ref(),
+                                    bootstrap_device_id,
                                 )
                                 .await
                                 {

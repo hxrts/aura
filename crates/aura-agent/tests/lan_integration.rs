@@ -334,7 +334,19 @@ async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
     let agent = create_lan_agent(0x51, lan_port).await?;
     let invitee = create_lan_agent(0x61, next_lan_port()).await?;
     let invitee_bridge = invitee.clone().as_runtime_bridge();
-    invitee_bridge.bootstrap_signing_keys().await?;
+    invitee_bridge
+        .bootstrap_signing_keys(
+            &aura_core::TimeoutBudget::from_start_and_timeout(
+                &invitee_bridge
+                    .physical_time_provider()
+                    .physical_time()
+                    .await
+                    .expect("original fixture initialization clock"),
+                std::time::Duration::from_secs(30),
+            )
+            .expect("original fixture initialization policy"),
+        )
+        .await?;
     let setup_code = invitee_bridge
         .export_device_enrollment_setup_request()
         .await?;

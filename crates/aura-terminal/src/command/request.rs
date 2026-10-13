@@ -22,6 +22,14 @@ pub enum InviteRole {
     Channel,
 }
 
+/// Purpose of an explicitly selected post-enrollment shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrollmentShortcutRole {
+    Contact,
+    Guardian,
+}
+
 impl std::str::FromStr for InviteRole {
     type Err = String;
 
@@ -284,6 +292,15 @@ pub enum Request {
     },
     /// Remove a device from this account.
     DeviceRemove { device: String },
+    /// Start enrollment and deliver a fresh signed invitation to an explicitly
+    /// selected external broker recipient after positive enrollment.
+    DeviceEnrollWithShortcut {
+        nickname: String,
+        setup_code: String,
+        recipient: String,
+        recipient_device: String,
+        purpose: EnrollmentShortcutRole,
+    },
     /// Cancel a key-rotation ceremony.
     RotationCancel { ceremony_id: String },
     /// Progress of a key-rotation ceremony this account runs.
@@ -530,6 +547,13 @@ pub fn all_request_examples() -> Vec<Request> {
             threshold: 1,
         },
         Request::DeviceRemove { device: s() },
+        Request::DeviceEnrollWithShortcut {
+            nickname: s(),
+            setup_code: s(),
+            recipient: s(),
+            recipient_device: s(),
+            purpose: EnrollmentShortcutRole::Contact,
+        },
         Request::RotationCancel { ceremony_id: s() },
         Request::RotationStatus { ceremony_id: s() },
         Request::OtaList,
@@ -643,6 +667,7 @@ pub fn all_request_examples() -> Vec<Request> {
             | Request::ThresholdSet { .. }
             | Request::GuardiansSet { .. }
             | Request::DeviceRemove { .. }
+            | Request::DeviceEnrollWithShortcut { .. }
             | Request::RotationCancel { .. }
             | Request::RotationStatus { .. }
             | Request::OtaList

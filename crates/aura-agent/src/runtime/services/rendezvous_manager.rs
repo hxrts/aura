@@ -203,7 +203,7 @@ pub enum RendezvousManagerError {
     #[error("LAN discovery not running")]
     LanDiscoveryUnavailable,
     #[error("bootstrap broker operation failed: {0}")]
-    BootstrapBroker(String),
+    BootstrapBroker(#[source] AuraError),
 }
 
 struct RendezvousState {
@@ -1232,6 +1232,7 @@ impl RendezvousManager {
 
     pub async fn register_bootstrap_candidate(
         &self,
+        device_id: aura_core::DeviceId,
         address: String,
         nickname_suggestion: Option<String>,
     ) -> Result<(), RendezvousManagerError> {
@@ -1241,6 +1242,7 @@ impl RendezvousManager {
 
         let registration = BootstrapBrokerRegistration {
             authority_id: self.authority_id.to_string(),
+            device_id,
             address,
             invitation_retrieval_token: self
                 .config
@@ -1248,18 +1250,17 @@ impl RendezvousManager {
                 .invitation_retrieval_token
                 .clone()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker invitation retrieval token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker invitation retrieval token is required",
+                    ))
                 })?,
             nickname_suggestion,
         };
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(broker) = self.local_bootstrap_broker().await {
-            broker
-                .register(registration)
-                .await
-                .map_err(RendezvousManagerError::BootstrapBroker)?;
+            broker.register(registration).await.map_err(|diagnostic| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(diagnostic))
+            })?;
             return Ok(());
         }
 
@@ -1271,9 +1272,9 @@ impl RendezvousManager {
                 .auth_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker auth token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker auth token is required",
+                    ))
                 })?;
             return register_remote_candidate(base_url, auth_token, &registration)
                 .await
@@ -1288,9 +1289,9 @@ impl RendezvousManager {
                 .auth_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker auth token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker auth token is required",
+                    ))
                 })?;
             return super::bootstrap_broker::register_remote_candidate(
                 base_url,
@@ -1301,11 +1302,14 @@ impl RendezvousManager {
             .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
-        Ok(())
+        Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+            "enabled bootstrap broker registration requires an available broker endpoint",
+        )))
     }
 
     pub async fn list_bootstrap_broker_candidates(
         &self,
+        device_id: aura_core::DeviceId,
     ) -> Result<Vec<BootstrapBrokerCandidateRecord>, RendezvousManagerError> {
         if !self.config.bootstrap_broker.enabled {
             return Ok(Vec::new());
@@ -1319,8 +1323,13 @@ impl RendezvousManager {
                 .await
                 .into_iter()
                 .filter(|candidate| {
-                    candidate.authority_id != self.authority_id.to_string()
-                        && seen.insert((candidate.authority_id.clone(), candidate.address.clone()))
+                    (candidate.authority_id != self.authority_id.to_string()
+                        || candidate.device_id != device_id)
+                        && seen.insert((
+                            candidate.authority_id.clone(),
+                            candidate.device_id,
+                            candidate.address.clone(),
+                        ))
                 })
                 .collect();
             return Ok(candidates);
@@ -1335,17 +1344,22 @@ impl RendezvousManager {
                 .auth_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker auth token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker auth token is required",
+                    ))
                 })?;
             let candidates = fetch_remote_candidates(base_url, auth_token)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker)?
                 .into_iter()
                 .filter(|candidate| {
-                    candidate.authority_id != self.authority_id.to_string()
-                        && seen.insert((candidate.authority_id.clone(), candidate.address.clone()))
+                    (candidate.authority_id != self.authority_id.to_string()
+                        || candidate.device_id != device_id)
+                        && seen.insert((
+                            candidate.authority_id.clone(),
+                            candidate.device_id,
+                            candidate.address.clone(),
+                        ))
                 })
                 .collect();
             return Ok(candidates);
@@ -1360,38 +1374,101 @@ impl RendezvousManager {
                 .auth_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker auth token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker auth token is required",
+                    ))
                 })?;
             let candidates = fetch_remote_candidates(base_url, auth_token)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker)?
                 .into_iter()
                 .filter(|candidate| {
-                    candidate.authority_id != self.authority_id.to_string()
-                        && seen.insert((candidate.authority_id.clone(), candidate.address.clone()))
+                    (candidate.authority_id != self.authority_id.to_string()
+                        || candidate.device_id != device_id)
+                        && seen.insert((
+                            candidate.authority_id.clone(),
+                            candidate.device_id,
+                            candidate.address.clone(),
+                        ))
                 })
                 .collect();
             return Ok(candidates);
         }
 
-        Ok(Vec::new())
+        Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+            "enabled bootstrap broker requires an available broker endpoint",
+        )))
+    }
+
+    /// Send only a code whose selected external destination and purpose were
+    /// checked against the original positive enrollment shortcut grant.
+    pub(crate) async fn send_post_enrollment_shortcut(
+        &self,
+        grant: &crate::runtime::services::enrollment_window::EnrolledDeviceShortcutAuthority,
+        selection: &aura_app::runtime_bridge::PostEnrollmentShortcutSelection,
+        issued: &crate::handlers::invitation_service::IssuedOriginalShortcutDelivery,
+    ) -> Result<(), RendezvousManagerError> {
+        use crate::runtime::services::enrollment_window::EnrolledDeviceShortcutPurpose;
+        use aura_app::runtime_bridge::PostEnrollmentShortcutPurpose;
+        if selection.recipient() == grant.subject() {
+            return Err(RendezvousManagerError::BootstrapBroker(
+                aura_core::AuraError::permission_denied(
+                    "shortcut broker recipient is the enrolled authority",
+                ),
+            ));
+        }
+        let purpose = match (grant.purpose(), selection.purpose()) {
+            (EnrolledDeviceShortcutPurpose::Contact, PostEnrollmentShortcutPurpose::Contact) => {
+                aura_core::invitation::InvitationPurpose::Contact
+            }
+            (EnrolledDeviceShortcutPurpose::Guardian, PostEnrollmentShortcutPurpose::Guardian) => {
+                aura_core::invitation::InvitationPurpose::Guardian
+            }
+            _ => {
+                return Err(RendezvousManagerError::BootstrapBroker(
+                    aura_core::AuraError::permission_denied(
+                        "shortcut broker purpose differs from original grant",
+                    ),
+                ))
+            }
+        };
+        if issued.issuer() != grant.subject()
+            || issued.recipient() != selection.recipient()
+            || issued.recipient_device() != selection.device()
+            || issued.purpose() != grant.purpose()
+        {
+            return Err(RendezvousManagerError::BootstrapBroker(
+                aura_core::AuraError::invalid(
+                    "issued shortcut does not match the original external recipient and grant",
+                ),
+            ));
+        }
+        self.send_bootstrap_broker_invitation(
+            selection.recipient(),
+            selection.device(),
+            purpose,
+            issued.code(),
+        )
+        .await
     }
 
     pub async fn send_bootstrap_broker_invitation(
         &self,
         recipient_authority: AuthorityId,
+        recipient_device: aura_core::DeviceId,
+        purpose: aura_core::invitation::InvitationPurpose,
         invitation_code: &str,
     ) -> Result<(), RendezvousManagerError> {
         if !self.config.bootstrap_broker.enabled {
-            return Err(RendezvousManagerError::BootstrapBroker(
-                "bootstrap broker is disabled".to_string(),
-            ));
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "bootstrap broker is disabled",
+            )));
         }
 
         let invitation = BootstrapBrokerInvitation {
             recipient_authority_id: recipient_authority.to_string(),
+            recipient_device_id: recipient_device,
+            purpose,
             invitation_code: invitation_code.to_string(),
         };
 
@@ -1400,7 +1477,9 @@ impl RendezvousManager {
             broker
                 .queue_invitation(invitation)
                 .await
-                .map_err(RendezvousManagerError::BootstrapBroker)?;
+                .map_err(|diagnostic| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(diagnostic))
+                })?;
             return Ok(());
         }
 
@@ -1411,23 +1490,24 @@ impl RendezvousManager {
                 .auth_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker auth token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker auth token is required",
+                    ))
                 })?;
             return send_remote_invitation(base_url, auth_token, &invitation)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
-        Err(RendezvousManagerError::BootstrapBroker(
-            "no bootstrap broker endpoint configured".to_string(),
-        ))
+        Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+            "no bootstrap broker endpoint configured",
+        )))
     }
 
     pub async fn take_bootstrap_broker_invitations(
         &self,
-    ) -> Result<Vec<String>, RendezvousManagerError> {
+        device_id: aura_core::DeviceId,
+    ) -> Result<Vec<BootstrapBrokerInvitation>, RendezvousManagerError> {
         if !self.config.bootstrap_broker.enabled {
             return Ok(Vec::new());
         }
@@ -1440,14 +1520,16 @@ impl RendezvousManager {
                 .invitation_retrieval_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker invitation retrieval token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker invitation retrieval token is required",
+                    ))
                 })?;
             return broker
-                .take_invitations(&self.authority_id.to_string(), retrieval_token)
+                .take_invitations(&self.authority_id.to_string(), device_id, retrieval_token)
                 .await
-                .map_err(RendezvousManagerError::BootstrapBroker);
+                .map_err(|diagnostic| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(diagnostic))
+                });
         }
 
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
@@ -1457,9 +1539,9 @@ impl RendezvousManager {
                 .auth_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker auth token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker auth token is required",
+                    ))
                 })?;
             let retrieval_token = self
                 .config
@@ -1467,21 +1549,24 @@ impl RendezvousManager {
                 .invitation_retrieval_token
                 .as_deref()
                 .ok_or_else(|| {
-                    RendezvousManagerError::BootstrapBroker(
-                        "bootstrap broker invitation retrieval token is required".to_string(),
-                    )
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                        "bootstrap broker invitation retrieval token is required",
+                    ))
                 })?;
             return take_remote_invitations(
                 base_url,
                 auth_token,
                 &self.authority_id.to_string(),
+                device_id,
                 retrieval_token,
             )
             .await
             .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
-        Ok(Vec::new())
+        Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+            "enabled bootstrap broker requires an available broker endpoint",
+        )))
     }
 
     /// Set the descriptor to announce on LAN
@@ -1856,6 +1941,71 @@ impl RendezvousManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn broker_client_enabled_without_endpoint_refuses_registration_and_reads() {
+        let mut config = RendezvousManagerConfig::for_testing();
+        config.bootstrap_broker = BootstrapBrokerConfig::default()
+            .enabled(true)
+            .with_invitation_retrieval_token("test-required-broker-owner");
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
+        let errors = [
+            manager
+                .register_bootstrap_candidate(
+                    aura_core::DeviceId::from_bytes([7; 32]),
+                    "127.0.0.1:40125".into(),
+                    None,
+                )
+                .await
+                .unwrap_err(),
+            manager
+                .list_bootstrap_broker_candidates(aura_core::DeviceId::from_bytes([7; 32]))
+                .await
+                .unwrap_err(),
+            manager
+                .take_bootstrap_broker_invitations(aura_core::DeviceId::from_bytes([7; 32]))
+                .await
+                .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(
+                matches!(
+                    error,
+                    RendezvousManagerError::BootstrapBroker(AuraError::Invalid { .. })
+                ),
+                "required missing broker must refuse, not acknowledge: {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn broker_client_disabled_preserves_optional_no_op() {
+        let manager = RendezvousManager::new(
+            test_authority(),
+            RendezvousManagerConfig::for_testing(),
+            test_time(),
+            test_udp(),
+        );
+        assert!(!manager.config().bootstrap_broker.enabled);
+        manager
+            .register_bootstrap_candidate(
+                aura_core::DeviceId::from_bytes([7; 32]),
+                "127.0.0.1:40125".into(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(manager
+            .list_bootstrap_broker_candidates(aura_core::DeviceId::from_bytes([7; 32]))
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(manager
+            .take_bootstrap_broker_invitations(aura_core::DeviceId::from_bytes([7; 32]))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_rendezvous::{capabilities::RendezvousCapability, GuardSnapshot};

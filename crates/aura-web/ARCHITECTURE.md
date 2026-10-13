@@ -77,6 +77,31 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
+- Bootstrap broker retrieval enters the app-owned required batch receiver before
+  the browser awaits a read. The browser host persists only an enrollment
+  prefill and surfaces typed batch refusal; it does not select one delivery by
+  queue order or treat prefill as an approved import. A pending code remains a
+  form input until the independent manifest and initiator verifier are supplied.
+  A typed batch refusal is visible on the mounted join form as an alert while
+  retaining the pending code for explicit review. The alert is diagnostic;
+  rendering it does not approve transfer, mark the account ready or create an
+  enrollment operation.
+- Browser enrollment import, including the page-owned semantic command, admits
+  the app's original required import before handing over the exact operation
+  instance. Browser storage persistence is the app import owner's host
+  acknowledgment before success publication. The shell observes the result and
+  updates navigation or error display; teardown requests cancellation of the
+  observer, while the app retains terminal custody. A component or controller
+  terminal-publication acknowledgment confirms only its stated observation
+  scope; it cannot stand in for the host's durable identity-write acknowledgment
+  or required task disposal.
+  Account creation may replace the bootstrap controller without remounting the
+  browser component, so the persistence host policy binds to the current
+  controller before onboarding or ready import controls appear. An older
+  controller's policy cannot authorize the new controller's import. On wasm, a
+  `RuntimeOnly` host policy is a typed pre-admission refusal, with the original
+  local submission failed rather than an app import started without durable
+  browser identity storage.
 - Browser semantic commands report enrollment code issuance and staged import
   as those events only. Completion is a separate app-owned ceremony-linked
   operation observed after runtime handoff or restart; browser teardown cannot
@@ -88,6 +113,16 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   `AccountConfig` metadata separately so preserved-profile restarts can rebind
   one active generation and recover the canonical runtime bootstrap path
   without browser-local semantic repair.
+  Account configurations are keyed by authority so adopting a second profile
+  does not overwrite the first profile's context, creation time or nickname.
+  The old single selected-config key is a read-only migration input only when
+  its embedded authority exactly matches the requested authority; a mismatched
+  per-authority record fails rather than being silently reused. Enrollment
+  host preparation takes the adopted authority from the sealed app completion,
+  not the still-provisional attached runtime. After the app's budget ACK, the
+  host writes the authority config, selected identity and pending-code removal
+  in that order. These are individually fallible writes, not one atomic
+  transaction; failure retains partial progress and its native storage cause.
 - Persisted browser `AccountConfig` context selection is fail-closed and
   authority-scoped: when the current runtime has no active home yet, browser
   bootstrap storage may reuse only the persisted `AccountConfig` for that same
@@ -130,6 +165,11 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   page-owned publication path and pushed caches, but navigation/session
   recovery stays on the explicit `recover_ui_state` path rather than being
   folded into ordinary semantic observation reads.
+  The Playwright observation cache rejects a lower `semantic_seq` than its
+  accepted snapshot within the same browser generation, preserving accepted
+  operation and event state against delayed pushes. Explicit page navigation
+  or generation reset clears that cache; a new generation may begin at a lower
+  sequence. This guard is an observation-order check, not semantic completion.
 - `UiSnapshot.supervised_task_failures` (group, task, cause of dead
   runtime-supervised tasks from `RuntimeBridge::supervised_task_failures`) is a
   diagnostic field outside parity, readiness and quiescence. The browser shell
@@ -162,7 +202,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Shared browser-flow execution must go through the semantic command bridge and real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
 - Playwright-to-page semantic submission uses the page-owned semantic queue
   (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
-  browser semantic lifecycle or runtime/bootstrap state.
+  browser semantic lifecycle or runtime/bootstrap state. Its enrollment-import
+  command requires the declared device-enrollment operation handle and uses
+  the same required app import and host-acknowledgment path as the visible form.
 - Browser semantic routing, weak selected-channel fallback handling, and raw
   semantic response construction stay centralized in `src/harness/commands.rs`;
   `src/harness/install.rs` and sibling bridge files must delegate through that
@@ -367,27 +409,23 @@ Browser semantic observation surface version 2 includes required `UiSnapshot.hom
 
 If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
 
-The onboarding rendered-control producer retains actual renderer-registered
-node instances and owns every poll of the unmodified, exactly pinned
-`dioxus-web` 0.7.4 renderer future. It revokes evidence before polling and
-binds the final rendered source and acknowledges DOM completion only after
-`Poll::Pending`: this audited non-hydrating renderer synchronously flushes all
-edits and mounted callbacks before suspending. Child-only renders are covered;
-multiple batches in one poll collapse into its final state, and no-op polls
-conservatively replace the capture. Drop revokes evidence before renderer
-teardown. This is DOM completion, not browser paint or protocol completion.
+The browser rendered-control producer retains actual renderer-registered node
+instances and uses the renderer's batch observer. `BeforeRender` revokes the
+prior capture and samples the controller's semantic source for this batch;
+`BeforeCommit` binds that same source to the pending opaque capture receipt,
+including child-only Settings navigation when the enclosing component is
+memoized. Only `Committed`, after DOM edits and mounted callbacks, permits a
+complete layout frame. The UI publication owner rereads the app snapshot and
+withholds committed visibility if its post-commit source differs. This is DOM
+completion, not browser paint, profile persistence or protocol completion.
 
-The renderer runs through `WebTaskOwner`; there is no separate render loop or
-fork of Dioxus internals. Component effects alone cannot cover a memoized root's
-child-only renders. Hydration is unsupported and must remain disabled in the
-resolved renderer feature graph. A document asset guard fails closed on link
-URL changes, including devtools stylesheet reloads, and drains pending mutation
-records before acknowledging a poll or measuring fresh layout. The asset guard
-never supplies commit evidence. Renderer upgrades must re-audit `run` suspension
-and synchronous `flush_edits` ordering and execute the real-browser regressions.
-It never finds controls by selector or equates focus/mounting with visibility.
-The existing UI snapshot publication owner issues opaque active capture receipts;
-replacement/remount revokes old callbacks, including old disposal callbacks.
+The observer is installed through the selected Dioxus web renderer; there
+is no separate render loop or fork of Dioxus internals. Hydration and external
+mutation modes remain unsupported and cannot supply commit evidence. Renderer
+upgrades require re-auditing batch phase ordering and real-browser regressions.
+Control visibility comes from registered nodes and actual layout, never a
+selector or focus alone. Replacement and remount invalidate the old receipt
+and stale callbacks before another frame can publish.
 Actual node style/ancestor clipping/disposal and nonempty layout determine the
 captured observation. Browser tests run the actual dioxus-web renderer, not
 native VirtualDom mounted-event simulation. See docs/117 and docs/804.

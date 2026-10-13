@@ -872,6 +872,7 @@ impl Default for Fact {
 // Clone/equality/serde are part of the journal semilattice contract for Cap meet
 // and replication. Debug remains manually redacted because token bytes are bearer
 // material.
+// aura-security: secret-derive-justified owner=core-capability-algebra expires=before-release remediation=docs/106_authorization.md Clone/equality/serde preserve Cap attenuation and journal replication; bearer serialization is explicit capability transfer, never issuer trust. Manual Debug redacts both buffers; Zeroize/ZeroizeOnDrop clear every owned copy. Review retained export requirements before release.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Cap {
     /// Security-sensitive serialized Biscuit bearer token bytes. Zeroized on drop.
@@ -968,8 +969,12 @@ impl Cap {
         if self.token_bytes.is_empty() {
             return Err(CapError::EmptyToken);
         }
-        biscuit_auth::Biscuit::from(&self.token_bytes, *root_key)
-            .map_err(|e| CapError::Deserialization(e.to_string()))
+        crate::crypto::verified_biscuit::VerifiedBiscuitToken::from_bytes(
+            &self.token_bytes,
+            *root_key,
+        )
+        .map(|verified| verified.token().clone())
+        .map_err(|e| CapError::Deserialization(e.to_string()))
     }
 
     /// Deserialize the token using the stored root key.
@@ -990,8 +995,12 @@ impl Cap {
         let root_key = biscuit_auth::PublicKey::from_bytes(&key_bytes)
             .map_err(|_| CapError::InvalidRootKey)?;
 
-        biscuit_auth::Biscuit::from(&self.token_bytes, root_key)
-            .map_err(|e| CapError::Deserialization(e.to_string()))
+        crate::crypto::verified_biscuit::VerifiedBiscuitToken::from_bytes(
+            &self.token_bytes,
+            root_key,
+        )
+        .map(|verified| verified.token().clone())
+        .map_err(|e| CapError::Deserialization(e.to_string()))
     }
 
     /// Check if the capability is empty (bottom element).
@@ -1052,8 +1061,13 @@ impl Cap {
         if self.root_key_bytes.len() == 32 {
             if let Ok(key_bytes) = TryInto::<[u8; 32]>::try_into(&self.root_key_bytes[..32]) {
                 if let Ok(root_key) = biscuit_auth::PublicKey::from_bytes(&key_bytes) {
-                    if let Ok(biscuit) = biscuit_auth::Biscuit::from(&self.token_bytes, root_key) {
-                        return Some(biscuit.block_count());
+                    if let Ok(verified) =
+                        crate::crypto::verified_biscuit::VerifiedBiscuitToken::from_bytes(
+                            &self.token_bytes,
+                            root_key,
+                        )
+                    {
+                        return Some(verified.token().block_count());
                     }
                 }
             }
@@ -1293,6 +1307,33 @@ impl fmt::Display for Journal {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod semilattice_tests {
+    #[test]
+    fn cap_bearer_copies_roundtrip_without_debug_disclosure_and_zeroize_independently() {
+        fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        requires_zeroize_on_drop::<Cap>();
+        let cap = Cap {
+            token_bytes: b"cap-bearer-redaction-regression".to_vec(),
+            root_key_bytes: vec![219; 32],
+        };
+        let debug = format!("{cap:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("cap-bearer-redaction-regression"));
+        assert!(!debug.contains(&format!("{:?}", cap.token_bytes)));
+        assert!(!debug.contains(&format!("{:?}", cap.root_key_bytes)));
+
+        let mut cloned = cap.clone();
+        let encoded = serde_json::to_vec(&cloned).unwrap();
+        let mut restored: Cap = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(cloned, cap);
+        assert_eq!(restored, cap);
+        zeroize::Zeroize::zeroize(&mut cloned);
+        zeroize::Zeroize::zeroize(&mut restored);
+        assert!(cloned.token_bytes.is_empty() && cloned.root_key_bytes.is_empty());
+        assert!(restored.token_bytes.is_empty() && restored.root_key_bytes.is_empty());
+        assert_eq!(cap.token_bytes, b"cap-bearer-redaction-regression");
+        assert_eq!(cap.root_key_bytes, vec![219; 32]);
+    }
+
     use super::*;
 
     #[test]

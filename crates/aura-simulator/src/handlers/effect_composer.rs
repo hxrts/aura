@@ -27,14 +27,12 @@ use crate::properties::{
 use crate::property_monitor::{AuraPropertyMonitor, PropertyRunReport, PropertyViolation};
 use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
 use crate::types::SimulatorConfig;
-use aura_agent::{AuraEffectSystem, EffectSystemFactory};
+use aura_agent::{AuraEffectSystem, EffectSystemFactory, SimulationSharedInbox};
 use aura_core::effects::{
     ChaosEffects, SimulationEnvironmentConfig, SimulationEnvironmentFactory, TestingEffects,
-    TransportEnvelope,
 };
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::DeviceId;
-use parking_lot::RwLock;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
@@ -55,7 +53,7 @@ pub struct SimulationEffectComposer {
     seed: u64,
     artifacts_dir: PathBuf,
     /// Optional shared transport inbox for multi-agent simulations
-    shared_transport_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
+    shared_transport_inbox: Option<Arc<SimulationSharedInbox>>,
 }
 
 impl SimulationEffectComposer {
@@ -88,10 +86,7 @@ impl SimulationEffectComposer {
     }
 
     /// Set the shared transport inbox for multi-agent communication
-    pub fn with_shared_transport_inbox(
-        mut self,
-        inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
-    ) -> Self {
+    pub fn with_shared_transport_inbox(mut self, inbox: Arc<SimulationSharedInbox>) -> Self {
         self.shared_transport_inbox = Some(inbox);
         self
     }
@@ -228,7 +223,7 @@ impl SimulationEffectComposer {
         device_id: DeviceId,
         authority_id: AuthorityId,
         seed: u64,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_inbox: Arc<SimulationSharedInbox>,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         Self::new(device_id, authority_id)
             .with_seed(seed)

@@ -59,6 +59,10 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Device-enrollment import and accept flows must rely on the upstream
   invitation workflow's bounded convergence contract rather than adding a
   frontend-local runtime pre-warm or peer-connectivity loop in `aura-ui`.
+- The shared enrollment-import submit helper checks the current controller's
+  host policy before transferring its exact local operation to the app. A wasm
+  `RuntimeOnly` policy produces a typed refusal and settles that local
+  submission; it cannot begin an app import without browser persistence ACK.
 - The add-device confirmation display and refresh path must read typed
   `CeremonyStatusHandle` lifecycle status from `aura-app::ui::workflows`
   rather than inferring progress from local timers, local counters, or modal
@@ -68,6 +72,12 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
   snapshot; exported operation state preserves the app-owned instance,
   cancellation, and typed failure domain/code. Guardian acceptance uses its
   own operation kind and waits for verified follow-up evidence.
+- A submitted terminal observation is a receipt for the exact synchronous
+  publisher handoff and its stated scope (channel acceptance, controller apply,
+  or component observation). Shared UI components may observe that receipt,
+  but an unpolled observation or component acknowledgment cannot replace the
+  original terminal intent or prove protocol/storage completion. Required
+  frontend task disposal remains with the shared task root.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - `UiController` exports the app snapshot's `projection_source_revisions` with `UiSnapshot`. Those source graph revisions describe the observed entity values and remain separate from the UI semantic/render `revision`; the UI must not mint or advance source revisions locally.
 - Onboarding must publish through the same semantic snapshot path as every other screen.

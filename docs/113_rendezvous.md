@@ -93,6 +93,13 @@ or cancellation cleanup. Any subsequent shortcut delivery retains the original
 approved enrollment owner and its purpose-bound acknowledgment under the
 original selected provider and deadline; broker records cannot reconstruct
 that authority.
+The issuer selects an external recipient authority and device and a Contact or
+Guardian purpose before starting an enrollment-with-shortcut workflow. After
+original enrollment disposal and positive acknowledgment, the issuer creates
+a fresh signed invitation for that exact destination and purpose under the
+separate fixed shortcut endpoint, then delivers it through the broker. The
+enrollment code is not replayed as the shortcut, and broker delivery does not
+turn enrollment-start success into invitation acceptance.
 
 Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton bootstrap registry. Runtime code may combine remembered direct contacts, neighborhood discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood re-entry hints, but it does not own final route choice or a global bootstrap cache.
 

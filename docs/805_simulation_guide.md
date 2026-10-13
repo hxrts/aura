@@ -249,6 +249,20 @@ let later = time.physical_time().await?;
 
 This handler advances time through explicit calls and its own sleep operations. For concurrent real-runtime fixtures, inject `ManualPhysicalClock` before service assembly when the test controls exact boundaries, or use the shared `QuiescentClock` with paused Tokio time for whole-flow scheduling. Sleeps on these runtime providers wait for controlled progress; one background sleeper must not advance every participant past a ceremony deadline. Retain original providers and durable endpoints across restart. Wall clock never decides distributed ordering, and timeout widening cannot repair readiness.
 
+For a manually driven runtime replay, install
+`ManualPhysicalClock::observe_next_relative_sleep` on the selected provider before
+polling the build or replay operation. Its one-shot receiver reports the actual
+typed relative-sleep target after wake notification registration. Clones share
+the observer slot; a second installed observer is rejected. Verify the expected
+wait was admitted (for example, the real five-millisecond reactive batch wait),
+then explicitly drive the same provider to that target while continuing to poll
+the original operation. The observation grants no processing acknowledgment:
+await the real replay completion and retain all original provider/window and
+failure custody. Do not auto-advance sleeps or renew a budget to make the fixture
+finish. After forward progress, use an actual provider read for refusal
+assertions, so an artificial earlier timestamp cannot create the rollback being
+asserted.
+
 ### Fault Injection
 
 ```rust

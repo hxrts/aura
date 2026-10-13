@@ -902,3 +902,28 @@ completion, and losing read/checkpoint/timer futures release their custody.
 Successful publication is synchronous under the original observation guard and
 requires independently established domain completion. Unsupported or failed
 clock providers cannot substitute a second clock or renew the original window.
+
+### Checkpoint evidence and native participant completion
+
+A domain operation result, persistence receipt, first failure and final
+selected-provider validation are independent evidence. Final checkpoint success
+cannot erase a native domain failure, and a preoperation receipt cannot establish
+postoperation durability. Any completed result and actual checkpoint disposition
+remain with the original consuming domain root after negative or unresolved
+execution; such outcomes create no cleanup capability.
+
+The approved-signing root consumes actual original participant completion and
+sealed descendant disposal before acknowledging Closed. The move-owned lease of
+the original tree handler provides exclusion but no authenticated provenance.
+Required-task disposal observers retain one accepted custody slot and remain
+Observed, even when repeated. Actual settled disposition, including resolved
+negative domain failure, is retained in that same slot before its resource
+acknowledgment becomes visible. Failed or interrupted cleanup cannot publish a
+settled disposition. Their outcome cannot authorize another execution
+or substitute for domain completion. Reconciliation custody remains with the
+original accepted control when an attempt is cancelled or fails. A retry may
+settle that original resource obligation under its existing authorized window;
+it cannot allocate a replacement task, provider or deadline. Resource disposal
+and domain terminal evidence remain distinct. Finite conditional negative consent remains
+bound to the original reviewed intent and actual protected first decision; it
+cannot authorize unrelated signatures or reconstruct participant material.

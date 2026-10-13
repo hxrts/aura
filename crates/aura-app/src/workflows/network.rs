@@ -417,6 +417,7 @@ mod tests {
         let other = AuthorityId::new_from_entropy([0x43; 32]);
         let candidates = vec![crate::runtime_bridge::BootstrapCandidateInfo {
             authority_id: barbara,
+            device_id: None,
             origin: crate::runtime_bridge::BootstrapCandidateOrigin::Lan,
             address: "192.168.0.32:31789".to_string(),
             discovered_at_ms: 1,

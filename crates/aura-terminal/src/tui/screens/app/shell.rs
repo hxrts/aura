@@ -203,8 +203,11 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIn
     };
     let drainage = match shutdown_window {
         Ok(window) => {
-            run_terminal_shutdown_cleanup(&window, clear_harness_command_sender, || {
-                tasks.wait_drained()
+            run_terminal_shutdown_cleanup(&window, clear_harness_command_sender, || async {
+                tasks
+                    .wait_required_disposed()
+                    .await
+                    .map_err(std::io::Error::other)
             })
             .await
         }
@@ -796,7 +799,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 operation_handle = Some(handle);
                             }
                         }
-                        Ok::<_, String>((state.screen(), operation_handle))
+                        Ok::<_, crate::tui::harness_state::HarnessSubmissionFailure>((state.screen(), operation_handle))
                     });
                     let (next_screen, operation_handle) = match apply_result {
                         Ok(result) => result,
@@ -1236,13 +1239,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     new_state.toast_error("UI update sender is unavailable");
                                     continue;
                                 };
-                                let operation = submit_ceremony_operation(
+                                let operation = match submit_ceremony_operation(
                                     app_ctx_for_dispatch.app_core.raw().clone(),
                                     tasks_for_events.clone(),
                                     update_tx,
                                     OperationId::remove_device(),
                                     SemanticOperationKind::RemoveDevice,
-                                );
+                                ) {
+                                    Ok(owner) => owner,
+                                    Err(source) => {
+                                        new_state.toast_error(source.to_string());
+                                        continue;
+                                    }
+                                };
                                 (cb.settings.on_remove_device)(device_id.into(), operation);
                             }
                             TuiCommand::HarnessRefreshAccount => {

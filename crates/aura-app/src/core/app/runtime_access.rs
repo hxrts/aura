@@ -216,18 +216,29 @@ impl AppCore {
         .await?
     }
 
-    /// Bootstrap signing keys for the current authority.
+    /// Bootstrap signing keys under the caller's original initialization window.
     pub async fn bootstrap_signing_keys(
         &self,
+        original: &aura_core::TimeoutBudget,
     ) -> Result<Vec<u8>, crate::runtime_bridge::RuntimeBridgeError> {
-        self.with_native_runtime_timeout(
-            "No runtime available - cannot bootstrap signing keys",
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::no_agent("No runtime available - cannot bootstrap signing keys")
+        })?;
+        crate::workflows::runtime::timeout_runtime_call_with_budget(
+            runtime,
+            original,
             "bootstrap_signing_keys",
             "bootstrap_signing_keys",
             APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move { runtime.bootstrap_signing_keys().await },
+            || runtime.bootstrap_signing_keys(original),
         )
-        .await?
+        .await
+        .map_err(|source| {
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::service_error("original signing initialization boundary failed"),
+                source,
+            )
+        })?
     }
 
     /// Get the threshold signing configuration for the current authority.
@@ -374,7 +385,7 @@ impl AppCore {
     /// Returns bootstrap candidates from the attached runtime for account-setup flows.
     pub async fn get_bootstrap_candidates(
         &self,
-    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
+    ) -> Result<Vec<BootstrapCandidateInfo>, crate::runtime_bridge::RuntimeBridgeError> {
         if let Some(runtime) = &self.runtime {
             return timeout_runtime_call_bounded(
                 runtime,
@@ -384,11 +395,16 @@ impl AppCore {
                 || runtime.try_get_bootstrap_candidates(),
             )
             .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))?;
+            .map_err(|error| {
+                crate::runtime_bridge::RuntimeBridgeError::with_source(
+                    IntentError::internal_error(format!(
+                        "Bootstrap candidate query failed: {error}"
+                    )),
+                    error,
+                )
+            })?;
         }
-        Err(IntentError::no_agent(
-            "get_bootstrap_candidates requires a runtime",
-        ))
+        Err(IntentError::no_agent("get_bootstrap_candidates requires a runtime").into())
     }
 
     pub(crate) async fn trigger_sync(&self) -> Result<(), IntentError> {

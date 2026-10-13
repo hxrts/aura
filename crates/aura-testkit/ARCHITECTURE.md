@@ -91,12 +91,18 @@ Contract alignment:
 | Transfer/capability modeling helpers | `MoveOwned` | Helper issuing the modeled token/handoff owns the transfer; tests and assertions observe. |
 | Deterministic time/network/simulation controllers | `ActorOwned` (test-only) | Controller instance owns mutation; tests and diagnostics observe. |
 | Fixtures, builders, and capture/assertion helpers | `Pure` / `Observed` | Test harness caller owns setup; tests and diagnostics observe. |
+| `task_custody::SupervisedTaskTestkit` | `ActorOwned` (host-only fixture) | One test supervisor owns required execution, cancellation and retained cleanup; disposal reports are observations, never domain or protocol receipts. |
 
 ### Capability-Gated Points
 
 - mock/runtime bridge helpers that model authoritative lifecycle/readiness or capability behavior for tests must do so explicitly and remain test-only
 - stateful effect doubles may expose mutation for deterministic control, but those shortcuts must not become production-facing backdoors
 - mock transport/journal/time helpers should preserve the same capability and ownership semantics the production code expects to consume
+- host-only required-task fixtures must explicitly drain after shutdown to
+  prove actual cleanup acknowledgment. Dropping a test supervisor requests
+  shutdown but does not turn worker completion, cancellation or an observer's
+  disappearance into disposal evidence. Failed or interrupted cleanup retains
+  original custody and its concrete source for reconciliation.
 
 - Mock acceptance and time APIs mirror the native `RuntimeBridgeError` contract;
   fixtures cannot silently convert native causes back into foreign diagnostics.

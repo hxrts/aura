@@ -77,10 +77,16 @@ impl SecureStorageEffects for AuraEffectSystem {
         data: &[u8],
         caps: &[SecureStorageCapability],
     ) -> Result<aura_core::effects::secure::ImmutableSecureStoreOutcome, SecureStorageError> {
-        self.crypto
+        let outcome = self
+            .crypto
             .secure_storage()
             .secure_store_immutable(location, data, caps)
-            .await
+            .await?;
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        if location.namespace == "device_enrollment_generation_allocation_v1" {
+            self.await_original_allocation_commit_for_test().await?;
+        }
+        Ok(outcome)
     }
 
     async fn secure_store(

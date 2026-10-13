@@ -24,6 +24,10 @@ pub use submitted_operation::{
     dropped_owner_error, run_frontend_sync_boundary, CeremonyMonitorHandoffRelease,
     CeremonyMonitorHandoffSubmission, CeremonySubmissionTerminalOutcome, LocalTerminalSubmission,
     SubmittedOperation, SubmittedOperationPublisher, SubmittedOperationRelease,
-    SubmittedOperationWorkflowError, WorkflowHandoffRelease, WorkflowHandoffSubmission,
+    SubmittedOperationWorkflowError, SubmittedTerminalAcknowledgment,
+    SubmittedTerminalAcknowledgmentScope, SubmittedTerminalCustody, SubmittedTerminalIntent,
+    SubmittedTerminalObservation, WorkflowHandoffRelease, WorkflowHandoffSubmission,
 };
-pub use task_owner::{FrontendTaskManager, FrontendTaskOwner, FrontendTaskRuntime};
+pub use task_owner::{
+    FrontendRequiredTaskReport, FrontendTaskManager, FrontendTaskOwner, FrontendTaskRuntime,
+};

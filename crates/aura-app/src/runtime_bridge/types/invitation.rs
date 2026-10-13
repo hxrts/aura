@@ -38,6 +38,19 @@ pub enum InvitationBridgeType {
     },
 }
 
+impl InvitationBridgeType {
+    /// Observe purpose without granting signature or workflow authority.
+    pub const fn purpose(&self) -> aura_core::invitation::InvitationPurpose {
+        use aura_core::invitation::InvitationPurpose;
+        match self {
+            Self::Contact { .. } => InvitationPurpose::Contact,
+            Self::Guardian { .. } => InvitationPurpose::Guardian,
+            Self::Channel { .. } => InvitationPurpose::Channel,
+            Self::DeviceEnrollment { .. } => InvitationPurpose::DeviceEnrollment,
+        }
+    }
+}
+
 /// Bridge-level invitation status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvitationBridgeStatus {

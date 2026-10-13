@@ -59,13 +59,109 @@ pub struct DeviceEnrollmentStart {
     pub manifest_transfer: Option<EnrollmentManifestTransferCodes>,
 }
 
+/// A user-selected external broker recipient for the operation that follows
+/// successful enrollment. The account being enrolled cannot be its recipient.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostEnrollmentShortcutPurpose {
+    Contact,
+    Guardian,
+}
+
+#[derive(Debug, Clone)]
+pub struct PostEnrollmentShortcutSelection {
+    recipient: AuthorityId,
+    device: DeviceId,
+    purpose: PostEnrollmentShortcutPurpose,
+}
+
+impl PostEnrollmentShortcutSelection {
+    pub fn select_external(
+        issuer: AuthorityId,
+        recipient: AuthorityId,
+        device: DeviceId,
+        purpose: PostEnrollmentShortcutPurpose,
+    ) -> Result<Self, aura_core::AuraError> {
+        if issuer == recipient {
+            return Err(aura_core::AuraError::invalid(
+                "post-enrollment shortcut recipient must be external",
+            ));
+        }
+        Ok(Self {
+            recipient,
+            device,
+            purpose,
+        })
+    }
+
+    pub fn recipient(&self) -> AuthorityId {
+        self.recipient
+    }
+    pub fn device(&self) -> DeviceId {
+        self.device
+    }
+    pub fn purpose(&self) -> PostEnrollmentShortcutPurpose {
+        self.purpose
+    }
+}
+
+/// The observed start and original move-only issuer continuation.
+pub struct IssuedDeviceEnrollmentStart {
+    pub start: DeviceEnrollmentStart,
+    pub post_completion: OriginalEnrollmentPostCompletion,
+}
+
+pub struct OriginalEnrollmentPostCompletion {
+    inner: Box<dyn std::any::Any + Send>,
+}
+
+impl OriginalEnrollmentPostCompletion {
+    pub fn from_runtime<T: std::any::Any + Send>(inner: T) -> Self {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+
+    pub fn runtime_mut<T: std::any::Any + Send>(&mut self) -> Option<&mut T> {
+        self.inner.downcast_mut::<T>()
+    }
+}
+
+#[cfg(test)]
+mod post_enrollment_shortcut_selection_tests {
+    use super::*;
+
+    #[test]
+    fn selected_external_recipient_cannot_be_enrolled_account() {
+        let issuer = AuthorityId::new_from_entropy([1; 32]);
+        let other = AuthorityId::new_from_entropy([2; 32]);
+        let device = DeviceId::from_bytes([3; 32]);
+        assert!(PostEnrollmentShortcutSelection::select_external(
+            issuer,
+            issuer,
+            device,
+            PostEnrollmentShortcutPurpose::Contact,
+        )
+        .is_err());
+        let selected = PostEnrollmentShortcutSelection::select_external(
+            issuer,
+            other,
+            device,
+            PostEnrollmentShortcutPurpose::Guardian,
+        )
+        .expect("explicitly selected external recipient");
+        assert_eq!(selected.recipient(), other);
+        assert_eq!(selected.device(), device);
+        assert_eq!(selected.purpose(), PostEnrollmentShortcutPurpose::Guardian);
+    }
+}
+
 /// Observed identifiers for one still-owned issuer preparation. This DTO grants
 /// no signature, generation, time-window or runtime admission authority.
 #[derive(Debug, Clone)]
 pub struct PreparedDeviceEnrollmentSigning {
     /// Identifier of the still-owned prepared issuer; this field grants no resume authority.
     pub ceremony_id: CeremonyId,
-    /// Canonical public three-domain intent for explicit participant review and transfer.
+    /// Canonical public initiation and conditional terminal intent for explicit participant review and transfer.
     pub signing_intent_code: String,
     /// Original user-transferred setup proof required by participant admission.
     pub setup_transfer_code: String,
@@ -150,6 +246,8 @@ pub enum BootstrapCandidateOrigin {
 pub struct BootstrapCandidateInfo {
     /// Authority ID of the discovered candidate.
     pub authority_id: AuthorityId,
+    /// Observed device; required for broker routing, optional for LAN descriptors.
+    pub device_id: Option<DeviceId>,
     /// Discovery origin for this candidate.
     pub origin: BootstrapCandidateOrigin,
     /// Best currently known address for the candidate bootstrap path.

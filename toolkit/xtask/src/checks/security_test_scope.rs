@@ -82,4 +82,26 @@ mod tests {
         assert!(!lines.contains(&7));
         assert!(lines.contains(&9));
     }
+    #[test]
+    fn text_and_test_like_names_do_not_exempt_later_macro_tokens() {
+        let source = r#"
+#[cfg(test)]
+mod tests { fn genuine() { unsigned(); } }
+const DECOY: &str = "mod tests #[cfg(test)]";
+// mod tests and #[cfg(test)] are text, not ownership.
+fn helper_for_tests() { production_call! { unsigned(); } }
+#[cfg(any(test, feature = "production"))]
+production_macro! { unsigned(); }
+#[cfg(all(unix, test))]
+fixture_macro! { unsigned(); }
+"#;
+        let lines = test_lines(source).unwrap();
+        for (idx, line) in source.lines().enumerate() {
+            if line.contains("fn genuine") || line.contains("fixture_macro!") {
+                assert!(lines.contains(&(idx + 1)), "{line}");
+            } else if line.contains("production_call!") || line.contains("production_macro!") {
+                assert!(!lines.contains(&(idx + 1)), "{line}");
+            }
+        }
+    }
 }

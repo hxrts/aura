@@ -1070,19 +1070,31 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn try_get_bootstrap_candidates(
         &self,
-    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
+    ) -> Result<Vec<BootstrapCandidateInfo>, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(vec![])
     }
 
-    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
+    async fn refresh_bootstrap_candidate_registration(
+        &self,
+        _original: &aura_core::TimeoutBudget,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(())
+    }
+
+    async fn take_bootstrap_invitation_batch(
+        &self,
+    ) -> Result<
+        aura_core::invitation::BootstrapInvitationBatch,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
+        Err(IntentError::no_agent("Mock bootstrap receiving is not configured").into())
     }
 
     async fn send_bootstrap_invitation(
         &self,
         _peer: &BootstrapCandidateInfo,
         _invitation_code: &str,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(())
     }
 
@@ -1101,6 +1113,7 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn bootstrap_signing_keys(
         &self,
+        _original: &aura_core::TimeoutBudget,
     ) -> Result<Vec<u8>, aura_app::runtime_bridge::RuntimeBridgeError> {
         // Return mock key material
         Ok(vec![0u8; 32])

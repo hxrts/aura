@@ -45,6 +45,37 @@ pub struct CeremonyRunner {
 }
 
 impl CeremonyRunner {
+    pub(crate) fn existing_original_cancellation_task(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        role: super::ceremony_tracker::OriginalCancellationTaskRole,
+    ) -> Result<
+        Option<std::sync::Arc<super::ceremony_tracker::OriginalCancellationTaskRegistration>>,
+        AuraError,
+    > {
+        self.tracker
+            .existing_original_cancellation_task(issued, role)
+    }
+
+    pub(crate) fn prepare_original_cancellation_task(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        role: super::ceremony_tracker::OriginalCancellationTaskRole,
+    ) -> Result<
+        std::sync::Arc<super::ceremony_tracker::OriginalCancellationTaskRegistration>,
+        AuraError,
+    > {
+        self.tracker
+            .prepare_original_cancellation_task(issued, role)
+    }
+    pub(crate) fn original_issuer_retirement_observation(
+        &self,
+        retained: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<Option<std::sync::Arc<super::ceremony_tracker::RunningIssuerObservation>>, AuraError>
+    {
+        self.tracker
+            .original_issuer_retirement_observation(retained)
+    }
     pub fn new(tracker: CeremonyTracker) -> Self {
         Self { tracker }
     }
@@ -54,7 +85,7 @@ impl CeremonyRunner {
     pub(crate) async fn retire_failed_enrollment_generation(
         &self,
         ceremony: &CeremonyId,
-    ) -> Result<(), AuraError> {
+    ) -> Result<crate::runtime::effects::AcknowledgedEnrollmentRetirement, AuraError> {
         self.tracker
             .retire_failed_enrollment_generation(ceremony)
             .await
@@ -69,16 +100,6 @@ impl CeremonyRunner {
         self.tracker
             .publish_cancelled_generation_settlement(ceremony, result)
             .await;
-    }
-
-    /// Await the cancelled-notice owner's sign-and-release result.
-    pub(crate) async fn await_cancelled_generation_settlement(
-        &self,
-        ceremony: &CeremonyId,
-    ) -> Result<(), AuraError> {
-        self.tracker
-            .await_cancelled_generation_settlement(ceremony)
-            .await
     }
 
     /// Register a new ceremony with prestate binding.
@@ -109,11 +130,12 @@ impl CeremonyRunner {
     pub(crate) async fn start_owned_device_enrollment(
         &self,
         generation: &mut crate::runtime::effects::EnrollmentGenerationReservation<'_>,
+        launch: &mut super::enrollment_window::OriginalIssuerLaunchWindow,
         request: CeremonyInitRequest,
         original_tasks: &crate::task_registry::TaskGroup,
     ) -> Result<(), AuraError> {
         self.tracker
-            .register_owned_device_enrollment(generation, request, original_tasks)
+            .register_owned_device_enrollment(generation, launch, request, original_tasks)
             .await
     }
 
@@ -139,27 +161,6 @@ impl CeremonyRunner {
         Ok(state.timeout_budget.clone())
     }
 
-    /// Admit the strongest actual registered generation, preserving its tracker and runtime.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "RegisteredEnrollmentGenerationCapability",
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn registered_enrollment_generation_window(
-        &self,
-        generation: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
-    ) -> Result<
-        super::enrollment_window::EnrollmentExecutionRoot<
-            super::ceremony_tracker::RegisteredEnrollmentWindowCapability,
-        >,
-        AuraError,
-    > {
-        self.tracker
-            .acquire_registered_enrollment_generation_window(generation)
-            .await
-            .map(super::enrollment_window::EnrollmentExecutionRoot::into_registered)
-    }
-
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "original_cancellation_preparation",
@@ -182,11 +183,10 @@ impl CeremonyRunner {
                 capability,
             ) => Ok(
                 super::enrollment_window::EnrollmentCancellationPreparationCapability::Active(
-                    super::enrollment_window::EnrollmentCancellationWindowCapability::registered(
+                    Box::new(super::enrollment_window::EnrollmentCancellationWindowCapability::registered(
                         *capability,
                         effects,
-                    )
-                    .await?,
+                    )?),
                 ),
             ),
             super::ceremony_tracker::RegisteredCancellationPreparationCapability::Decided(
@@ -308,35 +308,6 @@ impl CeremonyRunner {
         issued.require_runtime_owner(effects)?;
         self.tracker.acquire_cancelled_notice(issued).await
     }
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "RegisteredCancelledNoticeCapability",
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn cancelled_notice_window(
-        &self,
-        capability: super::ceremony_tracker::RegisteredCancelledNoticeCapability,
-        effects: &crate::runtime::AuraEffectSystem,
-    ) -> Result<super::enrollment_window::CancelledNoticeWindowAdmission, AuraError> {
-        match super::enrollment_window::CancelledEnrollmentNoticeWindowCapability::registered(
-            capability, effects,
-        )
-        .await
-        {
-            Ok(window) => {
-                Ok(super::enrollment_window::CancelledNoticeWindowAdmission::Eligible(window))
-            }
-            Err(cause) if super::enrollment_window::cancelled_notice_eligibility_ended(&cause) => {
-                Ok(
-                    super::enrollment_window::CancelledNoticeWindowAdmission::EligibilityEnded {
-                        cause,
-                    },
-                )
-            }
-            Err(cause) => Err(cause),
-        }
-    }
-
     /// Return the result published by the ceremony owner, if terminal.
     #[aura_macros::capability_boundary(
         category = "capability_gated",

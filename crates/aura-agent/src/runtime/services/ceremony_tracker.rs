@@ -23,6 +23,11 @@
 //! can be converted to `CeremonyStatus` (from `aura-core::domain::status`) for
 //! UI display and consistency tracking.
 
+enum OriginalRegistrationClock<'a> {
+    SelectAtRegistration,
+    SelectedEnrollment(&'a mut super::enrollment_window::OriginalIssuerLaunchWindow),
+}
+
 use super::state::with_state_mut_validated;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::{AuraEffectSystem, TaskGroup};
@@ -73,7 +78,33 @@ struct StoredEnrollmentClock {
     prestate: Hash32,
     epoch: u64,
     budget: aura_core::TimeoutBudget,
+    negative_cleanup_budget: aura_core::TimeoutBudget,
+    original_policy: super::enrollment_window::OriginalEnrollmentWindowPolicy,
     execution: super::enrollment_window::DurableEnrollmentExecutionState,
+}
+
+pub(super) struct OriginalIssuerNegativeCheckpointReceipt {
+    original: Arc<RegisteredEnrollmentWindowCapability>,
+    retained_decision: super::enrollment_window::DurableEnrollmentExecutionState,
+}
+impl OriginalIssuerNegativeCheckpointReceipt {
+    pub(super) fn require_original(
+        &self,
+        original: &Arc<RegisteredEnrollmentWindowCapability>,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.original, original)
+            || !matches!(
+                self.retained_decision,
+                super::enrollment_window::DurableEnrollmentExecutionState::Closed
+                    | super::enrollment_window::DurableEnrollmentExecutionState::Refused
+            )
+        {
+            return Err(AuraError::invalid(
+                "negative checkpoint has another original decision owner",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Immutable evidence that this exact allocation was eligible to become live.
@@ -88,6 +119,7 @@ struct StoredEnrollmentLiveWindow {
     epoch: u64,
     started_at_ms: u64,
     deadline_at_ms: u64,
+    original_policy: super::enrollment_window::OriginalEnrollmentWindowPolicy,
 }
 impl StoredEnrollmentLiveWindow {
     fn from_state(state: &TrackedCeremony) -> Result<Self, AuraError> {
@@ -101,6 +133,7 @@ impl StoredEnrollmentLiveWindow {
             epoch: state.new_epoch,
             started_at_ms: state.timeout_budget.started_at_ms(),
             deadline_at_ms: state.timeout_budget.deadline_at_ms(),
+            original_policy: state.original_window_policy.clone(),
         })
     }
 }
@@ -145,9 +178,145 @@ impl VerifiedEnrollmentCancellationCapability {
 pub(crate) struct RegisteredEnrollmentWindowCapability {
     tracker: OriginalEnrollmentTrackerReference,
     state: TrackedCeremony,
-    lease: Arc<tokio::sync::OwnedSemaphorePermit>,
+    lease: Arc<OriginalRegisteredExecutionLease>,
     notice_binding: std::sync::OnceLock<Arc<RegisteredEnrollmentNoticeBindingCapability>>,
+    negative_decision: std::sync::OnceLock<OriginalEnrollmentNegativeDecisionReceipt>,
+    verified_rejection: std::sync::OnceLock<
+        crate::handlers::invitation::enrollment_trust::VerifiedEnrollmentRejectionCapability,
+    >,
+    positive_decision: std::sync::OnceLock<OriginalEnrollmentPositiveDecisionReceipt>,
+    #[cfg(test)]
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    committed_confirmation_gate: parking_lot::Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
     _original_allocation: crate::runtime::effects::OriginalEnrollmentAllocationAcknowledgment,
+}
+
+/// Provenance of the actual protected first negative decision, retained in its
+/// original registered owner. Neither a status snapshot nor stored bytes can
+/// construct this receipt. Weak custody avoids a cycle through the owner slot.
+pub(crate) struct OriginalEnrollmentNegativeDecisionReceipt {
+    original: std::sync::Weak<RegisteredEnrollmentWindowCapability>,
+    kind: aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind,
+    decision_digest: [u8; 32],
+}
+impl OriginalEnrollmentNegativeDecisionReceipt {
+    pub(crate) fn kind(
+        &self,
+    ) -> aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind {
+        self.kind
+    }
+    pub(crate) fn decision_digest(&self) -> [u8; 32] {
+        self.decision_digest
+    }
+    pub(crate) fn original_owner_for_control(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<std::sync::Weak<RegisteredEnrollmentWindowCapability>, AuraError> {
+        self.require_original_control(issued)?;
+        Ok(self.original.clone())
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalEnrollmentNegativeDecisionReceipt",
+        receiver_type = OriginalEnrollmentNegativeDecisionReceipt,
+        family = "runtime_helper"
+    )]
+    pub(crate) fn require_original_control(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        let original = self.original.upgrade().ok_or_else(|| {
+            AuraError::permission_denied("original negative decision owner was lost")
+        })?;
+        original.require_issued_notice_control(issued)?;
+        let retained = original.negative_decision.get().ok_or_else(|| {
+            AuraError::permission_denied("original negative decision is not retained")
+        })?;
+        if !std::ptr::eq(retained, self) {
+            return Err(AuraError::permission_denied(
+                "foreign original negative decision receipt",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Actual original held activation and protected Committed decision. This token
+/// cannot be reconstructed from a terminal snapshot, wire frame or stored bytes.
+pub(crate) struct OriginalEnrollmentPositiveDecisionReceipt {
+    original: std::sync::Weak<RegisteredEnrollmentWindowCapability>,
+    decision_digest: [u8; 32],
+    committed_ops: Vec<aura_core::AttestedOp>,
+}
+impl OriginalEnrollmentPositiveDecisionReceipt {
+    pub(crate) fn committed_ops(&self) -> &[aura_core::AttestedOp] {
+        &self.committed_ops
+    }
+    pub(crate) fn decision_digest(&self) -> [u8; 32] {
+        self.decision_digest
+    }
+    pub(crate) fn original_owner_for_control(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<std::sync::Weak<RegisteredEnrollmentWindowCapability>, AuraError> {
+        self.require_original_control(issued)?;
+        Ok(self.original.clone())
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalEnrollmentPositiveDecisionReceipt", receiver_type = OriginalEnrollmentPositiveDecisionReceipt, family = "runtime_helper")]
+    pub(crate) fn require_original_control(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        let original = self.original.upgrade().ok_or_else(|| {
+            AuraError::permission_denied("original positive decision owner was lost")
+        })?;
+        original.require_issued_notice_control(issued)?;
+        let actual = original.positive_decision.get().ok_or_else(|| {
+            AuraError::permission_denied("original positive decision is not retained")
+        })?;
+        if !std::ptr::eq(actual, self) {
+            return Err(AuraError::permission_denied(
+                "foreign original positive decision receipt",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Actual protected retirement writes sealed through the original execution owner.
+/// Neither protected bytes nor supervision completion can construct this receipt.
+pub(crate) struct RejectedOriginalEnrollmentRetirement {
+    pub(crate) source: AuraError,
+    // Retains actual rejected write custody until its enclosing owner settles.
+    pub(crate) _writes: Box<crate::runtime::effects::AcknowledgedEnrollmentRetirement>,
+}
+pub(crate) struct OriginalEnrollmentRetirementAcknowledgment {
+    original: Arc<RegisteredEnrollmentWindowCapability>,
+    writes: crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+}
+impl OriginalEnrollmentRetirementAcknowledgment {
+    pub(crate) fn require_original(
+        &self,
+        original: &Arc<RegisteredEnrollmentWindowCapability>,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.original, original) {
+            return Err(crate::runtime::effects::held_registration_error(
+                crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
+            ));
+        }
+        original.require_issued_notice_control(issued)?;
+        self.writes
+            .require_original(original.tracker.effects.as_ref(), issued)
+    }
 }
 
 /// Actual fresh Pending publication acknowledgment, never decoded or cloned.
@@ -190,6 +359,10 @@ enum OriginalEnrollmentTrackerError {
     AlreadyBorn,
     #[error("the original enrollment Pending publication readback changed")]
     BirthReadbackChanged,
+    #[error("original issuer task disposal did not complete successfully")]
+    DeliveryInterrupted,
+    #[error("original signed issuer acknowledgment is negative")]
+    NegativeDeliveryAcknowledgment,
 }
 
 fn original_tracker_refusal(source: OriginalEnrollmentTrackerError) -> AuraError {
@@ -233,6 +406,10 @@ impl OriginalEnrollmentTrackerReference {
     }
 }
 impl HeldIssuerClockObservationCapability {
+    #[cfg(test)]
+    pub(super) fn ceremony_id(&self) -> &CeremonyId {
+        &self.state.ceremony_id
+    }
     pub(super) async fn require_pending(&self) -> Result<(), AuraError> {
         self.tracker.require_pending(&self.state).await
     }
@@ -251,12 +428,851 @@ pub(crate) struct RegisteredEnrollmentNoticeBindingCapability {
     expires_at_ms: u64,
     canonical_invitation: Vec<u8>,
 }
-impl RegisteredEnrollmentWindowCapability {
-    pub(super) fn prepare_running_observation(
+/// Read-only observation rooted in the original registered entry. The unique
+/// task control and terminal acknowledgment remain in that entry while waiting.
+pub(crate) struct OriginalIssuerDeliveryObservation {
+    original: Arc<RegisteredEnrollmentWindowCapability>,
+    disposal: crate::task_registry::OriginalRequiredTaskDisposalObserver,
+}
+impl OriginalIssuerDeliveryObservation {
+    /// Caller bounds this wait with the once-issued shortcut operation window.
+    /// Cancellation drops only this observer, never the retained task control.
+    pub(crate) async fn await_disposal(
         &self,
+    ) -> crate::task_registry::OriginalRequiredTaskDisposalObservation {
+        self.disposal.await_disposal().await
+    }
+    #[cfg(feature = "simulation")]
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalIssuerDeliveryObservation", receiver_type = OriginalIssuerDeliveryObservation, family = "runtime_helper")]
+    pub(crate) fn require_failed_disposal(
+        &self,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<AuraError, AuraError> {
+        let tracker = self.original.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "validate original failed issuer disposal".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.original.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !entry
+            .running
+            .as_ref()
+            .is_some_and(|actual| Arc::ptr_eq(&actual.original, &self.original))
+        {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        let task = entry
+            .issuer_task
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        task.require_disposal(disposal)?;
+        match disposal.outcome() {
+            aura_core::effects::task::RequiredTaskExit::Failed(source) => Ok(source),
+            _ => Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::DeliveryInterrupted,
+            )),
+        }
+    }
+    #[cfg(feature = "simulation")]
+    pub(crate) fn original_simulated_subtree_disposal(
+        &self,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<Arc<crate::task_registry::TaskGroupDisposalAcknowledgment>, AuraError> {
+        self.require_failed_disposal(disposal)?;
+        let tracker = self.original.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original disposed subtree".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.original.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, &self.original) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        running
+            .retirement_destination
+            .simulated_original_subtree_disposal()
+            .ok_or_else(|| AuraError::invalid("original sealed subtree disposal is unresolved"))
+    }
+    /// Validate actual original resource and domain acknowledgment without
+    /// moving either. Used as the original shortcut window's real checkpoint.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalIssuerDeliveryObservation", receiver_type = OriginalIssuerDeliveryObservation, family = "runtime_helper")]
+    pub(crate) fn require_positive(
+        &self,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), AuraError> {
+        let tracker = self.original.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "checkpoint original issuer delivery acknowledgment".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.original.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        self.require_positive_entry(entry, disposal)
+    }
+    fn require_positive_entry(
+        &self,
+        entry: &TrackedCeremonyEntry,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), AuraError> {
+        let running = entry
+            .running
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, &self.original) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        let task = entry
+            .issuer_task
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        task.require_disposal(disposal)?;
+        match disposal.outcome() {
+            aura_core::effects::task::RequiredTaskExit::Completed => {}
+            aura_core::effects::task::RequiredTaskExit::Failed(source) => return Err(source),
+            _ => {
+                return Err(original_tracker_refusal(
+                    OriginalEnrollmentTrackerError::DeliveryInterrupted,
+                ))
+            }
+        }
+        let acknowledged = entry
+            .acknowledged_issuer
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        acknowledged.require_original(&self.original)?;
+        if !acknowledged.positive() {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::NegativeDeliveryAcknowledgment,
+            ));
+        }
+        Ok(())
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalIssuerDeliveryObservation", receiver_type = OriginalIssuerDeliveryObservation, family = "runtime_helper")]
+    pub(crate) fn consume_positive(
+        &self,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+        purpose: super::enrollment_window::EnrolledDeviceShortcutPurpose,
+    ) -> Result<super::enrollment_window::EnrolledDeviceShortcutAuthority, AuraError> {
+        let tracker = self.original.tracker.upgrade()?;
+        let mut state = tracker
+            .shared
+            .state
+            .try_write()
+            .map_err(|source| AuraError::Internal {
+                message: "consume original issuer delivery acknowledgment".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get_mut(&self.original.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        self.require_positive_entry(entry, disposal)?;
+        // All fallible checks precede the one-use removal. The unique task
+        // control remains rooted in the same original entry.
+        Ok(entry
+            .acknowledged_issuer
+            .take()
+            .expect("checked original acknowledgment")
+            .into_shortcut_authority(purpose))
+    }
+}
+
+// Lifecycle status is a mutable observation, not part of original issuance
+// identity. Preserve every other field through the existing signed wire shape.
+fn original_invitation_binding(
+    invitation: &aura_core::invitation::Invitation,
+) -> Result<Vec<u8>, AuraError> {
+    aura_core::util::serialization::to_vec(&(
+        aura_signature::invitation::ShareableInvitation::from(invitation),
+        invitation.receiver_id,
+        invitation.created_at,
+        &invitation.receiver_nickname,
+    ))
+    .map_err(AuraError::from)
+}
+
+impl RegisteredEnrollmentWindowCapability {
+    /// Original selected endpoint retained for the separate shortcut operation.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RegisteredEnrollmentWindowCapability", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(crate) fn post_enrollment_budget(&self) -> Option<aura_core::TimeoutBudget> {
+        self.state.shortcut_budget.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_cancelled_notice_gate_for_test(
+        self: &Arc<Self>,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original notice gate owner".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        running
+            .retirement_destination
+            .install_cancelled_notice_gate_for_test()
+    }
+    #[cfg(test)]
+    pub(crate) fn install_negative_cleanup_first_observation_gate_for_test(
+        self: &Arc<Self>,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original notice gate owner".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        running
+            .retirement_destination
+            .install_negative_cleanup_first_observation_gate_for_test()
+    }
+    #[cfg(test)]
+    pub(crate) fn observe_negative_cleanup_clock_for_test(
+        &self,
+        now: &aura_core::time::PhysicalTime,
+    ) -> aura_core::TimeoutBudgetResult<std::time::Duration> {
+        self.negative_cleanup_budget().remaining_at(now)
+    }
+    #[cfg(test)]
+    pub(crate) fn install_negative_cleanup_after_observation_gate_for_test(
+        self: &Arc<Self>,
+    ) -> Result<
+        crate::handlers::invitation_service::OriginalNegativeCleanupObservationGate,
+        AuraError,
+    > {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original notice gate owner".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        running
+            .retirement_destination
+            .install_negative_cleanup_after_observation_gate_for_test()
+    }
+    #[cfg(test)]
+    pub(crate) fn install_committed_confirmation_gate_for_test(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let mut actual = self.committed_confirmation_gate.lock();
+        if actual.is_some() || self.positive_decision.get().is_some() {
+            return Err(AuraError::invalid("original committed gate already used"));
+        }
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        *actual = Some((entered, released));
+        Ok((observed, release))
+    }
+    #[cfg(test)]
+    pub(crate) fn has_original_positive_receipt_for_test(self: &Arc<Self>) -> bool {
+        self.positive_decision.get().is_some_and(|actual| {
+            actual
+                .original
+                .upgrade()
+                .is_some_and(|owner| Arc::ptr_eq(&owner, self))
+        })
+    }
+
+    pub(super) fn original_resource_decision(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<super::enrollment_window::OriginalIssuerResourceDecision, AuraError> {
+        self.require_issued_notice_control(issued)?;
+        match (self.positive_decision.get(), self.negative_decision.get()) {
+            (Some(receipt), None) => {
+                receipt.require_original_control(issued)?;
+                Ok(super::enrollment_window::OriginalIssuerResourceDecision::Committed)
+            }
+            (None, Some(_)) => {
+                self.require_original_verified_rejection(issued)?;
+                Ok(super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected)
+            }
+            _ => Err(AuraError::permission_denied(
+                "original resource cleanup requires one exclusive protected decision",
+            )),
+        }
+    }
+
+    pub(crate) fn original_positive_decision(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<&OriginalEnrollmentPositiveDecisionReceipt, AuraError> {
+        self.require_issued_notice_control(issued)?;
+        let actual = self.positive_decision.get().ok_or_else(|| {
+            AuraError::permission_denied("original positive decision has not been published")
+        })?;
+        actual.require_original_control(issued)?;
+        Ok(actual)
+    }
+    pub(crate) fn original_negative_decision(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<&OriginalEnrollmentNegativeDecisionReceipt, AuraError> {
+        self.require_issued_notice_control(issued)?;
+        let receipt = self.negative_decision.get().ok_or_else(|| {
+            AuraError::permission_denied("original negative decision has not been published")
+        })?;
+        receipt.require_original_control(issued)?;
+        Ok(receipt)
+    }
+    pub(in crate::runtime) fn require_original_held_reservation(
+        &self,
+        reservation: &crate::runtime::effects::EnrollmentGenerationReservation<'_>,
+    ) -> Result<(), AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        reservation.require_tracker(&tracker)?;
+        reservation.validate_allocated_registration(self.tracker.effects.as_ref(), &self.state)
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalIssuerNegativeCheckpointReceipt",
+        family = "runtime_helper"
+    )]
+    pub(super) fn release_held_negative_execution_lease(
+        self: &Arc<Self>,
+        reservation: &crate::runtime::effects::EnrollmentGenerationReservation<'static>,
+        retirement: &crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+        checkpoint: &OriginalIssuerNegativeCheckpointReceipt,
+        disposal: &crate::task_registry::TaskGroupDisposalAcknowledgment,
+        children: &crate::task_registry::TaskGroup,
+    ) -> Result<(), AuraError> {
+        self.require_original_held_reservation(reservation)?;
+        retirement.require_original_held(reservation, self.tracker.effects.as_ref())?;
+        checkpoint.require_original(self)?;
+        disposal.require_original_group(children)?;
+        self.lease.release_after_acknowledgment()
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_verified_issuer_cancellation",
+        receiver_type = RegisteredEnrollmentWindowCapability,
+        family = "runtime_helper"
+    )]
+    pub(crate) fn require_original_cancellation(
+        &self,
+        terminal: &crate::handlers::invitation::OriginalIssuerCancellationTerminal,
+    ) -> Result<(), AuraError> {
+        terminal
+            .require_original_effects(&self.tracker.effects)
+            .map_err(|source| match source {
+                crate::core::AgentError::Aura(source) => source,
+                source => AuraError::Internal {
+                    message: "original cancellation validation".into(),
+                    source: Some(Arc::new(source)),
+                },
+            })?;
+        self.require_issued_notice_control(terminal.issued())
+    }
+    #[cfg(feature = "simulation")]
+    pub(crate) fn original_simulation_ceremony(&self) -> &CeremonyId {
+        &self.state.ceremony_id
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(crate) fn original_committed_decision(
+        &self,
+        effects: &AuraEffectSystem,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<bool, AuraError> {
+        self.require_effects(effects)?;
+        self.require_issued_notice_control(issued)?;
+        match (self.positive_decision.get(), self.negative_decision.get()) {
+            (Some(actual), None) => {
+                actual.require_original_control(issued)?;
+                Ok(true)
+            }
+            (None, Some(actual)) => {
+                actual.require_original_control(issued)?;
+                Ok(false)
+            }
+            (None, None) => Ok(false),
+            _ => Err(AuraError::permission_denied(
+                "contradictory original enrollment decisions",
+            )),
+        }
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RegisteredEnrollmentWindowCapability", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(crate) async fn await_original_resource_disposal(
+        self: &Arc<Self>,
+    ) -> Result<
+        (
+            OriginalIssuerDeliveryObservation,
+            crate::task_registry::OriginalRequiredTaskDisposalObservation,
+        ),
+        AuraError,
+    > {
+        let observation = self.observe_original_delivery()?;
+        let disposal = aura_core::execute_with_timeout_budget(
+            self.tracker.effects.as_ref(),
+            &self.state.negative_cleanup_budget,
+            || async { Ok::<_, AuraError>(observation.await_disposal().await) },
+        )
+        .await
+        .map_err(|source| match source {
+            aura_core::TimeoutRunError::Operation(source) => source,
+            aura_core::TimeoutRunError::Timeout(source) => AuraError::from(source),
+        })?;
+        Ok((observation, disposal))
+    }
+    pub(super) fn negative_cleanup_budget(&self) -> &aura_core::TimeoutBudget {
+        &self.state.negative_cleanup_budget
+    }
+    pub(super) async fn acknowledge_negative_checkpoint(
+        self: &Arc<Self>,
+    ) -> Result<OriginalIssuerNegativeCheckpointReceipt, AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        self.require_effects(self.tracker.effects.as_ref())?;
+        let retained_decision = tracker
+            .persist_original_negative_clock(
+                &self.state,
+                self.tracker.effects.as_ref(),
+                OriginalNegativeCheckpointOwner::Issuer,
+            )
+            .await?;
+        Ok(OriginalIssuerNegativeCheckpointReceipt {
+            original: Arc::clone(self),
+            retained_decision,
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn observes_retained_retirement_acknowledgment(
+        self: &Arc<Self>,
+    ) -> Result<bool, AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original retirement custody".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        Ok(running
+            .retirement_destination
+            .retains_original_retirement_acknowledgment())
+    }
+    #[cfg(test)]
+    pub(crate) async fn original_cancellation_disposal_for_test(
+        self: &Arc<Self>,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let original = {
+            let state = tracker
+                .shared
+                .state
+                .try_read()
+                .map_err(|source| AuraError::Internal {
+                    message: "observe original cancellation disposal entry".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            let entry = state
+                .ceremonies
+                .get(&self.state.ceremony_id)
+                .ok_or_else(|| {
+                    original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
+                })?;
+            let running = entry.running.as_ref().ok_or_else(|| {
+                original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
+            })?;
+            if !Arc::ptr_eq(&running.original, self) {
+                return Err(original_tracker_refusal(
+                    OriginalEnrollmentTrackerError::OwnerLost,
+                ));
+            }
+            Arc::clone(
+                &entry
+                    .cancellation_task
+                    .as_ref()
+                    .ok_or_else(|| {
+                        AuraError::invalid("original cancellation control not published")
+                    })?
+                    .original,
+            )
+        };
+        original.disposal_observer().await
+    }
+    #[cfg(test)]
+    pub(crate) fn install_original_receipt_test_hook(
+        self: &Arc<Self>,
+        hook: crate::handlers::invitation_service::OriginalTerminalReceiptTestHook,
+    ) -> Result<(), AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "inspect original receipt destination".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        running
+            .retirement_destination
+            .install_receipt_test_hook(hook)
+    }
+    #[cfg(test)]
+    pub(crate) fn original_finalizer_failure_for_test(
+        self: &Arc<Self>,
+    ) -> Result<Option<AuraError>, AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original retirement custody".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        Ok(running
+            .retirement_destination
+            .original_finalizer_failure_for_test())
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(super) async fn await_original_terminal(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<CeremonyTerminalOutcome, AuraError> {
+        self.require_issued_notice_control(issued)?;
+        let tracker = self.tracker.upgrade()?;
+        let destination = {
+            let state = tracker.shared.state.read().await;
+            let running = state
+                .ceremonies
+                .get(&self.state.ceremony_id)
+                .and_then(|entry| entry.running.as_ref())
+                .ok_or_else(|| {
+                    original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
+                })?;
+            if !std::ptr::eq(running.original.as_ref(), self) {
+                return Err(original_tracker_refusal(
+                    OriginalEnrollmentTrackerError::OwnerLost,
+                ));
+            }
+            Arc::clone(&running.retirement_destination)
+        };
+        if let Some(source) = destination.retained_finalizer_failure() {
+            return Err(source);
+        }
+        tokio::select! {
+            biased;
+            source = destination.await_finalizer_failure() => Err(source),
+            outcome = tracker.await_enrollment_terminal_outcome(&self.state.ceremony_id) => {
+                if let Some(source) = destination.retained_finalizer_failure() {
+                    Err(source)
+                } else {
+                    outcome
+                }
+            }
+        }
+    }
+    pub(super) fn acknowledge_original_retirement(
+        self: &Arc<Self>,
+        writes: crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<OriginalEnrollmentRetirementAcknowledgment, RejectedOriginalEnrollmentRetirement>
+    {
+        let checked = self.require_issued_notice_control(issued).and_then(|()| {
+            writes.require_original(self.tracker.effects.as_ref(), issued)?;
+            if writes.prestate() != self.state.prestate_hash {
+                return Err(crate::runtime::effects::held_registration_error(
+                    crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
+                ));
+            }
+            Ok(())
+        });
+        match checked {
+            Ok(()) => Ok(OriginalEnrollmentRetirementAcknowledgment {
+                original: Arc::clone(self),
+                writes,
+            }),
+            Err(source) => Err(RejectedOriginalEnrollmentRetirement {
+                source,
+                _writes: Box::new(writes),
+            }),
+        }
+    }
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) async fn observe_original_prepared_interruption(
+        &self,
+        receiver: tokio::sync::oneshot::Receiver<
+            crate::handlers::device_epoch_rotation::OriginalPreparedActivationInterruption,
+        >,
+    ) -> crate::core::AgentResult<
+        crate::handlers::device_epoch_rotation::OriginalPreparedActivationInterruption,
+    > {
+        let effects = self.tracker.effects.as_ref();
+        aura_core::execute_with_timeout_budget(effects, &self.state.timeout_budget, || async {
+            let receipt = receiver.await.map_err(|source| AuraError::Internal {
+                message: "original prepared interruption observation lost".into(),
+                source: Some(Arc::new(source)),
+            })?;
+            receipt.require_original(effects, &self.state.ceremony_id)?;
+            Ok::<_, AuraError>(receipt)
+        })
+        .await
+        .map_err(|source| {
+            crate::core::AgentError::from(AuraError::Internal {
+                message: "observe original prepared interruption".into(),
+                source: Some(Arc::new(source)),
+            })
+        })
+    }
+    #[cfg(test)]
+    pub(crate) async fn observe_original_finalizer(
+        self: &Arc<Self>,
+    ) -> crate::core::AgentResult<()> {
+        let tracker = self.tracker.upgrade()?;
+        let running = {
+            let state = tracker
+                .shared
+                .state
+                .try_read()
+                .map_err(|source| AuraError::Internal {
+                    message: "observe retained original issuer entry".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            let running = state
+                .ceremonies
+                .get(&self.state.ceremony_id)
+                .and_then(|entry| entry.running.as_ref())
+                .ok_or_else(|| {
+                    original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
+                })?;
+            if !Arc::ptr_eq(&running.original, self) {
+                return Err(
+                    original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost).into(),
+                );
+            }
+            Arc::clone(running)
+        };
+        running
+            .observer
+            .observe_original_terminal(
+                self.tracker.effects.as_ref(),
+                &super::ceremony_runner::CeremonyRunner::new(tracker),
+            )
+            .await
+    }
+    pub(crate) fn observe_original_delivery(
+        self: &Arc<Self>,
+    ) -> Result<OriginalIssuerDeliveryObservation, AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original issuer disposal".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let running = entry
+            .running
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        let task = entry
+            .issuer_task
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        Ok(OriginalIssuerDeliveryObservation {
+            original: Arc::clone(self),
+            disposal: task.disposal_observer()?,
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn request_original_issuer_cancel_for_test(
+        self: &Arc<Self>,
+    ) -> Result<(), AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let mut state = tracker
+            .shared
+            .state
+            .try_write()
+            .map_err(|source| AuraError::Internal {
+                message: "borrow same original issuer cancellation".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get_mut(&self.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !entry
+            .running
+            .as_ref()
+            .is_some_and(|running| Arc::ptr_eq(&running.original, self))
+        {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        entry
+            .issuer_task
+            .as_mut()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?
+            .request_cancel()?;
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn require_original_issuer_disposal_for_test(
+        self: &Arc<Self>,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "borrow same original issuer disposal".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !entry
+            .running
+            .as_ref()
+            .is_some_and(|running| Arc::ptr_eq(&running.original, self))
+        {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        entry
+            .issuer_task
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?
+            .require_disposal(disposal)
+    }
+    pub(super) fn prepare_running_observation(
+        self: &Arc<Self>,
         observer: super::enrollment_window::HeldIssuerCompletionObserver,
         original_group: crate::task_registry::TaskGroup,
         generation: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
+        retirement_destination: Arc<
+            crate::handlers::invitation_service::OriginalIssuerTerminalDestination,
+        >,
     ) -> Result<PreparedRunningIssuerObservation, AuraError> {
         let tracker = self.tracker.upgrade()?;
         generation.require_tracker(&tracker)?;
@@ -265,25 +1281,189 @@ impl RegisteredEnrollmentWindowCapability {
         self._original_allocation
             .require_registered_generation(self.tracker.effects.as_ref(), generation)?;
         Ok(PreparedRunningIssuerObservation {
+            original: Arc::clone(self),
             tracker: OriginalEnrollmentTrackerReference::from_original(&tracker)?,
             ceremony: self.state.ceremony_id.clone(),
-            canonical_invitation: serde_json::to_vec(generation.canonical_invitation()).map_err(
-                |source| AuraError::Serialization {
-                    message: "retain original running issuer invitation".into(),
-                    source: Some(Arc::new(source)),
-                },
-            )?,
-            observer,
+            observer: Some(observer),
             original_group,
+            retirement_destination,
         })
     }
+    /// Move the same acknowledged root into its original entry only after all
+    /// checks succeed. A failed lock or binding check leaves caller custody intact.
+    pub(super) fn retain_issuer_acknowledgment(
+        self: &Arc<Self>,
+        pending: &mut Option<super::enrollment_window::AcknowledgedIssuerEnrollmentWindow>,
+    ) -> Result<(), AuraError> {
+        let acknowledged = pending
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        acknowledged.require_original(self)?;
+        let tracker = self.tracker.upgrade()?;
+        let mut state = tracker
+            .shared
+            .state
+            .try_write()
+            .map_err(|source| AuraError::Internal {
+                message: "retain original acknowledged issuer root".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get_mut(&self.state.ceremony_id)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let running = entry
+            .running
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) || entry.acknowledged_issuer.is_some() {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::AlreadyBorn,
+            ));
+        }
+        // No fallible work or await follows removal from the retained custodian.
+        entry.acknowledged_issuer = pending.take();
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn require_original_rejected_resources_for_test(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        self.original_resource_decision(issued)
+            .and_then(|decision| match decision {
+                super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected => {
+                    Ok(())
+                }
+                super::enrollment_window::OriginalIssuerResourceDecision::Committed => {
+                    Err(AuraError::permission_denied(
+                        "positive decision cannot admit rejected resource cleanup",
+                    ))
+                }
+            })
+    }
+
+    pub(super) fn require_original_verified_rejection(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        self.require_issued_notice_control(issued)?;
+        let proof = self.verified_rejection.get().ok_or_else(|| {
+            AuraError::permission_denied("original verified rejection proof missing")
+        })?;
+        let manifest = issued.manifest();
+        if proof.ceremony_id() != &manifest.ceremony
+            || proof.subject() != manifest.subject
+            || proof.device_id() != manifest.invitee_device
+            || proof.pending_epoch() != manifest.pending_epoch
+        {
+            return Err(AuraError::permission_denied(
+                "original verified rejection scope differs",
+            ));
+        }
+        let decision = self.original_negative_decision(issued)?;
+        if decision.kind()
+            != aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::Rejected
+        {
+            return Err(AuraError::permission_denied(
+                "original protected decision is not verified rejection",
+            ));
+        }
+        decision.require_original_control(issued)
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "verified_rejected_issuer_generation", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(super) async fn retire_original_rejected_generation(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<crate::runtime::effects::AcknowledgedEnrollmentRetirement, AuraError> {
+        self.require_original_verified_rejection(issued)?;
+        let tracker = self.tracker.upgrade()?;
+        tracker
+            .retire_failed_enrollment_generation(&self.state.ceremony_id)
+            .await
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "original_issuer_resource_closure", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(super) async fn close_original_issuer_resources(
+        self: &Arc<Self>,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+        retired: &super::enrollment_window::OriginalIssuerSigningResourceSettlement,
+        decision: super::enrollment_window::OriginalIssuerResourceDecision,
+        generation: Option<&OriginalEnrollmentRetirementAcknowledgment>,
+        disposal: &crate::task_registry::TaskGroupDisposalAcknowledgment,
+        children: &crate::task_registry::TaskGroup,
+    ) -> Result<OriginalIssuerResourceClosure, AuraError> {
+        decision.require_original(issued, child)?;
+        match decision {
+            super::enrollment_window::OriginalIssuerResourceDecision::Committed => {
+                if generation.is_some() {
+                    return Err(AuraError::permission_denied(
+                        "committed resources cannot retire pending generation",
+                    ));
+                }
+            }
+            super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected => {
+                self.require_original_verified_rejection(issued)?;
+                generation
+                    .ok_or_else(|| {
+                        AuraError::permission_denied(
+                            "verified rejection generation retirement missing",
+                        )
+                    })?
+                    .require_original(self, issued)?;
+            }
+        }
+        retired.require_original(issued, child)?;
+        disposal.require_original_group(children)?;
+        // The permit check prevents closing while any original execution is borrowed.
+        self.lease.close_resource_admission()?;
+        self.write_original_closed_checkpoint(true).await?;
+        Ok(OriginalIssuerResourceClosure {
+            original: Arc::downgrade(self),
+        })
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalIssuerResourceClosure", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(super) fn release_issuer_resource_execution(
+        self: &Arc<Self>,
+        receipt: &OriginalIssuerResourceClosure,
+    ) -> Result<(), AuraError> {
+        if !receipt
+            .original
+            .upgrade()
+            .is_some_and(|original| Arc::ptr_eq(&original, self))
+        {
+            return Err(AuraError::permission_denied(
+                "committed resource closure belongs to another original",
+            ));
+        }
+        self.lease.release_after_acknowledgment()
+    }
     pub(super) async fn acknowledge_terminal_checkpoint(&self) -> Result<(), AuraError> {
+        self.write_original_closed_checkpoint(false).await
+    }
+    async fn write_original_closed_checkpoint(
+        &self,
+        resource_reentry: bool,
+    ) -> Result<(), AuraError> {
         use aura_core::effects::{SecureStorageCapability, SecureStorageLocation};
         let tracker = self.tracker.upgrade()?;
         self.require_effects(self.tracker.effects.as_ref())?;
         let _write = tracker.shared.persistence_guard.lock().await;
-        self.require_pending().await?;
+        if !resource_reentry {
+            self.require_pending().await?;
+        }
         let mut record = tracker.read_bound_enrollment_clock(&self.state).await?;
+        if resource_reentry
+            && !matches!(
+                record.execution,
+                super::enrollment_window::DurableEnrollmentExecutionState::Pending
+                    | super::enrollment_window::DurableEnrollmentExecutionState::Closed
+            )
+        {
+            return Err(AuraError::permission_denied(
+                "committed resource clock has incompatible execution state",
+            ));
+        }
         record.budget = self.state.timeout_budget.clone();
         record.execution = super::enrollment_window::DurableEnrollmentExecutionState::Closed;
         let bytes = serde_json::to_vec(&record).map_err(|source| AuraError::Internal {
@@ -364,6 +1544,53 @@ impl RegisteredEnrollmentWindowCapability {
     // state/lease authority or bypass the original allocation verification.
     #[aura_macros::capability_boundary(
         category = "capability_gated",
+        capability = "RegisteredEnrollmentWindowCapability",
+        receiver_type = RegisteredEnrollmentWindowCapability,
+        family = "runtime_helper"
+    )]
+    pub(super) fn require_approved_manifest(
+        &self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<(), AuraError> {
+        use aura_signature::SecurityTranscript;
+        self.require_effects(approval.effects().as_ref())?;
+        let manifest = approval.manifest();
+        self._original_allocation
+            .require_manifest(approval.effects().as_ref(), manifest)?;
+        if self.state.kind != CeremonyKind::DeviceEnrollment
+            || self.state.ceremony_id != manifest.ceremony
+            || self.state.initiator_id != manifest.subject
+            || self.state.enrollment_device_id != Some(manifest.invitee_device)
+            || self.state.new_epoch != manifest.pending_epoch
+        {
+            return Err(AuraError::permission_denied(
+                "approved manifest differs from original registered allocation",
+            ));
+        }
+        approval
+            .negative_terminal_policy()
+            .require_manifest(manifest)?;
+        if let Some(bound) = self.notice_binding.get() {
+            let transcript = manifest.required_transcript_bytes().map_err(|source| {
+                AuraError::crypto_with_source(
+                    "encode original approved allocation manifest",
+                    Arc::new(source),
+                )
+            })?;
+            if bound.transcript != transcript
+                || bound.manifest_digest != aura_core::hash::hash(&transcript)
+                || bound.expires_at_ms != manifest.expires_at_ms
+            {
+                return Err(AuraError::permission_denied(
+                    "approved manifest differs from original issued notice binding",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
         capability = "RegisteredEnrollmentNoticeBindingCapability",
         family = "runtime_helper"
     )]
@@ -410,9 +1637,7 @@ impl RegisteredEnrollmentWindowCapability {
             manifest_digest: digest,
             transcript,
             expires_at_ms: manifest.expires_at_ms,
-            canonical_invitation: aura_core::util::serialization::to_vec(
-                issued.canonical_invitation(),
-            )?,
+            canonical_invitation: original_invitation_binding(issued.canonical_invitation())?,
         })
     }
     pub(super) fn bind_issued_notice_control(
@@ -454,20 +1679,103 @@ impl RegisteredEnrollmentWindowCapability {
         })?;
         Self::require_same_notice_binding(original, &candidate)
     }
+    pub(super) fn require_activation_generation(
+        &self,
+        effects: &AuraEffectSystem,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        activation: &EnrollmentActivationCapability<'_>,
+    ) -> Result<aura_core::Hash32, AuraError> {
+        self.require_effects(effects)?;
+        self.require_issued_notice_control(issued)?;
+        activation.require_effects(effects)?;
+        activation.require_tracker(&self.tracker.upgrade()?)?;
+        let manifest = issued.manifest();
+        if activation.ceremony_id() != &self.state.ceremony_id
+            || manifest.ceremony != self.state.ceremony_id
+            || manifest.subject != self.state.initiator_id
+            || manifest.pending_epoch != self.state.new_epoch
+        {
+            return Err(AuraError::permission_denied(
+                "activation differs from original registered generation",
+            ));
+        }
+        Ok(self.state.prestate_hash)
+    }
+
     pub(super) fn budget(&self) -> &aura_core::TimeoutBudget {
         &self.state.timeout_budget
     }
-    pub(super) fn lease(&self) -> Arc<tokio::sync::OwnedSemaphorePermit> {
+    pub(super) fn lease(&self) -> Arc<OriginalRegisteredExecutionLease> {
         self.lease.clone()
     }
 }
 
 impl CeremonyTracker {
-    #[cfg(test)]
-    pub(crate) fn original_running_issuer_observation(
+    /// Wait only for the original issuer's verified acceptance or terminal
+    /// decision. The caller's sealed child bounds this observation.
+    pub(crate) async fn await_original_enrollment_acceptance(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        original: &super::enrollment_window::EnrollmentExecutionChild,
+    ) -> Result<(), AuraError> {
+        let effects = self.shared.persistence.as_ref().ok_or_else(|| {
+            original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
+        })?;
+        issued.require_runtime_owner(effects.as_ref())?;
+        original.require_issued_notice_owner(issued)?;
+        loop {
+            let changed = self.shared.terminal_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let state = self.get(&issued.manifest().ceremony).await?;
+            if state.kind != CeremonyKind::DeviceEnrollment
+                || state.initiator_id != issued.manifest().subject
+                || state.new_epoch != issued.manifest().pending_epoch
+                || state.enrollment_device_id != Some(issued.manifest().invitee_device)
+            {
+                return Err(AuraError::permission_denied(
+                    "original acceptance binding differs",
+                ));
+            }
+            if state.has_failed {
+                let reason = state.failure_reason.ok_or_else(|| {
+                    AuraError::invalid("negative original enrollment lacks its terminal cause")
+                })?;
+                return Err(AuraError::PermissionDenied {
+                    message: "original enrollment terminal decision is negative".into(),
+                    source: Some(Arc::new(
+                        crate::handlers::invitation::EnrollmentVmAdmissionError::TerminalFailed(
+                            reason,
+                        ),
+                    )),
+                });
+            }
+            if state.threshold_k > 0
+                && state.accepted_participants.len() >= usize::from(state.threshold_k)
+            {
+                self.require_verified_enrollment_response(&issued.manifest().ceremony)
+                    .await?;
+                let tracker = self.shared.state.read().await;
+                let proof = tracker
+                    .enrollment_responses
+                    .get(&issued.manifest().ceremony)
+                    .ok_or_else(|| AuraError::invalid("original acceptance proof disappeared"))?;
+                if proof.invitation_id() != issued.manifest().invitation
+                    || proof.acceptance().manifest_digest != issued.digest()
+                {
+                    return Err(AuraError::permission_denied(
+                        "original acceptance transcript differs",
+                    ));
+                }
+                return Ok(());
+            }
+            changed.await;
+        }
+    }
+    pub(crate) fn original_issuer_retirement_observation(
         &self,
         retained: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-    ) -> Result<Arc<RunningIssuerObservation>, AuraError> {
+    ) -> Result<Option<Arc<RunningIssuerObservation>>, AuraError> {
         let effects = self.shared.persistence.as_ref().ok_or_else(|| {
             original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
         })?;
@@ -477,31 +1785,29 @@ impl CeremonyTracker {
             .state
             .try_read()
             .map_err(|source| AuraError::Internal {
-                message: "observe original running issuer entry".into(),
+                message: "observe original issuer retirement entry".into(),
                 source: Some(Arc::new(source)),
             })?;
-        let running = state
+        let Some(running) = state
             .ceremonies
             .get(&retained.manifest().ceremony)
             .and_then(|entry| entry.running.as_ref())
-            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
-        let canonical = serde_json::to_vec(retained.canonical_invitation()).map_err(|source| {
-            AuraError::Serialization {
-                message: "select original running issuer invitation".into(),
-                source: Some(Arc::new(source)),
-            }
-        })?;
-        if canonical != running.canonical_invitation {
-            return Err(crate::runtime::effects::held_registration_error(
-                crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
-            ));
-        }
-        running.registration.require_running()?;
-        Ok(Arc::clone(running))
+        else {
+            return Ok(None);
+        };
+        running.original.require_issued_notice_control(retained)?;
+        Ok(Some(Arc::clone(running)))
     }
     /// This is the private durable-publication closure. Its caller must retain
     /// the actual result through the shared original-deadline birth boundary.
     /// Merely observing these bytes later cannot call this constructor again.
+    #[cfg_attr(
+        test,
+        allow(
+            clippy::disallowed_types,
+            reason = "Constructs the synchronous test observation gate; its guard never crosses an await"
+        )
+    )]
     async fn publish_pending_issuer_birth(
         &self,
         generation: &mut crate::runtime::effects::EnrollmentGenerationReservation<'_>,
@@ -517,7 +1823,7 @@ impl CeremonyTracker {
         let tracker = OriginalEnrollmentTrackerReference::from_original(self)?;
         generation.validate_allocated_registration(tracker.effects.as_ref(), state)?;
         let record = StoredEnrollmentClock {
-            version: 3,
+            version: 4,
             ceremony: state.ceremony_id.clone(),
             subject: state.initiator_id,
             device: state.enrollment_device_id.ok_or_else(|| {
@@ -528,6 +1834,8 @@ impl CeremonyTracker {
             prestate: state.prestate_hash,
             epoch: state.new_epoch,
             budget: state.timeout_budget.clone(),
+            negative_cleanup_budget: state.negative_cleanup_budget.clone(),
+            original_policy: state.original_window_policy.clone(),
             execution: super::enrollment_window::DurableEnrollmentExecutionState::Pending,
         };
         let bytes = serde_json::to_vec(&record).map_err(|source| AuraError::Serialization {
@@ -576,8 +1884,13 @@ impl CeremonyTracker {
             original: RegisteredEnrollmentWindowCapability {
                 tracker,
                 state: state.clone(),
-                lease: Arc::new(lease),
+                lease: Arc::new(OriginalRegisteredExecutionLease::new(lease)),
                 notice_binding: std::sync::OnceLock::new(),
+                negative_decision: std::sync::OnceLock::new(),
+                verified_rejection: std::sync::OnceLock::new(),
+                positive_decision: std::sync::OnceLock::new(),
+                #[cfg(test)]
+                committed_confirmation_gate: parking_lot::Mutex::default(),
                 _original_allocation: original_allocation,
             },
         })
@@ -643,51 +1956,13 @@ impl CeremonyTracker {
             .take()
             .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::AlreadyBorn))
     }
-
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "EnrollmentExecutionRoot",
-        capability_type = super::enrollment_window::EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability,>,
-        family = "runtime_helper"
-    )]
-    pub(crate) fn retain_original_issuer_execution(
-        &self,
-        original: super::enrollment_window::EnrollmentExecutionRoot<
-            RegisteredEnrollmentWindowCapability,
-        >,
-    ) -> Result<(), AuraError> {
-        let retained = original.origin().tracker.upgrade()?;
-        if !Arc::ptr_eq(&self.shared, &retained.shared) {
-            return Err(original_tracker_refusal(
-                OriginalEnrollmentTrackerError::ForeignProvider,
-            ));
-        }
-        let mut state = self
-            .shared
-            .state
-            .try_write()
-            .map_err(|source| AuraError::Internal {
-                message: "original issuer execution return is contended".into(),
-                source: Some(Arc::new(source)),
-            })?;
-        let entry = state
-            .ceremonies
-            .get_mut(&original.origin().state.ceremony_id)
-            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
-        if entry.execution.is_some() || entry.running.is_some() {
-            return Err(original_tracker_refusal(
-                OriginalEnrollmentTrackerError::AlreadyBorn,
-            ));
-        }
-        entry.execution = Some(original);
-        Ok(())
-    }
 }
 
 /// Original allocation observation custody for cancellation preparation only.
 /// This does not acquire an execution permit or authorize VM/session admission.
 pub(super) struct CancellationClockObservationCapability {
-    tracker: CeremonyTracker,
+    negative: Option<Arc<VerifiedEnrollmentCancellationCapability>>,
+    tracker: OriginalEnrollmentTrackerReference,
     state: TrackedCeremony,
     signed_expiry_ms: u64,
 }
@@ -698,26 +1973,146 @@ pub(super) enum RegisteredCancellationPreparationCapability {
 /// Original execution custody for a negative notice only. This cannot admit the
 /// request/response enrollment protocol or restore pending signing material.
 pub(crate) struct RegisteredCancelledNoticeCapability {
-    observation: CancellationClockObservationCapability,
+    observation: Arc<CancellationClockObservationCapability>,
     lease: Arc<tokio::sync::OwnedSemaphorePermit>,
-    cancelled: VerifiedEnrollmentCancellationCapability,
+    cancelled: Arc<VerifiedEnrollmentCancellationCapability>,
     manifest_digest: [u8; 32],
 }
 impl RegisteredCancelledNoticeCapability {
-    pub(super) fn into_parts(
-        self,
+    pub(super) fn original_parts(
+        &self,
     ) -> (
-        CancellationClockObservationCapability,
+        Arc<CancellationClockObservationCapability>,
         Arc<tokio::sync::OwnedSemaphorePermit>,
-        VerifiedEnrollmentCancellationCapability,
+        Arc<VerifiedEnrollmentCancellationCapability>,
         [u8; 32],
     ) {
         (
-            self.observation,
-            self.lease,
-            self.cancelled,
+            Arc::clone(&self.observation),
+            Arc::clone(&self.lease),
+            Arc::clone(&self.cancelled),
             self.manifest_digest,
         )
+    }
+}
+pub(crate) struct OriginalCancellationNegativeCheckpointReceipt {
+    original: Arc<RegisteredCancelledNoticeCapability>,
+    retained_decision: super::enrollment_window::DurableEnrollmentExecutionState,
+}
+impl OriginalCancellationNegativeCheckpointReceipt {
+    pub(crate) fn require_original(
+        &self,
+        original: &Arc<RegisteredCancelledNoticeCapability>,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.original, original)
+            || !matches!(
+                self.retained_decision,
+                super::enrollment_window::DurableEnrollmentExecutionState::Closed
+                    | super::enrollment_window::DurableEnrollmentExecutionState::Refused
+            )
+        {
+            return Err(AuraError::permission_denied(
+                "another cancellation negative checkpoint",
+            ));
+        }
+        Ok(())
+    }
+}
+impl RegisteredCancelledNoticeCapability {
+    pub(crate) fn negative_cleanup_budget(&self) -> &aura_core::TimeoutBudget {
+        &self.observation.state.negative_cleanup_budget
+    }
+    pub(crate) fn cancelled(&self) -> &Arc<VerifiedEnrollmentCancellationCapability> {
+        &self.cancelled
+    }
+    pub(crate) async fn acknowledge_negative_checkpoint(
+        self: &Arc<Self>,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<OriginalCancellationNegativeCheckpointReceipt, AuraError> {
+        self.observation.require_effects(effects)?;
+        let retained_decision = self
+            .observation
+            .tracker
+            .upgrade()?
+            .persist_original_negative_clock(
+                &self.observation.state,
+                effects,
+                OriginalNegativeCheckpointOwner::Cancellation,
+            )
+            .await?;
+        Ok(OriginalCancellationNegativeCheckpointReceipt {
+            original: Arc::clone(self),
+            retained_decision,
+        })
+    }
+}
+/// Actual original cancellation retirement; fields stay private to the producer.
+pub(crate) struct OriginalCancellationRetirementReceipt {
+    original: Arc<RegisteredCancelledNoticeCapability>,
+    writes: crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+}
+impl OriginalCancellationRetirementReceipt {
+    pub(crate) fn require_original(
+        &self,
+        original: &Arc<RegisteredCancelledNoticeCapability>,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<(), AuraError> {
+        if !Arc::ptr_eq(&self.original, original) {
+            return Err(AuraError::permission_denied(
+                "another original cancellation retirement",
+            ));
+        }
+        original.require_original_retirement(&self.writes, issued, effects)
+    }
+}
+impl RegisteredCancelledNoticeCapability {
+    fn require_original_retirement(
+        &self,
+        writes: &crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<(), AuraError> {
+        self.observation.require_effects(effects)?;
+        writes.require_original(effects, issued)?;
+        let manifest = issued.manifest();
+        let state = &self.observation.state;
+        if self.manifest_digest != issued.digest()
+            || self.cancelled.invitation() != &manifest.invitation
+            || self.cancelled.ceremony() != &manifest.ceremony
+            || state.kind != CeremonyKind::DeviceEnrollment
+            || state.ceremony_id != manifest.ceremony
+            || state.initiator_id != manifest.subject
+            || state.enrollment_device_id != Some(manifest.invitee_device)
+            || state.new_epoch != manifest.pending_epoch
+            || writes.prestate() != state.prestate_hash
+            || self.observation.signed_expiry_ms != manifest.expires_at_ms
+        {
+            return Err(AuraError::permission_denied(
+                "original cancellation retirement binding differs",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn seal_original_retirement(
+        self: &Arc<Self>,
+        writes: crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<
+        OriginalCancellationRetirementReceipt,
+        Box<(
+            crate::runtime::effects::AcknowledgedEnrollmentRetirement,
+            AuraError,
+        )>,
+    > {
+        if let Err(source) = self.require_original_retirement(&writes, issued, effects) {
+            return Err(Box::new((writes, source)));
+        }
+        Ok(OriginalCancellationRetirementReceipt {
+            original: Arc::clone(self),
+            writes,
+        })
     }
 }
 enum RegisteredClockCheckpointAuthority<'a> {
@@ -728,9 +2123,8 @@ impl CancellationClockObservationCapability {
         &self,
         effects: &crate::runtime::AuraEffectSystem,
     ) -> Result<(), AuraError> {
-        let owner = self.tracker.shared.persistence.as_ref().ok_or_else(|| {
-            AuraError::invalid("cancellation observation lost its persistent runtime")
-        })?;
+        self.tracker.upgrade()?;
+        let owner = &self.tracker.effects;
         if !std::ptr::eq(owner.as_ref(), effects) {
             return Err(AuraError::Invalid {
                 message: "cancellation observation belongs to another runtime".into(),
@@ -747,6 +2141,7 @@ impl CancellationClockObservationCapability {
     }
     pub(super) async fn checkpoint(&self) -> Result<(), AuraError> {
         self.tracker
+            .upgrade()?
             .checkpoint_enrollment_clock_bound(
                 &self.state.ceremony_id,
                 Some(RegisteredClockCheckpointAuthority::Cancellation(self)),
@@ -790,15 +2185,10 @@ pub(crate) fn registered_window_lease_error(source: tokio::sync::TryAcquireError
     }
 }
 
-pub(crate) fn registered_enrollment_window_already_owned(error: &AuraError) -> bool {
-    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(source) = current {
-        if let Some(running) = source.downcast_ref::<OriginalIssuerAlreadyRunning>() {
-            return running.original.registration.require_running().is_ok();
-        }
-        current = source.source();
-    }
-    false
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OriginalNegativeCheckpointOwner {
+    Issuer,
+    Cancellation,
 }
 
 struct CeremonyTrackerShared {
@@ -811,7 +2201,22 @@ struct CeremonyTrackerShared {
     persistence_guard: Mutex<()>,
     #[cfg(test)]
     clock_checkpoint_fault: Mutex<Option<AuraError>>,
-    enrollment_decision_gate: Mutex<()>,
+    #[cfg(test)]
+    cancellation_postcheckpoint_gate: Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+            Option<Box<dyn FnOnce() + Send>>,
+        )>,
+    >,
+    #[cfg(test)]
+    negative_checkpoint_fault: Mutex<Option<(OriginalNegativeCheckpointOwner, AuraError)>>,
+    #[cfg(test)]
+    negative_checkpoint_fault_observer: Mutex<Option<tokio::sync::oneshot::Sender<AuraError>>>,
+    #[cfg(test)]
+    cancellation_cleanup_observer:
+        Mutex<Option<tokio::sync::oneshot::Sender<Result<(), AuraError>>>>,
+    enrollment_decision_gate: Arc<Mutex<()>>,
     terminal_changed: tokio::sync::Notify,
     /// Each cancelled-notice owner publishes whether it signed and released
     /// the cancelled pending generation. Retained, so cancel retries observe it.
@@ -833,6 +2238,11 @@ struct CeremonyTrackerState {
 /// The canonical actor entry owns execution separately from cloneable views.
 /// Restoring a snapshot produces only an observed entry, never a new root.
 struct TrackedCeremonyEntry {
+    original_entry: Arc<()>,
+    cancellation_task: Option<Arc<RetainedOriginalCancellationTask>>,
+    cancelled_notice_task: Option<Arc<RetainedOriginalCancellationTask>>,
+    issuer_task: Option<Arc<RetainedOriginalIssuerTask>>,
+    acknowledged_issuer: Option<super::enrollment_window::AcknowledgedIssuerEnrollmentWindow>,
     observed: TrackedCeremony,
     execution: Option<
         super::enrollment_window::EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>,
@@ -842,115 +2252,211 @@ struct TrackedCeremonyEntry {
 
 /// The actual original window and accepted registry spawn, retained by the
 /// existing canonical entry. It cannot mint execution or terminal authority.
+/// The canonical entry and its observations borrow this same retained control;
+/// cancellation of reconciliation leaves the handle in its original slot.
+struct RetainedOriginalIssuerTask {
+    control: tokio::sync::Mutex<crate::task_registry::OriginalRequiredTaskHandle>,
+}
+impl RetainedOriginalIssuerTask {
+    fn require_disposal(
+        &self,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), AuraError> {
+        let control = self
+            .control
+            .try_lock()
+            .map_err(|source| AuraError::Internal {
+                message: "original issuer control is borrowed".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        disposal.require_original(&control)
+    }
+    fn disposal_observer(
+        &self,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, AuraError> {
+        let control = self
+            .control
+            .try_lock()
+            .map_err(|source| AuraError::Internal {
+                message: "original issuer control is borrowed".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        Ok(control.disposal_observer())
+    }
+    #[cfg(test)]
+    fn request_cancel(&self) -> Result<(), AuraError> {
+        use aura_core::effects::task::RequiredTaskControl;
+        let mut control = self
+            .control
+            .try_lock()
+            .map_err(|source| AuraError::Internal {
+                message: "original issuer control is borrowed".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        control.request_cancel();
+        Ok(())
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedOriginalIssuerTask", receiver_type = RetainedOriginalIssuerTask, family = "runtime_helper")]
+    async fn reconcile(&self) -> Result<(), AuraError> {
+        use aura_core::effects::task::RequiredTaskControl;
+        use futures::FutureExt;
+        let mut control = self.control.lock().await;
+        control.await_original_attempt_disposition().await?;
+        // A completed original obligation needs no second cleanup. This observes
+        // only its actual resource disposition, never positive domain authority.
+        if control
+            .disposal_observer()
+            .await_disposal()
+            .now_or_never()
+            .is_some()
+        {
+            return Ok(());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            control.reconcile().await
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            control.reconcile_local().await
+        }
+    }
+}
+
 pub(crate) struct RunningIssuerObservation {
-    canonical_invitation: Vec<u8>,
+    retirement_destination:
+        Arc<crate::handlers::invitation_service::OriginalIssuerTerminalDestination>,
+    original: Arc<RegisteredEnrollmentWindowCapability>,
+    control: Arc<RetainedOriginalIssuerTask>,
     observer: super::enrollment_window::HeldIssuerCompletionObserver,
-    registration: crate::task_registry::RegisteredRuntimeTaskObservation,
+    // Retains the actual admitted task's registration evidence for this owner.
+    _registration: crate::task_registry::RegisteredRuntimeTaskObservation,
 }
 
 pub(crate) struct PreparedRunningIssuerObservation {
+    retirement_destination:
+        Arc<crate::handlers::invitation_service::OriginalIssuerTerminalDestination>,
+    original: Arc<RegisteredEnrollmentWindowCapability>,
     tracker: OriginalEnrollmentTrackerReference,
     ceremony: CeremonyId,
-    canonical_invitation: Vec<u8>,
-    observer: super::enrollment_window::HeldIssuerCompletionObserver,
+    observer: Option<super::enrollment_window::HeldIssuerCompletionObserver>,
     original_group: crate::task_registry::TaskGroup,
 }
 
 impl RunningIssuerObservation {
-    #[cfg(test)]
-    pub(crate) async fn finalize_original_issuer(
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedEnrollmentVmControl", receiver_type = RunningIssuerObservation, family = "runtime_helper")]
+    pub(crate) async fn observe_original_cancellation_settlement(
         &self,
         effects: &AuraEffectSystem,
-        retained: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-        service: &crate::handlers::device_epoch_rotation::DeviceEpochRotationService,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
     ) -> crate::core::AgentResult<()> {
-        let canonical = serde_json::to_vec(retained.canonical_invitation()).map_err(|source| {
-            AuraError::Serialization {
-                message: "compare original issuer finalization invitation".into(),
-                source: Some(Arc::new(source)),
-            }
-        })?;
-        if canonical != self.canonical_invitation {
-            return Err(crate::runtime::effects::held_registration_error(
-                crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
+        if self.original.original_committed_decision(effects, issued)? {
+            let (observation, disposal) = self.original.await_original_resource_disposal().await?;
+            observation.require_positive(&disposal)?;
+            Ok(())
+        } else {
+            self.original.require_effects(effects)?;
+            self.original.require_issued_notice_control(issued)?;
+            self.observer
+                .observe_original_negative_retirement(
+                    effects,
+                    &self.original,
+                    issued,
+                    &self.retirement_destination,
+                )
+                .await?;
+            let actual = aura_core::time::timeout::execute_negative_cleanup_with_timeout_budget(
+                effects,
+                self.original.negative_cleanup_budget(),
+                issued,
+                || self.control.reconcile(),
             )
-            .into());
+            .await;
+            let completed = match actual.operation {
+                Some(Ok(())) => true,
+                Some(Err(source)) => return Err(source.into()),
+                None => false,
+            };
+            actual.validation.map_err(AuraError::from)?;
+            if !completed {
+                return Err(
+                    AuraError::invalid("original issuer reconciliation did not execute").into(),
+                );
+            }
+            Ok(())
         }
-        self.registration.require_running()?;
-        self.observer
-            .finalize_original_issuer(effects, retained, service)
-            .await
     }
-    #[cfg(test)]
-    pub(crate) async fn observe_terminal_receipt(
+    pub(crate) async fn observe_original_retirement(
         &self,
-        effects: Arc<AuraEffectSystem>,
-        retained: Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
-        runner: &super::ceremony_runner::CeremonyRunner,
-    ) -> crate::core::AgentResult<crate::handlers::invitation::IssuerEnrollmentTerminalReceipt>
-    {
-        retained.require_runtime_owner(effects.as_ref())?;
-        let canonical = serde_json::to_vec(retained.canonical_invitation()).map_err(|source| {
-            AuraError::Serialization {
-                message: "compare observed original terminal invitation".into(),
-                source: Some(Arc::new(source)),
-            }
-        })?;
-        if canonical != self.canonical_invitation {
-            return Err(crate::runtime::effects::held_registration_error(
-                crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
-            )
-            .into());
-        }
-        self.registration.require_running()?;
+        effects: &AuraEffectSystem,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> crate::core::AgentResult<()> {
+        self.original.require_effects(effects)?;
+        self.original.require_issued_notice_control(issued)?;
         self.observer
-            .observe_issuer_terminal_receipt(effects, retained, runner)
+            .observe_original_retirement(
+                effects,
+                &self.original,
+                issued,
+                &self.retirement_destination,
+            )
             .await
-    }
-}
-
-#[derive(thiserror::Error)]
-#[error("the original registered enrollment task is already running")]
-struct OriginalIssuerAlreadyRunning {
-    original: Arc<RunningIssuerObservation>,
-}
-impl std::fmt::Debug for OriginalIssuerAlreadyRunning {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("OriginalIssuerAlreadyRunning")
     }
 }
 
 impl PreparedRunningIssuerObservation {
-    pub(crate) fn publish(
-        self,
-        registration: crate::task_registry::RegisteredRuntimeTaskObservation,
+    pub(crate) fn publish_required(
+        &mut self,
+        pending: &mut Option<crate::task_registry::OriginalRequiredTaskHandle>,
     ) -> Result<(), AuraError> {
+        let actual = pending
+            .as_ref()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let registration = actual.original_registration_observation()?;
+        registration.require_original_tree(&self.original_group)?;
+        registration.require_running()?;
         let tracker = self.tracker.upgrade()?;
         let mut state = tracker
             .shared
             .state
             .try_write()
             .map_err(|source| AuraError::Internal {
-                message: "publish original running issuer observation".into(),
+                message: "publish original retained issuer task".into(),
                 source: Some(Arc::new(source)),
             })?;
         let entry = state
             .ceremonies
             .get_mut(&self.ceremony)
             .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
-        if entry.execution.is_some() || entry.running.is_some() {
+        if entry.execution.is_some() || entry.running.is_some() || entry.issuer_task.is_some() {
             return Err(original_tracker_refusal(
                 OriginalEnrollmentTrackerError::AlreadyBorn,
             ));
         }
-        registration.require_original_tree(&self.original_group)?;
-        registration.require_running()?;
+        let observer = self
+            .observer
+            .take()
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let control = Arc::new(RetainedOriginalIssuerTask {
+            control: tokio::sync::Mutex::new(pending.take().ok_or_else(|| {
+                original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
+            })?),
+        });
         entry.running = Some(Arc::new(RunningIssuerObservation {
-            canonical_invitation: self.canonical_invitation,
-            observer: self.observer,
-            registration,
+            retirement_destination: Arc::clone(&self.retirement_destination),
+            original: Arc::clone(&self.original),
+            observer,
+            control: Arc::clone(&control),
+            _registration: registration,
         }));
+        entry.issuer_task = Some(control);
         Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn original_owner_observation_for_test(
+        &self,
+    ) -> std::sync::Weak<RegisteredEnrollmentWindowCapability> {
+        Arc::downgrade(&self.original)
     }
 }
 
@@ -970,6 +2476,11 @@ impl From<TrackedCeremony> for TrackedCeremonyEntry {
             observed,
             execution: None,
             running: None,
+            acknowledged_issuer: None,
+            original_entry: Arc::new(()),
+            cancellation_task: None,
+            cancelled_notice_task: None,
+            issuer_task: None,
         }
     }
 }
@@ -1181,6 +2692,9 @@ pub struct TrackedCeremony {
 
     /// Original owner window; clones retain observation and expiration.
     pub(crate) timeout_budget: aura_core::TimeoutBudget,
+    pub(crate) shortcut_budget: Option<aura_core::TimeoutBudget>,
+    pub(crate) negative_cleanup_budget: aura_core::TimeoutBudget,
+    pub(crate) original_window_policy: super::enrollment_window::OriginalEnrollmentWindowPolicy,
     pub(crate) enrollment_window_lease: Arc<tokio::sync::Semaphore>,
 
     /// Prestate hash at ceremony initiation (for supersession detection)
@@ -1281,14 +2795,38 @@ impl TrackedCeremony {
 /// One lock hierarchy: actual physical generation, then tracker decision.
 /// Tree custody may only be acquired after this composite owner exists.
 /// The token is neither clonable nor deserializable and releases in reverse order.
+enum EnrollmentDecisionTrackerOrigin<'a> {
+    Borrowed(&'a CeremonyTracker),
+    Owned(CeremonyTracker),
+}
+impl std::ops::Deref for EnrollmentDecisionTrackerOrigin<'_> {
+    type Target = CeremonyTracker;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(tracker) => tracker,
+            Self::Owned(tracker) => tracker,
+        }
+    }
+}
+enum EnrollmentDecisionGuard<'a> {
+    Borrowed {
+        _original: tokio::sync::MutexGuard<'a, ()>,
+    },
+    Owned {
+        _original: tokio::sync::OwnedMutexGuard<()>,
+    },
+}
 pub(crate) struct EnrollmentGenerationDecisionCapability<'a> {
-    tracker: &'a CeremonyTracker,
-    _decision: tokio::sync::MutexGuard<'a, ()>,
+    tracker: EnrollmentDecisionTrackerOrigin<'a>,
+    _decision: EnrollmentDecisionGuard<'a>,
     generation: crate::runtime::effects::EnrollmentGenerationCustodyCapability<'a>,
 }
 impl EnrollmentGenerationDecisionCapability<'_> {
     pub(crate) fn tracker(&self) -> CeremonyTracker {
-        self.tracker.clone()
+        match &self.tracker {
+            EnrollmentDecisionTrackerOrigin::Borrowed(tracker) => (*tracker).clone(),
+            EnrollmentDecisionTrackerOrigin::Owned(tracker) => tracker.clone(),
+        }
     }
     pub(crate) fn require_tracker(&self, tracker: &CeremonyTracker) -> Result<(), AuraError> {
         if !Arc::ptr_eq(&self.tracker.shared, &tracker.shared) {
@@ -1320,6 +2858,10 @@ pub(crate) struct EnrollmentActivationCapability<'a> {
 }
 
 impl EnrollmentActivationCapability<'_> {
+    pub(crate) fn decision(&self) -> &EnrollmentGenerationDecisionCapability<'_> {
+        &self.custody
+    }
+
     pub(crate) fn require_effects(
         &self,
         effects: &crate::runtime::effects::AuraEffectSystem,
@@ -1367,6 +2909,122 @@ impl EnrollmentActivationCapability<'_> {
         Ok(())
     }
 
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "EnrollmentActivationCapability", receiver_type = EnrollmentActivationCapability, family = "runtime_helper")]
+    pub(crate) async fn commit_original(
+        self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        child: &super::enrollment_window::EnrollmentExecutionChild,
+        prepared: &crate::handlers::device_epoch_rotation::PreparedEnrollmentActivationCapability<
+            '_,
+        >,
+    ) -> Result<(), AuraError> {
+        let effects = self.tracker.shared.persistence.as_ref().ok_or_else(|| {
+            AuraError::invalid("original activation requires persistent runtime custody")
+        })?;
+        self.require_effects(effects.as_ref())?;
+        child.require_issued_notice_owner(issued)?;
+        let manifest = issued.manifest();
+        if self.ceremony_id != manifest.ceremony {
+            return Err(AuraError::permission_denied(
+                "original activation ceremony differs",
+            ));
+        }
+        child
+            .execute(effects.as_ref(), || async {
+                #[cfg(test)]
+                eprintln!("original commit: executor entered; validating generation");
+                self.require_generation(manifest.subject, manifest.pending_epoch)
+                    .await?;
+                #[cfg(test)]
+                eprintln!("original commit: generation validated; reading held activation");
+                let committed_ops = prepared
+                    .original_committed_ops(effects.as_ref(), issued)
+                    .await
+                    .map_err(|source| {
+                        AuraError::crypto_with_source(
+                            "read original committed activation",
+                            Arc::new(source),
+                        )
+                    })?;
+                #[cfg(test)]
+                eprintln!("original commit: held activation read; persisting first decision");
+                let current = self.tracker.get(&self.ceremony_id).await?;
+                // Publish the protected first decision and receipt before visible terminal
+                // notification. The held activation gate excludes competing decisions.
+                self.tracker
+                    .persist_first_enrollment_terminal_decision(
+                        &current,
+                        CeremonyTerminalOutcome::Committed,
+                    )
+                    .await?;
+                #[cfg(test)]
+                eprintln!(
+                    "original commit: first decision persisted; reading original receipt binding"
+                );
+                let (original, decision_digest) = self
+                    .tracker
+                    .original_protected_terminal_decision(
+                        &current,
+                        CeremonyTerminalOutcome::Committed,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        AuraError::permission_denied("original committed execution owner absent")
+                    })?;
+                original.require_issued_notice_control(issued)?;
+                #[cfg(test)]
+                eprintln!("original commit: receipt binding verified; retaining receipt");
+                let receipt = OriginalEnrollmentPositiveDecisionReceipt {
+                    original: Arc::downgrade(&original),
+                    decision_digest,
+                    committed_ops,
+                };
+                if let Err(proposed) = original.positive_decision.set(receipt) {
+                    let actual = original.positive_decision.get().ok_or_else(|| {
+                        AuraError::invalid("original positive decision receipt disappeared")
+                    })?;
+                    if actual.decision_digest != proposed.decision_digest
+                        || aura_core::util::serialization::to_vec(&actual.committed_ops)?
+                            != aura_core::util::serialization::to_vec(&proposed.committed_ops)?
+                    {
+                        return Err(AuraError::permission_denied(
+                            "contradictory original positive decision receipt",
+                        ));
+                    }
+                }
+                #[cfg(test)]
+                eprintln!("original commit: receipt retained; publishing terminal notification");
+
+                #[cfg(test)]
+                {
+                    let gate = original.committed_confirmation_gate.lock().take();
+                    if let Some((entered, release)) = gate {
+                        entered.send(()).map_err(|_| {
+                            AuraError::invalid("actual committed test observer dropped")
+                        })?;
+                        release.await.map_err(|source| {
+                            AuraError::crypto_with_source(
+                                "actual committed confirmation gate dropped",
+                                Arc::new(source),
+                            )
+                        })?;
+                    }
+                }
+                self.tracker
+                    .complete_under_decision_gate(
+                        &self.ceremony_id,
+                        CeremonyTerminalOutcome::Committed,
+                    )
+                    .await?;
+                Ok(())
+            })
+            .await
+            .map_err(|source| match source {
+                aura_core::TimeoutRunError::Operation(source) => source,
+                aura_core::TimeoutRunError::Timeout(source) => AuraError::from(source),
+            })
+    }
+
     pub(crate) async fn commit(self) -> Result<(), aura_core::AuraError> {
         self.tracker
             .complete_under_decision_gate(&self.ceremony_id, CeremonyTerminalOutcome::Committed)
@@ -1398,14 +3056,22 @@ fn terminal_decision_location(ceremony: &CeremonyId) -> aura_core::effects::Secu
 /// Private fields and a held decision guard prevent callers from manufacturing cleanup.
 pub(crate) struct EnrollmentRetirementCapability<'a> {
     effects: &'a crate::runtime::AuraEffectSystem,
-    _generation: tokio::sync::MutexGuard<'a, ()>,
+    _custody: EnrollmentRetirementCustody<'a>,
     ceremony: CeremonyId,
     prestate: Hash32,
     authority: AuthorityId,
     epoch: u64,
     package_digest: [u8; 32],
     config_digest: [u8; 32],
-    _decision: tokio::sync::MutexGuard<'a, ()>,
+}
+enum EnrollmentRetirementCustody<'a> {
+    Acquired {
+        _generation: tokio::sync::MutexGuard<'a, ()>,
+        _decision: tokio::sync::MutexGuard<'a, ()>,
+    },
+    OriginalHeld {
+        _original: &'a EnrollmentGenerationDecisionCapability<'static>,
+    },
 }
 impl EnrollmentRetirementCapability<'_> {
     pub(crate) fn effects(&self) -> &crate::runtime::AuraEffectSystem {
@@ -1427,6 +3093,17 @@ impl EnrollmentRetirementCapability<'_> {
     }
 }
 impl CeremonyTracker {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) async fn original_enrollment_decision_guard_for_test(
+        &self,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        self.shared
+            .enrollment_decision_gate
+            .clone()
+            .lock_owned()
+            .await
+    }
+
     pub(crate) fn require_same_owner(&self, actual: &CeremonyTracker) -> Result<(), AuraError> {
         if !Arc::ptr_eq(&self.shared, &actual.shared) {
             return Err(crate::runtime::effects::held_registration_error(
@@ -1468,8 +3145,37 @@ impl CeremonyTracker {
         generation.require_effects(actual.as_ref())?;
         let decision = self.shared.enrollment_decision_gate.lock().await;
         Ok(EnrollmentGenerationDecisionCapability {
-            tracker: self,
-            _decision: decision,
+            tracker: EnrollmentDecisionTrackerOrigin::Borrowed(self),
+            _decision: EnrollmentDecisionGuard::Borrowed {
+                _original: decision,
+            },
+            generation,
+        })
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentGenerationCustodyCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn retain_owned_enrollment_generation_decision(
+        &self,
+        generation: crate::runtime::effects::EnrollmentGenerationCustodyCapability<'static>,
+    ) -> Result<EnrollmentGenerationDecisionCapability<'static>, AuraError> {
+        let actual = self.shared.persistence.as_ref().ok_or_else(|| {
+            crate::runtime::effects::held_registration_error(
+                crate::runtime::effects::HeldEnrollmentRegistrationError::RequiredOwner,
+            )
+        })?;
+        generation.require_effects(actual.as_ref())?;
+        let decision = Arc::clone(&self.shared.enrollment_decision_gate)
+            .lock_owned()
+            .await;
+        Ok(EnrollmentGenerationDecisionCapability {
+            tracker: EnrollmentDecisionTrackerOrigin::Owned(self.clone()),
+            _decision: EnrollmentDecisionGuard::Owned {
+                _original: decision,
+            },
             generation,
         })
     }
@@ -1531,34 +3237,10 @@ impl CeremonyTracker {
         self.shared.cancelled_generation_settled.notify_waiters();
     }
 
-    /// Await the cancelled-notice owner's sign-and-release result.
-    pub(crate) async fn await_cancelled_generation_settlement(
-        &self,
-        ceremony: &CeremonyId,
-    ) -> Result<(), AuraError> {
-        loop {
-            let changed = self.shared.cancelled_generation_settled.notified();
-            tokio::pin!(changed);
-            // Register before checking, so a settlement in between is not lost.
-            changed.as_mut().enable();
-            if let Some(result) = self
-                .shared
-                .cancelled_generation_settlements
-                .lock()
-                .await
-                .get(ceremony)
-                .cloned()
-            {
-                return result;
-            }
-            changed.await;
-        }
-    }
-
     pub(crate) async fn retire_failed_enrollment_generation(
         &self,
         ceremony: &CeremonyId,
-    ) -> Result<(), AuraError> {
+    ) -> Result<crate::runtime::effects::AcknowledgedEnrollmentRetirement, AuraError> {
         let effects = self
             .shared
             .persistence
@@ -1611,19 +3293,91 @@ impl CeremonyTracker {
             })?;
         let lease = EnrollmentRetirementCapability {
             effects,
-            _generation: generation_guard,
+            _custody: EnrollmentRetirementCustody::Acquired {
+                _generation: generation_guard,
+                _decision: decision,
+            },
             ceremony: ceremony.clone(),
             prestate: current.prestate_hash,
             authority: current.initiator_id,
             epoch: current.new_epoch,
             package_digest,
             config_digest,
-            _decision: decision,
         };
         effects.retire_pinned_enrollment_generation(&lease).await
     }
 
-    fn timeout_for_kind(kind: CeremonyKind) -> Duration {
+    /// Retire the pre-registration allocation using its already-held physical
+    /// and decision leases. The caller must bound this work with the root's
+    /// original negative endpoint and retain the returned write receipt before
+    /// returning Ready from that callback.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentGenerationReservation",
+        capability_type = crate::runtime::effects::EnrollmentGenerationReservation,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn retire_original_held_enrollment_generation(
+        &self,
+        reservation: &crate::runtime::effects::EnrollmentGenerationReservation<'static>,
+    ) -> Result<crate::runtime::effects::AcknowledgedEnrollmentRetirement, AuraError> {
+        reservation.require_tracker(self)?;
+        let effects = self.shared.persistence.as_ref().ok_or_else(|| {
+            AuraError::invalid("held retirement requires original persistent storage")
+        })?;
+        reservation.require_effects(effects.as_ref())?;
+        let ceremony = reservation.ceremony_id();
+        let current = self.get(ceremony).await?;
+        if current.terminal_outcome.is_some() {
+            reservation.validate_held_negative_registration(effects.as_ref(), &current)?;
+        } else {
+            reservation.validate_allocated_registration(effects.as_ref(), &current)?;
+        }
+        let negative = CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Cancelled);
+        self.complete_under_decision_gate(ceremony, negative)
+            .await?;
+        let current = self.get(ceremony).await?;
+        reservation.validate_held_negative_registration(effects.as_ref(), &current)?;
+        let durable = self
+            .retained_terminal_decision(ceremony)
+            .await?
+            .ok_or_else(|| {
+                AuraError::invalid("held retirement requires the durable negative decision")
+            })?;
+        if durable.prestate != current.prestate_hash || durable.record.outcome != Some(negative) {
+            return Err(AuraError::invalid(
+                "held retirement original decision changed",
+            ));
+        }
+        let (package_digest, config_digest) =
+            crate::handlers::invitation::enrollment_trust::failed_generation_binding(
+                effects,
+                ceremony,
+                current.initiator_id,
+                current.new_epoch,
+                current.prestate_hash,
+            )
+            .await
+            .map_err(|source| AuraError::Internal {
+                message: "load original held retirement binding".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let lease = EnrollmentRetirementCapability {
+            effects,
+            _custody: EnrollmentRetirementCustody::OriginalHeld {
+                _original: reservation.decision(),
+            },
+            ceremony: ceremony.clone(),
+            prestate: current.prestate_hash,
+            authority: current.initiator_id,
+            epoch: current.new_epoch,
+            package_digest,
+            config_digest,
+        };
+        effects.retire_pinned_enrollment_generation(&lease).await
+    }
+
+    pub(super) fn timeout_for_kind(kind: CeremonyKind) -> Duration {
         match kind {
             // Guardians and other devices approve on their own screens, as a
             // person does for enrollment; 60 s timed out in practice (run 147).
@@ -1693,7 +3447,15 @@ impl CeremonyTracker {
                 persistence_guard: Mutex::new(()),
                 #[cfg(test)]
                 clock_checkpoint_fault: Mutex::new(None),
-                enrollment_decision_gate: Mutex::new(()),
+                #[cfg(test)]
+                cancellation_postcheckpoint_gate: Mutex::new(None),
+                #[cfg(test)]
+                negative_checkpoint_fault: Mutex::new(None),
+                #[cfg(test)]
+                negative_checkpoint_fault_observer: Mutex::new(None),
+                #[cfg(test)]
+                cancellation_cleanup_observer: Mutex::new(None),
+                enrollment_decision_gate: Arc::new(Mutex::new(())),
                 terminal_changed: tokio::sync::Notify::new(),
                 cancelled_generation_settlements: Mutex::new(HashMap::new()),
                 cancelled_generation_settled: tokio::sync::Notify::new(),
@@ -1819,14 +3581,6 @@ impl CeremonyTracker {
         Ok(())
     }
 
-    pub(crate) fn require_enrollment_clock_storage(&self) -> Result<(), AuraError> {
-        self.shared
-            .persistence
-            .as_ref()
-            .map(|_| ())
-            .ok_or_else(|| AuraError::invalid("durable enrollment clock requires secure storage"))
-    }
-
     async fn require_live_enrollment_window(
         &self,
         state: &TrackedCeremony,
@@ -1911,6 +3665,41 @@ impl CeremonyTracker {
         *self.shared.clock_checkpoint_fault.lock().await = Some(source);
     }
 
+    #[cfg(test)]
+    pub(crate) async fn observe_cancellation_postcheckpoint_for_test(
+        &self,
+        after_release: Option<Box<dyn FnOnce() + Send>>,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        *self.shared.cancellation_postcheckpoint_gate.lock().await =
+            Some((entered, released, after_release));
+        (observed, release)
+    }
+    #[cfg(test)]
+    pub(crate) async fn fail_issuer_negative_checkpoint_for_test(
+        &self,
+        source: AuraError,
+    ) -> tokio::sync::oneshot::Receiver<AuraError> {
+        let (observed, actual) = tokio::sync::oneshot::channel();
+        *self.shared.negative_checkpoint_fault_observer.lock().await = Some(observed);
+        *self.shared.negative_checkpoint_fault.lock().await =
+            Some((OriginalNegativeCheckpointOwner::Issuer, source));
+        actual
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn observe_cancellation_cleanup_for_test(
+        &self,
+    ) -> tokio::sync::oneshot::Receiver<Result<(), AuraError>> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        *self.shared.cancellation_cleanup_observer.lock().await = Some(sender);
+        receiver
+    }
+
     /// Persist the latest owner observation before a required step continues.
     /// This gate is separate from the enrollment decision gate; callers holding
     /// that gate may checkpoint without recursively acquiring it.
@@ -1945,7 +3734,33 @@ impl CeremonyTracker {
             .ok_or_else(|| AuraError::invalid("enrollment clock owner is not registered"))?;
         self.require_live_enrollment_window(state).await?;
         let durable = self.read_bound_enrollment_clock(state).await?;
-        if durable.execution != super::enrollment_window::DurableEnrollmentExecutionState::Pending {
+        #[cfg(test)]
+        let observed_cancellation = matches!(
+            &expected,
+            Some(RegisteredClockCheckpointAuthority::Cancellation(_))
+        );
+        let negative = match &expected {
+            Some(RegisteredClockCheckpointAuthority::Cancellation(capability)) => {
+                capability.negative.as_ref()
+            }
+            None => None,
+        };
+        if let Some(cancelled) = negative {
+            if !Arc::ptr_eq(&cancelled.runtime_owner, effects)
+                || cancelled.ceremony != state.ceremony_id
+                || state.terminal_outcome
+                    != Some(CeremonyTerminalOutcome::Failed(
+                        CeremonyFailureReason::Cancelled,
+                    ))
+                || state.is_superseded
+            {
+                return Err(AuraError::permission_denied(
+                    "negative checkpoint original decision changed",
+                ));
+            }
+        } else if durable.execution
+            != super::enrollment_window::DurableEnrollmentExecutionState::Pending
+        {
             return Err(AuraError::permission_denied(
                 "closed enrollment cannot publish a Pending checkpoint",
             ));
@@ -1991,7 +3806,7 @@ impl CeremonyTracker {
             ));
         }
         let snapshot = StoredEnrollmentClock {
-            version: 3,
+            version: 4,
             ceremony: ceremony.clone(),
             subject: state.initiator_id,
             device: state
@@ -2000,7 +3815,9 @@ impl CeremonyTracker {
             prestate: state.prestate_hash,
             epoch: state.new_epoch,
             budget: state.timeout_budget.clone(),
-            execution: super::enrollment_window::DurableEnrollmentExecutionState::Pending,
+            negative_cleanup_budget: state.negative_cleanup_budget.clone(),
+            original_policy: state.original_window_policy.clone(),
+            execution: durable.execution,
         };
         let bytes = serde_json::to_vec(&snapshot).map_err(|source| AuraError::Internal {
             message: "encode enrollment clock checkpoint".into(),
@@ -2012,7 +3829,34 @@ impl CeremonyTracker {
                 &bytes,
                 &[SecureStorageCapability::Write],
             )
-            .await
+            .await?;
+        #[cfg(test)]
+        if observed_cancellation
+            && state.terminal_outcome
+                == Some(CeremonyTerminalOutcome::Failed(
+                    CeremonyFailureReason::Cancelled,
+                ))
+        {
+            if let Some((entered, release, after_release)) = self
+                .shared
+                .cancellation_postcheckpoint_gate
+                .lock()
+                .await
+                .take()
+            {
+                entered
+                    .send(())
+                    .map_err(|_| AuraError::invalid("cancellation checkpoint observer lost"))?;
+                release.await.map_err(|source| AuraError::Internal {
+                    message: "original cancellation checkpoint gate release lost".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+                if let Some(after_release) = after_release {
+                    after_release();
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn restore_enrollment_clock(
@@ -2023,6 +3867,8 @@ impl CeremonyTracker {
         // unless it still holds the actual original in-process birth root.
         let record = self.read_bound_enrollment_clock(registration).await?;
         registration.timeout_budget = record.budget;
+        registration.negative_cleanup_budget = record.negative_cleanup_budget;
+        registration.original_window_policy = record.original_policy;
         Ok(())
     }
 
@@ -2055,7 +3901,7 @@ impl CeremonyTracker {
                 message: "decode retained enrollment clock".into(),
                 source: Some(Arc::new(source)),
             })?;
-        if record.version != 3
+        if record.version != 4
             || record.ceremony != registration.ceremony_id
             || record.subject != registration.initiator_id
             || Some(record.device) != registration.enrollment_device_id
@@ -2063,6 +3909,11 @@ impl CeremonyTracker {
             || record.epoch != registration.new_epoch
             || record.budget.started_at_ms() != registration.timeout_budget.started_at_ms()
             || record.budget.deadline_at_ms() != registration.timeout_budget.deadline_at_ms()
+            || record.original_policy != registration.original_window_policy
+            || record.negative_cleanup_budget.started_at_ms()
+                != registration.negative_cleanup_budget.started_at_ms()
+            || record.negative_cleanup_budget.deadline_at_ms()
+                != registration.negative_cleanup_budget.deadline_at_ms()
         {
             return Err(AuraError::invalid(
                 "retained enrollment clock generation mismatch",
@@ -2072,11 +3923,16 @@ impl CeremonyTracker {
             record.execution,
             super::enrollment_window::DurableEnrollmentExecutionState::Pending
                 | super::enrollment_window::DurableEnrollmentExecutionState::Closed
+                | super::enrollment_window::DurableEnrollmentExecutionState::Refused
         ) {
             return Err(AuraError::invalid(
                 "retained enrollment clock lacks original Pending birth",
             ));
         }
+        record
+            .original_policy
+            .require_cleanup(&record.budget, &record.negative_cleanup_budget)
+            .map_err(AuraError::from)?;
         Ok(record)
     }
 
@@ -2319,6 +4175,7 @@ impl CeremonyTracker {
         self.register_with_generation(
             None,
             None,
+            OriginalRegistrationClock::SelectAtRegistration,
             ceremony_id,
             kind,
             initiator_id,
@@ -2343,6 +4200,7 @@ impl CeremonyTracker {
     pub(crate) async fn register_owned_device_enrollment(
         &self,
         generation: &mut crate::runtime::effects::EnrollmentGenerationReservation<'_>,
+        launch: &mut super::enrollment_window::OriginalIssuerLaunchWindow,
         request: super::ceremony_runner::CeremonyInitRequest,
         original_tasks: &TaskGroup,
     ) -> Result<(), AuraError> {
@@ -2354,6 +4212,7 @@ impl CeremonyTracker {
         self.register_with_generation(
             Some(generation),
             Some(original_tasks),
+            OriginalRegistrationClock::SelectedEnrollment(launch),
             request.ceremony_id,
             request.kind,
             request.initiator_id,
@@ -2373,6 +4232,7 @@ impl CeremonyTracker {
         &self,
         generation: Option<&mut crate::runtime::effects::EnrollmentGenerationReservation<'_>>,
         original_tasks: Option<&TaskGroup>,
+        original_clock: OriginalRegistrationClock<'_>,
         ceremony_id: CeremonyId,
         kind: CeremonyKind,
         initiator_id: AuthorityId,
@@ -2460,17 +4320,52 @@ impl CeremonyTracker {
             )));
         }
 
-        // Persistent tracker construction retains this same physical provider
-        // for allocation, bounded publication and every later observation.
-        let now = self
-            .time
-            .physical_time()
-            .await
-            .map_err(|e| aura_core::AuraError::Internal {
-                message: "Failed to get current time".into(),
-                source: Some(std::sync::Arc::new(e)),
-            })?;
-
+        // Enrollment forwards the original launch selection. Only unrelated
+        // ceremony admission selects an interval here; durable enrollment may
+        // neither reconstruct nor renew the launch's endpoint or provider.
+        let (now, original_birth) = match original_clock {
+            OriginalRegistrationClock::SelectedEnrollment(launch) => {
+                if kind != CeremonyKind::DeviceEnrollment {
+                    return Err(AuraError::invalid(
+                        "original enrollment clock cannot start another ceremony kind",
+                    ));
+                }
+                let effects = self.shared.persistence.as_ref().ok_or_else(|| {
+                    original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
+                })?;
+                let selected = launch.take_original_birth(effects)?;
+                (selected.started_at, selected.birth)
+            }
+            OriginalRegistrationClock::SelectAtRegistration => {
+                if generation.is_some() {
+                    return Err(AuraError::invalid(
+                        "owned enrollment requires its original launch selection",
+                    ));
+                }
+                let now =
+                    self.time
+                        .physical_time()
+                        .await
+                        .map_err(|source| AuraError::Internal {
+                            message: "select original ceremony registration clock".into(),
+                            source: Some(Arc::new(source)),
+                        })?;
+                let execution_policy = Self::timeout_for_kind(kind);
+                let shortcut_policy =
+                    super::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(
+                        execution_policy,
+                        execution_policy,
+                    )
+                    .map_err(AuraError::from)?;
+                let birth = super::enrollment_window::OriginalEnrollmentWindowBirth::allocate(
+                    &now,
+                    execution_policy,
+                    shortcut_policy,
+                )
+                .map_err(AuraError::from)?;
+                (now, birth)
+            }
+        };
         let mut state = TrackedCeremony {
             ceremony_id: ceremony_id.clone(),
             kind,
@@ -2494,11 +4389,10 @@ impl CeremonyTracker {
             failure_reason: None,
             timeout: Self::timeout_for_kind(kind),
             enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(
-                &now,
-                Self::timeout_for_kind(kind),
-            )
-            .map_err(AuraError::from)?,
+            timeout_budget: original_birth.execution,
+            shortcut_budget: Some(original_birth.shortcut),
+            negative_cleanup_budget: original_birth.negative_cleanup,
+            original_window_policy: original_birth.policy,
             prestate_hash,
             committed_at: None,
             committed_consensus_id: None,
@@ -2570,6 +4464,11 @@ impl CeremonyTracker {
                         observed: state,
                         execution,
                         running: None,
+                        acknowledged_issuer: None,
+                        original_entry: Arc::new(()),
+                        cancellation_task: None,
+                        cancelled_notice_task: None,
+                        issuer_task: None,
                     },
                 );
                 Ok(())
@@ -2588,173 +4487,6 @@ impl CeremonyTracker {
         }
 
         result
-    }
-
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "RegisteredEnrollmentGenerationCapability",
-        family = "runtime_helper"
-    )]
-    pub(super) async fn acquire_registered_enrollment_generation_window(
-        &self,
-        generation: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
-    ) -> Result<
-        super::enrollment_window::EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>,
-        AuraError,
-    > {
-        generation.require_tracker(self)?;
-        let effects = self.shared.persistence.as_ref().ok_or_else(|| {
-            AuraError::invalid("registered generation requires its actual persistent runtime")
-        })?;
-        generation.require_effects(effects.as_ref())?;
-        let crate::handlers::invitation::InvitationType::DeviceEnrollment { ceremony_id, .. } =
-            &generation.canonical_invitation().invitation_type
-        else {
-            return Err(crate::runtime::effects::held_registration_error(
-                crate::runtime::effects::HeldEnrollmentRegistrationError::InvitationKind,
-            ));
-        };
-        self.acquire_registered_enrollment_window_inner(ceremony_id, generation)
-            .await
-    }
-
-    async fn acquire_registered_enrollment_window_inner(
-        &self,
-        ceremony: &CeremonyId,
-        generation: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
-    ) -> Result<
-        super::enrollment_window::EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>,
-        AuraError,
-    > {
-        self.require_enrollment_clock_storage()?;
-        let _decision = self.shared.enrollment_decision_gate.lock().await;
-        let state = self.shared.state.read().await;
-        let registered = state
-            .ceremonies
-            .get(ceremony)
-            .ok_or_else(|| AuraError::invalid("enrollment ceremony is not registered"))?;
-        if registered.kind != CeremonyKind::DeviceEnrollment
-            || registered.terminal_outcome.is_some()
-            || registered.is_superseded
-            || registered.threshold_k == 0
-            || registered.threshold_k > registered.total_n
-            || registered.enrollment_device_id.is_none()
-            || registered.timeout_budget.started_at_ms() != registered.started_at.ts_ms
-            || u64::try_from(registered.timeout.as_millis()).ok()
-                != Some(registered.timeout_budget.timeout_ms())
-        {
-            return Err(AuraError::invalid(
-                "enrollment execution requires the original active registered generation",
-            ));
-        }
-        {
-            let canonical = generation.canonical_invitation();
-            let crate::handlers::invitation::InvitationType::DeviceEnrollment {
-                setup_binding: binding,
-                ..
-            } = &canonical.invitation_type
-            else {
-                return Err(crate::runtime::effects::held_registration_error(
-                    crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
-                ));
-            };
-            let effects = self
-                .shared
-                .persistence
-                .as_ref()
-                .ok_or_else(|| AuraError::invalid("missing original generation runtime"))?;
-            let retained = crate::handlers::invitation::enrollment_trust::verify_generation_registration_binding(effects.as_ref(), registered.initiator_id, registered.new_epoch, &registered.ceremony_id, registered.prestate_hash, &canonical.invitation_id, binding.digest).await.map_err(|source| AuraError::Internal { message: "verify original canonical registered execution owner".into(), source: Some(Arc::new(source)) })?;
-            let encode = |invitation: &crate::handlers::invitation::Invitation| {
-                serde_json::to_vec(invitation).map_err(|source| AuraError::Serialization {
-                    message: "compare original canonical registered invitation".into(),
-                    source: Some(Arc::new(source)),
-                })
-            };
-            if encode(&retained)? != encode(canonical)? {
-                return Err(crate::runtime::effects::held_registration_error(
-                    crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
-                ));
-            }
-        }
-        let registered = registered.observed.clone();
-        drop(state);
-        self.require_live_enrollment_window(&registered).await?;
-        let mut state = self
-            .shared
-            .state
-            .try_write()
-            .map_err(|source| AuraError::Internal {
-                message: "original registered execution entry is contended".into(),
-                source: Some(Arc::new(source)),
-            })?;
-        let entry = state
-            .ceremonies
-            .get_mut(ceremony)
-            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
-        if entry.observed.terminal_outcome.is_some() || entry.observed.is_superseded {
-            return Err(AuraError::permission_denied(
-                "original registered execution is terminal",
-            ));
-        }
-        if let Some(running) = &entry.running {
-            running.observer.require_effects(
-                self.shared
-                    .persistence
-                    .as_ref()
-                    .ok_or_else(|| {
-                        original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
-                    })?
-                    .as_ref(),
-            )?;
-            let canonical =
-                serde_json::to_vec(generation.canonical_invitation()).map_err(|source| {
-                    AuraError::Serialization {
-                        message: "compare original running issuer invitation".into(),
-                        source: Some(Arc::new(source)),
-                    }
-                })?;
-            if canonical != running.canonical_invitation {
-                return Err(crate::runtime::effects::held_registration_error(
-                    crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
-                ));
-            }
-            running.registration.require_running()?;
-            return Err(AuraError::PermissionDenied {
-                message: "original registered issuer is already running".into(),
-                source: Some(Arc::new(OriginalIssuerAlreadyRunning {
-                    original: running.clone(),
-                })),
-            });
-        }
-        let root = entry
-            .execution
-            .as_ref()
-            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::AlreadyBorn))?;
-        root.origin().require_effects(
-            self.shared
-                .persistence
-                .as_ref()
-                .ok_or_else(|| {
-                    original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
-                })?
-                .as_ref(),
-        )?;
-        if root.origin().state.ceremony_id != registered.ceremony_id
-            || root.origin().state.new_epoch != registered.new_epoch
-            || root.origin().state.prestate_hash != registered.prestate_hash
-            || root.origin().state.timeout_budget.started_at_ms()
-                != registered.timeout_budget.started_at_ms()
-            || root.origin().state.timeout_budget.deadline_at_ms()
-                != registered.timeout_budget.deadline_at_ms()
-        {
-            return Err(crate::runtime::effects::held_registration_error(
-                crate::runtime::effects::HeldEnrollmentRegistrationError::Binding,
-            ));
-        }
-        entry
-            .execution
-            .take()
-            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::AlreadyBorn))
     }
 
     #[aura_macros::capability_boundary(
@@ -2809,7 +4541,8 @@ impl CeremonyTracker {
         }
         Ok(RegisteredCancellationPreparationCapability::Active(
             Box::new(CancellationClockObservationCapability {
-                tracker: self.clone(),
+                negative: None,
+                tracker: OriginalEnrollmentTrackerReference::from_original(self)?,
                 state: state.observed.clone(),
                 signed_expiry_ms: manifest.expires_at_ms,
             }),
@@ -2876,18 +4609,20 @@ impl CeremonyTracker {
             .clone()
             .try_acquire_owned()
             .map_err(registered_window_lease_error)?;
+        let cancelled = Arc::new(VerifiedEnrollmentCancellationCapability {
+            runtime_owner: effects.clone(),
+            invitation: manifest.invitation.clone(),
+            ceremony: manifest.ceremony.clone(),
+        });
         Ok(RegisteredCancelledNoticeCapability {
-            observation: CancellationClockObservationCapability {
-                tracker: self.clone(),
+            observation: Arc::new(CancellationClockObservationCapability {
+                negative: Some(Arc::clone(&cancelled)),
+                tracker: OriginalEnrollmentTrackerReference::from_original(self)?,
                 state: state.observed.clone(),
                 signed_expiry_ms: manifest.expires_at_ms,
-            },
+            }),
             lease: Arc::new(lease),
-            cancelled: VerifiedEnrollmentCancellationCapability {
-                runtime_owner: effects.clone(),
-                invitation: manifest.invitation.clone(),
-                ceremony: manifest.ceremony.clone(),
-            },
+            cancelled,
             manifest_digest: issued.digest(),
         })
     }
@@ -2927,6 +4662,8 @@ impl CeremonyTracker {
         evidence: crate::handlers::invitation::VerifiedEnrollmentResponse,
     ) -> Result<bool, aura_core::AuraError> {
         let ceremony_id = evidence.ceremony_id().clone();
+        #[cfg(test)]
+        eprintln!("enrollment acceptance stage: verified response received ceremony={ceremony_id}");
         let _decision = self.shared.enrollment_decision_gate.lock().await;
         let current =
             self.get(&ceremony_id)
@@ -3024,6 +4761,11 @@ impl CeremonyTracker {
             message: "record verified enrollment response".into(),
             source: Some(std::sync::Arc::new(error)),
         })?;
+        // The same owned readiness domain covers acceptance and terminal
+        // progress. Waiters register before examining the canonical state.
+        self.shared.terminal_changed.notify_waiters();
+        #[cfg(test)]
+        eprintln!("enrollment acceptance stage: validated response committed ceremony={ceremony_id} ready={result}");
         Ok(result)
     }
 
@@ -3050,24 +4792,12 @@ impl CeremonyTracker {
             self.shared.persistence.as_ref().ok_or_else(|| {
                 aura_core::AuraError::invalid("no durable enrollment receipt owner")
             })?;
-        let (proof, mut registration) =
-            if crate::handlers::invitation::enrollment_trust::has_response_receipt(
-                effects,
-                ceremony_id,
-            )
-            .await
-            .map_err(|error| aura_core::AuraError::Internal {
+        let recovered = crate::handlers::invitation::enrollment_trust::recover_enrollment_registration_for_admission(effects, ceremony_id)
+            .await.map_err(|error| AuraError::Internal {
                 message: "recover enrollment evidence".into(),
-                source: Some(std::sync::Arc::new(error)),
-            })? {
-                let (proof, registration) = crate::handlers::invitation::enrollment_trust::recover_verified_response_receipt(effects, ceremony_id)
-                .await.map_err(|error| aura_core::AuraError::Internal { message: "recover enrollment evidence".into(), source: Some(std::sync::Arc::new(error)) })?;
-                (Some(proof), registration)
-            } else {
-                let registration = crate::handlers::invitation::enrollment_trust::recover_pending_enrollment_registration(effects, ceremony_id)
-                .await.map_err(|error| aura_core::AuraError::Internal { message: "recover enrollment evidence".into(), source: Some(std::sync::Arc::new(error)) })?;
-                (None, registration)
-            };
+                source: Some(Arc::new(error)),
+            })?;
+        let mut registration = recovered.registration().clone();
         let outcome = self
             .stored_enrollment_outcome(ceremony_id)
             .await
@@ -3123,13 +4853,10 @@ impl CeremonyTracker {
         self.restore_enrollment_clock(&mut registration).await?;
         self.require_live_enrollment_window(&registration).await?;
         if registration.terminal_outcome.is_none() {
-            crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
+            crate::handlers::invitation::enrollment_trust::restore_recovered_pending_signing_generation(
                 effects,
                 signing,
-                ceremony_id,
-                registration.initiator_id,
-                registration.new_epoch,
-                registration.prestate_hash,
+                &recovered,
             )
             .await
             .map_err(|error| AuraError::Crypto {
@@ -3137,6 +4864,7 @@ impl CeremonyTracker {
                 source: Some(std::sync::Arc::new(error)),
             })?;
         }
+        let proof = recovered.into_response();
         with_state_mut_validated(
             &self.shared.state,
             |tracker| {
@@ -3344,16 +5072,6 @@ impl CeremonyTracker {
         let custody = self
             .acquire_enrollment_generation_decision(effects.as_ref())
             .await?;
-        let prepared = if let Some(effects) = &self.shared.persistence {
-            effects
-                .secure_exists(&aura_core::effects::SecureStorageLocation::new(
-                    "device_enrollment_activation_v1",
-                    ceremony_id.to_string(),
-                ))
-                .await?
-        } else {
-            false
-        };
         let now =
             self.time
                 .physical_time()
@@ -3407,12 +5125,10 @@ impl CeremonyTracker {
                 return Err(AuraError::from(source.clone()));
             }
         }
-        if !prepared {
-            expired.map_err(|source| AuraError::Internal {
-                message: "enrollment activation deadline elapsed".into(),
-                source: Some(Arc::new(source)),
-            })?;
-        }
+        expired.map_err(|source| AuraError::Internal {
+            message: "enrollment activation deadline elapsed".into(),
+            source: Some(Arc::new(source)),
+        })?;
         let proof = state
             .enrollment_responses
             .get(ceremony_id)
@@ -3434,6 +5150,32 @@ impl CeremonyTracker {
             ceremony_id: ceremony_id.clone(),
             custody,
         }))
+    }
+
+    pub(crate) fn retain_prepared_enrollment_activation<'a>(
+        &'a self,
+        recovery: crate::handlers::device_epoch_rotation::AuthenticatedPreparedEnrollmentRecovery<
+            'a,
+        >,
+    ) -> Result<
+        (
+            EnrollmentActivationCapability<'a>,
+            crate::handlers::device_epoch_rotation::AuthenticatedPreparedEnrollmentActivation,
+        ),
+        AuraError,
+    > {
+        let (authenticated, custody) = recovery.into_original_decision();
+        custody.require_tracker(self)?;
+        authenticated.require_original(&custody)?;
+        let ceremony_id = authenticated.ceremony_id().clone();
+        Ok((
+            EnrollmentActivationCapability {
+                tracker: self,
+                ceremony_id,
+                custody,
+            },
+            authenticated,
+        ))
     }
 
     /// Verified refusal settles the same original registered generation under
@@ -3480,8 +5222,35 @@ impl CeremonyTracker {
         self.checkpoint_enrollment_clock(proof.ceremony_id())
             .await?;
         active.map_err(AuraError::from)?;
+        let original = {
+            let state = self.shared.state.read().await;
+            state
+                .ceremonies
+                .get(proof.ceremony_id())
+                .and_then(|entry| entry.running.as_ref())
+                .map(|running| Arc::clone(&running.original))
+                .ok_or_else(|| {
+                    original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost)
+                })?
+        };
+        let ceremony = proof.ceremony_id().clone();
+        if let Err(proposed) = original.verified_rejection.set(proof) {
+            let actual = original
+                .verified_rejection
+                .get()
+                .ok_or_else(|| AuraError::invalid("original verified rejection disappeared"))?;
+            if actual.ceremony_id() != proposed.ceremony_id()
+                || actual.subject() != proposed.subject()
+                || actual.device_id() != proposed.device_id()
+                || actual.pending_epoch() != proposed.pending_epoch()
+            {
+                return Err(AuraError::permission_denied(
+                    "contradictory original verified rejection",
+                ));
+            }
+        }
         self.complete_under_decision_gate(
-            proof.ceremony_id(),
+            &ceremony,
             CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Rejected),
         )
         .await
@@ -3566,6 +5335,112 @@ impl CeremonyTracker {
             .await
     }
 
+    async fn original_protected_terminal_decision(
+        &self,
+        current: &TrackedCeremony,
+        outcome: CeremonyTerminalOutcome,
+    ) -> Result<Option<(Arc<RegisteredEnrollmentWindowCapability>, [u8; 32])>, AuraError> {
+        // Before registered publication, there is no terminal-signing owner.
+        // Such failures still settle through their original prebirth cleanup.
+        let original = {
+            let registry = self.shared.state.read().await;
+            registry
+                .ceremonies
+                .get(&current.ceremony_id)
+                .and_then(|entry| entry.running.as_ref())
+                .map(|running| Arc::clone(&running.original))
+        };
+        let Some(original) = original else {
+            return Ok(None);
+        };
+        let effects = self.shared.persistence.as_ref().ok_or_else(|| {
+            AuraError::invalid("original terminal decision requires persistent runtime custody")
+        })?;
+        original.tracker.require_effects(effects.as_ref())?;
+        if original.state.prestate_hash != current.prestate_hash
+            || original.state.new_epoch != current.new_epoch
+            || !Arc::ptr_eq(
+                &original.state.enrollment_window_lease,
+                &current.enrollment_window_lease,
+            )
+            || !original
+                .state
+                .timeout_budget
+                .shares_observation_owner_with(&current.timeout_budget)
+        {
+            return Err(AuraError::permission_denied(
+                "terminal decision belongs to another original registered owner",
+            ));
+        }
+        let retained = self
+            .retained_terminal_decision(&current.ceremony_id)
+            .await?
+            .ok_or_else(|| AuraError::invalid("original terminal decision is missing"))?;
+        if retained.record.outcome != Some(outcome) || retained.prestate != current.prestate_hash {
+            return Err(AuraError::permission_denied(
+                "original terminal decision differs from protected first decision",
+            ));
+        }
+        current
+            .timeout_budget
+            .validate_checkpoint_continuation_from(&retained.record.budget)
+            .map_err(AuraError::from)?;
+        let bytes = effects
+            .secure_retrieve(
+                &terminal_decision_location(&current.ceremony_id),
+                &[aura_core::effects::SecureStorageCapability::Read],
+            )
+            .await?;
+        let expected = serde_json::to_vec(&retained).map_err(|source| AuraError::Internal {
+            message: "retain exact original terminal decision bytes".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        if bytes != expected {
+            return Err(AuraError::permission_denied(
+                "protected original terminal decision changed during receipt publication",
+            ));
+        }
+        Ok(Some((original, aura_core::hash::hash(&bytes))))
+    }
+
+    async fn retain_original_negative_decision(
+        &self,
+        current: &TrackedCeremony,
+        reason: CeremonyFailureReason,
+    ) -> Result<(), AuraError> {
+        let Some((original, decision_digest)) = self
+            .original_protected_terminal_decision(current, CeremonyTerminalOutcome::Failed(reason))
+            .await?
+        else {
+            return Ok(());
+        };
+        use aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind as Kind;
+        let kind = match reason {
+            CeremonyFailureReason::Rejected => Kind::Rejected,
+            CeremonyFailureReason::Cancelled => Kind::Cancelled,
+            CeremonyFailureReason::TimedOut => Kind::TimedOut,
+            CeremonyFailureReason::ChoreographyFailed => Kind::ChoreographyFailed,
+            CeremonyFailureReason::RuntimeFailed => Kind::RuntimeFailed,
+            CeremonyFailureReason::Superseded => Kind::Superseded,
+        };
+        let receipt = OriginalEnrollmentNegativeDecisionReceipt {
+            original: Arc::downgrade(&original),
+            kind,
+            decision_digest,
+        };
+        if let Err(proposed) = original.negative_decision.set(receipt) {
+            let actual = original.negative_decision.get().ok_or_else(|| {
+                AuraError::invalid("original negative decision receipt disappeared")
+            })?;
+            if actual.kind != proposed.kind || actual.decision_digest != proposed.decision_digest {
+                return Err(AuraError::permission_denied(
+                    "contradictory original negative decision receipt",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     async fn complete_under_decision_gate(
         &self,
         ceremony_id: &CeremonyId,
@@ -3608,6 +5483,12 @@ impl CeremonyTracker {
         // Required secure first-decision write precedes visible terminal publication.
         self.persist_first_enrollment_terminal_decision(&current, outcome)
             .await?;
+        if current.kind == CeremonyKind::DeviceEnrollment {
+            if let CeremonyTerminalOutcome::Failed(reason) = outcome {
+                self.retain_original_negative_decision(&current, reason)
+                    .await?;
+            }
+        }
         let result = with_state_mut_validated(
             &self.shared.state,
             |tracker| {
@@ -4349,6 +6230,11 @@ mod tests {
         tracker
             .register_owned_device_enrollment(
                 &mut generation,
+                &mut super::super::enrollment_window::OriginalIssuerLaunchWindow::select(
+                    effects.clone(),
+                )
+                .await?
+                .0,
                 crate::runtime::services::ceremony_runner::CeremonyInitRequest {
                     ceremony_id: retained.ceremony_id,
                     kind: retained.kind,
@@ -4601,17 +6487,33 @@ mod tests {
             root.origin().budget().deadline_at_ms(),
             observed.timeout_budget.deadline_at_ms()
         );
-        tracker.retain_original_issuer_execution(root).unwrap();
-        assert!(tracker
-            .shared
-            .state
-            .read()
+        // The canonical allocation already yielded its sole move-owned root.
+        // A mutated observed snapshot cannot return or replace that execution owner.
+        root.origin()
+            .require_pending()
             .await
-            .ceremonies
-            .get(&id)
-            .unwrap()
-            .execution
-            .is_some());
+            .expect("same original registered Pending owner remains valid");
+        assert!(
+            tracker
+                .shared
+                .state
+                .read()
+                .await
+                .ceremonies
+                .get(&id)
+                .expect("original allocation remains registered")
+                .execution
+                .is_none(),
+            "the retained root is not duplicated by snapshot observation"
+        );
+        assert!(root
+            .origin()
+            .budget()
+            .shares_observation_owner_with(&original.timeout_budget));
+        assert!(!root
+            .origin()
+            .budget()
+            .shares_observation_owner_with(&observed.timeout_budget));
         let _ = clock;
     }
 
@@ -4706,7 +6608,14 @@ mod tests {
                 .expect("actual clock-bound runtime");
             let agent = Arc::new(crate::AuraAgent::new(runtime, authority));
             AgentRuntimeBridge::new(agent.clone())
-                .bootstrap_signing_keys()
+                .bootstrap_signing_keys(
+                    crate::runtime::services::RuntimeServiceContext::test_original(
+                        agent.runtime().tasks(),
+                        agent.runtime().effects(),
+                    )
+                    .await
+                    .startup_window(),
+                )
                 .await
                 .expect("actual signing bootstrap");
             agents.push(agent);
@@ -4745,7 +6654,14 @@ mod tests {
             .expect("actual authenticated roster/prestate owner");
         let prestate = plan.prestate();
         let (epoch, _, _, mut generation) = effects
-            .prepare_pinned_enrollment_rotation(&pin, &reserved, &id, plan)
+            .prepare_pinned_enrollment_rotation(
+                &pin,
+                &reserved,
+                &id,
+                &mut crate::runtime::effects::OriginalEnrollmentAllocationProducer::from_original(
+                    plan,
+                ),
+            )
             .await
             .expect("actual held generation");
         let pending = issuer
@@ -4773,6 +6689,12 @@ mod tests {
         let result = tracker
             .register_owned_device_enrollment(
                 &mut generation,
+                &mut super::super::enrollment_window::OriginalIssuerLaunchWindow::select(
+                    effects.clone(),
+                )
+                .await
+                .expect("original fixture launch selection")
+                .0,
                 crate::runtime::services::ceremony_runner::CeremonyInitRequest {
                     ceremony_id: id.clone(),
                     kind: CeremonyKind::DeviceEnrollment,
@@ -5824,8 +7746,8 @@ mod tests {
     fn test_device_enrollment_ceremony_acceptance() {
         std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(|| {
             tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-                let (issuer, _invitee, _invitation, start, _acceptance, verified) =
-                    crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture("tracker-owned-acceptance").await;
+                let ((issuer, _invitee, _invitation, start, _acceptance, verified), original) =
+                    crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation("tracker-owned-acceptance", None, None).await;
                 let tracker = issuer.runtime().ceremony_tracker();
                 let runner = issuer.runtime().ceremony_runner();
                 let state = tracker.get(&start.ceremony_id).await.unwrap();
@@ -5837,14 +7759,7 @@ mod tests {
                     "generic counts cannot substitute for verified remote evidence");
                 assert_eq!(runner.terminal_outcome(&start.ceremony_id).await.unwrap(), None);
                 assert!(runner.record_verified_enrollment_response(verified).await.unwrap());
-                let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
-                    issuer.authority_id(), issuer.runtime().effects(),
-                    issuer.runtime().ceremony_tracker().clone(), runner.clone(),
-                    issuer.runtime().threshold_signing(), issuer.runtime().reconfiguration().clone(),
-                );
-                tokio::time::timeout(std::time::Duration::from_secs(10),
-                    service.finalize_sole_device_enrollment(&start.ceremony_id))
-                    .await.expect("bounded finalizer").expect("actual finalizer commits verified acceptance");
+                original.observe_original_finalizer().await.expect("actual original finalizer commits verified acceptance");
                 assert_eq!(runner.terminal_outcome(&start.ceremony_id).await.unwrap(),
                     Some(CeremonyTerminalOutcome::Committed));
                 assert!(tracker.is_complete(&start.ceremony_id).await.unwrap());
@@ -5971,434 +7886,514 @@ mod tests {
                     participants.iter().take(num_accepted).cloned().collect();
                 let participants_set: HashSet<_> = participants.into_iter().collect();
 
-                TrackedCeremony {
-                    ceremony_id: CeremonyId::new("proptest"),
-                    kind: CeremonyKind::GuardianRotation,
-                    initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                    threshold_k: threshold,
-                    total_n: participants_set.len() as u16,
-                    participants: participants_set,
-                    accepted_participants: accepted,
-                    new_epoch: 100,
-                    enrollment_device_id: None,
-                    enrollment_nickname_suggestion: None,
-                    started_at: PhysicalTime {
-                        ts_ms: 0,
-                        uncertainty: None,
-                    },
-                    has_failed: false,
-                    is_committed: false,
-                    is_superseded: false,
-                    superseded_by: None,
-                    supersedes: Vec::new(),
-                    agreement_mode: AgreementMode::CoordinatorSoftSafe,
-                    error_message: None,
-                    terminal_outcome: None,
-                    failure_reason: None,
-                    timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-                    timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(
-                        &PhysicalTime::exact(0),
-                        Duration::from_secs(30),
-                    )
-                    .expect("valid fixture original window"),
-                    prestate_hash: Hash32([0; 32]),
-                    committed_at: None,
-                    committed_consensus_id: None,
+                {
+                    let original_fixture_birth =
+                        crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(
+                            &PhysicalTime::exact(0),
+                            Duration::from_secs(30),
+                            crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(
+                                Duration::from_secs(30), Duration::from_secs(30),
+                            ).expect("valid shortcut fixture policy"),
+                        )
+                        .expect("valid original fixture birth");
+                    TrackedCeremony {
+                        ceremony_id: CeremonyId::new("proptest"),
+                        kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                        threshold_k: threshold,
+                        total_n: participants_set.len() as u16,
+                        participants: participants_set,
+                        accepted_participants: accepted,
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
+                        started_at: PhysicalTime {
+                            ts_ms: 0,
+                            uncertainty: None,
+                        },
+                        has_failed: false,
+                        is_committed: false,
+                        is_superseded: false,
+                        superseded_by: None,
+                        supersedes: Vec::new(),
+                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                        error_message: None,
+                        terminal_outcome: None,
+                        failure_reason: None,
+                        timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                        timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+                        negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+                        original_window_policy: original_fixture_birth.policy,
+                        prestate_hash: Hash32([0; 32]),
+                        committed_at: None,
+                        committed_consensus_id: None,
+                    }
                 }
             })
     }
 
     proptest! {
-        /// Property: Participants list has no duplicates.
-        /// This invariant is enforced by the validate() function.
-        #[test]
-        fn prop_no_duplicate_participants(
-            num_participants in 2usize..=8,
-        ) {
-            let participants: Vec<ParticipantIdentity> = (0..num_participants)
-                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
-                .collect();
-            let participants_set: HashSet<_> = participants.iter().cloned().collect();
+            /// Property: Participants list has no duplicates.
+            /// This invariant is enforced by the validate() function.
+            #[test]
+            fn prop_no_duplicate_participants(
+                num_participants in 2usize..=8,
+            ) {
+                let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                    .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                    .collect();
+                let participants_set: HashSet<_> = participants.iter().cloned().collect();
 
-            let state = CeremonyTrackerState {
-                enrollment_responses: HashMap::new(),
-                retired_enrollment_ids: HashSet::new(),
-                ceremonies: {
-                    let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), TrackedCeremony {
-                        ceremony_id: test_ceremony_id("test"),
-                        kind: CeremonyKind::GuardianRotation,
-                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                        threshold_k: 1,
-                        total_n: participants_set.len() as u16,
-                        participants: participants_set,
-                        accepted_participants: HashSet::new(),
-                        new_epoch: 100,
-                        enrollment_device_id: None,
-                        enrollment_nickname_suggestion: None,
-                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
-                        has_failed: false,
-                        is_committed: false,
-                        is_superseded: false,
-                        superseded_by: None,
-                        supersedes: Vec::new(),
-                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
-                        error_message: None,
-                        terminal_outcome: None,
-                        failure_reason: None,
-                        timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(&PhysicalTime::exact(0), Duration::from_secs(30)).expect("valid fixture original window"),
-                        prestate_hash: Hash32([0; 32]),
-                        committed_at: None,
-                        committed_consensus_id: None,
-                    }.into());
-                    map
-                },
-                supersession_records: Vec::new(),
-            };
+                let state = CeremonyTrackerState {
+                    enrollment_responses: HashMap::new(),
+                    retired_enrollment_ids: HashSet::new(),
+                    ceremonies: {
+                        let mut map = HashMap::new();
+                        map.insert(test_ceremony_id("test"), { let original_fixture_birth = crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(&PhysicalTime::exact(0), Duration::from_secs(30), crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(Duration::from_secs(30), Duration::from_secs(30)).expect("valid shortcut fixture policy")).expect("valid original fixture birth"); TrackedCeremony {
+                            ceremony_id: test_ceremony_id("test"),
+                            kind: CeremonyKind::GuardianRotation,
+                            initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                            threshold_k: 1,
+                            total_n: participants_set.len() as u16,
+                            participants: participants_set,
+                            accepted_participants: HashSet::new(),
+                            new_epoch: 100,
+                            enrollment_device_id: None,
+                            enrollment_nickname_suggestion: None,
+                            started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
+                            has_failed: false,
+                            is_committed: false,
+                            is_superseded: false,
+                            superseded_by: None,
+                            supersedes: Vec::new(),
+                            agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                            error_message: None,
+                            terminal_outcome: None,
+                            failure_reason: None,
+                            timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+    negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+    original_window_policy: original_fixture_birth.policy,
+                            prestate_hash: Hash32([0; 32]),
+                            committed_at: None,
+                            committed_consensus_id: None,
+                        } }.into());
+                        map
+                    },
+                    supersession_records: Vec::new(),
+                };
 
-            // Unique participants should pass validation
-            prop_assert!(state.validate().is_ok());
+                // Unique participants should pass validation
+                prop_assert!(state.validate().is_ok());
 
-            // Verify HashSet uniqueness invariant
-            let participant_set: HashSet<_> = participants.iter().collect();
-            prop_assert_eq!(participant_set.len(), participants.len());
-        }
+                // Verify HashSet uniqueness invariant
+                let participant_set: HashSet<_> = participants.iter().collect();
+                prop_assert_eq!(participant_set.len(), participants.len());
+            }
 
-        /// Property: Accepted participants is always a subset of participants.
-        #[test]
-        fn prop_accepted_subset_of_participants(
-            num_participants in 2usize..=8,
-            num_accepted in 0usize..=8
-        ) {
-            let participants: Vec<ParticipantIdentity> = (0..num_participants)
-                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
-                .collect();
-            let participants_set: HashSet<_> = participants.iter().cloned().collect();
+            /// Property: Accepted participants is always a subset of participants.
+            #[test]
+            fn prop_accepted_subset_of_participants(
+                num_participants in 2usize..=8,
+                num_accepted in 0usize..=8
+            ) {
+                let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                    .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                    .collect();
+                let participants_set: HashSet<_> = participants.iter().cloned().collect();
 
-            // Take a valid subset of participants as accepted
-            let num_accepted = num_accepted.min(num_participants);
-            let accepted: HashSet<_> = participants.iter().take(num_accepted).cloned().collect();
+                // Take a valid subset of participants as accepted
+                let num_accepted = num_accepted.min(num_participants);
+                let accepted: HashSet<_> = participants.iter().take(num_accepted).cloned().collect();
 
-            let state = CeremonyTrackerState {
-                enrollment_responses: HashMap::new(),
-                retired_enrollment_ids: HashSet::new(),
-                ceremonies: {
-                    let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), TrackedCeremony {
-                        ceremony_id: test_ceremony_id("test"),
-                        kind: CeremonyKind::GuardianRotation,
-                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                        threshold_k: 1,
-                        total_n: num_participants as u16,
-                        participants: participants_set.clone(),
-                        accepted_participants: accepted.clone(),
-                        new_epoch: 100,
-                        enrollment_device_id: None,
-                        enrollment_nickname_suggestion: None,
-                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
-                        has_failed: false,
-                        is_committed: false,
-                        is_superseded: false,
-                        superseded_by: None,
-                        supersedes: Vec::new(),
-                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
-                        error_message: None,
-                        terminal_outcome: None,
-                        failure_reason: None,
-                        timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(&PhysicalTime::exact(0), Duration::from_secs(30)).expect("valid fixture original window"),
-                        prestate_hash: Hash32([0; 32]),
-                        committed_at: None,
-                        committed_consensus_id: None,
-                    }.into());
-                    map
-                },
-                supersession_records: Vec::new(),
-            };
+                let state = CeremonyTrackerState {
+                    enrollment_responses: HashMap::new(),
+                    retired_enrollment_ids: HashSet::new(),
+                    ceremonies: {
+                        let mut map = HashMap::new();
+                        map.insert(test_ceremony_id("test"), { let original_fixture_birth = crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(&PhysicalTime::exact(0), Duration::from_secs(30), crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(Duration::from_secs(30), Duration::from_secs(30)).expect("valid shortcut fixture policy")).expect("valid original fixture birth"); TrackedCeremony {
+                            ceremony_id: test_ceremony_id("test"),
+                            kind: CeremonyKind::GuardianRotation,
+                            initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                            threshold_k: 1,
+                            total_n: num_participants as u16,
+                            participants: participants_set.clone(),
+                            accepted_participants: accepted.clone(),
+                            new_epoch: 100,
+                            enrollment_device_id: None,
+                            enrollment_nickname_suggestion: None,
+                            started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
+                            has_failed: false,
+                            is_committed: false,
+                            is_superseded: false,
+                            superseded_by: None,
+                            supersedes: Vec::new(),
+                            agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                            error_message: None,
+                            terminal_outcome: None,
+                            failure_reason: None,
+                            timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+    negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+    original_window_policy: original_fixture_birth.policy,
+                            prestate_hash: Hash32([0; 32]),
+                            committed_at: None,
+                            committed_consensus_id: None,
+                        } }.into());
+                        map
+                    },
+                    supersession_records: Vec::new(),
+                };
 
-            // Valid subset should pass validation
-            prop_assert!(state.validate().is_ok());
+                // Valid subset should pass validation
+                prop_assert!(state.validate().is_ok());
 
-            // Verify subset relationship
-            prop_assert!(accepted.is_subset(&participants_set));
-        }
+                // Verify subset relationship
+                prop_assert!(accepted.is_subset(&participants_set));
+            }
 
-        /// Property: Threshold must be <= total participants.
-        #[test]
-        fn prop_threshold_within_bounds(
-            num_participants in 1usize..=8,
-            threshold in 1u16..=8
-        ) {
-            let participants: Vec<ParticipantIdentity> = (0..num_participants)
-                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
-                .collect();
-            let participants_set: HashSet<_> = participants.iter().cloned().collect();
+            /// Property: Threshold must be <= total participants.
+            #[test]
+            fn prop_threshold_within_bounds(
+                num_participants in 1usize..=8,
+                threshold in 1u16..=8
+            ) {
+                let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                    .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                    .collect();
+                let participants_set: HashSet<_> = participants.iter().cloned().collect();
 
-            let state = CeremonyTrackerState {
-                enrollment_responses: HashMap::new(),
-                retired_enrollment_ids: HashSet::new(),
-                ceremonies: {
-                    let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), TrackedCeremony {
-                        ceremony_id: test_ceremony_id("test"),
-                        kind: CeremonyKind::GuardianRotation,
-                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                        threshold_k: threshold,
-                        total_n: num_participants as u16,
-                        participants: participants_set,
-                        accepted_participants: HashSet::new(),
-                        new_epoch: 100,
-                        enrollment_device_id: None,
-                        enrollment_nickname_suggestion: None,
-                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
-                        has_failed: false,
-                        is_committed: false,
-                        is_superseded: false,
-                        superseded_by: None,
-                        supersedes: Vec::new(),
-                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
-                        error_message: None,
-                        terminal_outcome: None,
-                        failure_reason: None,
-                        timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(&PhysicalTime::exact(0), Duration::from_secs(30)).expect("valid fixture original window"),
-                        prestate_hash: Hash32([0; 32]),
-                        committed_at: None,
-                        committed_consensus_id: None,
-                    }.into());
-                    map
-                },
-                supersession_records: Vec::new(),
-            };
+                let state = CeremonyTrackerState {
+                    enrollment_responses: HashMap::new(),
+                    retired_enrollment_ids: HashSet::new(),
+                    ceremonies: {
+                        let mut map = HashMap::new();
+                        map.insert(test_ceremony_id("test"), { let original_fixture_birth = crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(&PhysicalTime::exact(0), Duration::from_secs(30), crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(Duration::from_secs(30), Duration::from_secs(30)).expect("valid shortcut fixture policy")).expect("valid original fixture birth"); TrackedCeremony {
+                            ceremony_id: test_ceremony_id("test"),
+                            kind: CeremonyKind::GuardianRotation,
+                            initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                            threshold_k: threshold,
+                            total_n: num_participants as u16,
+                            participants: participants_set,
+                            accepted_participants: HashSet::new(),
+                            new_epoch: 100,
+                            enrollment_device_id: None,
+                            enrollment_nickname_suggestion: None,
+                            started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
+                            has_failed: false,
+                            is_committed: false,
+                            is_superseded: false,
+                            superseded_by: None,
+                            supersedes: Vec::new(),
+                            agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                            error_message: None,
+                            terminal_outcome: None,
+                            failure_reason: None,
+                            timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+    negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+    original_window_policy: original_fixture_birth.policy,
+                            prestate_hash: Hash32([0; 32]),
+                            committed_at: None,
+                            committed_consensus_id: None,
+                        } }.into());
+                        map
+                    },
+                    supersession_records: Vec::new(),
+                };
 
-            let result = state.validate();
+                let result = state.validate();
 
-            // Should succeed iff threshold <= num_participants
-            if threshold as usize <= num_participants {
-                prop_assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-            } else {
-                prop_assert!(result.is_err(), "Expected Err for threshold {} > total {}", threshold, num_participants);
+                // Should succeed iff threshold <= num_participants
+                if threshold as usize <= num_participants {
+                    prop_assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+                } else {
+                    prop_assert!(result.is_err(), "Expected Err for threshold {} > total {}", threshold, num_participants);
+                }
+            }
+
+            /// Property: Committed ceremonies must have threshold met.
+            /// is_committed implies accepted_participants.len() >= threshold_k
+            #[test]
+            fn prop_committed_implies_threshold_met(
+                num_participants in 2usize..=8,
+                threshold in 1u16..=8,
+                num_accepted in 0usize..=8
+            ) {
+                let threshold = threshold.min(num_participants as u16);
+                let num_accepted = num_accepted.min(num_participants);
+
+                let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                    .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                    .collect();
+                let accepted: HashSet<_> = participants.iter().take(num_accepted).cloned().collect();
+                let participants_set: HashSet<_> = participants.into_iter().collect();
+
+                let threshold_met = num_accepted >= threshold as usize;
+
+                let state = CeremonyTrackerState {
+                    enrollment_responses: HashMap::new(),
+                    retired_enrollment_ids: HashSet::new(),
+                    ceremonies: {
+                        let mut map = HashMap::new();
+                        map.insert(test_ceremony_id("test"), { let original_fixture_birth = crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(&PhysicalTime::exact(0), Duration::from_secs(30), crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(Duration::from_secs(30), Duration::from_secs(30)).expect("valid shortcut fixture policy")).expect("valid original fixture birth"); TrackedCeremony {
+                            ceremony_id: test_ceremony_id("test"),
+                            kind: CeremonyKind::GuardianRotation,
+                            initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                            threshold_k: threshold,
+                            total_n: num_participants as u16,
+                            participants: participants_set,
+                            accepted_participants: accepted,
+                            new_epoch: 100,
+                            enrollment_device_id: None,
+                            enrollment_nickname_suggestion: None,
+                            started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
+                            has_failed: false,
+                            is_committed: true, // Mark as committed
+                            is_superseded: false,
+                            superseded_by: None,
+                            supersedes: Vec::new(),
+                            agreement_mode: AgreementMode::ConsensusFinalized,
+                            error_message: None,
+                            terminal_outcome: Some(CeremonyTerminalOutcome::Committed),
+                            failure_reason: None,
+                            timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+    negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+    original_window_policy: original_fixture_birth.policy,
+                            prestate_hash: Hash32([0; 32]),
+                            committed_at: None,
+                            committed_consensus_id: None,
+                        } }.into());
+                        map
+                    },
+                    supersession_records: Vec::new(),
+                };
+
+                let result = state.validate();
+
+                // Should succeed iff threshold is met
+                if threshold_met {
+                    prop_assert!(result.is_ok(), "Expected Ok when threshold met, got: {:?}", result);
+                } else {
+                    prop_assert!(result.is_err(), "Expected Err for committed ceremony without threshold");
+                }
+            }
+
+            /// Property: Committed and failed are mutually exclusive.
+            #[test]
+            fn prop_committed_and_failed_mutually_exclusive(
+                is_committed in any::<bool>(),
+                has_failed in any::<bool>()
+            ) {
+                let a = AuthorityId::new_from_entropy([1u8; 32]);
+                let b = AuthorityId::new_from_entropy([2u8; 32]);
+                let participants = vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                ];
+                let accepted: HashSet<_> = participants.iter().cloned().collect(); // All accepted for threshold
+                let participants_set: HashSet<_> = participants.into_iter().collect();
+
+                let state = CeremonyTrackerState {
+                    enrollment_responses: HashMap::new(),
+                    retired_enrollment_ids: HashSet::new(),
+                    ceremonies: {
+                        let mut map = HashMap::new();
+                        map.insert(test_ceremony_id("test"), { let original_fixture_birth = crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(&PhysicalTime::exact(0), Duration::from_secs(30), crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(Duration::from_secs(30), Duration::from_secs(30)).expect("valid shortcut fixture policy")).expect("valid original fixture birth"); TrackedCeremony {
+                            ceremony_id: test_ceremony_id("test"),
+                            kind: CeremonyKind::GuardianRotation,
+                            initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                            threshold_k: 2,
+                            total_n: 2,
+                            participants: participants_set,
+                            accepted_participants: accepted,
+                            new_epoch: 100,
+                            enrollment_device_id: None,
+                            enrollment_nickname_suggestion: None,
+                            started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
+                            has_failed,
+                            is_committed,
+                            is_superseded: false,
+                            superseded_by: None,
+                            supersedes: Vec::new(),
+                            agreement_mode: if is_committed {
+                                AgreementMode::ConsensusFinalized
+                            } else {
+                                AgreementMode::CoordinatorSoftSafe
+                            },
+                            error_message: if has_failed { Some("test".to_string()) } else { None },
+                            terminal_outcome: if is_committed {
+                                Some(CeremonyTerminalOutcome::Committed)
+                            } else if has_failed {
+                                Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::RuntimeFailed))
+                            } else {
+                                None
+                            },
+                            failure_reason: has_failed.then_some(CeremonyFailureReason::RuntimeFailed),
+                            timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+    negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+    original_window_policy: original_fixture_birth.policy,
+                            prestate_hash: Hash32([0; 32]),
+                            committed_at: None,
+                            committed_consensus_id: None,
+                        } }.into());
+                        map
+                    },
+                    supersession_records: Vec::new(),
+                };
+
+                let result = state.validate();
+
+                // Both true => error
+                if is_committed && has_failed {
+                    prop_assert!(result.is_err());
+                }
+            }
+
+            /// Property: Superseded and committed are mutually exclusive.
+            #[test]
+            fn prop_superseded_and_committed_mutually_exclusive(
+                is_committed in any::<bool>(),
+                is_superseded in any::<bool>()
+            ) {
+                let a = AuthorityId::new_from_entropy([1u8; 32]);
+                let b = AuthorityId::new_from_entropy([2u8; 32]);
+                let participants = vec![
+                    ParticipantIdentity::guardian(a),
+                    ParticipantIdentity::guardian(b),
+                ];
+                let accepted: HashSet<_> = participants.iter().cloned().collect(); // All accepted for threshold
+                let participants_set: HashSet<_> = participants.into_iter().collect();
+
+                let state = CeremonyTrackerState {
+                    enrollment_responses: HashMap::new(),
+                    retired_enrollment_ids: HashSet::new(),
+                    ceremonies: {
+                        let mut map = HashMap::new();
+                        map.insert(test_ceremony_id("test"), { let original_fixture_birth = crate::runtime::services::enrollment_window::OriginalEnrollmentWindowBirth::allocate(&PhysicalTime::exact(0), Duration::from_secs(30), crate::runtime::services::enrollment_window::OriginalShortcutWindowPolicy::bounded_extension(Duration::from_secs(30), Duration::from_secs(30)).expect("valid shortcut fixture policy")).expect("valid original fixture birth"); TrackedCeremony {
+                            ceremony_id: test_ceremony_id("test"),
+                            kind: CeremonyKind::GuardianRotation,
+                            initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
+                            threshold_k: 2,
+                            total_n: 2,
+                            participants: participants_set,
+                            accepted_participants: accepted,
+                            new_epoch: 100,
+                            enrollment_device_id: None,
+                            enrollment_nickname_suggestion: None,
+                            started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
+                            has_failed: is_superseded, // Superseded ceremonies are marked failed
+                            is_committed,
+                            is_superseded,
+                            superseded_by: if is_superseded {
+                                Some(test_ceremony_id("other"))
+                            } else {
+                                None
+                            },
+                            supersedes: Vec::new(),
+                            agreement_mode: if is_committed {
+                                AgreementMode::ConsensusFinalized
+                            } else {
+                                AgreementMode::CoordinatorSoftSafe
+                            },
+                            error_message: None,
+                            terminal_outcome: if is_committed {
+                                Some(CeremonyTerminalOutcome::Committed)
+                            } else if is_superseded {
+                                Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Superseded))
+                            } else {
+                                None
+                            },
+                            failure_reason: is_superseded.then_some(CeremonyFailureReason::Superseded),
+                            timeout: Duration::from_secs(30),
+                        enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
+                timeout_budget: original_fixture_birth.execution,
+            shortcut_budget: Some(original_fixture_birth.shortcut),
+    negative_cleanup_budget: original_fixture_birth.negative_cleanup,
+    original_window_policy: original_fixture_birth.policy,
+                            prestate_hash: Hash32([0; 32]),
+                            committed_at: None,
+                            committed_consensus_id: None,
+                        } }.into());
+                        map
+                    },
+                    supersession_records: Vec::new(),
+                };
+
+                let result = state.validate();
+
+                // Both true => error
+                if is_committed && is_superseded {
+                    prop_assert!(result.is_err());
+                }
             }
         }
-
-        /// Property: Committed ceremonies must have threshold met.
-        /// is_committed implies accepted_participants.len() >= threshold_k
-        #[test]
-        fn prop_committed_implies_threshold_met(
-            num_participants in 2usize..=8,
-            threshold in 1u16..=8,
-            num_accepted in 0usize..=8
-        ) {
-            let threshold = threshold.min(num_participants as u16);
-            let num_accepted = num_accepted.min(num_participants);
-
-            let participants: Vec<ParticipantIdentity> = (0..num_participants)
-                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
-                .collect();
-            let accepted: HashSet<_> = participants.iter().take(num_accepted).cloned().collect();
-            let participants_set: HashSet<_> = participants.into_iter().collect();
-
-            let threshold_met = num_accepted >= threshold as usize;
-
-            let state = CeremonyTrackerState {
-                enrollment_responses: HashMap::new(),
-                retired_enrollment_ids: HashSet::new(),
-                ceremonies: {
-                    let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), TrackedCeremony {
-                        ceremony_id: test_ceremony_id("test"),
-                        kind: CeremonyKind::GuardianRotation,
-                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                        threshold_k: threshold,
-                        total_n: num_participants as u16,
-                        participants: participants_set,
-                        accepted_participants: accepted,
-                        new_epoch: 100,
-                        enrollment_device_id: None,
-                        enrollment_nickname_suggestion: None,
-                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
-                        has_failed: false,
-                        is_committed: true, // Mark as committed
-                        is_superseded: false,
-                        superseded_by: None,
-                        supersedes: Vec::new(),
-                        agreement_mode: AgreementMode::ConsensusFinalized,
-                        error_message: None,
-                        terminal_outcome: Some(CeremonyTerminalOutcome::Committed),
-                        failure_reason: None,
-                        timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(&PhysicalTime::exact(0), Duration::from_secs(30)).expect("valid fixture original window"),
-                        prestate_hash: Hash32([0; 32]),
-                        committed_at: None,
-                        committed_consensus_id: None,
-                    }.into());
-                    map
-                },
-                supersession_records: Vec::new(),
-            };
-
-            let result = state.validate();
-
-            // Should succeed iff threshold is met
-            if threshold_met {
-                prop_assert!(result.is_ok(), "Expected Ok when threshold met, got: {:?}", result);
-            } else {
-                prop_assert!(result.is_err(), "Expected Err for committed ceremony without threshold");
-            }
+    #[test]
+    fn original_invitation_binding_excludes_only_mutable_status() {
+        use aura_core::invitation::{Invitation, InvitationStatus, InvitationType};
+        let original = Invitation {
+            invitation_id: aura_core::InvitationId::new("immutable-issuance"),
+            context_id: aura_core::ContextId::new_from_entropy([211; 32]),
+            sender_id: AuthorityId::new_from_entropy([212; 32]),
+            receiver_id: AuthorityId::new_from_entropy([213; 32]),
+            invitation_type: InvitationType::Contact { nickname: None },
+            status: InvitationStatus::Pending,
+            created_at: 5_000,
+            expires_at: Some(6_000),
+            message: Some("original".into()),
+            receiver_nickname: Some("receiver".into()),
+        };
+        let identity = original_invitation_binding(&original).unwrap();
+        for status in [
+            InvitationStatus::Accepted,
+            InvitationStatus::Declined,
+            InvitationStatus::Cancelled,
+            InvitationStatus::Expired,
+        ] {
+            let mut observed = original.clone();
+            observed.status = status;
+            assert_eq!(original_invitation_binding(&observed).unwrap(), identity);
         }
-
-        /// Property: Committed and failed are mutually exclusive.
-        #[test]
-        fn prop_committed_and_failed_mutually_exclusive(
-            is_committed in any::<bool>(),
-            has_failed in any::<bool>()
-        ) {
-            let a = AuthorityId::new_from_entropy([1u8; 32]);
-            let b = AuthorityId::new_from_entropy([2u8; 32]);
-            let participants = vec![
-                ParticipantIdentity::guardian(a),
-                ParticipantIdentity::guardian(b),
-            ];
-            let accepted: HashSet<_> = participants.iter().cloned().collect(); // All accepted for threshold
-            let participants_set: HashSet<_> = participants.into_iter().collect();
-
-            let state = CeremonyTrackerState {
-                enrollment_responses: HashMap::new(),
-                retired_enrollment_ids: HashSet::new(),
-                ceremonies: {
-                    let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), TrackedCeremony {
-                        ceremony_id: test_ceremony_id("test"),
-                        kind: CeremonyKind::GuardianRotation,
-                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                        threshold_k: 2,
-                        total_n: 2,
-                        participants: participants_set,
-                        accepted_participants: accepted,
-                        new_epoch: 100,
-                        enrollment_device_id: None,
-                        enrollment_nickname_suggestion: None,
-                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
-                        has_failed,
-                        is_committed,
-                        is_superseded: false,
-                        superseded_by: None,
-                        supersedes: Vec::new(),
-                        agreement_mode: if is_committed {
-                            AgreementMode::ConsensusFinalized
-                        } else {
-                            AgreementMode::CoordinatorSoftSafe
-                        },
-                        error_message: if has_failed { Some("test".to_string()) } else { None },
-                        terminal_outcome: if is_committed {
-                            Some(CeremonyTerminalOutcome::Committed)
-                        } else if has_failed {
-                            Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::RuntimeFailed))
-                        } else {
-                            None
-                        },
-                        failure_reason: has_failed.then_some(CeremonyFailureReason::RuntimeFailed),
-                        timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(&PhysicalTime::exact(0), Duration::from_secs(30)).expect("valid fixture original window"),
-                        prestate_hash: Hash32([0; 32]),
-                        committed_at: None,
-                        committed_consensus_id: None,
-                    }.into());
-                    map
-                },
-                supersession_records: Vec::new(),
-            };
-
-            let result = state.validate();
-
-            // Both true => error
-            if is_committed && has_failed {
-                prop_assert!(result.is_err());
-            }
-        }
-
-        /// Property: Superseded and committed are mutually exclusive.
-        #[test]
-        fn prop_superseded_and_committed_mutually_exclusive(
-            is_committed in any::<bool>(),
-            is_superseded in any::<bool>()
-        ) {
-            let a = AuthorityId::new_from_entropy([1u8; 32]);
-            let b = AuthorityId::new_from_entropy([2u8; 32]);
-            let participants = vec![
-                ParticipantIdentity::guardian(a),
-                ParticipantIdentity::guardian(b),
-            ];
-            let accepted: HashSet<_> = participants.iter().cloned().collect(); // All accepted for threshold
-            let participants_set: HashSet<_> = participants.into_iter().collect();
-
-            let state = CeremonyTrackerState {
-                enrollment_responses: HashMap::new(),
-                retired_enrollment_ids: HashSet::new(),
-                ceremonies: {
-                    let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), TrackedCeremony {
-                        ceremony_id: test_ceremony_id("test"),
-                        kind: CeremonyKind::GuardianRotation,
-                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
-                        threshold_k: 2,
-                        total_n: 2,
-                        participants: participants_set,
-                        accepted_participants: accepted,
-                        new_epoch: 100,
-                        enrollment_device_id: None,
-                        enrollment_nickname_suggestion: None,
-                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
-                        has_failed: is_superseded, // Superseded ceremonies are marked failed
-                        is_committed,
-                        is_superseded,
-                        superseded_by: if is_superseded {
-                            Some(test_ceremony_id("other"))
-                        } else {
-                            None
-                        },
-                        supersedes: Vec::new(),
-                        agreement_mode: if is_committed {
-                            AgreementMode::ConsensusFinalized
-                        } else {
-                            AgreementMode::CoordinatorSoftSafe
-                        },
-                        error_message: None,
-                        terminal_outcome: if is_committed {
-                            Some(CeremonyTerminalOutcome::Committed)
-                        } else if is_superseded {
-                            Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Superseded))
-                        } else {
-                            None
-                        },
-                        failure_reason: is_superseded.then_some(CeremonyFailureReason::Superseded),
-                        timeout: Duration::from_secs(30),
-                    enrollment_window_lease: Arc::new(tokio::sync::Semaphore::new(1)),
-            timeout_budget: aura_core::TimeoutBudget::from_start_and_timeout(&PhysicalTime::exact(0), Duration::from_secs(30)).expect("valid fixture original window"),
-                        prestate_hash: Hash32([0; 32]),
-                        committed_at: None,
-                        committed_consensus_id: None,
-                    }.into());
-                    map
-                },
-                supersession_records: Vec::new(),
-            };
-
-            let result = state.validate();
-
-            // Both true => error
-            if is_committed && is_superseded {
-                prop_assert!(result.is_err());
-            }
+        let changes: [fn(&mut Invitation); 9] = [
+            |v| v.invitation_id = aura_core::InvitationId::new("another-issuance"),
+            |v| v.context_id = aura_core::ContextId::new_from_entropy([214; 32]),
+            |v| v.sender_id = AuthorityId::new_from_entropy([215; 32]),
+            |v| v.receiver_id = AuthorityId::new_from_entropy([216; 32]),
+            |v| {
+                v.invitation_type = InvitationType::Contact {
+                    nickname: Some("changed".into()),
+                }
+            },
+            |v| v.created_at += 1,
+            |v| v.expires_at = Some(6_001),
+            |v| v.message = None,
+            |v| v.receiver_nickname = None,
+        ];
+        for change in changes {
+            let mut replaced = original.clone();
+            change(&mut replaced);
+            assert_ne!(
+                original_invitation_binding(&replaced).unwrap(),
+                identity,
+                "every immutable invitation field remains bound"
+            );
         }
     }
+
     #[test]
     fn retained_notice_identity_rejects_digest_transcript_or_expiry_replacement() {
         // Pure identity comparison laws. These local values are not admitted
@@ -6471,10 +8466,6 @@ mod registered_window_admission_tests {
                 .try_acquire_owned()
                 .expect_err("actual owner holds permit"),
         );
-        assert!(
-            !registered_enrollment_window_already_owned(&busy),
-            "a busy semaphore alone cannot prove an actual running registration"
-        );
         let cause = busy
             .source()
             .expect("typed admission")
@@ -6490,7 +8481,6 @@ mod registered_window_admission_tests {
                 .try_acquire_owned()
                 .expect_err("actual owner closed admission"),
         );
-        assert!(!registered_enrollment_window_already_owned(&closed));
         assert!(matches!(
             closed
                 .source()
@@ -6499,5 +8489,949 @@ mod registered_window_admission_tests {
             Some(RegisteredEnrollmentWindowAdmissionError::Closed { .. })
         ));
         drop(owner);
+    }
+}
+
+impl CeremonyTracker {
+    async fn persist_original_negative_clock(
+        &self,
+        state: &TrackedCeremony,
+        effects: &crate::runtime::AuraEffectSystem,
+        _owner: OriginalNegativeCheckpointOwner,
+    ) -> Result<super::enrollment_window::DurableEnrollmentExecutionState, AuraError> {
+        use aura_core::effects::{SecureStorageCapability, SecureStorageLocation};
+        let _write = self.shared.persistence_guard.lock().await;
+        let mut record = self.read_bound_enrollment_clock(state).await?;
+        state
+            .timeout_budget
+            .validate_checkpoint_continuation_from(&record.budget)
+            .map_err(AuraError::from)?;
+        // Required negative acknowledgment retains the latest original history,
+        // including a rollback discovered after the positive checkpoint write.
+        record.budget = state.timeout_budget.clone();
+        if record.execution == super::enrollment_window::DurableEnrollmentExecutionState::Pending {
+            record.execution = super::enrollment_window::DurableEnrollmentExecutionState::Refused;
+        }
+        record.negative_cleanup_budget = state.negative_cleanup_budget.clone();
+        let retained_decision = record.execution;
+        let bytes = serde_json::to_vec(&record).map_err(|source| AuraError::Serialization {
+            message: "encode original issuer negative checkpoint".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        let location =
+            SecureStorageLocation::new("enrollment_clock_v1", state.ceremony_id.to_string());
+        #[cfg(test)]
+        if let Some(source) = {
+            let injected = self.shared.negative_checkpoint_fault.lock().await;
+            if injected.as_ref().is_some_and(|(owner, _)| *owner == _owner) {
+                injected.as_ref().map(|(_, source)| source.clone())
+            } else {
+                None
+            }
+        } {
+            if let Some(observed) = self
+                .shared
+                .negative_checkpoint_fault_observer
+                .lock()
+                .await
+                .take()
+            {
+                let _ = observed.send(source.clone());
+            }
+            return Err(source);
+        }
+        effects
+            .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+            .await?;
+        let retained = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await?;
+        if retained != bytes {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::BirthReadbackChanged,
+            ));
+        }
+        Ok(retained_decision)
+    }
+}
+
+/// Actual failed cancellation task disposal; domain refusal is separate from
+/// acknowledged resource settlement and remains bound to its original task.
+#[cfg(feature = "simulation")]
+pub(crate) struct OriginalSimulationCancellationFailure {
+    _registration: Arc<OriginalCancellationTaskRegistration>,
+    disposal: crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    source: AuraError,
+}
+#[cfg(feature = "simulation")]
+impl OriginalSimulationCancellationFailure {
+    pub(crate) fn source(&self) -> &AuraError {
+        &self.source
+    }
+    pub(crate) fn matches_shutdown(
+        &self,
+        failure: &crate::task_registry::TaskSupervisionError,
+    ) -> bool {
+        self.disposal.matches_supervision_failure(failure)
+    }
+}
+/// Original entry reference issued before required cancellation task admission.
+/// Neither identifiers nor later snapshots can construct this reference.
+pub(crate) struct OriginalCancellationTaskRegistration {
+    completion:
+        std::sync::OnceLock<Result<crate::handlers::invitation::InvitationResult, AuraError>>,
+    completion_changed: tokio::sync::Notify,
+    tracker: OriginalEnrollmentTrackerReference,
+    original_entry: Arc<()>,
+    ceremony: CeremonyId,
+    manifest_digest: [u8; 32],
+
+    original_budget: aura_core::TimeoutBudget,
+    role: OriginalCancellationTaskRole,
+    #[cfg(test)]
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    delivery_gate: parking_lot::Mutex<Option<OriginalCancelledNoticeDeliveryGate>>,
+}
+#[derive(Clone, Copy)]
+pub(crate) enum OriginalCancellationTaskRole {
+    Publication,
+    Notice,
+}
+struct RetainedOriginalCancellationTask {
+    original: Arc<OriginalCancellationTaskRegistration>,
+    _control: tokio::sync::Mutex<crate::task_registry::OriginalRequiredTaskHandle>,
+}
+impl CeremonyTracker {
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    pub(crate) fn prepare_original_cancellation_task(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        role: OriginalCancellationTaskRole,
+    ) -> Result<Arc<OriginalCancellationTaskRegistration>, AuraError> {
+        let effects = self.shared.persistence.as_ref().ok_or_else(|| {
+            original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
+        })?;
+        issued.require_runtime_owner(effects.as_ref())?;
+        let state = self
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "select original cancellation task entry".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let manifest = issued.manifest();
+        let entry = state
+            .ceremonies
+            .get(&manifest.ceremony)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if entry.kind != CeremonyKind::DeviceEnrollment
+            || entry.initiator_id != manifest.subject
+            || entry.enrollment_device_id != Some(manifest.invitee_device)
+            || entry.new_epoch != manifest.pending_epoch
+        {
+            return Err(AuraError::permission_denied(
+                "another original cancellation task entry",
+            ));
+        }
+        if let Some(running) = &entry.running {
+            running.original.require_issued_notice_control(issued)?;
+        }
+        let occupied = match role {
+            OriginalCancellationTaskRole::Publication => entry.cancellation_task.is_some(),
+            OriginalCancellationTaskRole::Notice => entry.cancelled_notice_task.is_some(),
+        };
+        if occupied {
+            return Err(AuraError::permission_denied(
+                "original cancellation task already admitted; reconcile its retained control",
+            ));
+        }
+        Ok(Arc::new(OriginalCancellationTaskRegistration {
+            completion: std::sync::OnceLock::new(),
+            completion_changed: tokio::sync::Notify::new(),
+            tracker: OriginalEnrollmentTrackerReference::from_original(self)?,
+            original_entry: Arc::clone(&entry.original_entry),
+            ceremony: manifest.ceremony.clone(),
+            manifest_digest: issued.digest(),
+            original_budget: entry.timeout_budget.clone(),
+            role,
+            #[cfg(test)]
+            delivery_gate: parking_lot::Mutex::new(None),
+        }))
+    }
+}
+impl CeremonyTracker {
+    pub(crate) fn existing_original_cancellation_task(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        role: OriginalCancellationTaskRole,
+    ) -> Result<Option<Arc<OriginalCancellationTaskRegistration>>, AuraError> {
+        let effects = self.shared.persistence.as_ref().ok_or_else(|| {
+            original_tracker_refusal(OriginalEnrollmentTrackerError::MissingProvider)
+        })?;
+        issued.require_runtime_owner(effects.as_ref())?;
+        let state = self
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original cancellation task".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&issued.manifest().ceremony)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let task = match role {
+            OriginalCancellationTaskRole::Publication => &entry.cancellation_task,
+            OriginalCancellationTaskRole::Notice => &entry.cancelled_notice_task,
+        }
+        .as_ref();
+        let Some(task) = task else {
+            return Ok(None);
+        };
+        if let Some(running) = &entry.running {
+            running.original.require_issued_notice_control(issued)?;
+        }
+        if !Arc::ptr_eq(&entry.original_entry, &task.original.original_entry)
+            || task.original.manifest_digest != issued.digest()
+        {
+            return Err(AuraError::permission_denied(
+                "another original cancellation task",
+            ));
+        }
+        Ok(Some(Arc::clone(&task.original)))
+    }
+    #[cfg(test)]
+    pub(crate) fn original_cancellation_task_for_test(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        role: OriginalCancellationTaskRole,
+    ) -> Result<Arc<OriginalCancellationTaskRegistration>, AuraError> {
+        self.existing_original_cancellation_task(issued, role)?
+            .ok_or_else(|| AuraError::invalid("original cancellation task not admitted"))
+    }
+    #[cfg(test)]
+    pub(crate) fn original_actor_alive_for_test(&self) -> impl Fn() -> bool {
+        let original = Arc::downgrade(&self.shared);
+        move || original.upgrade().is_some()
+    }
+}
+impl OriginalCancellationTaskRegistration {
+    #[cfg(test)]
+    pub(crate) async fn publish_cleanup_observation_for_test(&self, actual: Result<(), AuraError>) {
+        if let Ok(tracker) = self.tracker.upgrade() {
+            if let Some(sender) = tracker
+                .shared
+                .cancellation_cleanup_observer
+                .lock()
+                .await
+                .take()
+            {
+                let _ = sender.send(actual);
+            }
+        }
+    }
+
+    pub(crate) fn retain_completion(
+        &self,
+        result: Result<crate::handlers::invitation::InvitationResult, AuraError>,
+    ) {
+        let _ = self.completion.set(result);
+        self.completion_changed.notify_waiters();
+    }
+    #[cfg(feature = "simulation")]
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalCancellationTaskRegistration", receiver_type = OriginalCancellationTaskRegistration, family = "runtime_helper")]
+    pub(crate) async fn observe_simulated_failure_disposal(
+        self: &Arc<Self>,
+        effects: &AuraEffectSystem,
+    ) -> Result<OriginalSimulationCancellationFailure, AuraError> {
+        if !std::ptr::eq(self.tracker.effects.as_ref(), effects) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::MissingProvider,
+            ));
+        }
+        let actual = self.retained()?;
+        let observer = {
+            let control = actual._control.lock().await;
+            control.disposal_observer()
+        };
+        let disposal =
+            aura_core::execute_with_timeout_budget(effects, &self.original_budget, || async {
+                Ok::<_, AuraError>(observer.await_disposal().await)
+            })
+            .await
+            .map_err(|source| match source {
+                aura_core::TimeoutRunError::Operation(source) => source,
+                aura_core::TimeoutRunError::Timeout(source) => source.into(),
+            })?;
+        {
+            let control = actual._control.lock().await;
+            disposal.require_original(&control)?;
+        }
+        let source = match (self.completion.get(), disposal.outcome()) {
+            (Some(Err(source)), aura_core::effects::task::RequiredTaskExit::Failed(_)) => {
+                source.clone()
+            }
+            _ => {
+                return Err(AuraError::permission_denied(
+                    "cancellation failure requires actual failed resource disposal",
+                ))
+            }
+        };
+        Ok(OriginalSimulationCancellationFailure {
+            _registration: Arc::clone(self),
+            disposal,
+            source,
+        })
+    }
+    pub(crate) async fn observe_completion(
+        self: &Arc<Self>,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<crate::handlers::invitation::InvitationResult, AuraError> {
+        let _original_control = self.retained()?;
+        if !std::ptr::eq(self.tracker.effects.as_ref(), effects) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::MissingProvider,
+            ));
+        }
+        aura_core::execute_with_timeout_budget(effects, &self.original_budget, || async {
+            loop {
+                let changed = self.completion_changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                if let Some(actual) = self.completion.get() {
+                    return actual.clone();
+                }
+                changed.await;
+            }
+        })
+        .await
+        .map_err(|source| match source {
+            aura_core::TimeoutRunError::Operation(source) => source,
+            aura_core::TimeoutRunError::Timeout(source) => source.into(),
+        })
+    }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalCancellationTaskRegistration",
+        receiver_type = OriginalCancellationTaskRegistration,
+        family = "runtime_helper"
+    )]
+    pub(crate) fn require_notice_input(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<(), AuraError> {
+        issued.require_runtime_owner(effects)?;
+        let tracker = self.tracker.upgrade()?;
+        if !std::ptr::eq(self.tracker.effects.as_ref(), effects)
+            || self.manifest_digest != issued.digest()
+            || self.ceremony != issued.manifest().ceremony
+            || !matches!(self.role, OriginalCancellationTaskRole::Notice)
+        {
+            return Err(AuraError::permission_denied(
+                "another original notice admission",
+            ));
+        }
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "validate original notice admission".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.ceremony)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&entry.original_entry, &self.original_entry)
+            || entry.cancelled_notice_task.is_some()
+        {
+            return Err(AuraError::permission_denied(
+                "original notice admission replaced or occupied",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn publish(
+        self: &Arc<Self>,
+        pending: &mut Option<crate::task_registry::OriginalRequiredTaskHandle>,
+    ) -> Result<(), AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let mut state = tracker
+            .shared
+            .state
+            .try_write()
+            .map_err(|source| AuraError::Internal {
+                message: "retain original cancellation task control".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get_mut(&self.ceremony)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&entry.original_entry, &self.original_entry) {
+            return Err(AuraError::permission_denied(
+                "original cancellation entry was replaced",
+            ));
+        }
+        let slot = match self.role {
+            OriginalCancellationTaskRole::Publication => &mut entry.cancellation_task,
+            OriginalCancellationTaskRole::Notice => &mut entry.cancelled_notice_task,
+        };
+        if slot.is_some() || pending.is_none() {
+            return Err(AuraError::permission_denied(
+                "original cancellation control already retained",
+            ));
+        }
+        // Every fallible check precedes synchronous transfer of the issued handle.
+        let actual = pending
+            .take()
+            .ok_or_else(|| AuraError::invalid("original cancellation control missing"))?;
+        *slot = Some(Arc::new(RetainedOriginalCancellationTask {
+            original: Arc::clone(self),
+            _control: tokio::sync::Mutex::new(actual),
+        }));
+        Ok(())
+    }
+    pub(crate) async fn observe_publication(
+        &self,
+        effects: &crate::runtime::AuraEffectSystem,
+        admission: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<(), AuraError> {
+        self.tracker.upgrade()?;
+        let actual = &self.tracker.effects;
+        if !std::ptr::eq(actual.as_ref(), effects) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::MissingProvider,
+            ));
+        }
+        aura_core::execute_with_timeout_budget(effects, &self.original_budget, || async {
+            admission.await.map_err(|source| AuraError::Internal {
+                message: "original cancellation registration publication lost".into(),
+                source: Some(Arc::new(source)),
+            })
+        })
+        .await
+        .map_err(|source| match source {
+            aura_core::TimeoutRunError::Operation(source) => source,
+            aura_core::TimeoutRunError::Timeout(source) => source.into(),
+        })
+    }
+    fn retained(self: &Arc<Self>) -> Result<Arc<RetainedOriginalCancellationTask>, AuraError> {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original cancellation control".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.ceremony)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let slot = match self.role {
+            OriginalCancellationTaskRole::Publication => &entry.cancellation_task,
+            OriginalCancellationTaskRole::Notice => &entry.cancelled_notice_task,
+        };
+        let actual = slot
+            .as_ref()
+            .ok_or_else(|| AuraError::invalid("original cancellation control not published"))?;
+        if !Arc::ptr_eq(&entry.original_entry, &self.original_entry)
+            || !Arc::ptr_eq(&actual.original, self)
+        {
+            return Err(AuraError::permission_denied(
+                "another original cancellation control",
+            ));
+        }
+        Ok(Arc::clone(actual))
+    }
+    #[cfg(test)]
+    pub(crate) async fn disposal_observer(
+        self: &Arc<Self>,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, AuraError> {
+        let actual = self.retained()?;
+        let control = actual._control.lock().await;
+        Ok(control.disposal_observer())
+    }
+}
+
+/// One original execution permit shared by all original issuer descendants.
+/// Releasing exclusivity never restores execution eligibility for this cell.
+pub(super) struct OriginalRegisteredExecutionLease {
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    state: parking_lot::Mutex<OriginalRegisteredExecutionLeaseState>,
+}
+struct OriginalRegisteredExecutionLeaseState {
+    permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    active_work: usize,
+    resource_admission_closed: bool,
+}
+/// Actual work admission, not a count of retained child handles. Drop releases
+/// only this borrow; the original permit stays held until genuine terminal ACK.
+pub(super) struct OriginalRegisteredExecutionBorrow {
+    original: Arc<OriginalRegisteredExecutionLease>,
+}
+impl Drop for OriginalRegisteredExecutionBorrow {
+    fn drop(&mut self) {
+        self.original.state.lock().active_work -= 1;
+    }
+}
+#[derive(Debug, thiserror::Error)]
+#[error("the original enrollment execution lease was terminally released")]
+struct OriginalExecutionLeaseReleased;
+#[derive(Debug, thiserror::Error)]
+#[error("the original enrollment execution still has {0} active work borrows")]
+struct OriginalExecutionStillBorrowed(usize);
+#[derive(Debug, thiserror::Error)]
+#[error("the original enrollment execution work-borrow limit was reached")]
+struct OriginalExecutionBorrowLimit;
+impl OriginalRegisteredExecutionLease {
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
+    )]
+    fn new(permit: tokio::sync::OwnedSemaphorePermit) -> Self {
+        Self {
+            state: parking_lot::Mutex::new(OriginalRegisteredExecutionLeaseState {
+                permit: Some(permit),
+                active_work: 0,
+                resource_admission_closed: false,
+            }),
+        }
+    }
+    pub(super) fn require_active(&self) -> Result<(), AuraError> {
+        if self.state.lock().permit.is_some() {
+            return Ok(());
+        }
+        Err(AuraError::PermissionDenied {
+            message: "original enrollment execution is permanently closed".into(),
+            source: Some(Arc::new(OriginalExecutionLeaseReleased)),
+        })
+    }
+    pub(super) fn borrow_execution(
+        self: &Arc<Self>,
+    ) -> Result<OriginalRegisteredExecutionBorrow, AuraError> {
+        let mut state = self.state.lock();
+        if state.permit.is_none() || state.resource_admission_closed {
+            return Err(AuraError::PermissionDenied {
+                message: "original enrollment execution is permanently closed".into(),
+                source: Some(Arc::new(OriginalExecutionLeaseReleased)),
+            });
+        }
+        state.active_work =
+            state
+                .active_work
+                .checked_add(1)
+                .ok_or_else(|| AuraError::Internal {
+                    message: "original execution work admission refused".into(),
+                    source: Some(Arc::new(OriginalExecutionBorrowLimit)),
+                })?;
+        Ok(OriginalRegisteredExecutionBorrow {
+            original: Arc::clone(self),
+        })
+    }
+    fn close_resource_admission(&self) -> Result<(), AuraError> {
+        let mut state = self.state.lock();
+        if state.active_work != 0 {
+            return Err(AuraError::PermissionDenied {
+                message: "original resource closure has active execution work".into(),
+                source: Some(Arc::new(OriginalExecutionStillBorrowed(state.active_work))),
+            });
+        }
+        state.resource_admission_closed = true;
+        Ok(())
+    }
+    fn release_after_acknowledgment(&self) -> Result<(), AuraError> {
+        let mut state = self.state.lock();
+        if state.active_work != 0 {
+            return Err(AuraError::PermissionDenied {
+                message: "original execution work remains unresolved".into(),
+                source: Some(Arc::new(OriginalExecutionStillBorrowed(state.active_work))),
+            });
+        }
+        let actual = state.permit.take();
+        drop(state);
+        // Wake canonical semaphore admission only after releasing the cell lock.
+        drop(actual);
+        Ok(())
+    }
+}
+impl RegisteredEnrollmentWindowCapability {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "OriginalIssuerNegativeCheckpointReceipt",
+        family = "runtime_helper"
+    )]
+    pub(super) fn release_negative_execution_lease(
+        self: &Arc<Self>,
+        terminal: &crate::handlers::invitation::OriginalIssuerCancellationTerminal,
+        checkpoint: &OriginalIssuerNegativeCheckpointReceipt,
+        disposal: &crate::task_registry::TaskGroupDisposalAcknowledgment,
+        original_children: &crate::task_registry::TaskGroup,
+    ) -> Result<(), AuraError> {
+        self.require_issued_notice_control(terminal.issued())?;
+        checkpoint.require_original(self)?;
+        disposal.require_original_group(original_children)?;
+        self.lease.release_after_acknowledgment()
+    }
+}
+
+#[cfg(test)]
+mod original_execution_lease_tests {
+    use super::*;
+    use std::future::Future;
+    use std::task::Poll;
+
+    #[test]
+    fn original_resource_close_blocks_new_work_and_retains_closed_admission() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let original = Arc::new(OriginalRegisteredExecutionLease::new(
+            Arc::clone(&semaphore).try_acquire_owned().unwrap(),
+        ));
+        let work = original.borrow_execution().unwrap();
+        assert!(original.close_resource_admission().is_err());
+        drop(work);
+        original.close_resource_admission().unwrap();
+        assert!(original.borrow_execution().is_err());
+        original.require_active().unwrap();
+        // A dropped checkpoint observer cannot reopen admission on reentry.
+        original.close_resource_admission().unwrap();
+        assert!(original.borrow_execution().is_err());
+        assert!(Arc::clone(&semaphore).try_acquire_owned().is_err());
+        original.release_after_acknowledgment().unwrap();
+        assert!(original.require_active().is_err());
+        assert!(semaphore.try_acquire_owned().is_ok());
+    }
+
+    /// Primitive exclusion/Drop evidence only; real negative receipt validation
+    /// remains in the producer's release_negative_execution_lease boundary.
+    #[tokio::test]
+    async fn original_execution_work_borrow_blocks_release_and_outer_drop_preserves_permit() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&semaphore).try_acquire_owned().unwrap();
+        let original = Arc::new(OriginalRegisteredExecutionLease::new(permit));
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (_finish, finished) = tokio::sync::oneshot::channel::<()>();
+        let retained = Arc::clone(&original);
+        let mut actual_work = Box::pin(async move {
+            let _actual_borrow = retained.borrow_execution().unwrap();
+            entered.send(()).unwrap();
+            let _ = finished.await;
+        });
+        let waker = futures::task::noop_waker();
+        let mut context = std::task::Context::from_waker(&waker);
+        assert!(matches!(
+            actual_work.as_mut().poll(&mut context),
+            Poll::Pending
+        ));
+        ready.await.unwrap();
+        let source = original.release_after_acknowledgment().unwrap_err();
+        let AuraError::PermissionDenied {
+            source: Some(source),
+            ..
+        } = source
+        else {
+            panic!("actual active work must refuse permit release with its concrete source");
+        };
+        assert_eq!(
+            source
+                .downcast_ref::<OriginalExecutionStillBorrowed>()
+                .unwrap()
+                .0,
+            1
+        );
+        assert!(matches!(
+            Arc::clone(&semaphore).try_acquire_owned(),
+            Err(tokio::sync::TryAcquireError::NoPermits)
+        ));
+        drop(actual_work);
+        assert!(
+            matches!(
+                Arc::clone(&semaphore).try_acquire_owned(),
+                Err(tokio::sync::TryAcquireError::NoPermits)
+            ),
+            "outer Drop releases only its work borrow"
+        );
+        original.release_after_acknowledgment().unwrap();
+        let next_actual_permit = Arc::clone(&semaphore)
+            .try_acquire_owned()
+            .expect("the same canonical semaphore reopens after release");
+        assert!(original.require_active().is_err());
+        let source = match original.borrow_execution() {
+            Ok(_) => panic!("retained original lease must never regain execution eligibility"),
+            Err(source) => source,
+        };
+        let AuraError::PermissionDenied {
+            source: Some(source),
+            ..
+        } = source
+        else {
+            panic!("released execution must retain its concrete terminal source");
+        };
+        assert!(source
+            .downcast_ref::<OriginalExecutionLeaseReleased>()
+            .is_some());
+        drop(next_actual_permit);
+    }
+}
+/// Test observation only: actual original VM and bytes after real send completion.
+#[cfg(test)]
+pub(crate) struct OriginalCancelledNoticeDeliveryObservation {
+    pub(crate) session: uuid::Uuid,
+    pub(crate) vm: telltale_machine::SessionId,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) first_failure: Option<AuraError>,
+}
+#[cfg(test)]
+struct OriginalCancelledNoticeDeliveryGate {
+    reached: tokio::sync::oneshot::Sender<OriginalCancelledNoticeDeliveryObservation>,
+    resume: tokio::sync::oneshot::Receiver<()>,
+}
+#[cfg(test)]
+impl OriginalCancellationTaskRegistration {
+    /// Install on the original registration before its actual custody admission.
+    /// The channel observes completion; it cannot authorize or replace any owner.
+    pub(crate) fn observe_notice_delivery_for_test(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::oneshot::Receiver<OriginalCancelledNoticeDeliveryObservation>,
+            tokio::sync::oneshot::Sender<()>,
+        ),
+        AuraError,
+    > {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "install original delivery observation before admission".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let entry = state
+            .ceremonies
+            .get(&self.ceremony)
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        let admitted = match self.role {
+            OriginalCancellationTaskRole::Publication => entry.cancellation_task.is_some(),
+            OriginalCancellationTaskRole::Notice => entry.cancelled_notice_task.is_some(),
+        };
+        if admitted || !Arc::ptr_eq(&entry.original_entry, &self.original_entry) {
+            return Err(AuraError::permission_denied(
+                "delivery gate requires original preadmission entry",
+            ));
+        }
+        let mut gate = self.delivery_gate.lock();
+        if gate.is_some() {
+            return Err(AuraError::invalid(
+                "original delivery gate already installed",
+            ));
+        }
+        let (reached, observation) = tokio::sync::oneshot::channel();
+        let (resume, resumed) = tokio::sync::oneshot::channel();
+        *gate = Some(OriginalCancelledNoticeDeliveryGate {
+            reached,
+            resume: resumed,
+        });
+        Ok((observation, resume))
+    }
+    pub(crate) async fn notice_delivered_for_test(
+        &self,
+        session: &crate::runtime::session_ingress::OwnedVmSession,
+        bytes: &[u8],
+        first_failure: Option<AuraError>,
+    ) {
+        // Release the synchronous lock before the observation callback or await.
+        let gate = self.delivery_gate.lock().take();
+        if let Some(gate) = gate {
+            let _ = gate
+                .reached
+                .send(OriginalCancelledNoticeDeliveryObservation {
+                    session: session.owner().session_id.as_uuid(),
+                    vm: session.vm_session_id(),
+                    bytes: bytes.to_vec(),
+                    first_failure,
+                });
+            let _ = gate.resume.await;
+        }
+    }
+}
+
+/// Resource closure only: this cannot acknowledge a domain terminal frame.
+pub(super) struct OriginalIssuerResourceClosure {
+    original: std::sync::Weak<RegisteredEnrollmentWindowCapability>,
+}
+
+#[cfg(test)]
+impl RegisteredEnrollmentWindowCapability {
+    pub(crate) fn observe_original_running_owner_for_test(
+        self: &Arc<Self>,
+        effects: &AuraEffectSystem,
+        tracker: &CeremonyTracker,
+    ) -> Result<OriginalIssuerDeliveryObservation, AuraError> {
+        self.require_effects(effects)?;
+        let original_tracker = self.tracker.upgrade()?;
+        if !Arc::ptr_eq(&original_tracker.shared, &tracker.shared) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        self.observe_original_delivery()
+    }
+}
+#[cfg(test)]
+pub(crate) fn assert_original_running_owner_refusal_for_test(
+    source: &AuraError,
+    foreign_provider: bool,
+) {
+    let actual = std::error::Error::source(source)
+        .and_then(|source| source.downcast_ref::<OriginalEnrollmentTrackerError>())
+        .expect("actual original runtime/tracker refusal cause");
+    assert!(if foreign_provider {
+        matches!(actual, OriginalEnrollmentTrackerError::ForeignProvider)
+    } else {
+        matches!(actual, OriginalEnrollmentTrackerError::OwnerLost)
+    });
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod retained_issuer_control_tests {
+    use super::*;
+    use aura_core::effects::task::{RequiredTaskCustody, RequiredTaskExit, RequiredTaskSettlement};
+    use futures::FutureExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct ActualRequiredIssuer {
+        execution: Option<tokio::sync::oneshot::Receiver<()>>,
+        cleanup: Option<tokio::sync::oneshot::Receiver<()>>,
+        attempts: Arc<AtomicUsize>,
+    }
+    impl RequiredTaskCustody for ActualRequiredIssuer {
+        fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), AuraError>> {
+            Box::pin(async {
+                self.execution
+                    .as_mut()
+                    .expect("actual execution gate")
+                    .await
+                    .expect("release actual original execution");
+                self.execution = None;
+                Err(AuraError::internal(
+                    "actual original issuer execution failure",
+                ))
+            })
+        }
+        fn cleanup<'a>(
+            &'a mut self,
+            _exit: &'a RequiredTaskExit,
+        ) -> futures::future::BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+            Box::pin(async {
+                if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(AuraError::internal(
+                        "actual original issuer first cleanup refusal",
+                    ));
+                }
+                if let Some(gate) = self.cleanup.as_mut() {
+                    gate.await.expect("release same retained cleanup gate");
+                    self.cleanup = None;
+                }
+                Ok(RequiredTaskSettlement::ResolvedWithDomainFailure(
+                    AuraError::internal("actual negative issuer outcome"),
+                ))
+            })
+        }
+    }
+    #[tokio::test]
+    async fn cancelled_issuer_reconciliation_retains_same_control_until_actual_retry_ack() {
+        let supervisor = crate::task_registry::TaskSupervisor::new();
+        let group = supervisor.group("retained-issuer-reconciliation");
+        let (execute, execution) = tokio::sync::oneshot::channel();
+        let (release, cleanup) = tokio::sync::oneshot::channel();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let original = group
+            .spawn_original_required_custody(
+                "same-original-issuer".into(),
+                Box::new(ActualRequiredIssuer {
+                    execution: Some(execution),
+                    cleanup: Some(cleanup),
+                    attempts: Arc::clone(&attempts),
+                }),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("actual original required admission"));
+        let holder = RetainedOriginalIssuerTask {
+            control: tokio::sync::Mutex::new(original),
+        };
+        let observer = holder
+            .disposal_observer()
+            .expect("actual original disposal observer");
+        assert!(
+            holder.reconcile().now_or_never().is_none(),
+            "live first attempt has no retry disposition"
+        );
+        execute.send(()).expect("release actual first execution");
+        holder
+            .control
+            .lock()
+            .await
+            .await_original_attempt_disposition()
+            .await
+            .expect("actual failed first cleanup yielded original custody");
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        let mut retry = Box::pin(holder.reconcile());
+        assert!(
+            futures::poll!(retry.as_mut()).is_pending(),
+            "actual retry waits on retained domain cleanup gate"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        drop(retry);
+        assert!(
+            holder.control.try_lock().is_ok(),
+            "dropped retry returns exact control to retained slot"
+        );
+        assert!(
+            observer.await_disposal().now_or_never().is_none(),
+            "dropping retry cannot issue resource ACK"
+        );
+        release
+            .send(())
+            .expect("same domain gate survives dropped retry");
+        holder
+            .reconcile()
+            .await
+            .expect("same retained control completes actual original cleanup");
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        let disposal = observer
+            .await_disposal()
+            .now_or_never()
+            .expect("actual completed retry publishes its exact disposition before returning");
+        let repeated = observer
+            .await_disposal()
+            .now_or_never()
+            .expect("actual acknowledged disposition remains immutable and observable");
+        holder
+            .require_disposal(&repeated)
+            .expect("repeated observation belongs to exact same control");
+        holder
+            .require_disposal(&disposal)
+            .expect("ACK belongs to exact retained original control");
+        assert!(
+            matches!(disposal.outcome(), RequiredTaskExit::Failed(_)),
+            "negative original execution remains negative after resource ACK"
+        );
     }
 }

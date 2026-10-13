@@ -14,6 +14,8 @@ pub use submission::{
 pub use types::{
     dropped_owner_error, CeremonyMonitorHandoffRelease, CeremonySubmissionTerminalOutcome,
     SubmittedOperationPublisher, SubmittedOperationRelease, SubmittedOperationWorkflowError,
+    SubmittedTerminalAcknowledgment, SubmittedTerminalAcknowledgmentScope,
+    SubmittedTerminalCustody, SubmittedTerminalIntent, SubmittedTerminalObservation,
     WorkflowHandoffRelease,
 };
 
@@ -53,7 +55,8 @@ mod tests {
         SubmittedOperationRelease, SubmittedOperationWorkflowError, WorkflowHandoffSubmission,
     };
     use crate::ui_contract::{
-        OperationId, OperationInstanceId, SemanticOperationCausality, SemanticOperationKind,
+        OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+        SemanticOperationCausality, SemanticOperationError, SemanticOperationKind,
         SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalOutcome,
         WorkflowTerminalStatus,
     };
@@ -77,6 +80,12 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestPublisher {
         events: Arc<Mutex<Vec<Event>>>,
+        dispatch_gate: Option<Arc<DispatchGate>>,
+    }
+
+    struct DispatchGate {
+        ready: Mutex<Option<futures::channel::oneshot::Sender<()>>>,
+        resume: Mutex<futures::channel::oneshot::Receiver<()>>,
     }
 
     #[async_trait]
@@ -92,41 +101,136 @@ mod tests {
                 instance_id.clone(),
                 kind,
             ));
+            if let Some(gate) = &self.dispatch_gate {
+                gate.ready.lock().await.take().unwrap().send(()).unwrap();
+                (&mut *gate.resume.lock().await).await.unwrap();
+            }
         }
 
-        async fn publish_terminal(
+        fn publish_terminal(
             &self,
-            operation_id: &OperationId,
-            instance_id: &OperationInstanceId,
-            causality: Option<SemanticOperationCausality>,
-            status: SemanticOperationStatus,
-        ) {
-            self.events.lock().await.push(Event::Terminal(
-                operation_id.clone(),
-                instance_id.clone(),
-                causality,
-                status,
-            ));
-        }
-
-        fn publish_drop_failure(
-            &self,
-            operation_id: &OperationId,
-            instance_id: &OperationInstanceId,
-            kind: SemanticOperationKind,
-        ) {
+            intent: super::SubmittedTerminalIntent,
+        ) -> super::SubmittedTerminalObservation {
+            let acknowledgment = super::SubmittedTerminalAcknowledgment {
+                operation_id: intent.operation_id.clone(),
+                instance_id: intent.instance_id.clone(),
+                scope: super::SubmittedTerminalAcknowledgmentScope::ComponentObserved,
+            };
             block_on(async {
-                self.events.lock().await.push(Event::Dropped(
-                    operation_id.clone(),
-                    instance_id.clone(),
-                    kind,
-                ));
+                let event = if intent.status == dropped_owner_error(intent.status.kind) {
+                    Event::Dropped(intent.operation_id, intent.instance_id, intent.status.kind)
+                } else {
+                    Event::Terminal(
+                        intent.operation_id,
+                        intent.instance_id,
+                        intent.causality,
+                        intent.status,
+                    )
+                };
+                self.events.lock().await.push(event);
             });
+            drop(intent.retained);
+            Box::pin(async move { Ok(acknowledgment) })
         }
+        fn relinquish(&self, _: &OperationId, _: &OperationInstanceId, _: SemanticOperationKind) {}
     }
 
     fn events(publisher: &TestPublisher) -> Vec<Event> {
         block_on(async { publisher.events.lock().await.clone() })
+    }
+
+    #[test]
+    fn unpolled_terminal_observation_preserves_original_intent() {
+        let kind = SemanticOperationKind::CreateContactInvitation;
+        let error = SemanticOperationError::new(
+            SemanticFailureDomain::Command,
+            SemanticFailureCode::InternalError,
+        )
+        .with_detail("original refusal must survive unpolled observation");
+        for variant in 0..4 {
+            let publisher = TestPublisher::default();
+            let operation_id = OperationId::invitation_create();
+            let instance_id = OperationInstanceId(format!("original-unpolled-{variant}"));
+            let observation = match variant {
+                0 => SubmittedOperation::submit_with_instance_unpublished(
+                    publisher.clone(),
+                    operation_id.clone(),
+                    kind,
+                    instance_id.clone(),
+                )
+                .fail(error.clone()),
+                1 => LocalTerminalSubmission::submit_with_instance_unpublished(
+                    publisher.clone(),
+                    operation_id.clone(),
+                    kind,
+                    instance_id.clone(),
+                )
+                .fail(error.clone()),
+                2 => WorkflowHandoffSubmission::submit_with_instance_unpublished(
+                    publisher.clone(),
+                    operation_id.clone(),
+                    kind,
+                    instance_id.clone(),
+                )
+                .fail(error.clone()),
+                _ => CeremonyMonitorHandoffSubmission::submit_with_instance_unpublished(
+                    publisher.clone(),
+                    operation_id.clone(),
+                    kind,
+                    instance_id.clone(),
+                )
+                .fail(error.clone()),
+            };
+            let expected = vec![Event::Terminal(
+                operation_id,
+                instance_id,
+                None,
+                SemanticOperationStatus::failed(kind, error.clone()),
+            )];
+            assert_eq!(
+                events(&publisher),
+                expected,
+                "intent transfer precedes first poll"
+            );
+            drop(observation);
+            assert_eq!(
+                events(&publisher),
+                expected,
+                "observation Drop cannot replace the original intent"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_dispatch_retains_original_submission_identity() {
+        let (ready, observed) = futures::channel::oneshot::channel();
+        let (_release, resume) = futures::channel::oneshot::channel();
+        let publisher = TestPublisher {
+            dispatch_gate: Some(Arc::new(DispatchGate {
+                ready: Mutex::new(Some(ready)),
+                resume: Mutex::new(resume),
+            })),
+            ..TestPublisher::default()
+        };
+        let operation_id = OperationId::invitation_create();
+        let instance_id = OperationInstanceId("original-pending-dispatch".into());
+        let kind = SemanticOperationKind::CreateContactInvitation;
+        let mut submission = Box::pin(SubmittedOperation::submit_with_instance(
+            publisher.clone(),
+            operation_id.clone(),
+            kind,
+            instance_id.clone(),
+        ));
+        assert!(futures::poll!(&mut submission).is_pending());
+        observed.await.unwrap();
+        drop(submission);
+        assert_eq!(
+            events(&publisher),
+            vec![
+                Event::Dispatched(operation_id.clone(), instance_id.clone(), kind),
+                Event::Dropped(operation_id, instance_id, kind),
+            ]
+        );
     }
 
     #[test]
@@ -211,7 +315,11 @@ mod tests {
             |_| OperationInstanceId("test-op-1".to_string()),
         ));
 
-        block_on(operation.succeed(None));
+        let acknowledgment = block_on(operation.succeed(None)).unwrap();
+        assert_eq!(
+            acknowledgment.scope,
+            super::SubmittedTerminalAcknowledgmentScope::ComponentObserved
+        );
 
         let observed = events(&publisher);
         assert_eq!(
@@ -366,7 +474,11 @@ mod tests {
             SemanticOperationKind::CreateChannel,
             |_| OperationInstanceId("test-op-6".to_string()),
         ));
-        block_on(operation.succeed(None));
+        let acknowledgment = block_on(operation.succeed(None)).unwrap();
+        assert_eq!(
+            acknowledgment.scope,
+            super::SubmittedTerminalAcknowledgmentScope::ComponentObserved
+        );
 
         let observed = events(&publisher);
         assert_eq!(observed.len(), 2);

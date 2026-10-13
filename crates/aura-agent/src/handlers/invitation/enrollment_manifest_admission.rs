@@ -81,10 +81,9 @@ impl AdmittedEnrollmentManifest {
     }
 }
 fn location(authority: AuthorityId, id: &InvitationId) -> SecureStorageLocation {
-    SecureStorageLocation::with_sub_key(
-        "enrollment_manifest_admission_v1",
-        authority.to_string(),
-        id.to_string(),
+    SecureStorageLocation::new(
+        "enrollment_manifest_admission_v2",
+        format!("{authority}:{id}"),
     )
 }
 fn boundary(error: impl std::error::Error + Send + Sync + 'static) -> EnrollmentManifestError {
@@ -131,7 +130,7 @@ pub(crate) async fn admit_user_transfer(
     }
     let now = effects.physical_time().await?.ts_ms;
     let record = AdmissionRecord {
-        version: 1,
+        version: 2,
         provisional,
         device: effects.device_id(),
         invitation: pin.manifest().invitation.clone(),
@@ -173,6 +172,85 @@ pub(crate) async fn admit_user_transfer(
     birth
         .into_root(effects.clone(), admitted, original_tasks)
         .map_err(boundary)
+}
+
+/// Enumerated keys select candidates only. Every candidate must revalidate its
+/// protected independent transfer and native verifier before notice admission.
+pub(crate) async fn load_recoverable_negative_admissions(
+    effects: &AuraEffectSystem,
+) -> Result<Vec<AdmittedEnrollmentManifest>, EnrollmentManifestError> {
+    let keys = effects
+        .secure_list_keys(
+            "enrollment_manifest_admission_v2",
+            &[SecureStorageCapability::List],
+        )
+        .await
+        .map_err(boundary)?;
+    if keys.len() > 1024 {
+        return Err(EnrollmentManifestError::Shape);
+    }
+    let mut admitted = Vec::new();
+    for key in keys {
+        let bytes = effects
+            .secure_retrieve(
+                &SecureStorageLocation::new("enrollment_manifest_admission_v2", &key),
+                &[SecureStorageCapability::Read],
+            )
+            .await
+            .map_err(boundary)?;
+        if bytes.len() > MAX_RECORD_BYTES {
+            return Err(EnrollmentManifestError::Shape);
+        }
+        let record: AdmissionRecord =
+            aura_core::util::serialization::from_slice(&bytes).map_err(boundary)?;
+        if record.device != effects.device_id()
+            || location(record.provisional, &record.invitation).key != key
+        {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        let now = effects.physical_time().await?.ts_ms;
+        if record.admitted_at_ms > now {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        // Authenticate the original transfer at its retained admission time.
+        // The sealed recovery window independently enforces its fixed endpoint;
+        // completed historical evidence must not become a new active admission.
+        let baseline = validate(effects, &record, record.admitted_at_ms).await?;
+        if effects
+            .secure_exists(&confirmation_location(
+                record.provisional,
+                &record.invitation,
+            ))
+            .await
+            .map_err(boundary)?
+        {
+            let confirmed =
+                load_confirmed_enrollment(effects, record.provisional, &record.invitation).await?;
+            // Only the independently verified durable confirmation admits the
+            // same physical profile's transition from provisional to subject.
+            if effects.runtime_authority_id() != record.provisional
+                && effects.runtime_authority_id() != confirmed.confirmation().manifest().subject
+            {
+                return Err(EnrollmentManifestError::Pin);
+            }
+            continue;
+        }
+        if record.provisional != effects.runtime_authority_id() {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        if load_failed_enrollment_for_ceremony(
+            effects,
+            record.provisional,
+            &baseline.manifest().ceremony,
+        )
+        .await?
+        .is_some()
+        {
+            continue;
+        }
+        admitted.push(baseline);
+    }
+    Ok(admitted)
 }
 
 pub(crate) async fn load_admitted_baseline(
@@ -223,7 +301,7 @@ async fn validate(
     record: &AdmissionRecord,
     now: u64,
 ) -> Result<AdmittedEnrollmentManifest, EnrollmentManifestError> {
-    if record.version != 1
+    if record.version != 2
         || record.device != effects.device_id()
         || record.selected_verifier.len() != 32
         || record.admitted_at_ms > now
@@ -419,6 +497,14 @@ pub(super) async fn retain_verified_failure(
     failure: super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability,
     acknowledged: crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
 ) -> Result<DurableFailedEnrollmentCapability, EnrollmentManifestError> {
+    persist_verified_failure(effects, &failure, &acknowledged).await?;
+    Ok(DurableFailedEnrollmentCapability { evidence: failure })
+}
+async fn persist_verified_failure(
+    effects: &AuraEffectSystem,
+    failure: &super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability,
+    acknowledged: &crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
+) -> Result<(), EnrollmentManifestError> {
     let manifest = failure.manifest();
     if effects.device_id() != manifest.invitee_device
         || acknowledged.manifest_digest() != failure.manifest_digest()
@@ -468,7 +554,14 @@ pub(super) async fn retain_verified_failure(
         .await
         .map_err(boundary)?;
     if outcome == aura_core::effects::secure::ImmutableSecureStoreOutcome::Created {
-        return Ok(DurableFailedEnrollmentCapability { evidence: failure });
+        let retained = effects
+            .secure_retrieve(&key, &[SecureStorageCapability::Read])
+            .await
+            .map_err(boundary)?;
+        if retained != bytes {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        return Ok(());
     }
     let retained =
         load_failed_enrollment_for_ceremony(effects, record.provisional, &manifest.ceremony)
@@ -479,7 +572,7 @@ pub(super) async fn retain_verified_failure(
     {
         return Err(EnrollmentManifestError::Pin);
     }
-    Ok(retained)
+    Ok(())
 }
 
 /// Raw IDs select a secure record; only full pinned replay mints readout evidence.
@@ -1046,6 +1139,32 @@ mod tests {
             .await;
             let effects = invitee.runtime().effects();
             let key = location(invitee.authority_id(), &invitation.invitation_id);
+            let candidates = load_recoverable_negative_admissions(effects.as_ref())
+                .await
+                .unwrap();
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(
+                candidates[0].canonical_invitation().invitation_id,
+                invitation.invitation_id
+            );
+            let original = effects
+                .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                .await
+                .unwrap();
+            let foreign =
+                SecureStorageLocation::new("enrollment_manifest_admission_v2", "foreign-candidate");
+            effects
+                .secure_store(&foreign, &original, &[SecureStorageCapability::Write])
+                .await
+                .unwrap();
+            assert!(matches!(
+                load_recoverable_negative_admissions(effects.as_ref()).await,
+                Err(EnrollmentManifestError::Pin)
+            ));
+            assert!(effects
+                .fault_remove_secure_record_for_test(&foreign)
+                .await
+                .unwrap());
             assert!(effects
                 .fault_remove_secure_record_for_test(&key)
                 .await
@@ -1099,4 +1218,485 @@ mod tests {
             );
         }
     );
+}
+
+/// Native verified negative evidence prepared after actual VM disposal. It
+/// precedes the Closed checkpoint and never grants positive execution authority.
+pub(crate) struct PreparedRecoveredEnrollmentFailure {
+    admitted: std::sync::Arc<AdmittedEnrollmentManifest>,
+    effects: std::sync::Weak<AuraEffectSystem>,
+    proof: std::sync::Arc<super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability>,
+}
+impl PreparedRecoveredEnrollmentFailure {
+    pub(crate) fn require_original(
+        &self,
+        admitted: &AdmittedEnrollmentManifest,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), aura_core::AuraError> {
+        if !std::ptr::eq(self.admitted.as_ref(), admitted)
+            || !self
+                .effects
+                .upgrade()
+                .is_some_and(|actual| std::ptr::eq(actual.as_ref(), effects))
+        {
+            return Err(aura_core::AuraError::permission_denied(
+                "foreign prepared original negative receipt",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn proof(
+        &self,
+    ) -> &super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability {
+        &self.proof
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreparedRecoveredFailureRecord {
+    version: u16,
+    provisional: AuthorityId,
+    device: DeviceId,
+    manifest_digest: [u8; 32],
+    frame: super::enrollment_vm_admission::EnrollmentControlFrame,
+    observed_at_ms: u64,
+}
+fn prepared_recovered_failure_location(
+    admitted: &AdmittedEnrollmentManifest,
+) -> SecureStorageLocation {
+    SecureStorageLocation::with_sub_key(
+        "device_enrollment_prepared_negative_v1",
+        admitted.manifest().invitee_authority.to_string(),
+        admitted.manifest().ceremony.to_string(),
+    )
+}
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "RecoveredEnrollmentNoticeVmDisposal",
+    family = "runtime_helper"
+)]
+pub(crate) async fn prepare_recovered_enrollment_failure(
+    effects: &std::sync::Arc<AuraEffectSystem>,
+    admitted: &std::sync::Arc<AdmittedEnrollmentManifest>,
+    proof: std::sync::Arc<super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability>,
+    disposal: &super::enrollment_terminal_notice::RecoveredEnrollmentNoticeVmDisposal,
+) -> Result<PreparedRecoveredEnrollmentFailure, aura_core::AuraError> {
+    disposal.require_original(admitted.as_ref(), effects.as_ref())?;
+    if proof.manifest_digest() != admitted.manifest_digest()
+        || aura_core::util::serialization::to_vec(proof.canonical_invitation())
+            .map_err(aura_core::AuraError::from)?
+            != aura_core::util::serialization::to_vec(admitted.canonical_invitation())
+                .map_err(aura_core::AuraError::from)?
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "foreign prepared failure evidence",
+        ));
+    }
+    let record = PreparedRecoveredFailureRecord {
+        version: 1,
+        provisional: admitted.manifest().invitee_authority,
+        device: effects.device_id(),
+        manifest_digest: proof.manifest_digest(),
+        frame: proof.frame().clone(),
+        observed_at_ms: proof.observed_at_ms(),
+    };
+    let bytes =
+        aura_core::util::serialization::to_vec(&record).map_err(aura_core::AuraError::from)?;
+    if bytes.len() > MAX_RECORD_BYTES {
+        return Err(aura_core::AuraError::invalid(
+            "prepared negative receipt oversized",
+        ));
+    }
+    let key = prepared_recovered_failure_location(admitted);
+    effects
+        .secure_store(&key, &bytes, &[SecureStorageCapability::Write])
+        .await?;
+    if effects
+        .secure_retrieve(&key, &[SecureStorageCapability::Read])
+        .await?
+        != bytes
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "prepared negative receipt readback mismatch",
+        ));
+    }
+    Ok(PreparedRecoveredEnrollmentFailure {
+        admitted: admitted.clone(),
+        effects: std::sync::Arc::downgrade(effects),
+        proof,
+    })
+}
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "AdmittedEnrollmentManifest",
+    family = "runtime_helper"
+)]
+pub(crate) async fn load_prepared_recovered_enrollment_failure(
+    effects: &std::sync::Arc<AuraEffectSystem>,
+    admitted: &std::sync::Arc<AdmittedEnrollmentManifest>,
+) -> Result<Option<PreparedRecoveredEnrollmentFailure>, aura_core::AuraError> {
+    let key = prepared_recovered_failure_location(admitted);
+    if !effects.secure_exists(&key).await? {
+        return Ok(None);
+    }
+    let bytes = effects
+        .secure_retrieve(&key, &[SecureStorageCapability::Read])
+        .await?;
+    if bytes.len() > MAX_RECORD_BYTES {
+        return Err(aura_core::AuraError::invalid(
+            "prepared negative receipt oversized",
+        ));
+    }
+    let record: PreparedRecoveredFailureRecord =
+        aura_core::util::serialization::from_slice(&bytes).map_err(aura_core::AuraError::from)?;
+    let now = effects
+        .physical_time()
+        .await
+        .map_err(aura_core::AuraError::from)?;
+    if record.version != 1
+        || record.provisional != admitted.manifest().invitee_authority
+        || record.device != effects.device_id()
+        || record.manifest_digest != admitted.manifest_digest()
+        || record.observed_at_ms < admitted.admitted_at_ms()
+        || record.observed_at_ms >= admitted.manifest().expires_at_ms
+        || record.observed_at_ms > now.ts_ms
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "prepared negative receipt original binding mismatch",
+        ));
+    }
+    let proof = record
+        .frame
+        .verify_failure_at(effects.as_ref(), admitted.as_ref(), record.observed_at_ms)
+        .await
+        .map_err(|source| aura_core::AuraError::Internal {
+            message: "verify original prepared negative receipt".into(),
+            source: Some(std::sync::Arc::new(source)),
+        })?;
+    Ok(Some(PreparedRecoveredEnrollmentFailure {
+        admitted: admitted.clone(),
+        effects: std::sync::Arc::downgrade(effects),
+        proof: std::sync::Arc::new(proof),
+    }))
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "PreparedRecoveredEnrollmentFailure",
+    family = "runtime_helper"
+)]
+pub(crate) async fn persist_prepared_recovered_enrollment_failure(
+    effects: &AuraEffectSystem,
+    prepared: &PreparedRecoveredEnrollmentFailure,
+    acknowledged: &crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
+) -> Result<(), aura_core::AuraError> {
+    prepared.require_original(prepared.admitted.as_ref(), effects)?;
+    persist_verified_failure(effects, prepared.proof(), acknowledged)
+        .await
+        .map_err(|source| aura_core::AuraError::Internal {
+            message: "persist original recovered negative receipt".into(),
+            source: Some(std::sync::Arc::new(source)),
+        })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod recovered_notice_refusal_tests {
+    use super::*;
+    use crate::runtime::services::enrollment_window::RecoveredEnrollmentNoticeWindowCapability as Window;
+    use std::sync::Arc;
+
+    async fn actual_reopened_receiver(
+        phase: &str,
+    ) -> (
+        Arc<crate::AuraAgent>,
+        Arc<AdmittedEnrollmentManifest>,
+        Arc<aura_testkit::time::ManualPhysicalClock>,
+    ) {
+        let boundary = crate::runtime_bridge::tests::actual_enrollment_crash_boundary(phase);
+        let (crate::runtime_bridge::tests::EnrollmentCrashDetail::CancelledNotice {
+            invitee_authority,
+            invitee_context,
+            invitee_config,
+            ..
+        }
+        | crate::runtime_bridge::tests::EnrollmentCrashDetail::RecoveredNotice {
+            invitee_authority,
+            invitee_context,
+            invitee_config,
+            ..
+        }) = boundary.detail
+        else {
+            panic!("actual original cancellation crash")
+        };
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let profile =
+            crate::runtime::builder::TestingOwnedProfileCapability::acquire(&invitee_config)
+                .expect("actual original recovery fixture operation");
+        let runtime = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
+            .with_authority(invitee_authority)
+            .with_config(invitee_config)
+            .with_shared_transport(crate::SharedTransport::new())
+            .with_physical_time_provider(clock.clone())
+            .build(&crate::runtime::EffectContext::new(
+                invitee_authority,
+                invitee_context,
+                aura_core::effects::ExecutionMode::Testing,
+            ))
+            .await
+            .expect("actual original recovery fixture operation");
+        let agent = Arc::new(crate::AuraAgent::new(runtime, invitee_authority));
+        let mut admitted = load_recoverable_negative_admissions(agent.runtime().effects().as_ref())
+            .await
+            .expect("actual original recovery fixture operation");
+        assert_eq!(admitted.len(), 1);
+        (
+            agent,
+            Arc::new(
+                admitted
+                    .pop()
+                    .expect("actual original recovery fixture operation"),
+            ),
+            clock,
+        )
+    }
+
+    async fn close_actual_receiver(agent: &crate::AuraAgent) {
+        agent
+            .runtime()
+            .tasks()
+            .shutdown_gracefully(std::time::Duration::from_secs(5))
+            .await
+            .expect("refused recovery leaves no unresolved notice task");
+    }
+
+    fn actual_notice_tasks(agent: &crate::AuraAgent) -> Vec<String> {
+        let mut tasks: Vec<_> = agent
+            .runtime()
+            .tasks()
+            .active_tasks()
+            .into_iter()
+            .filter(|name| {
+                name.contains("recovered-negative-notice")
+                    || name.contains("recovered_negative_notice")
+            })
+            .collect();
+        tasks.sort();
+        tasks
+    }
+
+    #[test]
+    fn recovered_negative_notice_missing_or_foreign_original_anchor_refuses() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let (agent, admitted, _) = Box::pin(actual_reopened_receiver("cancelled-notice")).await;
+            let effects = agent.runtime().effects();
+            let key = Window::original_admitted_anchor_location_for_test(&admitted);
+            let original = effects
+                .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                .await
+                .expect("actual original recovery fixture operation");
+            let tasks_before = actual_notice_tasks(&agent);
+            assert!(effects
+                .fault_remove_secure_record_for_test(&key)
+                .await
+                .expect("actual original recovery fixture operation"));
+            let missing = Window::recover(effects.clone(), admitted.clone())
+                .await
+                .err()
+                .expect("missing original anchor refuses");
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&missing);
+            let mut native = false;
+            while let Some(actual) = source {
+                native |= actual.is::<aura_core::effects::SecureStorageError>();
+                source = actual.source();
+            }
+            assert!(
+                native,
+                "missing protected anchor retains concrete storage cause: {missing:?}"
+            );
+            assert!(
+                !effects
+                    .secure_exists(&key)
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                "refusal cannot repair missing anchor"
+            );
+            assert_eq!(actual_notice_tasks(&agent), tasks_before);
+
+            let (other, other_admitted, _) =
+                Box::pin(actual_reopened_receiver("cancelled-notice-foreign")).await;
+            let other_key = Window::original_admitted_anchor_location_for_test(&other_admitted);
+            let foreign = other
+                .runtime()
+                .effects()
+                .secure_retrieve(&other_key, &[SecureStorageCapability::Read])
+                .await
+                .expect("actual original recovery fixture operation");
+            assert_ne!(
+                foreign, original,
+                "independent genuine issuance has distinct original anchor"
+            );
+            effects
+                .secure_store(&key, &foreign, &[SecureStorageCapability::Write])
+                .await
+                .expect("actual original recovery fixture operation");
+            let refused = Window::recover(effects.clone(), admitted)
+                .await
+                .err()
+                .expect("foreign original scope refuses");
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&refused);
+            let mut discontinuity = false;
+            while let Some(actual) = source {
+                discontinuity |= matches!(
+                    actual.downcast_ref::<aura_core::TimeoutBudgetError>(),
+                    Some(aura_core::TimeoutBudgetError::CheckpointDiscontinuity { .. })
+                );
+                source = actual.source();
+            }
+            assert!(
+                discontinuity,
+                "actual foreign binding is retained: {refused:?}"
+            );
+            assert_eq!(
+                effects
+                    .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                foreign,
+                "refusal cannot repair foreign anchor"
+            );
+            assert_eq!(actual_notice_tasks(&agent), tasks_before);
+            close_actual_receiver(&agent).await;
+            close_actual_receiver(&other).await;
+        });
+    }
+
+    #[test]
+    fn recovered_negative_notice_closed_without_prepared_failure_refuses() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let (agent, admitted, clock) =
+                Box::pin(actual_reopened_receiver("prepared-negative-after-close")).await;
+            let effects = agent.runtime().effects();
+            let checkpoint = Window::original_admitted_checkpoint_location_for_test(&admitted);
+            let closed = effects
+                .secure_retrieve(&checkpoint, &[SecureStorageCapability::Read])
+                .await
+                .expect("actual original recovery fixture operation");
+            let prepared = prepared_recovered_failure_location(&admitted);
+            assert!(
+                effects
+                    .secure_exists(&prepared)
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                "actual crash follows prepared receipt and Closed readback"
+            );
+            let failed = failure_location(
+                admitted.manifest().invitee_authority,
+                &admitted.manifest().ceremony,
+            );
+            assert!(
+                !effects
+                    .secure_exists(&failed)
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                "worker stopped before final failure persistence"
+            );
+            let tasks_before = actual_notice_tasks(&agent);
+            assert!(effects
+                .fault_remove_secure_record_for_test(&prepared)
+                .await
+                .expect("actual original recovery fixture operation"));
+            let refused = Window::recover(effects.clone(), admitted)
+                .await
+                .err()
+                .expect("Closed without actual prepared negative evidence refuses");
+            Window::assert_recovered_notice_missing_checkpoint_for_test(&refused);
+            assert_eq!(
+                effects
+                    .secure_retrieve(&checkpoint, &[SecureStorageCapability::Read])
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                closed,
+                "refusal preserves actual original Closed checkpoint"
+            );
+            assert!(
+                !effects
+                    .secure_exists(&prepared)
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                "missing preparation is not repaired"
+            );
+            assert!(
+                !effects
+                    .secure_exists(&failed)
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                "refusal cannot publish failure from Closed alone"
+            );
+            assert_eq!(actual_notice_tasks(&agent), tasks_before);
+            assert_eq!(
+                clock
+                    .physical_time()
+                    .await
+                    .expect("actual original recovery fixture operation")
+                    .ts_ms,
+                5_000
+            );
+            close_actual_receiver(&agent).await;
+        });
+    }
+
+    #[test]
+    fn recovered_negative_notice_selected_provider_failure_retains_native_source() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let (agent, admitted, clock) =
+                Box::pin(actual_reopened_receiver("cancelled-notice")).await;
+            let effects = agent.runtime().effects();
+            let key = Window::original_admitted_anchor_location_for_test(&admitted);
+            let original = effects
+                .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                .await
+                .expect("actual original recovery fixture operation");
+            let tasks_before = actual_notice_tasks(&agent);
+            clock
+                .fail_next_observation(aura_core::effects::TimeError::OperationFailed {
+                    reason: "original recovered receiver clock fault".into(),
+                })
+                .await;
+            let refused = Window::recover(effects.clone(), admitted.clone())
+                .await
+                .err()
+                .expect("selected original clock failure refuses");
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&refused);
+            let mut native = false;
+            while let Some(actual) = source {
+                native |= matches!(actual.downcast_ref::<aura_core::effects::TimeError>(), Some(aura_core::effects::TimeError::OperationFailed { reason }) if reason == "original recovered receiver clock fault");
+                source = actual.source();
+            }
+            assert!(
+                native,
+                "actual selected provider cause retained: {refused:?}"
+            );
+            assert_eq!(
+                effects
+                    .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                    .await
+                    .expect("actual original recovery fixture operation"),
+                original
+            );
+            assert_eq!(actual_notice_tasks(&agent), tasks_before);
+            assert_eq!(
+                clock
+                    .physical_time()
+                    .await
+                    .expect("actual original recovery fixture operation")
+                    .ts_ms,
+                5_000
+            );
+            let recovered = Window::recover(effects, admitted)
+                .await
+                .expect("same protected endpoint remains recoverable after provider fault");
+            drop(recovered);
+            close_actual_receiver(&agent).await;
+        });
+    }
 }

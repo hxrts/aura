@@ -275,7 +275,7 @@ impl SimulatedAgent {
     pub async fn new_with_shared_transport(
         name: String,
         config: AgentConfig,
-        shared_inbox: Option<Arc<parking_lot::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
+        shared_inbox: Option<Arc<aura_agent::SimulationSharedInbox>>,
     ) -> TerminalResult<Self> {
         // Create deterministic identifiers derived from seed and name
         let device_id = demo_device_id(config.seed, &name);
@@ -875,7 +875,7 @@ impl AgentFactory {
     /// Create Alice and Carol agents for demo with optional shared transport
     pub async fn create_demo_agents(
         seed: u64,
-        shared_inbox: Option<Arc<parking_lot::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
+        shared_inbox: Option<Arc<aura_agent::SimulationSharedInbox>>,
     ) -> TerminalResult<(SimulatedAgent, SimulatedAgent)> {
         let alice_config = AgentConfig {
             seed,

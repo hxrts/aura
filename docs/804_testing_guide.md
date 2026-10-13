@@ -451,6 +451,18 @@ The bootstrap staging and handoff promise is completion-based. Callers may treat
 
 Browser bootstrap storage is explicit. Preserved-profile recovery correctness depends on the typed selected runtime identity, pending bootstrap metadata, and browser-local `AccountConfig` metadata remaining distinct. The next generation must recover the canonical runtime bootstrap path without falling back to browser-local semantic repair. Channel-returning bridge responses now distinguish weak selected-channel ids from authoritative channel bindings. A payload that lacks context is not a binding.
 
+For browser enrollment adoption, derive the new account configuration from
+the sealed import completion's subject authority, while the attached runtime
+may still identify the provisional invitee. Verify per-authority storage keeps
+the previous profile's context, creation time and nickname, and that legacy
+selected-config migration is read-only and accepts only an exact authority
+match. Reject a per-authority key whose stored authority differs. Fault each
+host write separately after the app budget ACK: authority config, selected
+runtime identity and pending-code clear are ordered but not atomic, so tests
+must preserve the actual partial state and native cause. A ready screen or
+import terminal result alone does not prove the adopted profile survives
+same-profile reopen.
+
 Browser bootstrap broker credentials are intentionally not query-string
 parameters. Tests may stage the broker URL through controlled bootstrap setup,
 but bearer and invitation-retrieval tokens must use session-scoped browser
@@ -463,6 +475,15 @@ Browser harness failures surface explicit publication-state diagnostics through 
 `submitSemanticCommand` follows that rule directly. After bounded same-page recovery it must fail closed instead of replaying the semantic request through a fresh browser session. The browser publication owner classifies diagnostics by typed publication status, binding mode, and reliability before serializing them to page globals. Compatibility-sensitive waits keep one canonical publication path instead of ad hoc string assembly.
 
 The driver raises a semantic-revision floor before each browser action so a later `ui_state` cannot return the pre-action snapshot. A failed action (absent, hidden or disabled control, exhausted click retries) restores the floor it raised, because the page never publishes the newer revision for an action that did not happen. Observation must keep working after a refused action; the Playwright driver smoke test covers a failed click followed by `ui_state`.
+
+The Playwright cache also compares each candidate `semantic_seq` with its last
+accepted snapshot in the same page generation. Reject a lower sequence without
+replacing the cache or advancing its observation version; a delayed console
+push must not erase accepted operation/event state. Explicit navigation or
+generation reset clears the cache, so a newly observed generation may start
+with a lower sequence. The driver self-test covers both cases. This cache
+ordering check does not prove a browser enrollment transfer or invitation
+export succeeded; those require separate typed workflow evidence.
 
 A successful action is not proof of a no-op. After a successful action (other than `submit_semantic_command`, which keeps its own typed publication contract) the driver observes the page for a bounded settle window. A snapshot at or above the floor satisfies it. In-flight semantic work reported by the page (`operation_submitting` or `readiness_loading` quiescence reasons, or a submitting operation) keeps the floor raised, as does missing quiescence or DOM evidence. Only a settled, unchanged semantic snapshot restores the pre-action floor: a confirmed no-op (DOM unchanged) or DOM-only navigation (DOM changed, then stable). The action result carries `post_action_observation` with the outcome, and the smoke test covers each case.
 
@@ -599,6 +620,54 @@ Do not use this table to justify ambient shared ownership. If a subsystem needs 
 Subscribing before registration must fail with `ReactiveError::SignalNotFound`. Tests must not treat an empty stream as equivalent to "signal not registered." Lagging subscribers are allowed to miss intermediate updates. Assertions should target eventual newer snapshots, not lossless delivery.
 
 TUI-local semantic submission is limited to the sanctioned local-terminal and workflow-handoff owner wrappers. Browser bridge concurrency is limited to `WebTaskOwner` and does not own parity-critical lifecycle. Playwright stages browser runtime identity through the explicit bridge entrypoint before rebootstrap and submits semantic commands through the page-owned semantic queue.
+
+For browser enrollment import, test both the visible form and the page-owned
+semantic queue with the declared device-enrollment operation handle. Admit the
+same app required import before releasing the frontend's exact instance, then
+assert that host identity persistence precedes app terminal success. Destroy
+the browser observer during host acknowledgment and require cancellation or
+the retained prior failure without a false success. A broker batch must retain
+every retrieved delivery through typed purpose routing, including a pending
+enrollment prefill, rather than selecting its last item. Prefill alone cannot
+authorize import without the independent manifest and initiator verifier.
+Test controller replacement after account creation without a component remount:
+the browser must bind the persistence host policy to the current controller
+before either import surface is exposed. The former controller's policy must
+not carry the new submission. On wasm, supply `RuntimeOnly` deliberately and
+require typed pre-admission refusal plus local submission failure, with no app
+import or false success in the observed lifecycle.
+The mounted browser refusal fixture must observe the actual alert and retained
+prefill on the join form, with account readiness false and no semantic
+enrollment operation. A visible diagnostic does not prove approval or import.
+
+Submitted-operation regressions must drop an unpolled terminal-observation
+future and still find the original synchronous intent, instance, failure and
+retained custody at the publisher. Check the returned acknowledgment's exact
+instance and scope without treating channel acceptance, controller apply or
+component observation as protocol or storage proof. For required frontend
+tasks, interrupt a worker and fail cleanup independently: the shared task root
+must retain the original owner and source until explicit reconciliation, and
+`wait_required_disposed` must refuse while any obligation lacks an actual
+cleanup acknowledgment.
+
+Host-only app fixtures may inject `aura_testkit::task_custody::SupervisedTaskTestkit`
+as the runtime's owned task spawner. Pause, cancel or abort the real borrowed
+worker, then explicitly drain the supervisor and inspect execution, domain,
+cleanup and acknowledgment fields. A dropped observer or testkit owner is not
+a cleanup receipt; preserve the original failure and owner when settlement is
+interrupted or fails. This fixture exercises ownership mechanics only and
+cannot substitute for enrollment, broker, storage or protocol evidence.
+
+On the native TUI path, inject channel acceptance, receiver refusal and an
+interrupted terminal-send observer against the same required publication
+owner. Assert exact operation-instance identity, one `ChannelAccepted`
+acknowledgment only after the real `UiUpdate` send, and retention of the
+original terminal failure when the send is unacknowledged. Shutdown must use
+its original cleanup window and refuse reload while required native disposal
+is unresolved, preserving sender-clearing and disposal sources independently.
+For semantic command pre-admission refusals, assert a typed domain/code and
+concrete-source reason with no operation handle; changed diagnostic wording
+must not alter the reason or create accepted terminal evidence.
 
 Authoritative readiness refresh remains private to `aura-app::workflows` and is compile-fail tested in both default and `signals` configurations.
 
@@ -950,6 +1019,22 @@ Run a complete owned batch with `AURA_E2E_REMOTE=user@host scripts/harness/lan/b
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
 Shared flows should be authored semantically once, then executed through the harness using either the TUI or browser driver. Do not create a second frontend execution path for MBT or simulator replay. Core shared scenarios should use semantic actions and state-based assertions. Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks except in dedicated low-level driver tests.
+
+When setup and a later operation share an operation ID for one actor, use
+`capture_operation_instance` before the later submission, then give
+`operation_state_is` the captured variable in `after_instance`. This requires
+the requested state on a different observed instance. When the importing actor
+has no prior operation of that ID, use `assert_operation_absent` for that actor
+before opening the modal, then assert its `operation_state_is = succeeded` after
+approval. The absence assertion reads the actor's semantic snapshot; it fails
+if any prior operation of that ID is present. This prevents setup or another
+actor's success from satisfying enrollment-import completion.
+The harness checks the selected actor's observed operation ID, state, and
+optional `after_instance` before it consults a matching exact submission
+handle. For browser enrollment approval, assert `modal_confirm_button` is
+mounted and activate that control after filling the code, manifest, and
+independent verifier; a raw Enter key is not the approval action in this
+scenario.
 
 ### Run Config
 
@@ -1584,6 +1669,13 @@ survival after coroutine compaction, stable IDs for later sessions, and required
 lock/index/epoch failures before mutation. They must accompany changes to the
 dependency lifecycle API. Also run actual Aura backend close/cancellation tests;
 dependency success alone does not verify host binding or fragment retirement.
+For session-buffer receive, hold VM startup after claiming a valid envelope,
+cancel the participant, and assert return to the original session bucket and
+position. Also check malformed-frame consumption and failed startup before VM
+ownership. After owner and fragment claim, cancellation must retire that exact
+session and its fragments without erasing the inbox or replaying an owned frame.
+The exact session-cancel fixture has passed; after-owner-claim coverage remains
+pending, so the full VM-open custody boundary is not yet validated.
 Cooperative teardown needs its own nonterminal-session and surviving-session
 coverage. A closed status or removal from the host's active set alone does not
 prove target coroutine/resource disposal. Regenerate `Cargo.nix` when changing
@@ -2468,17 +2560,21 @@ bounds; keyboard-only actions do not gain fabricated button observations.
 Browser layout fixtures include child-owned rerenders with a memoized parent,
 exact-target actual resize and scroll-listener witnesses and a fresh canonical
 snapshot measurement. DOM references arrange these changes;
-typed renderer observations are their postconditions. The web producer uses an
-unmodified, exactly pinned dioxus-web 0.7.4 renderer: its owned future wrapper
-revokes observations before every poll and captures the final flushed state
-when the renderer suspends. Tests must also cover no-edit wakeups, reentrant
-reads during revocation, cancellation revocation, and stylesheet replacement
-before asynchronous MutationObserver delivery. Hydration remains unsupported;
-renderer upgrades require an audit of synchronous flush/suspension ordering,
-not merely successful compilation. Component effects and mutation notifications
-alone cannot acknowledge a root-wide render. Dependency graph updates
-and executed native/browser gates are required before treating this candidate as
-integration evidence.
+typed renderer observations are their postconditions. The selected Dioxus web
+renderer calls the batch observer at `BeforeRender`, `BeforeCommit` and
+`Committed`. Tests must prove the first phase samples the controller semantic
+source, the second retains that same source, and only the third publishes a
+complete frame. The UI publication owner must reject a frame if its final app
+source differs. Exercise a memoized parent with child-only Settings navigation
+to Devices: the new capture and semantic sequence must advance, the old
+nickname control must disappear, and the visible import control must match
+the committed source. Hydration/external mutation are unsupported; renderer
+upgrades require a real-browser batch-order audit, not compilation alone.
+Component effects and mutation notifications cannot acknowledge a root-wide
+render. The diagnostic two-browser run reached signed code, mounted import
+control, explicit three-field approval and import success, then Bob readiness
+after restart; it failed the two-device retention assertion and does not prove
+same-profile adoption or complete enrollment persistence.
 
 Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
 from the active modal field. A generic modal-input identity cannot replace that
@@ -2511,6 +2607,18 @@ runs must explicitly select their actual browser and matching driver with
 refuses before runner execution. The wrapper preserves runner status and removes
 its private capabilities file after success or failure. Playwright is a separate
 protocol and cannot serve as a WebDriver executable.
+
+For `aura-effects/tests/browser_secret_lifetime.rs`, use that external real
+browser runner with the `web` feature and actual Web Lock/IndexedDB origin;
+native libtests or the Playwright harness cannot execute its `wasm_bindgen_test`
+fixtures. The selected-owner test covers one-shot/foreign lease refusal, live
+birth, durable negative retirement and reopen of the same encrypted inventory.
+The external-conflict test overwrites the fixture's selected IndexedDB record
+and requires state/read/reconciliation refusal without fresh secret issuance.
+These provider fixtures prove local selected-writer custody only. In the
+two-browser flow, Alice's `device_enrollment_code_ready` under that provider
+does not prove Bob's mounted Devices control, explicit approval, host
+persistence or same-profile reopen; each needs its own observed result.
 
 ### Canonical signed-owner checkpoint validation
 

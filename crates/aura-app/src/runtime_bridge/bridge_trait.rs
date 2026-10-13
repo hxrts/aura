@@ -5,9 +5,10 @@ use super::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
     CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart, DeviceSigningConsent,
-    DiscoveryTriggerOutcome, InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus,
-    OutboundMessageDeliveryFailure, PendingSigningRequest, RendezvousStatus, RuntimeStatus,
-    SettingsBridgeState, SyncStatus,
+    DiscoveryTriggerOutcome, InvitationInfo, InvitationMutationOutcome,
+    IssuedDeviceEnrollmentStart, KeyRotationCeremonyStatus, OriginalEnrollmentPostCompletion,
+    OutboundMessageDeliveryFailure, PendingSigningRequest, PostEnrollmentShortcutSelection,
+    RendezvousStatus, RuntimeStatus, SettingsBridgeState, SyncStatus,
 };
 use crate::core::IntentError;
 use crate::ui_contract::{
@@ -504,13 +505,27 @@ pub trait RuntimeBridge: Send + Sync {
     /// unavailability from a real empty candidate set.
     async fn try_get_bootstrap_candidates(
         &self,
-    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError>;
+    ) -> Result<Vec<BootstrapCandidateInfo>, crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Refresh this runtime's bootstrap-candidate self-registration.
     ///
     /// Browser runtimes use this to advertise themselves to a broker-backed
     /// startup discovery plane after the broker becomes reachable.
-    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError>;
+    /// Execution uses the caller's original budget and the runtime's selected
+    /// physical provider; retries cannot renew the endpoint.
+    async fn refresh_bootstrap_candidate_registration(
+        &self,
+        original: &aura_core::TimeoutBudget,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError>;
+
+    /// Fetch the complete batch for this runtime's actual physical receiver.
+    /// This transport receipt grants no invitation or enrollment authority.
+    async fn take_bootstrap_invitation_batch(
+        &self,
+    ) -> Result<
+        aura_core::invitation::BootstrapInvitationBatch,
+        crate::runtime_bridge::RuntimeBridgeError,
+    >;
 
     /// Send an invitation to a bootstrap candidate.
     ///
@@ -521,7 +536,7 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         peer: &BootstrapCandidateInfo,
         invitation_code: &str,
-    ) -> Result<(), IntentError>;
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError>;
 
     // =========================================================================
     // Threshold Signing
@@ -537,6 +552,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// Returns the public key package bytes for signature verification.
     async fn bootstrap_signing_keys(
         &self,
+        original: &aura_core::TimeoutBudget,
     ) -> Result<Vec<u8>, crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Get threshold configuration for the authority
@@ -683,6 +699,29 @@ pub trait RuntimeBridge: Send + Sync {
         nickname_suggestion: String,
         setup: crate::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
     ) -> Result<DeviceEnrollmentStart, aura_invitation::enrollment_setup::EnrollmentIssuanceError>;
+
+    /// Issue the original enrollment continuation for one explicitly selected
+    /// external shortcut recipient. Unsupported runtimes refuse this operation.
+    async fn initiate_device_enrollment_with_shortcut(
+        &self,
+        _nickname_suggestion: String,
+        _setup: crate::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        _selection: PostEnrollmentShortcutSelection,
+    ) -> Result<
+        IssuedDeviceEnrollmentStart,
+        aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+    > {
+        Err(aura_invitation::enrollment_setup::EnrollmentIssuanceError::Unavailable)
+    }
+
+    async fn deliver_post_enrollment_shortcut(
+        &self,
+        _original: &mut OriginalEnrollmentPostCompletion,
+    ) -> Result<aura_core::InvitationId, aura_core::AuraError> {
+        Err(aura_core::AuraError::invalid(
+            "post-enrollment shortcut unavailable",
+        ))
+    }
 
     /// Initiate a device removal ("remove device") ceremony.
     ///

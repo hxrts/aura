@@ -524,6 +524,41 @@ impl TaskGroupDisposalAcknowledgment {
         self.failure.as_ref()
     }
 
+    /// Match the exact failed descendant retained by this disposed subtree.
+    #[cfg(feature = "simulation")]
+    pub(crate) fn matches_supervision_failure(&self, observed: &TaskSupervisionError) -> bool {
+        let (
+            Some(TaskSupervisionError::TaskFailed {
+                group: original_group,
+                task: original_task,
+                source: original_source,
+            }),
+            TaskSupervisionError::TaskFailed {
+                group,
+                task,
+                source,
+            },
+        ) = (self.failure.as_ref(), observed)
+        else {
+            return false;
+        };
+        if original_group != group || original_task != task {
+            return false;
+        }
+        let mut original: Option<&(dyn std::error::Error + 'static)> = Some(original_source);
+        while let Some(left) = original {
+            let mut observed: Option<&(dyn std::error::Error + 'static)> = Some(source);
+            while let Some(right) = observed {
+                if std::ptr::eq(left, right) {
+                    return true;
+                }
+                observed = right.source();
+            }
+            original = left.source();
+        }
+        false
+    }
+
     pub(crate) fn execution_outcome(&self) -> &TaskGroupExecutionOutcome {
         &self.execution_outcome
     }

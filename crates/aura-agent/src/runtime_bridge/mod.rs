@@ -6,6 +6,9 @@
 
 use crate::core::default_context_id_for_authority;
 mod enrollment_issuance;
+pub(crate) use enrollment_issuance::OriginalIssuedEnrollmentContinuation;
+#[cfg(feature = "simulation")]
+pub(crate) use enrollment_issuance::OriginalSimulationFailedDisposal;
 pub(crate) mod enrollment_quorum;
 use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
@@ -47,7 +50,6 @@ use aura_core::effects::{
     TransportEnvelope,
 };
 use aura_core::hash::hash;
-use aura_core::threshold::ParticipantIdentity;
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -1937,7 +1939,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn try_get_bootstrap_candidates(
         &self,
-    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
+    ) -> Result<Vec<BootstrapCandidateInfo>, aura_app::runtime_bridge::RuntimeBridgeError> {
         rendezvous::get_bootstrap_candidates(self).await
     }
 
@@ -1968,15 +1970,42 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }))
     }
 
-    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
-        rendezvous::refresh_bootstrap_candidate_registration(self).await
+    async fn refresh_bootstrap_candidate_registration(
+        &self,
+        original: &aura_core::TimeoutBudget,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        rendezvous::refresh_bootstrap_candidate_registration(self, original).await
+    }
+
+    async fn take_bootstrap_invitation_batch(
+        &self,
+    ) -> Result<
+        aura_core::invitation::BootstrapInvitationBatch,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
+        let recipient_authority_id = self.agent.authority_id();
+        let recipient_device_id = self.agent.runtime().device_id();
+        let deliveries = require_rendezvous_service(self)?
+            .take_bootstrap_broker_invitations(recipient_device_id)
+            .await
+            .map_err(|source| {
+                error_boundary::bridge_runtime_internal(
+                    "Receive bootstrap invitation batch",
+                    source,
+                )
+            })?;
+        Ok(aura_core::invitation::BootstrapInvitationBatch {
+            recipient_authority_id,
+            recipient_device_id,
+            deliveries,
+        })
     }
 
     async fn send_bootstrap_invitation(
         &self,
         _peer: &BootstrapCandidateInfo,
         _invitation_code: &str,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         rendezvous::send_bootstrap_invitation(self, _peer, _invitation_code).await
     }
 
@@ -2007,32 +2036,68 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn bootstrap_signing_keys(
         &self,
+        original: &TimeoutBudget,
     ) -> Result<Vec<u8>, aura_app::runtime_bridge::RuntimeBridgeError> {
-        let authority = self.agent.authority_id();
-        let signing_service = self.agent.threshold_signing();
-
-        // Bootstrap 1-of-1 keys for single-device operation
-        let public_key_package = signing_service
-            .bootstrap_authority(&authority)
+        let runtime = self.agent.runtime();
+        let effects = runtime.effects();
+        let context = crate::runtime::services::RuntimeServiceContext::new(
+            runtime.tasks(),
+            effects.clone(),
+            original.clone(),
+        );
+        let public_key_package =
+            execute_with_timeout_budget(effects.as_ref(), original, || async {
+                let public_key_package = self
+                    .agent
+                    .threshold_signing()
+                    .bootstrap_authority(&self.agent.authority_id())
+                    .await
+                    .map_err(|source| {
+                        error_boundary::bridge_runtime_internal(
+                            "Failed to bootstrap signing keys",
+                            source,
+                        )
+                    })?;
+                self.restore_original_enrollment_observations(&context)
+                    .await
+                    .map_err(|source| {
+                        error_boundary::bridge_runtime_internal(
+                            "Restore enrollment ceremonies",
+                            source,
+                        )
+                    })?;
+                Ok::<_, aura_app::runtime_bridge::RuntimeBridgeError>(public_key_package)
+            })
             .await
-            .map_err(|e| {
-                error_boundary::bridge_runtime_internal("Failed to bootstrap signing keys", e)
+            .map_err(|source| match source {
+                TimeoutRunError::Operation(source) => source,
+                TimeoutRunError::Timeout(source) => error_boundary::bridge_runtime_internal(
+                    "Original signing bootstrap window",
+                    source,
+                ),
             })?;
-
-        self.restore_owned_device_enrollment_ceremonies()
-            .await
-            .map_err(|error| {
-                error_boundary::bridge_runtime_internal("Restore enrollment ceremonies", error)
-            })?;
-
-        // The LAN identity key now exists; announce this account right away.
-        if let Err(error) = self.agent.runtime().publish_lan_descriptor().await {
+        // Announcement is subsidiary to the required bootstrap and recovery.
+        // It shares the caller's selected provider and original fixed endpoint.
+        if let Err(source) = execute_with_timeout_budget(effects.as_ref(), original, || async {
+            self.agent.runtime().publish_lan_descriptor().await
+        })
+        .await
+        {
             tracing::debug!(
-                error = %error,
+                error = %source,
                 "LAN descriptor publish after signing-key bootstrap failed; periodic refresh will retry"
             );
+            runtime
+                .tasks()
+                .group("runtime_bridge.bootstrap_announcement")
+                .record_subsidiary_failure(
+                    "initial_lan_descriptor",
+                    aura_core::AuraError::Internal {
+                        message: "bounded signing bootstrap LAN announcement failed".into(),
+                        source: Some(Arc::new(source)),
+                    },
+                );
         }
-
         Ok(public_key_package)
     }
 
@@ -2755,14 +2820,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
             self.spawn_device_epoch_rotation(
                 crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
                     ceremony_id: ceremony_id.clone(),
-                    kind: aura_sync::protocols::DeviceEpochRotationKind::Rotation,
+                    origin:
+                        crate::handlers::device_epoch_rotation::DeviceEpochRotationOrigin::Rotation,
                     pending_epoch: pending_epoch.value(),
                     participant_device_id: device_id,
                     key_package,
                     threshold_config: threshold_config.clone(),
                     public_key_package: public_key_package.clone(),
                 },
-            );
+            )
+            .map_err(|source| IntentError::internal_error(source.to_string()))?;
         }
 
         Ok(ceremony_id)
@@ -2776,7 +2843,28 @@ impl RuntimeBridge for AgentRuntimeBridge {
         aura_app::runtime_bridge::DeviceEnrollmentStart,
         aura_invitation::enrollment_setup::EnrollmentIssuanceError,
     > {
-        self.issue_original_device_enrollment(nickname_suggestion, setup, None)
+        self.issue_original_device_enrollment(nickname_suggestion, setup)
+            .await
+    }
+
+    async fn initiate_device_enrollment_with_shortcut(
+        &self,
+        nickname_suggestion: String,
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        selection: aura_app::runtime_bridge::PostEnrollmentShortcutSelection,
+    ) -> Result<
+        aura_app::runtime_bridge::IssuedDeviceEnrollmentStart,
+        aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+    > {
+        self.issue_original_device_enrollment_with_shortcut(nickname_suggestion, setup, selection)
+            .await
+    }
+
+    async fn deliver_post_enrollment_shortcut(
+        &self,
+        original: &mut aura_app::runtime_bridge::OriginalEnrollmentPostCompletion,
+    ) -> Result<aura_core::InvitationId, aura_core::AuraError> {
+        self.deliver_original_post_enrollment_shortcut(original)
             .await
     }
 
@@ -3146,14 +3234,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
             self.spawn_device_epoch_rotation(
                 crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
                     ceremony_id: ceremony_id.clone(),
-                    kind: aura_sync::protocols::DeviceEpochRotationKind::Removal,
+                    origin:
+                        crate::handlers::device_epoch_rotation::DeviceEpochRotationOrigin::Removal,
                     pending_epoch: pending_epoch.value(),
                     participant_device_id: device_id,
                     key_package,
                     threshold_config: threshold_config.clone(),
                     public_key_package: public_key_package.clone(),
                 },
-            );
+            )
+            .map_err(|source| IntentError::internal_error(source.to_string()))?;
         }
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
@@ -4100,9 +4190,12 @@ impl AgentRuntimeBridge {
         })
     }
 
-    /// Called after signing bootstrap restores the active context. No service-start
-    /// readiness shortcut is used; pending generations are verified before tasks start.
-    async fn restore_owned_device_enrollment_ceremonies(&self) -> Result<(), aura_core::AuraError> {
+    /// Restore observations or authenticate a prepared decision under the caller's
+    /// original startup resource window. Serialized records never mint execution roots.
+    async fn restore_original_enrollment_observations(
+        &self,
+        context: &crate::runtime::services::RuntimeServiceContext,
+    ) -> Result<(), aura_core::AuraError> {
         let runtime = self.agent.runtime();
         let tracker = runtime.ceremony_tracker();
         let effects = runtime.effects();
@@ -4183,139 +4276,66 @@ impl AgentRuntimeBridge {
             if state.terminal_outcome.is_some() {
                 continue;
             }
-            let registered_generation = effects
-                .resume_owned_enrollment_registration(
-                    tracker,
-                    state.initiator_id,
-                    state.new_epoch,
-                    &ceremony_id,
-                    state.prestate_hash,
-                )
-                .await?;
-            let admission = self
-                .agent
-                .invitations()
-                .map_err(|error| aura_core::AuraError::Internal {
-                    message: "restore enrollment invitation owner".into(),
-                    source: Some(std::sync::Arc::new(error)),
-                })?
-                .start_registered_device_enrollment(&registered_generation)
-                .await
-                .map_err(|error| aura_core::AuraError::Internal {
-                    message: "resume registered enrollment initiator".into(),
-                    source: Some(std::sync::Arc::new(error)),
-                })?;
-            if admission == crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::AlreadyRunning { continue; }
-            let invitee = state
-                .enrollment_device_id
-                .ok_or_else(|| aura_core::AuraError::invalid("missing restored invitee"))?;
-            let peers = state
-                .participants
-                .iter()
-                .filter_map(|participant| match participant {
-                    ParticipantIdentity::Device(device) if *device != invitee => Some(*device),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            if peers.is_empty() {
-                self.spawn_sole_device_enrollment_finalizer(ceremony_id);
-            } else {
-                let public_key_package = effects
-                    .secure_retrieve(
-                        &SecureStorageLocation::with_sub_key(
-                            "threshold_pubkey",
-                            state.initiator_id.to_string(),
-                            state.new_epoch.to_string(),
-                        ),
-                        &[SecureStorageCapability::Read],
-                    )
-                    .await?;
-                let threshold_config = effects
-                    .secure_retrieve(
-                        &SecureStorageLocation::with_sub_key(
-                            "threshold_config",
-                            state.initiator_id.to_string(),
-                            state.new_epoch.to_string(),
-                        ),
-                        &[SecureStorageCapability::Read],
-                    )
-                    .await?;
-                for device in peers {
-                    let key_package = signing
-                        .participant_key_package(
-                            &state.initiator_id,
-                            state.new_epoch,
-                            &ParticipantIdentity::device(device),
-                        )
-                        .await?;
-                    self.spawn_device_epoch_rotation(
-                        crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
-                            ceremony_id: ceremony_id.clone(),
-                            kind: aura_sync::protocols::DeviceEpochRotationKind::Enrollment,
-                            pending_epoch: state.new_epoch,
-                            participant_device_id: device,
-                            key_package,
-                            public_key_package: public_key_package.clone(),
-                            threshold_config: threshold_config.clone(),
+            // Existence selects a candidate only. The canonical recovery owner
+            // must authenticate the full original preparation before mutation.
+            if effects
+                .secure_exists(&SecureStorageLocation::new(
+                    "device_enrollment_activation_v1",
+                    ceremony_id.to_string(),
+                ))
+                .await?
+            {
+                self.original_enrollment_finalizer_service()
+                    .recover_prepared_enrollment(context, &ceremony_id)
+                    .await
+                    .map_err(|source| match source {
+                        crate::core::AgentError::Aura(source) => source,
+                        source => aura_core::AuraError::Internal {
+                            message: "restore authenticated prepared enrollment".into(),
+                            source: Some(std::sync::Arc::new(source)),
                         },
-                    );
-                }
+                    })?;
             }
+            // Restored Pending/Closed records remain observations. An existing
+            // in-process task already retains its actual root; a process restart
+            // cannot reconstruct it or admit another protocol execution here.
         }
+        self.agent
+            .invitations()
+            .map_err(|source| aura_core::AuraError::Internal {
+                message: "restore negative-only enrollment receivers".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })?
+            .recover_original_enrollment_notice_receivers()
+            .await
+            .map_err(|source| match source {
+                crate::core::AgentError::Aura(source) => source,
+                source => aura_core::AuraError::Internal {
+                    message: "restore negative-only enrollment receivers".into(),
+                    source: Some(std::sync::Arc::new(source)),
+                },
+            })?;
         Ok(())
     }
 
-    fn spawn_sole_device_enrollment_finalizer(
+    pub(crate) fn original_enrollment_finalizer_service(
         &self,
-        ceremony_id: aura_core::types::identifiers::CeremonyId,
-    ) {
-        let ceremony_runner = self.agent.runtime().ceremony_runner().clone();
-        let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+    ) -> crate::handlers::device_epoch_rotation::DeviceEpochRotationService {
+        crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
             self.agent.authority_id(),
             self.agent.runtime().effects(),
             self.agent.runtime().ceremony_tracker().clone(),
             self.agent.runtime().ceremony_runner().clone(),
             self.agent.runtime().threshold_signing(),
             self.agent.runtime().reconfiguration().clone(),
-        );
-        let task_name = format!("device_enrollment_finalize.{ceremony_id}");
-        let fut = async move {
-            if let Err(error) = service.finalize_sole_device_enrollment(&ceremony_id).await {
-                let reason = if error.is_timeout() {
-                    aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
-                } else {
-                    aura_app::runtime_bridge::CeremonyFailureReason::RuntimeFailed
-                };
-                if let Err(settle_error) = ceremony_runner
-                    .fail_with_reason(&ceremony_id, reason, Some(error.to_string()))
-                    .await
-                {
-                    tracing::warn!(
-                        error = %settle_error,
-                        ceremony_id = %ceremony_id,
-                        "sole-device enrollment terminal outcome publication failed"
-                    );
-                }
-                tracing::warn!(
-                    error = %error,
-                    ceremony_id = %ceremony_id,
-                    "sole-device enrollment finalization failed"
-                );
-            }
-        };
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, fut);
-            } else {
-                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, fut);
-            }
-        }
+        )
     }
 
     fn spawn_device_epoch_rotation(
         &self,
         request: crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest,
-    ) {
+    ) -> Result<(), aura_core::AuraError> {
+        let original_children = request.origin.original_children();
         let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
             self.agent.authority_id(),
             self.agent.runtime().effects(),
@@ -4334,6 +4354,8 @@ impl AgentRuntimeBridge {
         let fut = async move {
             let ceremony_id = request.ceremony_id.clone();
             if let Err(error) = service.execute_initiator(request).await {
+                #[cfg(test)]
+                eprintln!("original device rotation failed before terminal publication: {error:?}");
                 let reason = if error.is_timeout() {
                     aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
                 } else {
@@ -4351,14 +4373,32 @@ impl AgentRuntimeBridge {
                     );
                 }
             }
+            Ok::<(), aura_core::AuraError>(())
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, fut);
+                if let Some(children) = original_children {
+                    let _task_handle = children.spawn_local_try_named_observed(task_name, fut)
+                        .map_err(|source| aura_core::AuraError::Internal {
+                            message: "original enrollment rotation task admission failed".into(),
+                            source: Some(std::sync::Arc::new(source)),
+                        })?;
+                } else {
+                    let _task_handle = self.agent.runtime().tasks().spawn_local_try_named(task_name, fut);
+                }
             } else {
-                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, fut);
+                if let Some(children) = original_children {
+                    let _task_handle = children.spawn_try_named_observed(task_name, fut)
+                        .map_err(|source| aura_core::AuraError::Internal {
+                            message: "original enrollment rotation task admission failed".into(),
+                            source: Some(std::sync::Arc::new(source)),
+                        })?;
+                } else {
+                    let _task_handle = self.agent.runtime().tasks().spawn_try_named(task_name, fut);
+                }
             }
         }
+        Ok(())
     }
 }
 

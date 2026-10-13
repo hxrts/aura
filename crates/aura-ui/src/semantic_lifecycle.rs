@@ -1,9 +1,9 @@
 use crate::UiController;
 use async_trait::async_trait;
 use aura_app::frontend_primitives::{
-    dropped_owner_error, run_frontend_sync_boundary, CeremonyMonitorHandoffSubmission,
-    LocalTerminalSubmission, SubmittedOperationPublisher, SubmittedOperationWorkflowError,
-    WorkflowHandoffRelease, WorkflowHandoffSubmission,
+    run_frontend_sync_boundary, CeremonyMonitorHandoffSubmission, LocalTerminalSubmission,
+    SubmittedOperationPublisher, SubmittedOperationWorkflowError, WorkflowHandoffRelease,
+    WorkflowHandoffSubmission,
 };
 use aura_app::ui::scenarios::UiOperationHandle;
 use aura_app::ui_contract::{
@@ -14,6 +14,15 @@ use aura_app::ui_contract::{
 };
 use std::future::Future;
 use std::sync::Arc;
+
+fn observe_controller_publication<T>(
+    boundary: &'static str,
+    observation: impl Future<Output = Result<T, aura_core::AuraError>>,
+) {
+    if let Err(source) = run_frontend_sync_boundary(boundary, observation) {
+        tracing::error!(%source, "controller terminal publication failed");
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiOperationTransferScope {
@@ -67,34 +76,25 @@ impl SubmittedOperationPublisher for UiSubmittedOperationPublisher {
         );
     }
 
-    async fn publish_terminal(
+    fn publish_terminal(
         &self,
-        operation_id: &OperationId,
-        instance_id: &OperationInstanceId,
-        causality: Option<SemanticOperationCausality>,
-        status: SemanticOperationStatus,
-    ) {
+        intent: aura_app::frontend_primitives::SubmittedTerminalIntent,
+    ) -> aura_app::frontend_primitives::SubmittedTerminalObservation {
+        let acknowledgment = aura_app::frontend_primitives::SubmittedTerminalAcknowledgment {
+            operation_id: intent.operation_id.clone(),
+            instance_id: intent.instance_id.clone(),
+            scope: aura_app::frontend_primitives::SubmittedTerminalAcknowledgmentScope::ControllerApplied,
+        };
         self.controller.apply_authoritative_operation_status(
-            operation_id.clone(),
-            Some(instance_id.clone()),
-            causality,
-            status,
+            intent.operation_id,
+            Some(intent.instance_id),
+            intent.causality,
+            intent.status,
         );
+        drop(intent.retained);
+        Box::pin(async move { Ok(acknowledgment) })
     }
-
-    fn publish_drop_failure(
-        &self,
-        operation_id: &OperationId,
-        instance_id: &OperationInstanceId,
-        kind: SemanticOperationKind,
-    ) {
-        self.controller.apply_authoritative_operation_status(
-            operation_id.clone(),
-            Some(instance_id.clone()),
-            None,
-            dropped_owner_error(kind),
-        );
-    }
+    fn relinquish(&self, _: &OperationId, _: &OperationInstanceId, _: SemanticOperationKind) {}
 }
 
 struct SubmittedUiLocalOwner(LocalTerminalSubmission<UiSubmittedOperationPublisher>);
@@ -176,6 +176,70 @@ pub fn apply_handed_off_terminal_status(
     Ok(())
 }
 
+/// Admit required import custody before relinquishing the exact local owner.
+/// The admitted task cannot execute until its actual release arms it.
+pub fn begin_exact_enrollment_import(
+    controller: Arc<UiController>,
+    code: String,
+    transfer_input: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
+    host: aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy,
+) -> Result<
+    (
+        UiOperationHandle,
+        UiOperationTransfer,
+        aura_app::ui::workflows::invitation::EnrollmentImportObservation,
+    ),
+    String,
+> {
+    use aura_app::ui::workflows::invitation::{
+        import_device_enrollment_with_terminal_status, EnrollmentImportAdmissionRefusal,
+    };
+    let owner = UiWorkflowHandoffOwner::submit(
+        controller.clone(),
+        OperationId::device_enrollment(),
+        SemanticOperationKind::ImportDeviceEnrollmentCode,
+    );
+    let handle = owner.operation_handle();
+    #[cfg(target_arch = "wasm32")]
+    if matches!(
+        &host,
+        aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy::RuntimeOnly
+    ) {
+        let refused = EnrollmentImportAdmissionRefusal::browser_host_unavailable();
+        let detail = refused.source_error().to_string();
+        owner.fail_with_custody(refused.semantic_error(), Box::new(refused));
+        return Err(detail);
+    }
+    let admitted = match controller.enrollment_import_admission() {
+        Some(admission) => import_device_enrollment_with_terminal_status(
+            controller.app_core(),
+            admission,
+            code,
+            transfer_input,
+            owner.workflow_instance_id(),
+            host,
+        ),
+        None => Err(EnrollmentImportAdmissionRefusal::unavailable()),
+    };
+    let mut observer = match admitted {
+        Ok(observer) => observer,
+        Err(refused) => {
+            let detail = refused.source_error().to_string();
+            owner.fail_with_custody(refused.semantic_error(), Box::new(refused));
+            return Err(detail);
+        }
+    };
+    let transfer = match owner.handoff_enrollment_import(&mut observer) {
+        Ok(transfer) => transfer,
+        Err((owner, error)) => {
+            let detail = error.to_string();
+            owner.fail_with_custody(error.semantic_error(), Box::new(error));
+            return Err(detail);
+        }
+    };
+    Ok((handle, transfer, observer))
+}
+
 #[must_use]
 pub fn begin_exact_handoff_operation(
     controller: Arc<UiController>,
@@ -223,11 +287,11 @@ impl SubmittedUiLocalOwner {
     }
 
     fn succeed(self, causality: Option<SemanticOperationCausality>) {
-        run_frontend_sync_boundary("UiLocalOperationOwner::succeed", self.0.succeed(causality));
+        observe_controller_publication("UiLocalOperationOwner::succeed", self.0.succeed(causality));
     }
 
     fn fail(self, error: SemanticOperationError) {
-        run_frontend_sync_boundary("UiLocalOperationOwner::fail", self.0.fail(error));
+        observe_controller_publication("UiLocalOperationOwner::fail", self.0.fail(error));
     }
 }
 
@@ -263,11 +327,37 @@ impl SubmittedUiHandoffOwner {
     }
 
     fn fail(self, error: SemanticOperationError) {
-        run_frontend_sync_boundary("UiWorkflowHandoffOwner::fail", self.0.fail(error));
+        observe_controller_publication("UiWorkflowHandoffOwner::fail", self.0.fail(error));
+    }
+
+    fn handoff_enrollment_import(
+        self,
+        observer: &mut aura_app::ui::workflows::invitation::EnrollmentImportObservation,
+    ) -> Result<
+        UiOperationTransfer,
+        (
+            Self,
+            aura_app::ui::workflows::invitation::EnrollmentImportHandoffError,
+        ),
+    > {
+        match observer.accept_handoff(self.0) {
+            Ok(release) => Ok(Self::transfer_with_release(
+                release,
+                UiOperationTransferScope::ImportDeviceEnrollment,
+            )),
+            Err((submission, error)) => Err((Self(submission), error)),
+        }
     }
 
     fn handoff_to_app_workflow(self, scope: UiOperationTransferScope) -> UiOperationTransfer {
         let release = self.0.handoff_to_workflow();
+        Self::transfer_with_release(release, scope)
+    }
+
+    fn transfer_with_release(
+        release: WorkflowHandoffRelease,
+        scope: UiOperationTransferScope,
+    ) -> UiOperationTransfer {
         let operation_id = release.operation_id().clone();
         let instance_id = release.instance_id().clone();
         let kind = release.kind();
@@ -355,6 +445,21 @@ impl UiWorkflowHandoffOwner {
         ))
     }
 
+    fn handoff_enrollment_import(
+        self,
+        observer: &mut aura_app::ui::workflows::invitation::EnrollmentImportObservation,
+    ) -> Result<
+        UiOperationTransfer,
+        (
+            Self,
+            aura_app::ui::workflows::invitation::EnrollmentImportHandoffError,
+        ),
+    > {
+        self.0
+            .handoff_enrollment_import(observer)
+            .map_err(|(owner, error)| (Self(owner), error))
+    }
+
     #[must_use]
     pub fn operation_handle(&self) -> UiOperationHandle {
         self.0.operation_handle()
@@ -367,6 +472,16 @@ impl UiWorkflowHandoffOwner {
 
     pub fn fail_with(self, error: SemanticOperationError) {
         self.0.fail(error);
+    }
+    pub fn fail_with_custody(
+        self,
+        error: SemanticOperationError,
+        retained: aura_app::frontend_primitives::SubmittedTerminalCustody,
+    ) {
+        observe_controller_publication(
+            "UiWorkflowHandoffOwner::fail_with_custody",
+            self.0 .0.fail_with_custody(error, Some(retained)),
+        );
     }
 
     #[must_use]
@@ -407,18 +522,18 @@ impl SubmittedUiCeremonyOwner {
     }
 
     fn fail(self, error: SemanticOperationError) {
-        run_frontend_sync_boundary("UiCeremonySubmissionOwner::fail", self.0.fail(error));
+        observe_controller_publication("UiCeremonySubmissionOwner::fail", self.0.fail(error));
     }
 
     fn monitor_started(self) {
-        let _ = run_frontend_sync_boundary(
+        observe_controller_publication(
             "UiCeremonySubmissionOwner::monitor_started",
             self.0.monitor_started(None),
         );
     }
 
     fn cancel(self) {
-        let _ = run_frontend_sync_boundary("UiCeremonySubmissionOwner::cancel", self.0.cancel());
+        observe_controller_publication("UiCeremonySubmissionOwner::cancel", self.0.cancel());
     }
 }
 
@@ -526,6 +641,68 @@ mod tests {
             )),
             Arc::new(MemoryClipboard::default()),
         ))
+    }
+
+    #[test]
+    fn synchronous_terminal_receipt_proves_controller_application() {
+        use aura_app::frontend_primitives::{
+            SubmittedTerminalAcknowledgmentScope, SubmittedTerminalIntent,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Retained(Arc<AtomicUsize>);
+        impl Drop for Retained {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+
+        let controller = controller();
+        let publisher = UiSubmittedOperationPublisher {
+            controller: controller.clone(),
+        };
+        let operation_id = OperationId::ban_actor();
+        let instance_id = OperationInstanceId("controller-original-publication".into());
+        let released = Arc::new(AtomicUsize::new(0));
+        let observation = publisher.publish_terminal(SubmittedTerminalIntent {
+            operation_id: operation_id.clone(),
+            instance_id: instance_id.clone(),
+            causality: None,
+            status: SemanticOperationStatus::failed(
+                SemanticOperationKind::BanActor,
+                SemanticOperationError::new(
+                    SemanticFailureDomain::Command,
+                    SemanticFailureCode::PermissionDenied,
+                ),
+            ),
+            retained: Some(Box::new(Retained(released.clone()))),
+        });
+
+        // Application precedes polling the receipt; the receipt only observes it.
+        let snapshot = controller.semantic_model_snapshot();
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == operation_id)
+            .expect("actual controller applied terminal intent");
+        assert_eq!(operation.instance_id, instance_id);
+        assert_eq!(
+            operation.state,
+            aura_app::ui::contract::OperationState::Failed
+        );
+        assert_eq!(
+            operation.failure.as_ref().map(|failure| failure.code),
+            Some(SemanticFailureCode::PermissionDenied)
+        );
+        assert_eq!(released.load(Ordering::Acquire), 1);
+
+        let acknowledgment = futures::executor::block_on(observation).unwrap();
+        assert_eq!(acknowledgment.operation_id, operation_id);
+        assert_eq!(acknowledgment.instance_id, instance_id);
+        assert_eq!(
+            acknowledgment.scope,
+            SubmittedTerminalAcknowledgmentScope::ControllerApplied
+        );
     }
 
     #[test]

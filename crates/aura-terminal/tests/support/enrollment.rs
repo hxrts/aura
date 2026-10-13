@@ -41,7 +41,17 @@ pub async fn provisional_invitee_setup(
     );
     let bridge = agent.clone().as_runtime_bridge();
     bridge
-        .bootstrap_signing_keys()
+        .bootstrap_signing_keys(
+            &aura_core::TimeoutBudget::from_start_and_timeout(
+                &bridge
+                    .physical_time_provider()
+                    .physical_time()
+                    .await
+                    .expect("original fixture initialization clock"),
+                std::time::Duration::from_secs(30),
+            )
+            .expect("original fixture initialization policy"),
+        )
         .await
         .expect("invitee signing ready");
     let setup_code = bridge

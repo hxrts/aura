@@ -20,6 +20,9 @@ use futures::{
 
 use super::cancellation_waiters::FrontendCancellationWaiters;
 
+mod required;
+pub use required::FrontendRequiredTaskReport;
+
 #[derive(Debug, Default)]
 struct FrontendTaskCancellationState {
     cancelled: AtomicBool,
@@ -90,6 +93,7 @@ struct FrontendTaskSpawnerImpl {
     cancellation_state: Arc<FrontendTaskCancellationState>,
     runtime: FrontendTaskRuntime,
     completion: Arc<TaskCompletion>,
+    required: required::RequiredRegistry,
 }
 
 const TASK_ADMISSION_CLOSED: usize = 1usize << (usize::BITS - 1);
@@ -195,6 +199,7 @@ impl FrontendTaskSpawnerImpl {
             cancellation_state,
             runtime,
             completion: Arc::new(TaskCompletion::default()),
+            required: required::RequiredRegistry::default(),
         }
     }
 
@@ -229,6 +234,20 @@ impl FrontendTaskSpawnerImpl {
 }
 
 impl TaskSpawner for FrontendTaskSpawnerImpl {
+    fn admit_required_custody(
+        &self,
+        name: &'static str,
+        obligation: Box<dyn aura_core::effects::task::RequiredTaskCustody>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<
+        Box<dyn aura_core::effects::task::RequiredTaskControl>,
+        aura_core::effects::task::RejectedRequiredTask<
+            dyn aura_core::effects::task::RequiredTaskCustody,
+        >,
+    > {
+        self.admit_required(name, obligation, token)
+    }
+
     fn spawn(&self, fut: BoxFuture<'static, ()>) {
         let Some(lease) = self.completion.admit() else {
             return;
@@ -357,6 +376,18 @@ impl FrontendTaskManager {
     /// shutdown. The caller supplies its original bounded observation window.
     pub async fn wait_drained(&self) {
         self.inner.completion.drained().await;
+    }
+
+    /// Observe original required obligations independently of worker completion.
+    pub async fn required_task_reports(&self) -> Vec<FrontendRequiredTaskReport> {
+        self.inner.required.reports().await
+    }
+
+    /// Acknowledge original required resource disposal after task drainage.
+    /// Failed cleanup retains its owner and original control for reconciliation.
+    pub async fn wait_required_disposed(&self) -> Result<(), aura_core::AuraError> {
+        self.inner.completion.drained().await;
+        self.inner.required.require_disposed().await
     }
 }
 

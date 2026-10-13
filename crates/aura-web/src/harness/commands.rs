@@ -865,32 +865,31 @@ async fn execute_semantic_intent(
             code,
             manifest_transfer,
         } => {
+            match &contract.submission {
+                SubmissionContract::OperationHandle { operation_id, .. }
+                    if operation_id == &OperationId::device_enrollment() => {}
+                _ => {
+                    return Err(JsValue::from_str(
+                        "enrollment import requires declared operation handle",
+                    ))
+                }
+            }
             let app_core = controller.app_core().clone();
-            let (handle, transfer) = begin_declared_handoff_operation(
-                controller.clone(),
-                &contract,
-                OperationId::device_enrollment(),
-                SemanticOperationKind::ImportDeviceEnrollmentCode,
-                UiOperationTransferScope::ImportDeviceEnrollment,
-            )?;
-            let instance = Some(handle.instance_id().clone());
+            let (handle, transfer, observer) =
+                aura_ui::semantic_lifecycle::begin_exact_enrollment_import(
+                    controller.clone(),
+                    code,
+                    manifest_transfer,
+                    workflows::enrollment_import_host_policy(app_core, active_storage_prefix()),
+                )
+                .map_err(|error| JsValue::from_str(&error))?;
             spawn_handoff_workflow_task(
                 "import_device_enrollment",
                 controller.clone(),
                 transfer,
                 "import_device_enrollment",
-                async move {
-                    aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
-                        &app_core,code,manifest_transfer,instance).await
-                },
-                move |controller, completed| async move {
-                    workflows::persist_completed_enrollment_identity(
-                        controller.app_core(),
-                        &completed,
-                        &active_storage_prefix(),
-                    )
-                    .await
-                    .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                observer,
+                move |controller, _completed| async move {
                     crate::harness_bridge::apply_browser_ui_mutation(
                         controller.clone(),
                         move |controller| {

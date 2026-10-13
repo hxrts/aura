@@ -4,7 +4,7 @@
 //! calls the same workflow functions the TUI and web call; nothing here
 //! reaches agent services or local files.
 
-use super::request::{ExportFormat, InviteRole, Request};
+use super::request::{EnrollmentShortcutRole, ExportFormat, InviteRole, Request};
 use super::response::{
     AccountView, AmpChannelView, AuthorityView, CeremonyStatusView, ChannelView, ContactView,
     InvitationView, MessageView, NotificationView, OperationView, OtaReleaseView, OtaUpgradeView,
@@ -20,7 +20,8 @@ use aura_app::ui::signals::{SyncStatus, CONTACTS_SIGNAL};
 use aura_app::ui::types::{
     format_budget_status, AccessLevel, AppCore, Channel, Contact, ContactRelationshipState,
     ContactsState, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, InvitationsState,
-    Message, ReadReceiptPolicy, RecoveryState,
+    Message, PostEnrollmentShortcutPurpose, PostEnrollmentShortcutSelection, ReadReceiptPolicy,
+    RecoveryState,
 };
 use aura_app::ui::workflows::signals::read_signal_or_default;
 use aura_app::ui::workflows::strong_command::CommandResolver;
@@ -976,6 +977,47 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
             let handle = ceremonies::start_device_removal_ceremony(app, device).await?;
             Ok(Response::CeremonyStarted {
                 ceremony_id: handle.ceremony_id().to_string(),
+            })
+        }
+        Request::DeviceEnrollWithShortcut {
+            nickname,
+            setup_code,
+            recipient,
+            recipient_device,
+            purpose,
+        } => {
+            let recipient = parse_authority("shortcut recipient", &recipient)?;
+            let device =
+                parse::<aura_core::DeviceId>("shortcut recipient device", &recipient_device)?;
+            let purpose = match purpose {
+                EnrollmentShortcutRole::Contact => PostEnrollmentShortcutPurpose::Contact,
+                EnrollmentShortcutRole::Guardian => PostEnrollmentShortcutPurpose::Guardian,
+            };
+            let selection = PostEnrollmentShortcutSelection::select_external(
+                ctx.authority_id,
+                recipient,
+                device,
+                purpose,
+            )
+            .map_err(CommandError::from)?;
+            let start = ceremonies::start_device_enrollment_with_external_shortcut(
+                app,
+                nickname.clone(),
+                setup_code.clone(),
+                selection,
+            )
+            .await?;
+            Ok(Response::DeviceEnrollmentStarted {
+                ceremony_id: start.ceremony_id.to_string(),
+                enrollment_code: start.enrollment_code,
+                manifest_code: start
+                    .manifest_transfer
+                    .as_ref()
+                    .map(|v| v.manifest_code.clone()),
+                initiator_verifier_code: start
+                    .manifest_transfer
+                    .as_ref()
+                    .map(|v| v.initiator_verifier_code.clone()),
             })
         }
         Request::RotationCancel { ceremony_id } => {

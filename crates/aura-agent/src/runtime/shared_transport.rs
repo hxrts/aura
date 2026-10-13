@@ -36,12 +36,15 @@ pub struct SharedTransport {
 #[derive(Debug)]
 struct SharedTransportShared {
     state: RwLock<SharedTransportState>,
+    #[cfg(test)]
+    routed_observation: RwLock<Option<Vec<TransportEnvelope>>>,
 }
 
 #[derive(Debug, Default)]
 struct SharedTransportState {
     inboxes: HashMap<AuthorityId, Arc<RwLock<Vec<TransportEnvelope>>>>,
     inbox_notifiers: HashMap<AuthorityId, Arc<Notify>>,
+    fresh_arrival_notifiers: HashMap<AuthorityId, Arc<Notify>>,
     online: HashSet<AuthorityId>,
     device_authorities: HashMap<aura_core::DeviceId, AuthorityId>,
     link_faults: HashMap<(AuthorityId, AuthorityId), LinkFault>,
@@ -83,11 +86,32 @@ impl SharedTransportState {
 }
 
 impl SharedTransport {
+    /// Opt-in, per-instance observation of actual successful routing only.
+    #[cfg(test)]
+    pub(crate) fn observe_routed_envelopes_for_test(&self) {
+        let mut observation = self.shared.routed_observation.write();
+        assert!(
+            observation.is_none(),
+            "original routing observation already installed"
+        );
+        *observation = Some(Vec::new());
+    }
+    #[cfg(test)]
+    pub(crate) fn routed_envelopes_for_test(&self) -> Vec<TransportEnvelope> {
+        self.shared
+            .routed_observation
+            .read()
+            .as_ref()
+            .expect("routing observation must be installed before actual send")
+            .clone()
+    }
     /// Create a new empty shared transport network.
     pub fn new() -> Self {
         Self {
             shared: Arc::new(SharedTransportShared {
                 state: RwLock::new(SharedTransportState::default()),
+                #[cfg(test)]
+                routed_observation: RwLock::new(None),
             }),
         }
     }
@@ -134,6 +158,16 @@ impl SharedTransport {
         })
     }
 
+    fn fresh_arrival_notify_inner(&self, authority_id: AuthorityId) -> Arc<Notify> {
+        self.with_state_mut(|state| {
+            state
+                .fresh_arrival_notifiers
+                .entry(authority_id)
+                .or_insert_with(|| Arc::new(Notify::new()))
+                .clone()
+        })
+    }
+
     /// Access the inbox for a specific authority.
     pub fn inbox_for(&self, authority_id: AuthorityId) -> Arc<RwLock<Vec<TransportEnvelope>>> {
         self.ensure_inbox(authority_id)
@@ -164,8 +198,43 @@ impl SharedTransport {
             .unwrap_or(envelope.destination);
         let inbox = self.ensure_inbox(mailbox);
         let notify = self.inbox_notify_inner(mailbox);
+        let fresh_arrival = self.fresh_arrival_notify_inner(mailbox);
+        #[cfg(test)]
+        let actual_routed = envelope.clone();
         inbox.write().push(envelope);
+        #[cfg(test)]
+        if let Some(observation) = self.shared.routed_observation.write().as_mut() {
+            // Capture only after the original envelope reached the real inbox.
+            // This records exact bytes/metadata/receipt, not a send invocation.
+            observation.push(actual_routed);
+        }
         notify.notify_waiters();
+        fresh_arrival.notify_waiters();
+    }
+
+    /// Restore a frame already admitted to this inbox. This is an inbox-content
+    /// change, not a new network arrival, and must bypass outbound link faults.
+    pub(crate) fn restore_envelope(&self, envelope: TransportEnvelope) {
+        self.restore_envelope_at(envelope, None);
+    }
+
+    pub(crate) fn restore_envelope_at(
+        &self,
+        envelope: TransportEnvelope,
+        original_index: Option<usize>,
+    ) {
+        let mailbox = envelope
+            .metadata
+            .get("aura-destination-device-id")
+            .and_then(|raw| raw.parse::<aura_core::DeviceId>().ok())
+            .and_then(|device| self.authority_for_device(device))
+            .unwrap_or(envelope.destination);
+        let inbox = self.ensure_inbox(mailbox);
+        let mut inbox = inbox.write();
+        let index = original_index.unwrap_or(inbox.len()).min(inbox.len());
+        inbox.insert(index, envelope);
+        drop(inbox);
+        self.inbox_notify_inner(mailbox).notify_waiters();
     }
 
     /// Record which authority owns a simulated device, so device-addressed
@@ -243,6 +312,10 @@ impl SharedTransport {
     /// Return the authority-scoped inbox notifier used by shared transport delivery.
     pub fn inbox_notify(&self, authority_id: AuthorityId) -> Arc<Notify> {
         self.inbox_notify_inner(authority_id)
+    }
+
+    pub(crate) fn fresh_arrival_notify(&self, authority_id: AuthorityId) -> Arc<Notify> {
+        self.fresh_arrival_notify_inner(authority_id)
     }
 }
 

@@ -29,6 +29,72 @@ pub struct DeviceEnrollmentSetupBinding {
     pub digest: [u8; 32],
 }
 
+/// Invitation purpose used for typed dispatch. This observation grants no
+/// signature verification, enrollment approval, or contact authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationPurpose {
+    /// Invitation to join a channel or its home.
+    Channel,
+    /// Invitation to become a guardian.
+    Guardian,
+    /// Invitation to become a contact.
+    Contact,
+    /// Invitation to enroll a physical device.
+    DeviceEnrollment,
+}
+
+/// Bound shared by the broker mailbox and its finite receiving owner.
+pub const MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT: usize = 16;
+
+/// Untrusted transport record. Purpose and recipient observations grant no
+/// signature verification, enrollment approval, or contact authority.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BootstrapBrokerInvitation {
+    /// Observed authority address, checked against the selected runtime receiver.
+    pub recipient_authority_id: String,
+    /// Observed physical receiver, distinct from sibling devices.
+    pub recipient_device_id: DeviceId,
+    /// Dispatch label, checked again against canonical and verified code shapes.
+    pub purpose: InvitationPurpose,
+    /// Original code; omitted from diagnostics and never treated as approval.
+    pub invitation_code: String,
+}
+
+impl std::fmt::Debug for BootstrapBrokerInvitation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BootstrapBrokerInvitation")
+            .field("recipient_authority_id", &self.recipient_authority_id)
+            .field("recipient_device_id", &self.recipient_device_id)
+            .field("purpose", &self.purpose)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Runtime-selected receiving identity beside the observed wire records.
+/// This is not decoded from a remote response and grants no workflow authority.
+#[derive(Debug)]
+pub struct BootstrapInvitationBatch {
+    /// Authority selected by the actual receiving runtime.
+    pub recipient_authority_id: AuthorityId,
+    /// Physical device selected by that same runtime before retrieval.
+    pub recipient_device_id: DeviceId,
+    /// Complete transport response in its original order.
+    pub deliveries: Vec<BootstrapBrokerInvitation>,
+}
+
+impl InvitationPurpose {
+    /// Canonical fact-storage label for this invitation purpose.
+    pub const fn fact_type(self) -> &'static str {
+        match self {
+            Self::Channel => "channel",
+            Self::Guardian => "guardian",
+            Self::Contact => "contact",
+            Self::DeviceEnrollment => "device",
+        }
+    }
+}
+
 /// Type of invitation
 // aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md device-enrollment variant carries encrypted setup payloads for transfer; field-level justifications track migration to secret wrappers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,14 +187,19 @@ mod channel_id_serde {
 }
 
 impl InvitationType {
+    /// Observe the purpose of this canonical invitation payload.
+    pub const fn purpose(&self) -> InvitationPurpose {
+        match self {
+            Self::Channel { .. } => InvitationPurpose::Channel,
+            Self::Guardian { .. } => InvitationPurpose::Guardian,
+            Self::Contact { .. } => InvitationPurpose::Contact,
+            Self::DeviceEnrollment { .. } => InvitationPurpose::DeviceEnrollment,
+        }
+    }
+
     /// Convert to type string for fact storage
     pub fn as_type_string(&self) -> String {
-        match self {
-            InvitationType::Channel { .. } => "channel".to_string(),
-            InvitationType::Guardian { .. } => "guardian".to_string(),
-            InvitationType::Contact { .. } => "contact".to_string(),
-            InvitationType::DeviceEnrollment { .. } => "device".to_string(),
-        }
+        self.purpose().fact_type().to_owned()
     }
 }
 

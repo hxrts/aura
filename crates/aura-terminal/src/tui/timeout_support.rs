@@ -102,14 +102,13 @@ where
     Clear: FnOnce() -> ClearFuture,
     ClearFuture: Future<Output = std::io::Result<()>>,
     Drain: FnOnce() -> DrainFuture,
-    DrainFuture: Future<Output = ()>,
+    DrainFuture: Future<Output = std::io::Result<()>>,
 {
     let mut clear_failure = None;
     let drainage = window
         .run(|| async {
             clear_failure = clear().await.err();
-            drain().await;
-            Ok(())
+            drain().await
         })
         .await;
     match (clear_failure, drainage) {
@@ -231,6 +230,123 @@ mod shutdown_window_tests {
     }
 
     #[tokio::test]
+    async fn shutdown_required_custody_failure_retains_both_original_sources() {
+        use aura_core::effects::task::{
+            RequiredTaskCustody, RequiredTaskExit, RequiredTaskSettlement,
+        };
+        use futures::future::BoxFuture;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        #[derive(Debug, thiserror::Error)]
+        #[error("actual clearing refusal")]
+        struct ClearFailure;
+        struct RequiredOwner {
+            ready: Option<futures::channel::oneshot::Sender<()>>,
+            refuse: Arc<AtomicBool>,
+            dropped: Arc<AtomicUsize>,
+            source: Arc<std::io::Error>,
+        }
+        impl Drop for RequiredOwner {
+            fn drop(&mut self) {
+                self.dropped.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+        impl RequiredTaskCustody for RequiredOwner {
+            fn execute(&mut self) -> BoxFuture<'_, Result<(), aura_core::AuraError>> {
+                Box::pin(async {
+                    self.ready.take().unwrap().send(()).unwrap();
+                    futures::future::pending().await
+                })
+            }
+            fn cleanup<'a>(
+                &'a mut self,
+                exit: &'a RequiredTaskExit,
+            ) -> BoxFuture<'a, Result<RequiredTaskSettlement, aura_core::AuraError>> {
+                Box::pin(async move {
+                    assert!(matches!(exit, RequiredTaskExit::Cancelled));
+                    if self.refuse.load(Ordering::Acquire) {
+                        Err(aura_core::AuraError::Internal {
+                            message: "required native disposal refused".into(),
+                            source: Some(self.source.clone()),
+                        })
+                    } else {
+                        Ok(RequiredTaskSettlement::Resolved)
+                    }
+                })
+            }
+        }
+        let time = Arc::new(ManualPhysicalClock::new(1000));
+        let start = time.physical_time().await.unwrap();
+        let window = TerminalShutdownWindow {
+            time: time.clone(),
+            budget: TimeoutBudget::from_start_and_timeout(&start, Duration::from_secs(5)).unwrap(),
+        };
+        let tasks = crate::tui::tasks::UiTaskOwner::new();
+        let source = Arc::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "original required native disposal source",
+        ));
+        let refuse = Arc::new(AtomicBool::new(true));
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let (ready, observed) = futures::channel::oneshot::channel();
+        let mut original_control = tasks
+            .owned_spawner()
+            .spawn_required_custody(
+                "original-terminal-shutdown-obligation",
+                Box::new(RequiredOwner {
+                    ready: Some(ready),
+                    refuse: refuse.clone(),
+                    dropped: dropped.clone(),
+                    source: source.clone(),
+                }),
+            )
+            .unwrap();
+        observed.await.unwrap();
+        tasks.shutdown();
+        let failure = run_terminal_shutdown_cleanup(
+            &window,
+            || async { Err(std::io::Error::other(ClearFailure)) },
+            || async {
+                tasks
+                    .wait_required_disposed()
+                    .await
+                    .map_err(std::io::Error::other)
+            },
+        )
+        .await
+        .unwrap_err();
+        let retained = failure
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<ShutdownCleanupFailure>())
+            .expect("clearing and required resource errors remain independent");
+        assert!(retained
+            .clear
+            .get_ref()
+            .is_some_and(|source| source.is::<ClearFailure>()));
+        let native = retained
+            .drain
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<aura_core::AuraError>())
+            .expect("required disposal must remain a concrete native error");
+        let aura_core::AuraError::Internal {
+            source: Some(actual),
+            ..
+        } = native
+        else {
+            panic!("actual disposal provider source missing");
+        };
+        let expected: Arc<dyn std::error::Error + Send + Sync> = source;
+        assert!(Arc::ptr_eq(&expected, actual));
+        assert_eq!(dropped.load(Ordering::Acquire), 0);
+        assert_eq!(time.now_ms(), 1000);
+        refuse.store(false, Ordering::Release);
+        original_control.reconcile().await.unwrap();
+        tasks.wait_required_disposed().await.unwrap();
+        assert_eq!(dropped.load(Ordering::Acquire), 1);
+        assert_eq!(time.now_ms(), 1000);
+    }
+
+    #[tokio::test]
     async fn shutdown_clear_failure_survives_original_endpoint_during_task_drain() {
         #[derive(Debug, thiserror::Error)]
         #[error("actual harness sender clearing fault")]
@@ -244,7 +360,7 @@ mod shutdown_window_tests {
         let cleanup = run_terminal_shutdown_cleanup(
             &window,
             || async { Err(std::io::Error::other(NativeClearFailure)) },
-            || futures::future::pending::<()>(),
+            || futures::future::pending::<std::io::Result<()>>(),
         );
         futures::pin_mut!(cleanup);
         assert!(futures::poll!(cleanup.as_mut()).is_pending());

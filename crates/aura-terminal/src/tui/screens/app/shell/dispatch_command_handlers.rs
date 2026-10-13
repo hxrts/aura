@@ -65,13 +65,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::start_recovery(),
                 SemanticOperationKind::StartRecovery,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.recovery.on_start_recovery)(operation);
         }
         DispatchCommand::ApproveRecovery => {
@@ -99,13 +105,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = submit_local_terminal_operation(
+                let operation = match submit_local_terminal_operation(
                     app_core_for_events,
                     tasks_for_events,
                     update_tx,
                     OperationId::submit_guardian_approval(),
                     SemanticOperationKind::SubmitGuardianApproval,
-                );
+                ) {
+                    Ok(owner) => owner,
+                    Err(source) => {
+                        new_state.toast_error(source.to_string());
+                        return EventCommandLoopAction::ContinueCommand;
+                    }
+                };
                 (cb.recovery.on_submit_approval)(request_id, operation);
             } else {
                 new_state.toast_error("No pending recovery requests");
@@ -151,13 +163,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::start_guardian_ceremony(),
                 SemanticOperationKind::StartGuardianCeremony,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
 
             let tasks = tasks_for_events;
             let tasks_handle = tasks.clone();
@@ -324,13 +342,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::start_multifactor_ceremony(),
                 SemanticOperationKind::StartMultifactorCeremony,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
 
             let tasks = tasks_for_events;
             let tasks_handle = tasks.clone();
@@ -473,13 +497,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::cancel_guardian_ceremony(),
                 SemanticOperationKind::CancelGuardianCeremony,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
 
             let tasks = tasks_for_events;
             tasks.spawn(async move {
@@ -539,13 +569,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::cancel_key_rotation_ceremony(),
                 SemanticOperationKind::CancelKeyRotationCeremony,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
 
             let tasks = tasks_for_events;
             tasks.spawn(async move {
@@ -626,13 +662,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::account_create(),
                 SemanticOperationKind::CreateAccount,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             let handle = operation.harness_handle();
             set_authoritative_operation_state_sanctioned(
                 new_state,
@@ -651,13 +693,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.app.on_import_device_enrollment_during_onboarding)(
                 code,
                 manifest_transfer,
@@ -669,13 +717,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::CreateGuardianInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.recovery.on_select_guardian)(contact_id.to_string(), operation);
         }
 
@@ -693,13 +747,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::join_channel(),
                 SemanticOperationKind::JoinChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.router.go_to(Screen::Chat);
             (cb.chat.on_join_channel)(channel_name, operation);
         }
@@ -708,13 +768,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_accept_channel(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.router.go_to(Screen::Chat);
             (cb.chat.on_accept_pending_channel_invitation)(operation);
         }
@@ -738,13 +804,19 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = submit_workflow_handoff_operation(
+                let operation = match submit_workflow_handoff_operation(
                     app_core_for_events,
                     tasks_for_events,
                     update_tx,
                     OperationId::send_message(),
                     SemanticOperationKind::SendChatMessage,
-                );
+                ) {
+                    Ok(owner) => owner,
+                    Err(source) => {
+                        new_state.toast_error(source.to_string());
+                        return EventCommandLoopAction::ContinueCommand;
+                    }
+                };
                 (cb.chat.on_send_owned)(channel_id, content, operation);
             } else {
                 new_state
@@ -765,13 +837,19 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = submit_workflow_handoff_operation(
+                let operation = match submit_workflow_handoff_operation(
                     app_core_for_events,
                     tasks_for_events,
                     update_tx,
                     OperationId::retry_message(),
                     SemanticOperationKind::RetryChatMessage,
-                );
+                ) {
+                    Ok(owner) => owner,
+                    Err(source) => {
+                        new_state.toast_error(source.to_string());
+                        return EventCommandLoopAction::ContinueCommand;
+                    }
+                };
                 (cb.chat.on_retry_message)(
                     msg.id.clone(),
                     msg.channel_id.clone(),
@@ -916,13 +994,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::create_channel(),
                 aura_app::ui_contract::SemanticOperationKind::CreateChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.chat.on_create_channel)(
                 name,
                 topic,
@@ -940,13 +1024,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::set_channel_topic(),
                 SemanticOperationKind::SetChannelTopic,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.chat.on_edit_channel_info)(channel_id.to_string(), name, topic, operation);
         }
         DispatchCommand::DeleteChannel { channel_id } => {
@@ -954,13 +1044,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::close_channel(),
                 SemanticOperationKind::CloseChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.chat.on_close_channel)(channel_id.to_string(), operation);
         }
 
@@ -973,13 +1069,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::update_contact_nickname(),
                 SemanticOperationKind::UpdateContactNickname,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.contacts.on_update_nickname)(contact_id.to_string(), nickname, operation);
         }
         DispatchCommand::OpenContactNicknameModal => {
@@ -1027,13 +1129,19 @@ pub(super) fn handle_dispatch_command_match(
                         new_state.toast_error("UI update sender is unavailable");
                         return EventCommandLoopAction::ContinueCommand;
                     };
-                    let operation = submit_local_terminal_operation(
+                    let operation = match submit_local_terminal_operation(
                         app_core_for_events,
                         tasks_for_events,
                         update_tx,
                         OperationId::start_direct_chat(),
                         SemanticOperationKind::StartDirectChat,
-                    );
+                    ) {
+                        Ok(owner) => owner,
+                        Err(source) => {
+                            new_state.toast_error(source.to_string());
+                            return EventCommandLoopAction::ContinueCommand;
+                        }
+                    };
                     (cb.contacts.on_start_chat)(contact.id.clone(), operation);
                 } else {
                     new_state.toast_error("No contact selected");
@@ -1054,13 +1162,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::CreateGuardianInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.recovery.on_select_guardian)(contact.id, operation);
         }
         DispatchCommand::ToggleSelectedContactReadReceipts => {
@@ -1112,13 +1226,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::send_friend_request(),
                 SemanticOperationKind::SendFriendRequest,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.contacts.on_send_friend_request)(contact.id, operation);
         }
         DispatchCommand::AcceptSelectedFriendRequest => {
@@ -1142,13 +1262,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::accept_friend_request(),
                 SemanticOperationKind::AcceptFriendRequest,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.contacts.on_accept_friend_request)(contact.id, operation);
         }
         DispatchCommand::DeclineSelectedFriendRequest => {
@@ -1172,13 +1298,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::decline_friend_request(),
                 SemanticOperationKind::DeclineFriendRequest,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.contacts.on_decline_friend_request)(contact.id, operation);
         }
         DispatchCommand::RevokeSelectedFriendship => {
@@ -1202,13 +1334,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::revoke_friendship(),
                 SemanticOperationKind::RevokeFriendship,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.contacts.on_revoke_friendship)(contact.id, operation);
         }
         DispatchCommand::InviteSelectedContactToChannel => {
@@ -1239,13 +1377,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 contact.id.clone(),
@@ -1286,13 +1430,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 authority_id.to_string(),
@@ -1313,13 +1463,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::remove_contact(),
                 SemanticOperationKind::RemoveContact,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.contacts.on_remove_contact)(contact_id.to_string(), operation);
         }
         DispatchCommand::OpenRemoveContactModal => {
@@ -1405,13 +1561,19 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = submit_local_terminal_operation(
+                let operation = match submit_local_terminal_operation(
                     app_core_for_events,
                     tasks_for_events,
                     update_tx,
                     OperationId::accept_friend_request(),
                     SemanticOperationKind::AcceptFriendRequest,
-                );
+                ) {
+                    Ok(owner) => owner,
+                    Err(source) => {
+                        new_state.toast_error(source.to_string());
+                        return EventCommandLoopAction::ContinueCommand;
+                    }
+                };
                 (cb.contacts.on_accept_friend_request)(authority.clone(), operation);
                 return EventCommandLoopAction::ContinueCommand;
             }
@@ -1430,13 +1592,19 @@ pub(super) fn handle_dispatch_command_match(
                         }
                         _ => OperationId::invitation_accept_contact(),
                     };
-                    let operation = submit_workflow_handoff_operation(
+                    let operation = match submit_workflow_handoff_operation(
                         app_ctx_for_dispatch.app_core.raw().clone(),
                         app_ctx_for_dispatch.tasks(),
                         update_tx,
                         operation_id,
                         accept_kind,
-                    );
+                    ) {
+                        Ok(owner) => owner,
+                        Err(source) => {
+                            new_state.toast_error(source.to_string());
+                            return EventCommandLoopAction::ContinueCommand;
+                        }
+                    };
                     new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
                     (cb.invitations.on_accept)(invitation_id, operation);
                 } else {
@@ -1464,13 +1632,19 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = submit_local_terminal_operation(
+                let operation = match submit_local_terminal_operation(
                     app_core_for_events,
                     tasks_for_events,
                     update_tx,
                     OperationId::decline_friend_request(),
                     SemanticOperationKind::DeclineFriendRequest,
-                );
+                ) {
+                    Ok(owner) => owner,
+                    Err(source) => {
+                        new_state.toast_error(source.to_string());
+                        return EventCommandLoopAction::ContinueCommand;
+                    }
+                };
                 (cb.contacts.on_decline_friend_request)(authority.clone(), operation);
                 return EventCommandLoopAction::ContinueCommand;
             }
@@ -1479,13 +1653,19 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = submit_local_terminal_operation(
+                let operation = match submit_local_terminal_operation(
                     app_core_for_events,
                     tasks_for_events,
                     update_tx,
                     OperationId::invitation_decline(),
                     SemanticOperationKind::DeclineInvitation,
-                );
+                ) {
+                    Ok(owner) => owner,
+                    Err(source) => {
+                        new_state.toast_error(source.to_string());
+                        return EventCommandLoopAction::ContinueCommand;
+                    }
+                };
                 (cb.invitations.on_decline)(invitation_id, operation);
             } else if let Some(NotificationSelection::SentInvitation(invitation_id)) = selected {
                 // On a sent invitation, `x` revokes it after confirmation.
@@ -1519,13 +1699,19 @@ pub(super) fn handle_dispatch_command_match(
                 InvitationKind::Guardian => SemanticOperationKind::CreateGuardianInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 kind,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.clear_runtime_fact_kind(RuntimeEventKind::InvitationCodeReady);
             (cb.invitations.on_create)(
                 receiver_id,
@@ -1542,13 +1728,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_accept_contact(),
                 SemanticOperationKind::AcceptContactInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_accept_contact_code)(code, operation);
         }
@@ -1557,13 +1749,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_import(),
                 SemanticOperationKind::ImportInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_import)(code, operation);
         }
@@ -1591,13 +1789,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::invitation_revoke(),
                 SemanticOperationKind::RevokeInvitation,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.invitations.on_revoke)(invitation_id.to_string(), operation);
         }
 
@@ -1619,13 +1823,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::update_nickname_suggestion(),
                 SemanticOperationKind::UpdateNicknameSuggestion,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.settings.on_update_nickname_suggestion)(nickname_suggestion, operation);
         }
         DispatchCommand::UpdateMfaPolicy { policy } => {
@@ -1633,13 +1843,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::update_mfa_policy(),
                 SemanticOperationKind::UpdateMfaPolicy,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.settings.on_update_mfa)(policy, operation);
         }
         DispatchCommand::ToggleSigningConsent | DispatchCommand::DecideSigningRequest { .. } => {
@@ -1698,13 +1914,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = match submit_local_terminal_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::StartDeviceEnrollment,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.settings.on_add_device)(name, setup_code, operation);
         }
         DispatchCommand::RemoveDevice { device_id } => {
@@ -1712,13 +1934,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_ceremony_operation(
+            let operation = match submit_ceremony_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::remove_device(),
                 SemanticOperationKind::RemoveDevice,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.settings.on_remove_device)(device_id, operation);
         }
         DispatchCommand::ImportDeviceEnrollmentOnMobile {
@@ -1729,13 +1957,19 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_workflow_handoff_operation(
+            let operation = match submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
-            );
+            ) {
+                Ok(owner) => owner,
+                Err(source) => {
+                    new_state.toast_error(source.to_string());
+                    return EventCommandLoopAction::ContinueCommand;
+                }
+            };
             (cb.settings.on_import_device_enrollment_on_mobile)(code, manifest_transfer, operation);
         }
         DispatchCommand::OpenAuthorityPicker => {
