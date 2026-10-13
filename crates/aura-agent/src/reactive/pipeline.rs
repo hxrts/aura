@@ -210,6 +210,9 @@ impl ReactivePipeline {
     /// Publish replay facts and wait for this exact accepted target under the
     /// service owner's original resource window. Diagnostic Batch events never
     /// satisfy required replay readiness.
+    /// Required replay flushes the scheduler's ordered pending batch without
+    /// waiting for its performance timer; readiness still requires actual view
+    /// application and the original target's processing acknowledgment.
     pub(crate) async fn replay_required<T: PhysicalTimeEffects + Sync>(
         &self,
         facts: Vec<Fact>,

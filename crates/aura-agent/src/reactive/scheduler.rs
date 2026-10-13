@@ -397,6 +397,16 @@ impl ReactiveScheduler {
                     if batch.is_empty() {
                         self.acknowledge_processed(processed_through.take());
                     }
+                    // An issued processing target is a required flush boundary,
+                    // including facts already ordered before its publication.
+                    // Keep the selected clock observation fallible even though
+                    // this path does not wait for the performance batch timer.
+                    if sequence.is_some() && !batch.is_empty() {
+                        self.time_effects.physical_time().await.map_err(required_scheduler_source)?;
+                        batch_window = None;
+                        self.process_batch(std::mem::take(&mut batch), processed_through.take()).await?;
+                        continue;
+                    }
                     // Start batching window if this is the first fact
                     if was_empty && !batch.is_empty() {
                         let now = self.time_effects.physical_time().await.map_err(required_scheduler_source)?;
@@ -1037,6 +1047,67 @@ mod tests {
         assert!(source
             .downcast_ref::<tokio::sync::watch::error::RecvError>()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn required_nonempty_replay_flushes_pending_batch_without_clock_progress() {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let (mut scheduler, ingress, shutdown) = ReactiveScheduler::new(
+            SchedulerConfig {
+                collect_stats: true,
+                ..SchedulerConfig::default()
+            },
+            Arc::new(build_fact_registry()),
+            clock.clone(),
+        );
+        let updates = Arc::new(RwLock::new(0));
+        scheduler.register_view(Arc::new(MockView {
+            id: "required-frozen-replay".into(),
+            update_count: updates.clone(),
+        }));
+        let stats = scheduler.shared.clone();
+        let fact = |id| {
+            make_test_fact(
+                id,
+                FactContent::Relational(RelationalFact::Generic {
+                    context_id: test_context_id(),
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from(
+                            "required_frozen_replay",
+                        ),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![1],
+                    },
+                }),
+            )
+        };
+        ingress
+            .send(FactSource::Journal(vec![fact(93)]))
+            .await
+            .unwrap();
+        let target = ingress.publish_required(vec![fact(94)]).await.unwrap();
+        let started = clock.physical_time().await.unwrap();
+        let original =
+            TimeoutBudget::from_start_and_timeout(&started, Duration::from_secs(1)).unwrap();
+        let exercise = async {
+            target
+                .await_processed(&ingress, clock.as_ref(), &original)
+                .await
+                .unwrap();
+            assert_eq!(
+                *updates.read().await,
+                2,
+                "actual view applied the ordered combined batch"
+            );
+            assert_eq!(clock.physical_time().await.unwrap(), started);
+            shutdown.send(()).await.unwrap();
+        };
+        let (result, ()) = futures::join!(scheduler.run(), exercise);
+        result.unwrap();
+        let stats = stats.stats.read().await;
+        assert_eq!(stats.facts_processed, 2);
+        assert_eq!(stats.batch_count, 1);
     }
 
     #[tokio::test]
@@ -1726,10 +1797,8 @@ mod tests {
     #[tokio::test]
     async fn required_issued_target_retains_failed_projection_without_processing_ack() {
         use std::error::Error;
-        let (mut scheduler, ingress, _shutdown) = scheduler_with_registry(SchedulerConfig {
-            batch_window: Duration::ZERO,
-            ..SchedulerConfig::default()
-        });
+        let (mut scheduler, ingress, _shutdown) =
+            scheduler_with_registry(SchedulerConfig::default());
         scheduler.register_view(Arc::new(FailingProjection));
         let target = ingress
             .publish_required(vec![make_test_fact(
