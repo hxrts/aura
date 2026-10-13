@@ -561,7 +561,7 @@ fn collect_failure_diagnostics(
 
         let log_response = tool_api.handle_request(ToolRequest::TailLog {
             instance_id: instance.id.clone(),
-            lines: 200,
+            lines: 2000,
         });
         let log_tail = match log_response {
             aura_harness::tool_api::ToolResponse::Ok {

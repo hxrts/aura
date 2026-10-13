@@ -1276,6 +1276,14 @@ held only while checking and reserving,
 and only builders of the same checkout block its sweeps, so two worktrees can
 build at once.
 
+The wrapper retains `wasm-debug` during direct debug Cargo commands with
+`--target wasm32-unknown-unknown`. A shell batch hides its compiler arguments;
+pass `--preserve-cache-lane wasm-debug` to the outer wrapper when that batch
+uses the same cache. This prevents pre-admission and post-command guarded
+cleanup from deleting its warm artifacts. Other inactive lanes can still be
+reclaimed, and insufficient disk headroom still refuses admission. Global
+sweep skips any preview that would evict the declared incoming lane.
+
 When recovery is needed, the default nonincremental build first reclaims the
 inactive `debug-incremental` lane through the guarded lane cleaner, preserving
 reusable debug dependencies. Explicit `CARGO_INCREMENTAL=1` builds retain that
@@ -1760,6 +1768,14 @@ validation lane. Notice draining must retain its native failures in production
 builds as well as unit tests; a test-only helper cannot supply production
 cleanup. Run `cargo check -p hxrts-aura-agent -p aura-simulator --lib` in the Nix
 environment with the same bounded build queue used for the focused tests.
+
+When cancellation observation/window and accepted enrollment-response variants
+use boxed payloads, keep the public cancellation/retry and accepted-response
+finalizer regressions in the same coherent native batch. Assert that each
+consumer receives the original move-owned capability and that a failed
+supervised child still exposes its concrete source through the resulting error
+chain. A smaller enum or a green strict lint result alone does not establish
+either ownership or source preservation.
 
 ### Startup authorization fault coverage
 
@@ -2693,6 +2709,10 @@ and its clipping ancestry. Neither a pure capture test nor native VirtualDom
 simulated mounted events substitute for these producer tests. This first producer
 does not close the full control inventory or the paired-client LAN release gate.
 
+On browser scenario failure, the harness retains a bounded 2,000-line merged
+app/console log tail so the original typed error context survives high-volume
+UI publication and wait diagnostics.
+
 Native nested clipping instrumentation delegates the original iocraft View props,
 layout and drawing on the same node. Hidden and Scroll overflow boundaries, the
 terminal-provided viewport and actual registered field/list nodes compose their
@@ -2700,21 +2720,25 @@ bounds; keyboard-only actions do not gain fabricated button observations.
 Browser layout fixtures include child-owned rerenders with a memoized parent,
 exact-target actual resize and scroll-listener witnesses and a fresh canonical
 snapshot measurement. DOM references arrange these changes;
-typed renderer observations are their postconditions. The selected Dioxus web
-renderer calls the batch observer at `BeforeRender`, `BeforeCommit` and
-`Committed`. Tests must prove the first phase samples the controller semantic
-source, the second retains that same source, and only the third publishes a
-complete frame. The UI publication owner must reject a frame if its final app
-source differs. Exercise a memoized parent with child-only Settings navigation
-to Devices: the new capture and semantic sequence must advance, the old
-nickname control must disappear, and the visible import control must match
-the committed source. Hydration/external mutation are unsupported; renderer
-upgrades require a real-browser batch-order audit, not compilation alone.
-Component effects and mutation notifications cannot acknowledge a root-wide
-render. The diagnostic two-browser run reached signed code, mounted import
-control, explicit three-field approval and import success, then Bob readiness
-after restart; it failed the two-device retention assertion and does not prove
+typed renderer observations are their postconditions. The web producer uses an
+unmodified, exactly pinned `dioxus-web` 0.7.4 renderer. Its owned future wrapper
+revokes observations before each poll and can acknowledge only the final flushed
+state after the renderer suspends. Tests must cover a no-edit wakeup, reentrant
+reads during revocation, cancellation, child-only rerenders, exact-target resize
+and scroll callbacks, and stylesheet replacement before asynchronous
+`MutationObserver` delivery. The UI publication owner must reject a frame if
+its final app source differs. Exercise a memoized parent with child-only
+Settings navigation to Devices: the new capture and semantic sequence must
+advance, the old nickname control must disappear, and the visible import
+control must match the committed source. Hydration remains unsupported;
+renderer upgrades require a real-browser audit of `run` suspension and
+synchronous `flush_edits` ordering, not compilation alone. Component effects
+and mutation notifications cannot acknowledge a root-wide render. The
+diagnostic two-browser run reached signed code, mounted import control,
+explicit three-field approval and import success, then Bob readiness after
+restart; it failed the two-device retention assertion and does not prove
 same-profile adoption or complete enrollment persistence.
+
 
 Modal focus observation retains the exact canonical `ControlId::Field(FieldId)`
 from the active modal field. A generic modal-input identity cannot replace that

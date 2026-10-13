@@ -9,6 +9,15 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
 
+fn fixture_controller() -> Arc<aura_ui::UiController> {
+    Arc::new(aura_ui::UiController::new(
+        Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::new(aura_app::AppConfig::default()).expect("fixture app"),
+        )),
+        Arc::new(aura_ui::MemoryClipboard::default()),
+    ))
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Visible,
@@ -17,6 +26,8 @@ enum Mode {
     Unmounted,
     Duplicate,
     Buttons,
+    WakeOnly,
+    Bounce,
 }
 #[derive(Clone)]
 struct Commands(Rc<RefCell<Option<mpsc::Receiver<Mode>>>>);
@@ -94,9 +105,9 @@ async fn child_owned_settings_navigation_commits_devices_import_control() {
     );
     let observer = super::rendered_controls::BrowserRendererObserver::default();
     observer.install_context(&mut dom);
-    let config = observer.config(dioxus::web::Config::new().rootnode(root.clone().into()));
+    let config = dioxus_web::Config::new().rootnode(root.clone().into());
     let owner = crate::task_owner::new_web_task_owner();
-    owner.spawn_local_cancellable(async move { dioxus::web::run(dom, config).await });
+    owner.spawn_local_cancellable(observer.run(dom, config));
     let (initial_capture, initial_semantic_seq) = loop {
         let snapshot = events.next().await.expect("initial actual renderer frame");
         if let aura_app::ui::contract::RenderedControlFrame::Committed {
@@ -149,7 +160,14 @@ fn ChildLocalSurface(commands: Commands) -> Element {
         async move {
             if let Some(mut receiver) = receiver {
                 while let Some(next) = receiver.next().await {
-                    mode.set(next);
+                    if next == Mode::Bounce {
+                        mode.set(Mode::Hidden);
+                        // The effect runs after the first flush and schedules a
+                        // second render before this renderer poll suspends.
+                        dioxus::dioxus_core::queue_effect(move || mode.set(Mode::Visible));
+                    } else if next != Mode::WakeOnly {
+                        mode.set(next);
+                    }
                 }
             }
         }
@@ -184,6 +202,7 @@ async fn next_root(
     after_capture: u64,
 ) -> UiSnapshot {
     console_log!("await root state={state:?} after_capture={after_capture}");
+    let mut revoked = after_capture == 0;
     loop {
         let snapshot = events
             .next()
@@ -194,11 +213,21 @@ async fn next_root(
             snapshot.rendered_control_frame,
             snapshot.rendered_controls
         );
+        if matches!(
+            snapshot.rendered_control_frame,
+            aura_app::ui::contract::RenderedControlFrame::Unavailable
+        ) {
+            revoked = true;
+        }
         if matches!(&snapshot.rendered_control_frame, aura_app::ui::contract::RenderedControlFrame::Committed { capture_revision, .. } if *capture_revision > after_capture)
             && snapshot.rendered_controls.iter().any(|observation| {
                 observation.control == ControlId::OnboardingRoot && observation.state == state
             })
         {
+            assert!(
+                revoked,
+                "old evidence must be revoked before acknowledging a renderer poll"
+            );
             return snapshot;
         }
     }
@@ -206,15 +235,22 @@ async fn next_root(
 
 #[wasm_bindgen_test]
 async fn actual_renderer_visible_hidden_zero_unmount_and_same_source_remount() {
-    let controller = Arc::new(aura_ui::UiController::new(
-        Arc::new(async_lock::RwLock::new(
-            aura_app::AppCore::new(aura_app::AppConfig::default()).expect("fixture app"),
-        )),
-        Arc::new(aura_ui::MemoryClipboard::default()),
-    ));
+    let controller = fixture_controller();
     let (events_tx, mut events_rx) = mpsc::channel(32);
     let events_tx = async_lock::Mutex::new(events_tx);
+    let latest = Arc::new(std::sync::Mutex::new(None));
+    let delivered = latest.clone();
     controller.set_ui_snapshot_sink(Arc::new(move |snapshot| {
+        *delivered.lock().expect("latest snapshot") = Some(snapshot.clone());
+        if matches!(
+            snapshot.rendered_control_frame,
+            aura_app::ui::contract::RenderedControlFrame::Unavailable
+        ) {
+            assert!(
+                !super::rendered_controls::capture_current_layout(),
+                "reentrant layout reads cannot acknowledge an in-progress renderer poll"
+            );
+        }
         events_tx
             .try_lock()
             .expect("fixture event sender available")
@@ -243,13 +279,47 @@ async fn actual_renderer_visible_hidden_zero_unmount_and_same_source_remount() {
         .expect("attach actual renderer root");
     let observer = super::rendered_controls::BrowserRendererObserver::default();
     observer.install_context(&mut dom);
-    let config = observer.config(dioxus::web::Config::new().rootnode(root.clone().into()));
+    let config = dioxus_web::Config::new().rootnode(root.clone().into());
     let owner = crate::task_owner::new_web_task_owner();
-    owner.spawn_local_cancellable(async move { dioxus::web::run(dom, config).await });
+    owner.spawn_local_cancellable(observer.run(dom, config));
     let visible = next_root(&mut events_rx, ControlLayoutState::Visible, 0).await;
     console_log!("initial visible publication received");
     let parent_renders = renders.get();
-    let initial = visible.rendered_controls[0].capture_revision;
+    // Wake the renderer without changing any signal or producing DOM edits.
+    // A yielded no-op poll must preserve the actual final node state.
+    commands
+        .try_send(Mode::WakeOnly)
+        .expect("wake without edits");
+    let woke = next_root(
+        &mut events_rx,
+        ControlLayoutState::Visible,
+        visible.rendered_controls[0].capture_revision,
+    )
+    .await;
+    assert_eq!(
+        woke.rendered_controls[0].source,
+        visible.rendered_controls[0].source
+    );
+    commands.try_send(Mode::Bounce).expect("two render batches");
+    let bounced = loop {
+        let snapshot = events_rx.next().await.expect("batched render publication");
+        if let aura_app::ui::contract::RenderedControlFrame::Committed {
+            capture_revision, ..
+        } = snapshot.rendered_control_frame
+        {
+            if capture_revision > woke.rendered_controls[0].capture_revision {
+                assert!(
+                    snapshot
+                        .rendered_controls
+                        .iter()
+                        .all(|control| control.state == ControlLayoutState::Visible),
+                    "only the final flushed state of the poll may be acknowledged"
+                );
+                break snapshot;
+            }
+        }
+    };
+    let initial = bounced.rendered_controls[0].capture_revision;
     let source = visible.rendered_controls[0].source.clone();
     commands.try_send(Mode::Hidden).expect("hidden render");
     let hidden = next_root(&mut events_rx, ControlLayoutState::Hidden, initial).await;
@@ -334,32 +404,34 @@ async fn actual_renderer_visible_hidden_zero_unmount_and_same_source_remount() {
     else {
         panic!("committed duplicate frame");
     };
+    let resize_observed = observer.observe_next_resize(root.clone());
     root.set_attribute("style", "width:400px;height:0px;overflow:auto")
         .expect("external layout resize");
-    console_log!("await actual resized layout publication");
-    let resized_layout = loop {
-        let snapshot = events_rx
-            .next()
-            .await
-            .expect("actual ResizeObserver publication");
-        if let aura_app::ui::contract::RenderedControlFrame::Committed {
-            capture_revision: observed_capture,
-            layout_revision: observed_layout,
-            ..
-        } = snapshot.rendered_control_frame
-        {
-            if observed_capture == capture_revision
-                && observed_layout > layout_revision
-                && snapshot.rendered_controls.len() == 2
-                && snapshot
-                    .rendered_controls
-                    .iter()
-                    .all(|control| control.state == ControlLayoutState::ZeroExtent)
-            {
-                break observed_layout;
-            }
-        }
+    assert!(resize_observed
+        .await
+        .expect("actual root ResizeObserver must run"));
+    let resized = latest
+        .lock()
+        .expect("resize delivery")
+        .clone()
+        .expect("resized frame");
+    let aura_app::ui::contract::RenderedControlFrame::Committed {
+        capture_revision: resized_capture,
+        layout_revision: resized_layout,
+        ..
+    } = resized.rendered_control_frame
+    else {
+        panic!("resize must publish committed layout")
     };
+    // An independently queued renderer poll may supersede the earlier receipt.
+    // The exact-target callback, rather than receipt equality, witnesses resize.
+    assert!(resized_capture >= capture_revision);
+    assert!(resized_layout > layout_revision);
+    assert_eq!(resized.rendered_controls.len(), 2);
+    assert!(resized
+        .rendered_controls
+        .iter()
+        .all(|control| control.state == ControlLayoutState::ZeroExtent));
     root.set_attribute("style", "width:400px;height:40px;overflow:auto")
         .expect("scroll viewport");
     let spacer = document
@@ -382,30 +454,46 @@ async fn actual_renderer_visible_hidden_zero_unmount_and_same_source_remount() {
     assert!(scroll_observed
         .await
         .expect("actual owner scroll listener must run"));
+    let before_fresh = latest
+        .lock()
+        .expect("scroll delivery")
+        .clone()
+        .expect("scroll frame");
+    let aura_app::ui::contract::RenderedControlFrame::Committed {
+        capture_revision: before_capture,
+        layout_revision: before_layout,
+        ..
+    } = before_fresh.rendered_control_frame
+    else {
+        panic!("scroll must publish committed layout")
+    };
     assert!(
         super::rendered_controls::capture_current_layout(),
         "fresh getter joins existing committed renderer frame"
     );
-    loop {
-        let snapshot = events_rx.next().await.expect("fresh scrolled layout");
-        if let aura_app::ui::contract::RenderedControlFrame::Committed {
-            capture_revision: observed_capture,
-            layout_revision: observed_layout,
-            ..
-        } = snapshot.rendered_control_frame
-        {
-            if observed_capture == capture_revision
-                && observed_layout > resized_layout
-                && snapshot.rendered_controls.len() == 2
-                && snapshot
-                    .rendered_controls
-                    .iter()
-                    .all(|control| control.state == ControlLayoutState::ZeroExtent)
-            {
-                break;
-            }
-        }
-    }
+    let fresh = latest
+        .lock()
+        .expect("fresh delivery")
+        .clone()
+        .expect("fresh frame");
+    let aura_app::ui::contract::RenderedControlFrame::Committed {
+        capture_revision: fresh_capture,
+        layout_revision: fresh_layout,
+        ..
+    } = fresh.rendered_control_frame
+    else {
+        panic!("fresh measurement must remain committed")
+    };
+    assert_eq!(
+        fresh_capture, before_capture,
+        "a fresh measurement cannot issue a renderer receipt"
+    );
+    assert!(fresh_layout > before_layout && fresh_layout > resized_layout);
+    assert_eq!(fresh.rendered_controls.len(), 2);
+    assert!(fresh
+        .rendered_controls
+        .iter()
+        .all(|control| control.state == ControlLayoutState::ZeroExtent));
     assert_eq!(
         renders.get(),
         parent_renders,
@@ -413,10 +501,108 @@ async fn actual_renderer_visible_hidden_zero_unmount_and_same_source_remount() {
     );
     // Actual producer evidence above is authoritative. DOM references are used
     // to arrange layout changes and clean the fixture root; typed owner publications decide visibility.
-    controller
-        .clear_ui_snapshot_sink()
-        .expect("detach fixture snapshot receiver before producer disposal");
     owner.shutdown();
     owner.wait_drained().await;
+    assert!(
+        !super::rendered_controls::capture_current_layout(),
+        "cancelled renderer cannot retain committed evidence"
+    );
+    assert!(matches!(
+        latest
+            .lock()
+            .expect("last delivery")
+            .as_ref()
+            .expect("disposal publishes revocation")
+            .rendered_control_frame,
+        aura_app::ui::contract::RenderedControlFrame::Unavailable
+    ));
+    controller
+        .clear_ui_snapshot_sink()
+        .expect("detach fixture receiver");
     root.remove();
+}
+
+/// Drive the real renderer directly so asset invalidation is checked in the
+/// same JavaScript turn, before MutationObserver callbacks can be delivered.
+#[wasm_bindgen_test]
+fn actual_renderer_stylesheet_reload_withholds_commit_before_callback() {
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+    let controller = fixture_controller();
+    let latest = Arc::new(std::sync::Mutex::new(None));
+    let delivered = latest.clone();
+    controller.set_ui_snapshot_sink(Arc::new(move |snapshot| {
+        *delivered.lock().expect("latest snapshot") = Some(snapshot);
+    }));
+    let document = web_sys::window()
+        .expect("browser")
+        .document()
+        .expect("document");
+    let root = document.create_element("div").expect("renderer root");
+    let link = document.create_element("link").expect("stylesheet");
+    link.set_attribute("rel", "stylesheet")
+        .expect("stylesheet relation");
+    link.set_attribute("href", "data:text/css,")
+        .expect("initial stylesheet");
+    document
+        .body()
+        .expect("body")
+        .append_child(&root)
+        .expect("attach renderer");
+    document
+        .body()
+        .expect("body")
+        .append_child(&link)
+        .expect("attach stylesheet");
+    let (_commands, receiver) = mpsc::channel(1);
+    let mut dom = VirtualDom::new_with_props(
+        fixture,
+        FixtureProps {
+            controller: controller.clone(),
+            commands: Commands(Rc::new(RefCell::new(Some(receiver)))),
+            renders: Rc::new(std::cell::Cell::new(0)),
+        },
+    );
+    let observer = super::rendered_controls::BrowserRendererObserver::default();
+    observer.install_context(&mut dom);
+    let mut renderer =
+        Box::pin(observer.run(dom, dioxus_web::Config::new().rootnode(root.clone().into())));
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    assert!(matches!(renderer.as_mut().poll(&mut cx), Poll::Pending));
+    assert!(matches!(
+        latest
+            .lock()
+            .expect("initial delivery")
+            .as_ref()
+            .expect("committed frame")
+            .rendered_control_frame,
+        aura_app::ui::contract::RenderedControlFrame::Committed { .. }
+    ));
+    link.set_attribute("href", "data:text/css,/*reload*/")
+        .expect("replace stylesheet");
+    assert!(
+        !super::rendered_controls::capture_current_layout(),
+        "pending asset records must revoke evidence before asynchronous delivery"
+    );
+    assert!(matches!(
+        latest
+            .lock()
+            .expect("asset delivery")
+            .as_ref()
+            .expect("revoked frame")
+            .rendered_control_frame,
+        aura_app::ui::contract::RenderedControlFrame::Unavailable
+    ));
+    assert!(renderer.as_mut().poll(&mut cx).is_pending());
+    assert!(
+        !super::rendered_controls::capture_current_layout(),
+        "subsequent polls cannot recertify an unsupported asset reload"
+    );
+    drop(renderer);
+    controller.clear_ui_snapshot_sink().expect("detach sink");
+    root.remove();
+    link.remove();
 }

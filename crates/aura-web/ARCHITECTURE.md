@@ -428,22 +428,27 @@ Browser semantic observation surface version 2 includes required `UiSnapshot.hom
 If the shared controller cannot acquire the app snapshot, it exports the existing loading/busy snapshot rather than claiming authoritative empty home modes with ready state.
 
 The browser rendered-control producer retains actual renderer-registered node
-instances and uses the renderer's batch observer. `BeforeRender` revokes the
-prior capture and samples the controller's semantic source for this batch;
-`BeforeCommit` binds that same source to the pending opaque capture receipt,
-including child-only Settings navigation when the enclosing component is
-memoized. Only `Committed`, after DOM edits and mounted callbacks, permits a
-complete layout frame. The UI publication owner rereads the app snapshot and
-withholds committed visibility if its post-commit source differs. This is DOM
+instances and owns every poll of the unmodified, exactly pinned `dioxus-web`
+0.7.4 renderer future. It revokes the prior capture before polling and
+acknowledges the final flushed state only when the renderer returns
+`Poll::Pending`: this audited non-hydrating renderer synchronously flushes edits
+and mounted callbacks before suspending. Child-only renders are included even
+when the enclosing component is memoized; multiple batches in one poll collapse
+to the final state, and a no-op poll conservatively replaces the capture. The
+UI publication owner rejects a frame if its app source no longer matches the
+rendered source. Drop revokes evidence before renderer teardown. This is DOM
 completion, not browser paint, profile persistence or protocol completion.
 
-The observer is installed through the selected Dioxus web renderer; there
-is no separate render loop or fork of Dioxus internals. Hydration and external
-mutation modes remain unsupported and cannot supply commit evidence. Renderer
-upgrades require re-auditing batch phase ordering and real-browser regressions.
-Control visibility comes from registered nodes and actual layout, never a
-selector or focus alone. Replacement and remount invalidate the old receipt
-and stale callbacks before another frame can publish.
-Actual node style/ancestor clipping/disposal and nonempty layout determine the
-captured observation. Browser tests run the actual dioxus-web renderer, not
-native VirtualDom mounted-event simulation. See docs/117 and docs/804.
+The renderer runs through `WebTaskOwner`; there is no separate render loop or
+fork of Dioxus internals. Hydration remains disabled in the resolved renderer
+feature graph. A document asset guard fails closed on stylesheet URL changes,
+including devtools reloads, and drains pending mutation records before a poll
+can acknowledge them. The asset guard never supplies commit evidence. Renderer
+upgrades require re-auditing `run` suspension and synchronous `flush_edits`
+ordering plus the real-browser regressions. Control visibility comes from
+registered nodes and actual layout, never a selector or focus alone.
+Replacement and remount invalidate the old receipt and stale callbacks before
+another frame can publish. Browser tests run the actual dioxus-web renderer,
+not native VirtualDom mounted-event simulation. See docs/117 and docs/804.
+Browser failure diagnostics retain a bounded merged app/console tail across
+high-volume publication so the original renderer or workflow error is reviewable.

@@ -113,9 +113,9 @@ impl MountedForm {
         );
         let observer = crate::shell::rendered_controls::BrowserRendererObserver::default();
         observer.install_context(&mut dom);
-        let config = observer.config(dioxus::web::Config::new().rootnode(root.clone().into()));
+        let config = dioxus_web::Config::new().rootnode(root.clone().into());
         let owner = crate::task_owner::new_web_task_owner();
-        owner.spawn_local_cancellable(async move { dioxus::web::run(dom, config).await });
+        owner.spawn_local_cancellable(observer.run(dom, config));
         let mut mounted = Self {
             state,
             root,
