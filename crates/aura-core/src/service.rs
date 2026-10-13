@@ -300,6 +300,53 @@ impl EstablishPath {
     }
 }
 
+/// Which kind of establish path the runtime selected toward a peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeerPathKind {
+    /// The path goes through a relay; the peer is not reached directly.
+    Relay,
+    /// The path reaches the peer's advertised endpoint directly.
+    Direct,
+}
+
+impl PeerPathKind {
+    /// Classify an establish path: relay-mediated endpoints and routed paths
+    /// are `Relay`; a hop-free path to a non-relay endpoint is `Direct`.
+    pub fn of(path: &EstablishPath) -> Self {
+        if path.route.destination.protocol == LinkProtocol::WebSocketRelay || !path.is_direct() {
+            Self::Relay
+        } else {
+            Self::Direct
+        }
+    }
+
+    /// Stable lowercase name for observations and scenario assertions.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Relay => "relay",
+            Self::Direct => "direct",
+        }
+    }
+}
+
+/// Observation of the establish path most recently selected toward a peer in a
+/// context. This records what the runtime chose when it prepared the channel;
+/// it does not attest that the channel came up.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SelectedPeerPath {
+    /// Peer the path leads to.
+    pub peer: AuthorityId,
+    /// Relational context the channel belongs to.
+    pub context_id: ContextId,
+    /// Relay or direct.
+    pub kind: PeerPathKind,
+    /// Link protocol of the path's destination endpoint.
+    pub protocol: LinkProtocol,
+    /// Physical time (ms) the selection was made, from the caller's clock.
+    pub selected_at_ms: u64,
+}
+
 /// One backwards-built transparent anonymous setup layer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransparentAnonymousSetupLayer {
@@ -1860,5 +1907,25 @@ mod tests {
                 now_ms: 100
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod peer_path_tests {
+    use super::*;
+
+    fn endpoint(protocol: LinkProtocol) -> LinkEndpoint {
+        LinkEndpoint::direct(protocol, "192.0.2.1:4000")
+    }
+
+    #[test]
+    fn direct_endpoints_classify_as_direct_and_relay_endpoints_as_relay() {
+        let direct = EstablishPath::direct(endpoint(LinkProtocol::Tcp));
+        assert_eq!(PeerPathKind::of(&direct), PeerPathKind::Direct);
+        assert_eq!(PeerPathKind::Direct.as_str(), "direct");
+
+        let relay = EstablishPath::direct(endpoint(LinkProtocol::WebSocketRelay));
+        assert_eq!(PeerPathKind::of(&relay), PeerPathKind::Relay);
+        assert_eq!(PeerPathKind::Relay.as_str(), "relay");
     }
 }

@@ -1331,6 +1331,19 @@ backend, and are recorded in `events.json` and the lab timeline; without a lab
 the step fails rather than being skipped. `holepunch-relay-first.toml` and its
 corporate variant use them after the contact link.
 
+The path the runtime selects toward a peer is observable as the
+`peer_path_selected` runtime event (`RuntimeFact::PeerPathSelected` with
+`relay` or `direct` and the link protocol). It is recorded by
+`aura-rendezvous` when a channel is prepared toward a peer, read through the
+runtime bridge into the discovered-peers signal, and surfaced by the TUI as a
+runtime fact. It records the selection, not that the channel came up, and it
+fires only on rendezvous establishment: a contact link over one LAN segment is
+carried by LAN transport and selects no path, so the single-LAN scenarios do
+not assert it, while the relay-first scenarios assert it after the shared
+channel is joined. Retry generations (`CandidateGeneration`,
+`NetworkGeneration`) are not observable: the `PeerConnectionActor` state
+machine that owns them is not yet driven by the runtime.
+
 Lab artifacts land under the run directory: `network_lab_runtime.json` (device,
 namespace and address per authority), `network-lab-artifacts/` with the
 patchbay run directory copy, one `<device>.pcap` per device captured by

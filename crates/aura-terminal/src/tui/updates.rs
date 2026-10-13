@@ -524,6 +524,8 @@ pub enum UiUpdate {
     },
     /// LAN peer count changed (for keyboard navigation)
     LanPeersCountChanged(usize),
+    /// The runtime's selected establish paths toward peers changed.
+    PeerPathsChanged(Vec<aura_core::service::SelectedPeerPath>),
 
     // =========================================================================
     // Notifications

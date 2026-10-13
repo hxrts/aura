@@ -156,6 +156,84 @@ actor = "alice"
 runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
+[[steps]]
+id = "alice-open-chat-before-join"
+action = "open_screen"
+actor = "alice"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
+id = "alice-join-shared-channel"
+action = "create_channel"
+actor = "alice"
+value = "shared-parity-lab"
+timeout_ms = 6000
+
+[[steps]]
+id = "alice-open-contacts-before-invite"
+action = "open_screen"
+actor = "alice"
+screen_id = "contacts"
+timeout_ms = 6000
+
+[[steps]]
+id = "alice-invite-bob-to-shared-channel"
+action = "invite_actor_to_channel"
+actor = "alice"
+value = "${bob_authority_id}"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-pending-home-invitation-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "pending_home_invitation_ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-join-shared-channel"
+action = "accept_pending_channel_invitation"
+actor = "bob"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-open-chat-after-accept"
+action = "open_screen"
+actor = "bob"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-join-shared-channel-explicit"
+action = "join_channel"
+actor = "bob"
+value = "shared-parity-lab"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-channel-membership-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "channel_membership_ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-recipient-peers-resolved"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "recipient_peers_resolved"
+timeout_ms = 120000
+
+# Channel establishment toward bob is where the runtime selects a path; a
+# relay-first link across NATs must show `relay` here.
+[[steps]]
+id = "alice-peer-path-selected"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "peer_path_selected"
+timeout_ms = 30000
+
 
 [[steps]]
 id = "flush-nat-b"

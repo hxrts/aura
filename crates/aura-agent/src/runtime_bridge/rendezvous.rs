@@ -31,6 +31,13 @@ pub(super) async fn get_discovered_peers(
     Ok(rendezvous.list_cached_peers().await)
 }
 
+pub(super) async fn get_selected_peer_paths(
+    bridge: &AgentRuntimeBridge,
+) -> Result<Vec<aura_core::service::SelectedPeerPath>, IntentError> {
+    let rendezvous = require_rendezvous_service(bridge)?;
+    Ok(rendezvous.list_selected_peer_paths().await)
+}
+
 pub(super) async fn get_rendezvous_status(
     bridge: &AgentRuntimeBridge,
 ) -> Result<RendezvousStatus, IntentError> {

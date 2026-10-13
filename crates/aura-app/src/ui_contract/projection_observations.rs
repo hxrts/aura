@@ -154,3 +154,51 @@ mod tests {
         );
     }
 }
+
+/// Describe the establish paths the runtime selected toward peers. One fact
+/// per selection; a relay path says the peer was not reached directly, nothing
+/// more.
+pub fn observed_peer_paths(paths: &[aura_core::service::SelectedPeerPath]) -> Vec<RuntimeFact> {
+    paths
+        .iter()
+        .map(|selected| RuntimeFact::PeerPathSelected {
+            peer_authority_id: selected.peer.to_string(),
+            path: selected.kind.as_str().to_string(),
+            protocol: format!("{:?}", selected.protocol).to_lowercase(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod peer_path_observation_tests {
+    use super::*;
+    use crate::ui_contract::RuntimeEventKind;
+    use aura_core::service::{LinkProtocol, PeerPathKind, SelectedPeerPath};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
+
+    #[test]
+    fn selected_paths_become_one_runtime_fact_each() {
+        let peer = AuthorityId::from_entropy([7u8; 32]);
+        let facts = observed_peer_paths(&[SelectedPeerPath {
+            peer,
+            context_id: ContextId::from_entropy([8u8; 32]),
+            kind: PeerPathKind::Relay,
+            protocol: LinkProtocol::WebSocketRelay,
+            selected_at_ms: 42,
+        }]);
+        assert_eq!(facts.len(), 1);
+        let RuntimeFact::PeerPathSelected {
+            peer_authority_id,
+            path,
+            protocol,
+        } = &facts[0]
+        else {
+            panic!("expected a peer path fact, got {:?}", facts[0]);
+        };
+        assert_eq!(peer_authority_id, &peer.to_string());
+        assert_eq!(path, "relay");
+        assert_eq!(protocol, "websocketrelay");
+        assert_eq!(facts[0].kind(), RuntimeEventKind::PeerPathSelected);
+        assert_eq!(facts[0].key(), format!("peer_path_selected:{peer}:relay"));
+    }
+}

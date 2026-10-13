@@ -1927,6 +1927,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         rendezvous::get_rendezvous_status(self).await
     }
 
+    async fn try_get_selected_peer_paths(
+        &self,
+    ) -> Result<Vec<aura_core::service::SelectedPeerPath>, IntentError> {
+        rendezvous::get_selected_peer_paths(self).await
+    }
+
     async fn trigger_discovery(&self) -> Result<DiscoveryTriggerOutcome, IntentError> {
         rendezvous::trigger_discovery(self).await
     }

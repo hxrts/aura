@@ -1155,6 +1155,13 @@ pub(super) async fn process_ui_update_match(
                 crate::tui::state::ToastLevel::Success
             );
         }
+        UiUpdate::PeerPathsChanged(paths) => {
+            tui.with_mut(|state| {
+                for fact in aura_app::ui_contract::observed_peer_paths(&paths) {
+                    state.upsert_runtime_fact(fact);
+                }
+            });
+        }
         UiUpdate::LanPeersCountChanged(count) => {
             tui.with_mut(|state| {
                 state.upsert_runtime_fact(aura_app::ui_contract::observed_contacts_projection(

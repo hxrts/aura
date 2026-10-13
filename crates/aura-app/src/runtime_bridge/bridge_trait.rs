@@ -490,6 +490,15 @@ pub trait RuntimeBridge: Send + Sync {
     /// zero-value status.
     async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError>;
 
+    /// Establish paths the rendezvous runtime selected toward peers (relay or
+    /// direct), as an observation. Bridges without a live rendezvous service
+    /// report none.
+    async fn try_get_selected_peer_paths(
+        &self,
+    ) -> Result<Vec<aura_core::service::SelectedPeerPath>, IntentError> {
+        Ok(Vec::new())
+    }
+
     /// Trigger an on-demand discovery refresh
     ///
     /// This initiates an immediate discovery cycle rather than waiting

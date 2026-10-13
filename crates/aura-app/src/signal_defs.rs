@@ -306,6 +306,8 @@ pub struct DiscoveredPeersState {
     pub last_updated_ms: u64,
     /// LAN discovery counters, when LAN discovery runs.
     pub lan_stats: Option<LanDiscoveryStats>,
+    /// Establish paths the runtime selected toward peers (relay or direct).
+    pub selected_paths: Vec<aura_core::service::SelectedPeerPath>,
 }
 
 /// Device information for settings

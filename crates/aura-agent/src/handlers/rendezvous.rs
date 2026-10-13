@@ -430,6 +430,9 @@ impl RendezvousHandler {
             .into_iter()
             .next()
             .ok_or_else(|| AgentError::invalid("Peer descriptor has no establish path"))?;
+        self.registry
+            .record_selected_path(context_id, peer, &establish_path, current_time)
+            .await;
 
         let outcome = self
             .service
