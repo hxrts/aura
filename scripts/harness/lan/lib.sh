@@ -2,7 +2,9 @@
 # Raw keys/screens are frontend-conformance diagnostics only.
 # shellcheck source=env.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env.sh"
-AURA_E2E_DRV="$AURA_E2E_ROOT/scripts/harness/lan/drv.sh"
+# The isolated shell fixture supplies a mock driver; normal LAN runs use the
+# checkout's guarded owner driver.
+AURA_E2E_DRV="${AURA_E2E_DRV:-$AURA_E2E_ROOT/scripts/harness/lan/drv.sh}"
 
 req() { # req <instance> <method> [JSON object fields] [transport timeout seconds]
   local inst=$1 method=$2 extra=${3:-} transport_timeout=${4:-60} body quoted_body quoted_root
@@ -43,7 +45,7 @@ req_private() { # req_private <instance> [transport timeout seconds] < request.j
 lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < response.json
   local instance=$1 method=$2 label=$3 dir target scratch mode
   case "$instance" in alex-tui|alex-tui2|alex-web|barbara-tui|barbara-tui2|barbara-web) ;; *) return 2;; esac
-  case "$method" in submit_semantic_command|ui_state|wait_for_ui_snapshot_event|restart|get_authority_id) ;; *) return 2;; esac
+  case "$method" in prepare_device_enrollment_setup|submit_semantic_command|ui_state|wait_for_ui_snapshot_event|restart|get_authority_id) ;; *) return 2;; esac
   [[ "$label" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || return 2
   [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || return 2
   [[ -d "$AURA_E2E_RUN_DIR" && ! -L "$AURA_E2E_RUN_DIR" && -O "$AURA_E2E_RUN_DIR" ]] || return 2

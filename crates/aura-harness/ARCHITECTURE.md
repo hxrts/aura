@@ -70,6 +70,17 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   readiness without copying codes, labels, screen names, device-list IDs, or
   diagnostic detail. Reopen still requires a fresh
   authoritative observation after restart.
+  The paired LAN bootstrap omits ordinary contact links so enrollment cannot
+  inherit an established contact route. Its checklist transfers signed setup
+  and issued code/manifest/verifier through private stdin requests, keeps the
+  exact approval handle and host acknowledgment, and compares authority and
+  device observations after same-profile restart. Read-only preflight records
+  fixed commits, compared artifacts, planned host/process identity and the
+  development-only broker before either owner starts; the result records
+  actual process identity and receipts. Native restart retains the original
+  operation through the private receipt because only browser restart accepts
+  an expected operation instance. Network delivery remains unverified until
+  separately asserted across the two hosts.
 
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;

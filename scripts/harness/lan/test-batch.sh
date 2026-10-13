@@ -41,6 +41,16 @@ cp "$fixture/local/scripts/harness/lan/env.sh" "$fixture/remote root's/scripts/h
 cat > "$fixture/local/scripts/harness/lan/fresh.sh" <<'MOCK'
 #!/usr/bin/env bash
 [[ "$FIXTURE_CASE" != failure ]] || exit 7
+if [[ "${AURA_E2E_BOOTSTRAP:-}" == paired-enrollment ]]; then
+  [[ -f ".tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json" ]] || exit 9
+  printf 'fresh\n' >> "$FIXTURE_ROOT/actions"
+fi
+MOCK
+cat > "$fixture/local/scripts/harness/lan/paired-preflight.sh" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$FIXTURE_CASE" != preflight-failure ]] || exit 17
+printf 'preflight\n' >> "$FIXTURE_ROOT/actions"
+printf '{"phase":"preflight"}\n' > "$1"
 MOCK
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/local/work/handoff/lan-checklist.sh"
 cat > "$fixture/local/scripts/harness/lan/drv.sh" <<'MOCK'
@@ -85,4 +95,21 @@ for FIXTURE_CASE in success failure refusal foreign missing interrupt; do
   [[ $(cat "$fixture/actions") == "$expected" ]] || { cat "$fixture/output" "$fixture/actions"; exit 1; }
   [[ $(cat "$fixture/local/.tmp/lan-checklist-$token/exit-status") == "$status" ]]
 done
+export AURA_E2E_BOOTSTRAP=paired-enrollment FIXTURE_CASE=success
+token=lan-batch-paired-fixture
+for checkout in "$fixture/local" "$fixture/remote root's"; do
+  printf '%s\n' "$token" > "$checkout/.tmp/e2e/run/retention-run-id"
+done
+: > "$fixture/actions"
+bash "$fixture/local/scripts/harness/lan/batch.sh" "$token" -- bash "$fixture/local/work/handoff/lan-checklist.sh" > "$fixture/output" 2>&1
+[[ $(sed -n '1,2p' "$fixture/actions") == $'preflight\nfresh' ]]
+[[ -f "$fixture/local/.tmp/lan-checklist-$token/paired-preflight.json" ]]
+[[ $(stat -c '%a' "$fixture/local/.tmp/lan-checklist-$token") == 700 ]]
+export FIXTURE_CASE=preflight-failure
+token=lan-batch-preflight-refusal
+: > "$fixture/actions"
+if bash "$fixture/local/scripts/harness/lan/batch.sh" "$token" -- bash "$fixture/local/work/handoff/lan-checklist.sh" > "$fixture/output" 2>&1; then
+  echo 'paired batch started after failed preflight' >&2; exit 1
+fi
+[[ ! -s "$fixture/actions" ]]
 echo 'LAN batch finalization fixtures passed'

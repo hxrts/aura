@@ -16,8 +16,8 @@ export AURA_E2E_REMOTE_NIX="$FIXTURE_ROOT/bin/nix"
 export AURA_E2E_REMOTE_CONFIG="remote config's.toml"
 export AURA_E2E_LOCAL_CONFIG="local config's.toml"
 export AURA_E2E_RUN_DIR="$FIXTURE_ROOT/evidence"
-onboard() { echo "$1"; }
-link() { :; }
+onboard() { [[ "${AURA_E2E_BOOTSTRAP:-}" != paired-enrollment ]] || printf 'onboard:%s\n' "$1" >> "$FIXTURE_ROOT/paired-actions"; echo "$1"; }
+link() { [[ "${AURA_E2E_BOOTSTRAP:-}" != paired-enrollment ]] || printf 'link:%s:%s\n' "$1" "$2" >> "$FIXTURE_ROOT/paired-actions"; }
 contacts() { :; }
 LIB
 cat > "$fixture_root/bin/nix" <<'NIX'
@@ -77,4 +77,9 @@ export FAIL_HOST=none
 bash "$fixture_root/driver/fresh.sh" "run token's" > "$fixture_root/out"
 expected=$'local:stop\nssh\nremote:stop\nremote:start\nlocal:start'
 [[ $(cat "$fixture_root/actions") == "$expected" ]]
+export AURA_E2E_BOOTSTRAP=paired-enrollment
+: > "$fixture_root/paired-actions"
+bash "$fixture_root/driver/fresh.sh" "run token's" > "$fixture_root/out"
+[[ $(cat "$fixture_root/paired-actions") == $'onboard:alex-tui\nonboard:barbara-tui' ]]
+rg -q 'paired enrollment actors ready' "$fixture_root/out"
 echo 'fresh-run shutdown sequencing fixtures passed'

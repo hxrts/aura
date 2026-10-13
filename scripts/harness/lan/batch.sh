@@ -24,6 +24,10 @@ evidence="$PWD/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN"
 mkdir "$evidence"
 printf '%s\n' "$checkpoint" > "$evidence/commit"
 printf '%s\0' "${checklist_command[@]}" > "$evidence/checklist-command"
+if [[ "${AURA_E2E_BOOTSTRAP:-}" == paired-enrollment ]]; then
+  chmod 700 "$evidence"
+  bash "$here/paired-preflight.sh" "$evidence/paired-preflight.json"
+fi
 result=0
 finalized=false
 batch_pid=''

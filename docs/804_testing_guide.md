@@ -1108,6 +1108,26 @@ under the LAN run directory. Reopen evidence must pair the exact original
 operation/host acknowledgment with an authoritative post-restart readiness,
 authority and device-list observation; a `restarted` status alone is insufficient.
 
+For an unlinked native pair, run `batch.sh` with
+`AURA_E2E_BOOTSTRAP=paired-enrollment` and
+`bash scripts/harness/lan/paired-enrollment.sh` as the checklist command.
+That bootstrap creates the two real accounts without the ordinary `fresh.sh`
+contact links. The checklist exports Barbara's signed setup through her
+runtime, submits it to Alex, transfers the issued code, signed manifest and
+retained verifier through stdin, and records the exact approval operation,
+host acknowledgment and same-device reopen evidence in owner-only receipts.
+Before `fresh.sh` starts either host, `batch.sh` writes an owner-only paired
+preflight manifest containing both checked commits, the matching local smoke
+receipt, compared local/remote native and web hashes, intended actor/host
+process identities, the development-only broker endpoint/policy, and the exact
+inventory. After the run, the private result records actual PID/birth identities
+and the original operation/host/reopen receipts without any transferred secret.
+Native `restart` does not accept a browser evidence handle; the checklist keeps
+that exact operation in its pre-restart receipt and verifies fresh readiness,
+authority and devices after restart, without assuming a fixed screen.
+`network_delivery_asserted` remains false until independent paired-host
+transport evidence proves the original authenticated envelope crossed the LAN.
+
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
 Shared flows should be authored semantically once, then executed through the harness using either the TUI or browser driver. Do not create a second frontend execution path for MBT or simulator replay. Core shared scenarios should use semantic actions and state-based assertions. Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks except in dedicated low-level driver tests.

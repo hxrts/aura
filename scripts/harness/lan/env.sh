@@ -17,6 +17,8 @@
 #   AURA_E2E_HOST_ADDR    this host's LAN address, substituted for __HOST_ADDR__
 #                         in the configs (default: detected from the primary
 #                         interface)
+#   AURA_E2E_BOOTSTRAP    paired-enrollment starts two independent accounts
+#                         without the ordinary pre-linked contact cast
 
 AURA_E2E_ROOT="${AURA_E2E_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 AURA_E2E_RUN_DIR="${AURA_E2E_RUN_DIR:-$AURA_E2E_ROOT/.tmp/e2e/run}"

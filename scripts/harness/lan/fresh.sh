@@ -28,7 +28,15 @@ printf -v remote_command 'cd %q && scripts/harness/lan/drv.sh stop && AURA_E2E_R
 ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "$remote_command" | tail -1
 (cd "$AURA_E2E_ROOT" && nix develop --command "$AURA_E2E_DRV" start "$local_config" | tail -1)
 
-a=$(onboard alex-tui Alex); b=$(onboard barbara-tui Barbara); c=$(onboard alex-tui2 Carol)
+a=$(onboard alex-tui Alex); b=$(onboard barbara-tui Barbara)
+if [[ "${AURA_E2E_BOOTSTRAP:-}" == paired-enrollment ]]; then
+  # First-contact enrollment must not inherit an authenticated contact route.
+  # The two accounts above are real signing runtimes; Alex and Barbara stay
+  # independent until Barbara explicitly approves the transferred enrollment.
+  printf 'paired enrollment actors ready: alex-tui and barbara-tui\n'
+  exit 0
+fi
+c=$(onboard alex-tui2 Carol)
 echo "A=$a B=$b C=$c" | tee "$AURA_E2E_RUN_DIR/ids-$AURA_E2E_RUN_TOKEN"
 link alex-tui barbara-tui
 link alex-tui alex-tui2
