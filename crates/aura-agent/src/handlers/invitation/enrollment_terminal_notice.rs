@@ -44,6 +44,10 @@ fn discard_unverified_notice(error: &AgentError) -> bool {
     false
 }
 
+fn pending_terminal_receive(status: AuraVmHostWaitStatus, step: &StepResult) -> bool {
+    matches!(status, AuraVmHostWaitStatus::Deferred) && matches!(step, StepResult::Stuck)
+}
+
 /// Each variant retains its protocol-specific owner; recovery has no active
 /// request/response admission authority.
 enum IssuedNoticeWindowCapability<'a> {
@@ -576,6 +580,9 @@ async fn receive_cancelled_notice_with_window(
             "terminal listener timed out",
             "terminal listener cancelled",
         )?;
+        if pending_terminal_receive(round.host_wait_status, &round.step) {
+            continue;
+        }
         if super::vm_loop::handle_invitation_vm_step(round.step, "terminal listener became stuck")?
         {
             return Err(AgentError::invalid(
@@ -588,6 +595,30 @@ async fn receive_cancelled_notice_with_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deferred_terminal_receive_waits_within_original_window() {
+        assert!(pending_terminal_receive(
+            AuraVmHostWaitStatus::Deferred,
+            &StepResult::Stuck
+        ));
+        assert!(!pending_terminal_receive(
+            AuraVmHostWaitStatus::Idle,
+            &StepResult::Stuck
+        ));
+        assert!(!pending_terminal_receive(
+            AuraVmHostWaitStatus::TimedOut,
+            &StepResult::Stuck
+        ));
+        assert!(!pending_terminal_receive(
+            AuraVmHostWaitStatus::Cancelled,
+            &StepResult::Stuck
+        ));
+        assert!(!pending_terminal_receive(
+            AuraVmHostWaitStatus::Deferred,
+            &StepResult::AllDone
+        ));
+    }
+
     #[test]
     fn negative_session_identity_is_distinct_and_exactly_bound() {
         let invitation = InvitationId::new("negative-session-binding");

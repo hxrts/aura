@@ -1322,6 +1322,16 @@ to signed manifest validity. Their required observations acknowledge the same
 durable original checkpoint, and replacing an allocation or observation owner
 fails closed. The preparation capability cannot admit a VM session.
 
+The active tracker observation and cancellation-window variants hold their
+capabilities behind a box to keep the enclosing result small. The box changes
+storage layout only: each capability still has one original owner and is moved
+through preparation, checkpoint acknowledgment and terminal publication. The
+accepted enrollment-response variant likewise boxes the verified response;
+its pinned verifier and original admission context remain required when the
+consumer takes it. None of these variants grants a second execution owner.
+Supervision failures retain concrete native sources through these handoffs;
+reducing an error payload must not convert a required cause to display text.
+
 An already persisted Cancelled decision yields a distinct negative publication
 capability. It cannot reopen execution or renew eligibility. Initial selector
 lookup and historical negative publication require their own bounded ingress

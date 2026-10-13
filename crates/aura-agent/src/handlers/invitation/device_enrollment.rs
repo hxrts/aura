@@ -13,6 +13,116 @@ enum EnrollmentInviteeChoice {
     Refuse,
 }
 
+/// Log only bounded error categories. Enrollment errors can contain protocol
+/// material in their Display text, so browser diagnostics must not print the
+/// source chain itself.
+fn terminal_notice_failure_categories(error: &AgentError) -> Vec<&'static str> {
+    use std::error::Error;
+    let mut categories = Vec::with_capacity(8);
+    let mut cause: Option<&(dyn Error + 'static)> = Some(error);
+    for _ in 0..8 {
+        let Some(current) = cause else { break };
+        let category = if let Some(agent) = current.downcast_ref::<AgentError>() {
+            match agent {
+                AgentError::TimeoutWithSource { .. } | AgentError::Timeout(_) => "agent_timeout",
+                AgentError::Aura(_) => "agent_aura",
+                AgentError::Config(_) => "agent_config",
+                AgentError::Runtime(_) => "agent_runtime",
+                AgentError::Context(_) => "agent_context",
+                AgentError::Effects(_) => "agent_effects",
+                AgentError::Choreography(_) => "agent_choreography",
+                AgentError::DeviceEnrollmentMessage(_) => "agent_enrollment_message",
+                AgentError::EnrollmentManifest(_) => "agent_enrollment_manifest",
+                AgentError::UnresolvedDeviceBinding { .. } => "agent_device_binding",
+            }
+        } else if let Some(aura) = current.downcast_ref::<aura_core::AuraError>() {
+            match aura {
+                aura_core::AuraError::Network { .. } => "aura_network",
+                aura_core::AuraError::Storage { .. } => "aura_storage",
+                aura_core::AuraError::Crypto { .. } => "aura_crypto",
+                aura_core::AuraError::Serialization { .. } => "aura_serialization",
+                aura_core::AuraError::Internal { .. } => "aura_internal",
+                _ => "aura_other",
+            }
+        } else if let Some(ingress) =
+            current.downcast_ref::<crate::runtime::session_ingress::SessionIngressError>()
+        {
+            match ingress {
+                crate::runtime::session_ingress::SessionIngressError::SessionStart { .. } => {
+                    "session_start"
+                }
+                crate::runtime::session_ingress::SessionIngressError::BridgeRound { .. } => {
+                    "session_bridge_round"
+                }
+                crate::runtime::session_ingress::SessionIngressError::SessionClose { .. } => {
+                    "session_close"
+                }
+                _ => "session_other",
+            }
+        } else if let Some(bridge) =
+            current.downcast_ref::<crate::runtime::vm_host_bridge::AuraVmBridgeRoundError>()
+        {
+            match bridge {
+                crate::runtime::vm_host_bridge::AuraVmBridgeRoundError::Send { .. } => {
+                    "bridge_send"
+                }
+                crate::runtime::vm_host_bridge::AuraVmBridgeRoundError::Receive { .. } => {
+                    "bridge_receive"
+                }
+                crate::runtime::vm_host_bridge::AuraVmBridgeRoundError::Step { .. } => {
+                    "bridge_step"
+                }
+                _ => "bridge_other",
+            }
+        } else if current.is::<aura_core::TimeoutBudgetError>() {
+            "timeout_budget"
+        } else if current.is::<aura_core::effects::TransportError>() {
+            "transport"
+        } else if current.is::<EnrollmentVmTeardownFailure>() {
+            "vm_teardown"
+        } else {
+            "other"
+        };
+        categories.push(category);
+        cause = current.source();
+    }
+    categories
+}
+
+#[cfg(test)]
+#[test]
+fn terminal_notice_diagnostic_retains_typed_cause_without_error_text() {
+    assert_eq!(
+        terminal_notice_failure_categories(&AgentError::runtime("secret enrollment payload")),
+        ["agent_runtime"]
+    );
+    let error = AgentError::Aura(aura_core::AuraError::Internal {
+        message: "secret enrollment payload".into(),
+        source: Some(Arc::new(
+            aura_core::TimeoutBudgetError::ObservationUnavailable,
+        )),
+    });
+    assert_eq!(
+        terminal_notice_failure_categories(&error),
+        ["agent_aura", "aura_internal", "timeout_budget"]
+    );
+    let mut nested = aura_core::AuraError::Internal {
+        message: "secret enrollment payload".into(),
+        source: None,
+    };
+    for _ in 0..12 {
+        nested = aura_core::AuraError::Internal {
+            message: "secret enrollment payload".into(),
+            source: Some(Arc::new(nested)),
+        };
+    }
+    let categories = terminal_notice_failure_categories(&AgentError::Aura(nested));
+    assert_eq!(categories.len(), 8);
+    assert!(categories
+        .iter()
+        .all(|category| !category.contains("secret")));
+}
+
 /// Primary execution remains the standard cause if teardown also fails.
 #[derive(Debug)]
 pub(crate) struct EnrollmentVmTeardownFailure {
@@ -774,10 +884,16 @@ impl InvitationDeviceEnrollmentHandler {
             }
             match failure {
                 None => Ok(()),
-                Some(source) => Err(aura_core::AuraError::Internal {
-                    message: "enrollment terminal notice listener failed".into(),
-                    source: Some(source),
-                }),
+                Some(source) => {
+                    tracing::error!(
+                        cause_categories = ?terminal_notice_failure_categories(source.as_ref()),
+                        "enrollment terminal notice listener failed"
+                    );
+                    Err(aura_core::AuraError::Internal {
+                        message: "enrollment terminal notice listener failed".into(),
+                        source: Some(source),
+                    })
+                }
             }
         });
         cfg_if::cfg_if! {
