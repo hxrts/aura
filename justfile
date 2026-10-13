@@ -1845,15 +1845,15 @@ scenario-suite:
 
 # Run harness coordinator with a TOML run config and optional scenario file
 harness-run *ARGS:
-    just _harness -- run {{ ARGS }}
+    just _harness run {{ ARGS }}
 
 # Lint harness TOML run and scenario files
 harness-lint *ARGS:
-    just _harness -- lint {{ ARGS }}
+    just _harness lint {{ ARGS }}
 
 # Replay a previously recorded harness bundle
 harness-replay *ARGS:
-    just _harness -- replay {{ ARGS }}
+    just _harness replay {{ ARGS }}
 
 # Run harness crate tests
 harness-test:
