@@ -39,7 +39,13 @@ rg -F -q '[remote](https://example.com), [anchor](#scope)' "$fixture/$first_arch
 [[ -s "$(dirname "$fixture/$first_archive")/../evidence/proof.md" ]]
 backup="$(sed -n 's/.*original backup: //p' "$fixture/archive-result.log")"
 [[ "$backup" == "$fixture/.task-plan/"*/before.md ]]
-if compgen -G "$fixture/.task-plan.*" > /dev/null; then exit 1; fi
+assert_no_obsolete_sibling() {
+  [[ -z "$(find "$fixture" -maxdepth 1 -name '.task-plan.*' -print -quit)" ]]
+}
+mkdir "$fixture/.task-plan.obsolete"
+if assert_no_obsolete_sibling; then exit 1; fi
+rmdir "$fixture/.task-plan.obsolete"
+assert_no_obsolete_sibling
 cmp -s "$backup" "$fixture/original.md"
 printf '%s\n' 'New evidence with literal $(do not execute) and `backticks`.' 'Continuation.' > "$fixture/entry.md"
 "${tool[@]}" log 1 "$fixture/entry.md" > "$fixture/log-result.log"
