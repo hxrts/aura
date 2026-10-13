@@ -1272,6 +1272,40 @@ async fn handle_http_connection(
             let _ =
                 write_http_response(&mut stream, status, "text/plain; charset=utf-8", b"").await;
         }
+        ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/ack-witness/") => {
+            let Some(key) = pending_enrollment_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-mailbox/ack-witness/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid pending enrollment mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let witnesses = shared
+                .write()
+                .await
+                .pending_enrollment_mailboxes
+                .acknowledged_witnesses(key, now_ms);
+            match serde_json::to_vec(&witnesses) {
+                Ok(body) => {
+                    let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
+                }
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        500,
+                        "text/plain; charset=utf-8",
+                        b"pending enrollment ACK witness encoding failed",
+                    )
+                    .await;
+                }
+            }
+        }
         ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/envelopes/") => {
             let Some(key) = pending_enrollment_mailbox_key(
                 path.trim_start_matches("/v2/bootstrap/enrollment-mailbox/envelopes/"),

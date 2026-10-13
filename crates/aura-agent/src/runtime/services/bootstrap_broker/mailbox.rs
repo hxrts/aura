@@ -17,6 +17,25 @@ const MAX_REGISTRATIONS: usize = 256;
 const MAX_PENDING_ENVELOPES: usize = 32;
 const MAX_ENVELOPES_PER_REGISTRATION: usize = 4;
 const MAX_ACKNOWLEDGED_PER_REGISTRATION: usize = 128;
+
+/// Broker-side transport custody only. An ACK is recorded after the original
+/// receiver has verified and immutably retained the exact envelope. It says
+/// nothing about later choreography or enrollment success.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(super) struct PendingMailboxAckWitness {
+    pub manifest_digest: String,
+    pub subject: String,
+    pub device: String,
+    pub message_id: String,
+    pub envelope_digest: String,
+    pub stage: PendingMailboxWitnessStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum PendingMailboxWitnessStage {
+    ReceiverAcknowledgedRetainedFrame,
+}
 #[derive(Debug)]
 struct PendingEnvelope {
     delivery: PendingMailboxDelivery,
@@ -260,6 +279,24 @@ impl PendingEnrollmentMailboxes {
             .collect())
     }
 
+    pub(super) fn acknowledged_witnesses(
+        &mut self,
+        key: PendingMailboxKey,
+        now_ms: u64,
+    ) -> Vec<PendingMailboxAckWitness> {
+        self.prune_expired(now_ms);
+        let Some(entry) = self.entries.get(&key) else {
+            return Vec::new();
+        };
+        let mut witnesses: Vec<_> = entry
+            .acknowledged
+            .iter()
+            .map(|(message_id, digest)| ack_witness(key, message_id, digest))
+            .collect();
+        witnesses.sort_by(|a, b| a.message_id.cmp(&b.message_id));
+        witnesses
+    }
+
     /// Only the credential holder can retire an exact delivered message after
     /// its runtime has admitted the original envelope. An interrupted take
     /// leaves the bounded retained frame available for immediate redelivery.
@@ -298,6 +335,44 @@ impl PendingEnrollmentMailboxes {
             .acknowledged
             .insert(message_id.to_owned(), hash(&bytes));
         Ok(())
+    }
+}
+
+fn ack_witness(
+    key: PendingMailboxKey,
+    message_id: &str,
+    envelope_digest: &[u8; 32],
+) -> PendingMailboxAckWitness {
+    PendingMailboxAckWitness {
+        manifest_digest: hex::encode(key.manifest_digest),
+        subject: key.subject.to_string(),
+        device: key.device.to_string(),
+        message_id: message_id.to_owned(),
+        envelope_digest: hex::encode(envelope_digest),
+        stage: PendingMailboxWitnessStage::ReceiverAcknowledgedRetainedFrame,
+    }
+}
+
+#[cfg(test)]
+mod witness_tests {
+    use super::*;
+
+    #[test]
+    fn ack_witness_exposes_exact_scope_and_digest_without_envelope_or_credential() {
+        let key = PendingMailboxKey::new(
+            "11111111-1111-1111-1111-111111111111".parse().unwrap(),
+            DeviceId::from_bytes([2; 32]),
+            [3; 32],
+        );
+        let message_id = "22222222-2222-2222-2222-222222222222";
+        let witness = ack_witness(key, message_id, &[4; 32]);
+        let json = serde_json::to_value(&witness).expect("witness encodes");
+        assert_eq!(json["manifest_digest"], hex::encode([3; 32]));
+        assert_eq!(json["device"], key.device.to_string());
+        assert_eq!(json["message_id"], message_id);
+        assert_eq!(json["envelope_digest"], hex::encode([4; 32]));
+        assert_eq!(json["stage"], "receiver_acknowledged_retained_frame");
+        assert_eq!(json.as_object().unwrap().len(), 6);
     }
 }
 
