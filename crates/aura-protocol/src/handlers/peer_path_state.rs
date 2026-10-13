@@ -371,7 +371,7 @@ mod tests {
     fn probes_are_bounded_until_a_generation_changes() {
         let (context, peer) = ids();
         let direct = direct_path("10.0.1.2:41002");
-        let candidates = [relay_path(), direct.clone()];
+        let candidates = [relay_path(), direct];
         let mut state = PeerPathState::new(context, peer, &candidates, 0, 0).expect("state");
 
         let mut probes = 0;

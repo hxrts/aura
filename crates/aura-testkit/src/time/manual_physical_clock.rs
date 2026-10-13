@@ -25,13 +25,13 @@ struct State {
     #[cfg(not(target_arch = "wasm32"))]
     task_observation_failure: tokio::sync::Mutex<Option<(tokio::task::Id, TimeError)>>,
     sleep_failure: tokio::sync::Mutex<Option<TimeError>>,
-    sleep_admission: tokio::sync::Mutex<
-        Option<(
-            Option<u64>,
-            tokio::sync::oneshot::Sender<WindowPosition<PhysicalMillis>>,
-        )>,
-    >,
+    sleep_admission: tokio::sync::Mutex<SleepAdmission>,
 }
+
+type SleepAdmission = Option<(
+    Option<u64>,
+    tokio::sync::oneshot::Sender<WindowPosition<PhysicalMillis>>,
+)>;
 impl ManualPhysicalClock {
     /// Construct the original physical observation.
     pub fn new(now: u64) -> Self {

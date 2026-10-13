@@ -700,6 +700,7 @@ dependencies = [
  "cfg-if",
  "dioxus",
  "dioxus-web",
+ "form_urlencoded",
  "futures",
  "gloo-net",
  "hxrts-aura-agent",

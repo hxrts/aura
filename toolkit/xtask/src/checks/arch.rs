@@ -1150,6 +1150,10 @@ fn attribute_scope_contains(
             self.record(&item.attrs, item.span());
             syn::visit::visit_local(self, item);
         }
+        fn visit_field(&mut self, field: &'ast syn::Field) {
+            self.record(&field.attrs, field.span());
+            syn::visit::visit_field(self, field);
+        }
     }
     let syntax = syn::parse_file(source).context("parse architecture test scope")?;
     let mut scopes = TestScopes {
@@ -1197,6 +1201,13 @@ mod test_scope_tests {
     #[test]
     fn malformed_rust_fails_closed() {
         assert!(test_scope_contains("#[cfg(test)] fn broken( {", 1).is_err());
+    }
+
+    #[test]
+    fn test_only_fields_do_not_hide_adjacent_production_fields() {
+        let source = "struct Custody {\n #[cfg(test)]\n fixture: std::sync::Mutex<()>,\n production: std::sync::Mutex<()>,\n}\n";
+        assert!(test_scope_contains(source, 3).unwrap());
+        assert!(!test_scope_contains(source, 4).unwrap());
     }
 
     #[test]

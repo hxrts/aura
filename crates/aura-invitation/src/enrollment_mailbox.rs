@@ -471,7 +471,7 @@ impl IssuerEnrollmentReturnRegistration {
             || self.proof.signer_count == 0
             || self.proof.signers.len() != usize::from(self.proof.signer_count)
             || self.proof.signers.windows(2).any(|pair| pair[0] >= pair[1])
-            || self.proof.signers.iter().any(|&index| index == 0)
+            || self.proof.signers.contains(&0)
             || match self.mode {
                 SigningMode::Threshold => self.proof.signer_count < 2,
                 SigningMode::SingleSigner => !self.proof.is_single_signer(),

@@ -2097,11 +2097,8 @@ pub(crate) fn actual_enrollment_crash_boundary(phase: &str) -> EnrollmentCrashBo
             ])
             .env("AURA_ENROLLMENT_CRASH_BOUNDARY", phase)
             .env_remove("AURA_BUILD_WAIT_SECONDS")
-            .env(
-                "AURA_TEST_KEYRING_DIR",
-                std::env::var_os("AURA_TEST_KEYRING_DIR")
-                    .expect("actual native fixture must retain selected file keyring"),
-            )
+            // Inherit the selected test keyring directory, or let both
+            // processes use the file-backed test keyring's shared default.
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

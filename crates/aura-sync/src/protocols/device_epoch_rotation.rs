@@ -889,7 +889,7 @@ mod tests {
             bytes.clone()
         )
         .is_err());
-        let mut obsolete = envelope.clone();
+        let mut obsolete = envelope;
         obsolete.schema_version = 1;
         assert!(decode(
             authority,

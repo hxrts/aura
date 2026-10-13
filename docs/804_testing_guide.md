@@ -1226,6 +1226,17 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 
 ### Build and Caching
 
+For the complete browser enrollment scenario, build the native
+`bootstrap_broker_fixture` example with `--features simulation` in the same guarded batch as the browser
+inventory. Set `AURA_BROWSER_BROKER_FIXTURE` to its executable path and wrap the
+harness command with `scripts/verify/browser-enrollment-broker.sh`. The wrapper
+starts a loopback broker with a fresh authorization token, passes its endpoint
+and token to the harness, and waits for broker disposal after the harness exits.
+The harness gives each page a separate retrieval token. The browser driver
+initializes credentials in origin session storage before page bootstrap; only
+the endpoint is a query parameter, so startup URLs and logs omit credentials.
+Production enrollment authorization and signed verifier checks still run.
+
 `Cargo.lock` is committed, together with the lockfiles of the excluded
 `toolkit/xtask` and `toolkit/lints` workspaces, so every checkout, CI runner and
 remote host resolves the same dependency graph that the advisory audit and the

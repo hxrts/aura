@@ -24,10 +24,10 @@ enum ImportOwnerSlot {
     Closed,
 }
 impl ImportOwnerSlot {
-    fn semantic_owner(&self) -> Option<&SemanticWorkflowOwner> {
+    fn require_semantic_owner(&self) -> Result<&SemanticWorkflowOwner, AuraError> {
         match self {
-            Self::Armed(owner) => Some(owner),
-            Self::Closed => None,
+            Self::Armed(owner) => Ok(owner),
+            Self::Closed => Err(AuraError::invalid("original semantic owner is not armed")),
         }
     }
 }
@@ -274,8 +274,8 @@ impl EnrollmentImportCoordinator {
             &self.app,
             self.owner
                 .get()
-                .and_then(ImportOwnerSlot::semantic_owner)
-                .ok_or_else(|| AuraError::invalid("original semantic owner is not armed"))?,
+                .ok_or_else(|| AuraError::invalid("original semantic owner is not armed"))?
+                .require_semantic_owner()?,
             prepare_device_enrollment_import(&runtime, &budget, code, transfer),
             match host {
                 EnrollmentImportHostPolicy::RuntimeOnly => None,
@@ -297,8 +297,11 @@ impl EnrollmentImportCoordinator {
         // on the observer dropping its sender, and late handoff retains its
         // original prior publisher when this deposit wins.
         let _ = self.owner.set(ImportOwnerSlot::Closed);
-        let Some(owner) = self.owner.get().and_then(ImportOwnerSlot::semantic_owner) else {
-            return Ok(RequiredTaskSettlement::Resolved);
+        let owner = match self.owner.get() {
+            Some(ImportOwnerSlot::Armed(owner)) => owner,
+            Some(ImportOwnerSlot::Closed) | None => {
+                return Ok(RequiredTaskSettlement::Resolved);
+            }
         };
         Self::settle_original(
             owner,

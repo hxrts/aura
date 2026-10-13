@@ -26,6 +26,12 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 ## Invariants
 
+- Browser broker credentials arrive in a URL fragment and move into session
+  storage before runtime construction. Consuming the authorization key retains
+  the separate invitation retrieval key until it too is adopted; each key is
+  removed from the address bar after successful storage. The endpoint alone
+  never enables an unauthenticated pending enrollment route.
+
 - LAN browser startup consumes a previously guarded `web,harness` build.
   The tracked LAN driver sets `AURA_HARNESS_WEB_PREBUILT_ONLY=1`; the static
   server rejects missing, stale or non-harness assets without clearing the

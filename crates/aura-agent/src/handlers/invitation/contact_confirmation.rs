@@ -258,7 +258,10 @@ async fn verify_contact_response_signature_required(
         )
         .await
         .map_err(|source| {
-            AgentError::invalid(format!("verify quorum contact response: {source}"))
+            AgentError::Aura(aura_core::AuraError::Crypto {
+                message: "verify quorum contact response".into(),
+                source: Some(Arc::new(source)),
+            })
         });
     }
     if original.response.quorum_epoch.is_some() || original.response.recipient_device_id.is_some() {
@@ -273,11 +276,19 @@ async fn verify_contact_response_signature_required(
         original.original_sender_key(effects)?,
     )
     .await
-    .map_err(|source| {
-        AgentError::Aura(aura_core::AuraError::Crypto {
-            message: "verify contact response against original invitation issuer".into(),
-            source: Some(Arc::new(source)),
-        })
+    .map_err(|source| match source {
+        aura_signature::TranscriptCryptoError::Provider(source) => {
+            AgentError::Aura(aura_core::AuraError::Crypto {
+                message: "verify contact response against original invitation issuer".into(),
+                source: Some(Arc::new(source)),
+            })
+        }
+        aura_signature::TranscriptCryptoError::Encoding(source) => {
+            AgentError::Aura(aura_core::AuraError::Serialization {
+                message: "encode contact response verification transcript".into(),
+                source: Some(Arc::new(source)),
+            })
+        }
     })
 }
 
@@ -795,7 +806,10 @@ impl InvitationHandler {
                 let package =
                     frost_ed25519::keys::PublicKeyPackage::deserialize(&signed.public_key_package)
                         .map_err(|source| {
-                            AgentError::invalid(format!("invalid contact quorum package: {source}"))
+                            AgentError::Aura(aura_core::AuraError::Crypto {
+                                message: "invalid contact quorum package".into(),
+                                source: Some(Arc::new(source)),
+                            })
                         })?;
                 if package.verifying_key().serialize().as_slice() != issued.group_key() {
                     return Err(AgentError::invalid(

@@ -484,7 +484,8 @@ fn adopt_fragment_credential(key: &str) {
         )
         .is_ok()
     {
-        let _ = window.location().set_hash("");
+        let remaining = fragment_without_key(fragment, key);
+        let _ = window.location().set_hash(&remaining);
     }
 }
 
@@ -494,6 +495,14 @@ fn fragment_value(fragment: &str, key: &str) -> Option<String> {
         let (name, value) = pair.split_once('=')?;
         (name == key && !value.is_empty()).then(|| value.to_string())
     })
+}
+
+fn fragment_without_key(fragment: &str, key: &str) -> String {
+    fragment
+        .split('&')
+        .filter(|pair| pair.split_once('=').is_none_or(|(name, _)| name != key))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 pub(crate) fn bootstrap_broker_invitation_token() -> Option<String> {
@@ -518,15 +527,14 @@ fn session_value(key: &str) -> Option<String> {
 fn query_value(target_key: &str) -> Option<String> {
     let window = web_sys::window()?;
     let search = window.location().search().ok()?;
-    let query = search.strip_prefix('?').unwrap_or(&search);
-    for pair in query.split('&') {
-        if let Some((key, value)) = pair.split_once('=') {
-            if key == target_key && !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
+    query_value_from_search(&search, target_key)
+}
+
+fn query_value_from_search(search: &str, target_key: &str) -> Option<String> {
+    let query = search.strip_prefix('?').unwrap_or(search);
+    form_urlencoded::parse(query.as_bytes()).find_map(|(key, value)| {
+        (key == target_key && !value.is_empty()).then(|| value.into_owned())
+    })
 }
 
 fn harness_token() -> Option<String> {
@@ -776,6 +784,18 @@ pub(crate) fn persist_demo_tablet_enrollment_code(
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn broker_query_endpoint_is_decoded_before_request_construction() {
+        let search =
+            "?__aura_harness_instance=alice&__aura_bootstrap_broker=http%3A%2F%2F127.0.0.1%3A51651";
+        assert_eq!(
+            query_value_from_search(search, BOOTSTRAP_BROKER_QUERY_KEY).as_deref(),
+            Some("http://127.0.0.1:51651")
+        );
+        assert_eq!(query_value_from_search(search, "missing"), None);
+    }
+
     #[test]
     fn fragment_credentials_are_read_by_exact_key() {
         let fragment = "x=1&aura_bootstrap_broker_auth=tok-123&y=";
@@ -790,6 +810,16 @@ mod tests {
         );
         assert_eq!(fragment_value(fragment, "aura_bootstrap_broker"), None);
         assert_eq!(fragment_value("", "aura_bootstrap_broker_auth"), None);
+        let both = "aura_bootstrap_broker_auth=first&aura_bootstrap_broker_invitation=second";
+        let after_auth = fragment_without_key(both, "aura_bootstrap_broker_auth");
+        assert_eq!(
+            fragment_value(&after_auth, "aura_bootstrap_broker_invitation").as_deref(),
+            Some("second")
+        );
+        assert_eq!(
+            fragment_without_key(&after_auth, "aura_bootstrap_broker_invitation"),
+            ""
+        );
     }
 
     #[test]

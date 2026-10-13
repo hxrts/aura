@@ -156,7 +156,8 @@ impl Scope<'_> {
             "from_trusted_provider" => Some(self.provider_issuer()),
             "new_trusted_provider_identity" => Some(
                 self.path == "crates/aura-effects/src/profile_storage.rs"
-                    && self.owner("FilesystemProfileStorageHandler", "acquire_owned_native"),
+                    && (self.owner("FilesystemProfileStorageHandler", "acquire_owned_native")
+                        || self.owner("FilesystemProfileStorageHandler", "acquire_owned_browser")),
             ),
             "into_selected_profile_lifetime_channel" => Some(
                 self.path == "crates/aura-agent/src/runtime/effects.rs"
@@ -291,7 +292,8 @@ impl Scope<'_> {
         }) && self.native_result(if method == "decide_negative" { Some("NegativeSecretDecisionCapability") } else { None })
     }
     fn provider_issuer(&self) -> bool {
-        self.path == "crates/aura-effects/src/secure/allocation_lifetime.rs"
+        (self.path == "crates/aura-effects/src/secure/allocation_lifetime.rs"
+            || self.path == "crates/aura-effects/src/secure/browser_allocation_lifetime.rs")
             && self.implementation.is_none()
             && self
                 .signature
@@ -426,6 +428,45 @@ mod tests {
             source
         )
         .is_err());
+    }
+    #[test]
+    fn browser_provider_identity_requires_exact_owner() {
+        let path = "crates/aura-effects/src/profile_storage.rs";
+        let source = "impl FilesystemProfileStorageHandler { async fn acquire_owned_browser(&self) { SecretLifetimeProviderIdentity::new_trusted_provider_identity(); } }";
+        assert!(analyze(path, source).expect("browser owner").is_empty());
+        assert_eq!(
+            analyze(path, &source.replace("acquire_owned_browser", "unrelated"))
+                .expect("unrelated owner")
+                .len(),
+            1
+        );
+        assert_eq!(
+            analyze("crates/aura-effects/src/unrelated.rs", source)
+                .expect("foreign path")
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn browser_provider_issuer_requires_exact_declaration() {
+        let path = "crates/aura-effects/src/secure/browser_allocation_lifetime.rs";
+        let source = "#[aura_macros::capability_boundary(category = \"capability_gated\", capability = \"ProfileSecretLifetimeRecoveryCapability\", family = \"proof_issuer\")] #[aura_macros::authoritative_source(kind = \"proof_issuer\")] fn selected_profile_channel(owned: &ProfileOwnedSecureStorage) -> Result<ProfileSecretLifetimeRecoveryCapability,AuraError> { Alias::from_trusted_provider(backend); }";
+        assert!(analyze(path, source).expect("browser issuer").is_empty());
+        assert_eq!(
+            analyze(
+                path,
+                &source.replace("selected_profile_channel", "unrelated")
+            )
+            .expect("unrelated issuer")
+            .len(),
+            1
+        );
+        assert_eq!(
+            analyze("crates/aura-effects/src/secure/unrelated.rs", source)
+                .expect("foreign path")
+                .len(),
+            1
+        );
     }
     #[test]
     fn registry_negative_requires_actual_capability_type() {

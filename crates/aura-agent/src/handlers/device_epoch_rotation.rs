@@ -100,6 +100,20 @@ enum DeviceEpochSigningOwner<'a> {
 }
 
 impl OriginalEnrollmentRotationContext {
+    pub(crate) fn from_original(
+        issued: std::sync::Arc<
+            crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        >,
+        original: crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+        children: crate::task_registry::TaskGroup,
+    ) -> Self {
+        Self {
+            issued,
+            original,
+            children,
+        }
+    }
+
     fn require_request(
         &self,
         effects: &AuraEffectSystem,

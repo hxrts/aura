@@ -432,7 +432,7 @@ pub(crate) const STANDING_HOLD_MS: u64 = CEREMONY_MAX_POLLS as u64 * 50;
 /// observed) for a later round, or `None` once it has waited out the
 /// coordinator's attempt window and is refused.
 pub(crate) fn hold_for_standing(envelope: &mut TransportEnvelope, now_ms: u64) -> bool {
-    let held_since = held_since_ms(&envelope).unwrap_or(now_ms);
+    let held_since = held_since_ms(envelope).unwrap_or(now_ms);
     if now_ms.saturating_sub(held_since) >= STANDING_HOLD_MS {
         return false;
     }

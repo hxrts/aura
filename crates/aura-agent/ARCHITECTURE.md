@@ -119,6 +119,13 @@ declares two `ActorOwned` roots and one `Pure` policy.
 - `handlers/`: Service API implementations (auth, session, recovery, etc.).
 - `reactive/`: Signal-based notification and scheduling.
 
+Original issuer required-task custody, its terminal destination, and error custody live in
+`runtime/services/issuer_task_custody.rs`, `issuer_terminal_destination.rs`, and
+`issuer_error_custody.rs`. The invitation handler retains only the typed service
+entry points and re-exports the owner handles for existing runtime callers. The
+original owner retains its signed result, cancellation and retirement receipts
+through cleanup; moving the modules does not transfer terminal authority.
+
 ### Enrollment VM admission owner
 
 Enrollment parent inventory uses a bounded, fallible secure metadata reader.
@@ -708,6 +715,10 @@ Ownership categories follow [docs/122_ownership_model.md](../../docs/122_ownersh
     `RetainedEnrollmentVerifier` and `VerifiedEnrollmentResponse`; only the
     explicit setup-transfer path selects the expected verifier, and only
     successful expected-key verification constructs response evidence
+  - `runtime/services/retained_enrollment_vm_control.rs` retains the original
+    enrollment VM control's conditional-acquisition outcome, signer binding,
+    and runtime identity; the sealed handler capability checks the original
+    control and execution child before those runtime-owned slots are used
   - `runtime/services/reconfiguration_manager.rs` via `ReconfigurationManager` and `SessionDelegationTransfer`
   - `runtime/session_ingress.rs` via `RuntimeSessionOwner`
   - `runtime/subsystems/vm_fragment.rs` via `VmFragmentRegistry`

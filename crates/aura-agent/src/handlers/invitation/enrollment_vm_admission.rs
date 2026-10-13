@@ -95,7 +95,7 @@ mod original_k1_return_registration_tests {
                 )
                 .await
                 .expect("original return registration inventory is readable");
-            assert_eq!(keys, [location.key.clone()]);
+            assert_eq!(keys.as_slice(), std::slice::from_ref(&location.key));
             let registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
                 aura_core::util::serialization::from_slice(&bytes).unwrap();
             let credential_location = SecureStorageLocation::with_sub_key(

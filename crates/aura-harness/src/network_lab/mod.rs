@@ -1263,7 +1263,7 @@ mod tests {
         // Without a resolvable relay address the peer gets nothing to dial.
         assert!(relay_launch_env(&topology, &topology.authorities[1], |_| None).is_empty());
 
-        let mut no_relay = topology.clone();
+        let mut no_relay = topology;
         no_relay.required_relay_authority = None;
         assert!(relay_launch_env(&no_relay, &no_relay.authorities[1], relay_ip).is_empty());
     }

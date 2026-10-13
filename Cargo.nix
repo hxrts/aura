@@ -3053,6 +3053,10 @@ with optional architecture-specific hardware acceleration
             target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
+            name = "form_urlencoded";
+            packageId = "form_urlencoded";
+          }
+          {
             name = "futures";
             packageId = "futures";
           }

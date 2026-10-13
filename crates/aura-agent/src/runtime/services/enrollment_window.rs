@@ -4630,7 +4630,7 @@ impl OriginalSigningTaskCustody {
             && self
                 .completion
                 .as_ref()
-                .map_or(true, |actual| actual.original().is_err())
+                .is_none_or(|actual| actual.original().is_err())
         {
             // A fresh original root cannot account for committed Closed while
             // silently losing its independently retained native completion.

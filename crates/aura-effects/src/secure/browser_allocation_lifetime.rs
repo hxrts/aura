@@ -18,6 +18,7 @@ struct Inventory {
     version: u16,
     records: Vec<Record>,
 }
+// aura-security: secret-derive-justified owner=allocation-lifetime-provider expires=before-release remediation=docs/100_crypto.md private browser persistence codec only; plaintext and encoded buffers are Zeroizing, IndexedDB stores only authenticated ciphertext, Record Drop zeroizes secret bytes, and no Debug/Clone or public export is provided.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {

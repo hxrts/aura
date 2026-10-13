@@ -34,6 +34,15 @@ fn invalid(cause: IssuedInvitationIdentityError) -> AgentError {
         AuraError::Invalid { message, source }
     })
 }
+fn invalid_source(
+    stage: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> AgentError {
+    AgentError::Aura(AuraError::Invalid {
+        message: stage.into(),
+        source: Some(Arc::new(source)),
+    })
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,9 +126,7 @@ impl VerifiedQuorumInvitationIssuance {
         shareable.version = ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION;
         let context = shareable
             .quorum_signing_context(invitation.receiver_id, recipient_device, transport)
-            .map_err(|source| {
-                AgentError::invalid(format!("invalid quorum invitation intent: {source}"))
-            })?;
+            .map_err(|source| invalid_source("invalid quorum invitation intent", source))?;
         let signature = signing.sign_with_device_quorum(context.clone()).await?;
         if signature.signer_count < 2
             || signature.signature.len() != ShareableInvitation::SENDER_PROOF_SIGNATURE_BYTES
@@ -146,9 +153,7 @@ impl VerifiedQuorumInvitationIssuance {
             ));
         }
         let package = frost_ed25519::keys::PublicKeyPackage::deserialize(&retained_package)
-            .map_err(|source| {
-                AgentError::invalid(format!("invalid retained native group package: {source}"))
-            })?;
+            .map_err(|source| invalid_source("invalid retained native group package", source))?;
         let group_key = package.verifying_key().serialize();
         let trusted_key = TrustedPublicKey::active(
             TrustedKeyDomain::AuthorityThreshold,
@@ -158,9 +163,7 @@ impl VerifiedQuorumInvitationIssuance {
         );
         let transcript =
             aura_signature::threshold_signing_context_transcript_bytes(&context, signature.epoch)
-                .map_err(|source| {
-                AgentError::invalid(format!("invalid quorum invitation transcript: {source}"))
-            })?;
+                .map_err(|source| invalid_source("invalid quorum invitation transcript", source))?;
         if !effects
             .frost_verify(&transcript, &signature.signature, trusted_key.bytes())
             .await?
@@ -182,9 +185,7 @@ impl VerifiedQuorumInvitationIssuance {
                 },
                 transport.clone(),
             )
-            .map_err(|source| {
-                AgentError::invalid(format!("invalid signed quorum invitation: {source}"))
-            })?;
+            .map_err(|source| invalid_source("invalid signed quorum invitation", source))?;
         Ok(Self {
             runtime_owner: effects,
             original: OriginalQuorumProofRecord {
@@ -362,9 +363,8 @@ impl IssuedQuorumInvitationCapability<'_> {
             trusted_key.bytes(),
         )
         .await
-        .map_err(|source| {
-            AgentError::invalid(format!("verify retained quorum response: {source}"))
-        })? {
+        .map_err(|source| invalid_source("verify retained quorum response", source))?
+        {
             return Err(AgentError::invalid(
                 "retained quorum response signature did not verify",
             ));
@@ -451,7 +451,7 @@ async fn read_quorum(
         trusted_key.bytes(),
     )
     .await
-    .map_err(|source| AgentError::invalid(format!("verify retained quorum invitation: {source}")))?
+    .map_err(|source| invalid_source("verify retained quorum invitation", source))?
     {
         return Err(invalid(IssuedInvitationIdentityError::Binding));
     }

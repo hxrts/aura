@@ -129,8 +129,20 @@ fn guardian_key_failure(source: GuardianRecoveryKeyError) -> AgentError {
     };
     AgentError::Aura(error)
 }
-fn guardian_crypto_failure(stage: &'static str, source: aura_core::AuraError) -> AgentError {
+fn guardian_crypto_failure(
+    stage: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> AgentError {
     AgentError::Aura(aura_core::AuraError::Crypto {
+        message: stage.into(),
+        source: Some(Arc::new(source)),
+    })
+}
+fn guardian_invalid_source(
+    stage: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> AgentError {
+    AgentError::Aura(aura_core::AuraError::Invalid {
         message: stage.into(),
         source: Some(Arc::new(source)),
     })
@@ -343,9 +355,7 @@ async fn verify_guardian_confirmation_required(
             original.original_sender_key(effects)?,
         )
         .await
-        .map_err(|source| {
-            AgentError::invalid(format!("verify quorum Guardian confirmation: {source}"))
-        });
+        .map_err(|source| guardian_crypto_failure("verify quorum Guardian confirmation", source));
     }
     if confirm.quorum_epoch.is_some() || confirm.recipient_device_id.is_some() {
         return Err(AgentError::invalid(
@@ -799,7 +809,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                                         return Err(AgentError::invalid("Guardian confirmation quorum differs from original issuance"));
                                     }
                                     let package = frost_ed25519::keys::PublicKeyPackage::deserialize(&signed.public_key_package)
-                                        .map_err(|source| AgentError::invalid(format!("invalid Guardian quorum package: {source}")))?;
+                                        .map_err(|source| guardian_invalid_source("invalid Guardian quorum package", source))?;
                                     if package.verifying_key().serialize().as_slice() != quorum.group_key() {
                                         return Err(AgentError::invalid("Guardian confirmation group key differs from original issuance"));
                                     }

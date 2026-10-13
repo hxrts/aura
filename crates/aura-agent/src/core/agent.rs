@@ -36,7 +36,10 @@ pub struct AuraAgent {
 
     /// Runtime-local deduplication after an encrypted original mailbox frame
     /// has been admitted to the VM queue. Reopen rebuilds this from custody.
+    // Deduplication and queue admission are synchronous; no guard crosses an await.
+    #[allow(clippy::disallowed_types)]
     pending_mailbox_seen: parking_lot::Mutex<std::collections::HashSet<String>>,
+    #[allow(clippy::disallowed_types)]
     issuer_return_seen: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
@@ -58,7 +61,9 @@ impl AuraAgent {
             services,
             context,
             periodic_sync_started: std::sync::atomic::AtomicBool::new(false),
+            #[allow(clippy::disallowed_types)] // Synchronous mailbox deduplication slot.
             pending_mailbox_seen: parking_lot::Mutex::new(std::collections::HashSet::new()),
+            #[allow(clippy::disallowed_types)] // Synchronous return-mailbox deduplication slot.
             issuer_return_seen: parking_lot::Mutex::new(std::collections::HashSet::new()),
         }
     }

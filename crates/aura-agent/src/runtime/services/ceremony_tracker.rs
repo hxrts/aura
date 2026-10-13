@@ -2191,6 +2191,13 @@ enum OriginalNegativeCheckpointOwner {
     Cancellation,
 }
 
+#[cfg(test)]
+type CancellationPostcheckpointGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+    Option<Box<dyn FnOnce() + Send>>,
+);
+
 struct CeremonyTrackerShared {
     state: RwLock<CeremonyTrackerState>,
     /// Authoritative lifecycle state for runtime health.
@@ -2202,13 +2209,7 @@ struct CeremonyTrackerShared {
     #[cfg(test)]
     clock_checkpoint_fault: Mutex<Option<AuraError>>,
     #[cfg(test)]
-    cancellation_postcheckpoint_gate: Mutex<
-        Option<(
-            tokio::sync::oneshot::Sender<()>,
-            tokio::sync::oneshot::Receiver<()>,
-            Option<Box<dyn FnOnce() + Send>>,
-        )>,
-    >,
+    cancellation_postcheckpoint_gate: Mutex<Option<CancellationPostcheckpointGate>>,
     #[cfg(test)]
     negative_checkpoint_fault: Mutex<Option<(OriginalNegativeCheckpointOwner, AuraError)>>,
     #[cfg(test)]

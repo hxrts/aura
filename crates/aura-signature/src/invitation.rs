@@ -115,6 +115,14 @@ pub struct ShareableInvitationSenderProof {
 
 pub use aura_core::invitation::ShareableInvitationTransportMetadata;
 
+type DecodedInvitationCode = (
+    ShareableInvitation,
+    Option<ShareableInvitationSenderProof>,
+    ShareableInvitationTransportMetadata,
+    Option<AuthorityId>,
+    Option<DeviceId>,
+);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ShareableInvitationCodeEnvelope {
     payload: ShareableInvitation,
@@ -505,18 +513,7 @@ impl ShareableInvitation {
         Ok((invitation, proof, transport))
     }
 
-    fn decode_code(
-        code: &str,
-    ) -> Result<
-        (
-            Self,
-            Option<ShareableInvitationSenderProof>,
-            ShareableInvitationTransportMetadata,
-            Option<AuthorityId>,
-            Option<DeviceId>,
-        ),
-        ShareableInvitationError,
-    > {
+    fn decode_code(code: &str) -> Result<DecodedInvitationCode, ShareableInvitationError> {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let parts = Self::parse_code_parts(code)?;
@@ -688,12 +685,10 @@ impl ShareableInvitation {
             InvitationType::DeviceEnrollment { .. }
         ) {
             Self::ENROLLMENT_QUORUM_VERSION
+        } else if self.version == Self::CONTACT_GUARDIAN_QUORUM_VERSION {
+            Self::CONTACT_GUARDIAN_QUORUM_VERSION
         } else {
-            if self.version == Self::CONTACT_GUARDIAN_QUORUM_VERSION {
-                Self::CONTACT_GUARDIAN_QUORUM_VERSION
-            } else {
-                Self::CURRENT_VERSION
-            }
+            Self::CURRENT_VERSION
         };
         if self.version != expected_version {
             return Err(ShareableInvitationError::UnsupportedVersion(self.version));

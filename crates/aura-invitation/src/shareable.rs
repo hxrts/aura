@@ -127,7 +127,7 @@ mod current_codec_tests {
             aura_signature::threshold_signing_context_transcript_bytes(&other_recipient, 7)
                 .unwrap()
         );
-        let mut other_transport = transport.clone();
+        let mut other_transport = transport;
         other_transport.sender_hint = Some("wss://attacker.example".into());
         let other_hint = invitation
             .quorum_signing_context(recipient, recipient_device, &other_transport)

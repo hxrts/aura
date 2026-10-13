@@ -37,6 +37,15 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Invariants
 
+- Complete browser enrollment uses an explicitly started loopback bootstrap
+  broker. The harness accepts the broker URL and authorization token together,
+  requires a loopback URL and a long hex token, and gives each browser instance
+  a separate unpredictable invitation retrieval credential retained across its
+  restart. The browser driver places only the endpoint in the query and
+  initializes credentials in origin session storage before page bootstrap;
+  startup logs and the page URL omit both credentials. Missing provisioning leaves the production broker
+  disabled, so no harness mode bypasses sender authorization.
+
 - Harness IPC uses one selected short local runtime root, shared by run
   provisioning and coordinator admission. Run, instance/profile and session
   generation remain isolated independently of checkout depth. Explicit roots

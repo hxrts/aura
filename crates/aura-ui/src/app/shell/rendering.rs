@@ -477,7 +477,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 }
                             },
                             on_primary: {
-                                let controller = controller.clone();
                                 let add_device_modal_state = add_device_modal_state.clone();
                                 move |_| {
                                     if !submit_runtime_modal_action(
@@ -601,7 +600,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 }
                             },
                             on_footer_action: {
-                                let controller = controller.clone();
                                 move |index: usize| {
                                     if index == 0
                                         && matches!(modal_state, Some(ModalState::CreateInvitation))
@@ -663,7 +661,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             }
                         },
                         on_confirm: {
-                            let controller = controller.clone();
                             let add_device_modal_state = add_device_modal_state.clone();
                             move |_| {
                                 if !submit_runtime_modal_action(
@@ -787,7 +784,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             }
                         },
                         on_footer_action: {
-                            let controller = controller.clone();
                             move |index: usize| {
                                 if index == 0
                                     && matches!(modal_state, Some(ModalState::CreateInvitation))

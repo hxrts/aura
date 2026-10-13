@@ -95,9 +95,10 @@ impl PendingEnrollmentMailboxes {
         if now_ms >= statement.expires_at_ms() {
             return Err("pending mailbox registration expired on selected physical provider");
         }
+        let candidate = hash(retrieval_credential.as_bytes());
         if statement.version()
             != aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxStatement::VERSION
-            || statement.retrieval_credential_commitment() != hash(retrieval_credential.as_bytes())
+            || !constant_time_eq(&statement.retrieval_credential_commitment(), &candidate)
         {
             return Err("pending mailbox registration credential binding is invalid");
         }
@@ -107,8 +108,8 @@ impl PendingEnrollmentMailboxes {
             statement.manifest_digest(),
         );
         if let Some(existing) = self.entries.get(&key) {
-            if existing.registration != registration
-                || existing.credential_commitment != statement.retrieval_credential_commitment()
+            if !constant_time_eq(&existing.credential_commitment, &candidate)
+                || existing.registration != registration
             {
                 return Err("pending mailbox registration conflicts with original scope");
             }

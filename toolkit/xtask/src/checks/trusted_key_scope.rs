@@ -891,11 +891,9 @@ mod tests {
                 "original: &RequiredGuardianPossessionVerificationCapability",
                 "original: &peer::RequiredGuardianPossessionVerificationCapability",
             ),
-            source.replace(
-                "issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability",
-                "pub issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability",
-            ),
+            source.replace("issued: &'owner T,", "pub issued: &'owner T,"),
         ] {
+            assert_ne!(invalid, source, "negative mutation must alter the source");
             assert!(
                 !analyze(path, &invalid).unwrap().violations.is_empty(),
                 "unbound possession source accepted"

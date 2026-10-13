@@ -79,10 +79,15 @@ impl EnrollmentReturnMailboxes {
         now_ms: u64,
     ) -> Result<(), &'static str> {
         self.prune_expired(now_ms);
-        if !(32..=256).contains(&retrieval_credential.len())
-            || now_ms >= registration.statement.expires_at_ms()
-            || registration.statement.retrieval_credential_commitment()
-                != hash(retrieval_credential.as_bytes())
+        if !(32..=256).contains(&retrieval_credential.len()) {
+            return Err("return mailbox credential or selected validity is invalid");
+        }
+        let candidate = hash(retrieval_credential.as_bytes());
+        if now_ms >= registration.statement.expires_at_ms()
+            || !constant_time_eq(
+                &registration.statement.retrieval_credential_commitment(),
+                &candidate,
+            )
         {
             return Err("return mailbox credential or selected validity is invalid");
         }
@@ -93,8 +98,8 @@ impl EnrollmentReturnMailboxes {
             statement.manifest_digest(),
         );
         if let Some(existing) = self.entries.get(&key) {
-            return if existing.registration == registration
-                && existing.credential_commitment == hash(retrieval_credential.as_bytes())
+            return if constant_time_eq(&existing.credential_commitment, &candidate)
+                && existing.registration == registration
             {
                 Ok(())
             } else {

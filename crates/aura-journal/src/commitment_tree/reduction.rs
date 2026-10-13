@@ -669,7 +669,7 @@ mod tests {
         } else {
             &second
         };
-        let expected = reduce(&[winner.clone()]).unwrap();
+        let expected = reduce(std::slice::from_ref(winner)).unwrap();
         assert_eq!(reduce(&[first.clone(), second.clone()]).unwrap(), expected);
         assert_eq!(reduce(&[second, first]).unwrap(), expected);
     }

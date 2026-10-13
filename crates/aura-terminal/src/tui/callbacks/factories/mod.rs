@@ -330,7 +330,7 @@ fn spawn_enrollment_import_callback(
                 match publication.await {
                     Ok(_) => emit_error_toast(&tx, "devices", detail).await,
                     Err(source) => {
-                        tracing::error!(%source, "original enrollment refusal publication unresolved")
+                        tracing::error!(%source, "original enrollment refusal publication unresolved");
                     }
                 }
             });
@@ -377,7 +377,7 @@ fn spawn_enrollment_import_callback(
                     "devices",
                     format!("Import device enrollment failed: {error}"),
                 )
-                .await
+                .await;
             }
         }
     });

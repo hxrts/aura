@@ -1556,6 +1556,17 @@ try {
   refusedForeignEvidence = true;
 }
 assert(refusedForeignEvidence, "new driver rejects foreign captured-instance evidence");
+const brokerTarget = new URL(withHarnessHarnessQuery(
+  "http://127.0.0.1:4173/", "alice", 1, "run-token",
+  { url: "http://127.0.0.1:43102", auth: "a".repeat(64), invitation: "b".repeat(64) },
+));
+assert(
+  brokerTarget.searchParams.get("__aura_bootstrap_broker") === "http://127.0.0.1:43102" &&
+    !brokerTarget.search.includes("aura_bootstrap_broker_auth") &&
+    !brokerTarget.href.includes("a".repeat(64)) &&
+    !brokerTarget.href.includes("b".repeat(64)),
+  "browser broker credentials stay outside the page URL",
+);
   console.error("[driver] selftest ok");
 }
 
@@ -3403,6 +3414,17 @@ function parseStartOptions(params) {
     params.harness_run_token.trim().length > 0
       ? params.harness_run_token.trim()
       : null;
+  const broker = params?.broker ?? null;
+  if (broker !== null && (
+    typeof broker.url !== "string" ||
+    typeof broker.auth !== "string" ||
+    typeof broker.invitation !== "string" ||
+    !/^http:\/\/127\.0\.0\.1:[0-9]+$/.test(broker.url) ||
+    !/^[a-fA-F0-9]{32,}$/.test(broker.auth) ||
+    !/^[a-fA-F0-9]{32,}$/.test(broker.invitation)
+  )) {
+    throw new Error("invalid browser broker credentials");
+  }
   const scenarioSeed = params?.scenario_seed ?? null;
   const dataDir = String(
     params?.data_dir ?? path.join(".tmp", "harness", instanceId),
@@ -3454,6 +3476,7 @@ function parseStartOptions(params) {
     instanceId,
     appUrl,
     harnessRunToken,
+    broker,
     scenarioSeed,
     dataDir,
     headless,
@@ -3503,7 +3526,7 @@ function requestTimeoutMs(method, params) {
   }
 }
 
-function withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed, harnessRunToken) {
+function withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed, harnessRunToken, broker = null) {
   const url = new URL(appUrl);
   url.searchParams.set("__aura_harness_instance", instanceId);
   if (harnessRunToken) {
@@ -3515,6 +3538,9 @@ function withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed, harnessRunTok
     scenarioSeed !== ""
   ) {
     url.searchParams.set("__aura_harness_scenario_seed", String(scenarioSeed));
+  }
+  if (broker !== null) {
+    url.searchParams.set("__aura_bootstrap_broker", broker.url);
   }
   return url.toString();
 }
@@ -3532,6 +3558,7 @@ async function startPage(params) {
     instanceId,
     appUrl,
     harnessRunToken,
+    broker,
     scenarioSeed,
     dataDir,
     headless,
@@ -3549,6 +3576,7 @@ async function startPage(params) {
     instanceId,
     scenarioSeed,
     harnessRunToken,
+    broker,
   );
 
   if (sessions.has(instanceId)) {
@@ -3578,6 +3606,14 @@ async function startPage(params) {
         ignoreHTTPSErrors: true,
         args: CHROMIUM_HARNESS_ARGS,
       });
+      if (broker !== null) {
+        const origin = new URL(appUrl).origin;
+        await context.addInitScript(({ auth, invitation, origin }) => {
+          if (window.location.origin !== origin) return;
+          window.sessionStorage.setItem("aura_bootstrap_broker_auth", auth);
+          window.sessionStorage.setItem("aura_bootstrap_broker_invitation", invitation);
+        }, { auth: broker.auth, invitation: broker.invitation, origin });
+      }
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} launchPersistentContext done`,
       );
@@ -3592,7 +3628,7 @@ async function startPage(params) {
         page,
         startOptions: { ...options, resetStorage: false },
         headless,
-        appUrl: targetUrl,
+        appUrl,
         dataDir,
         artifactDir,
         consoleLog,
@@ -3697,7 +3733,7 @@ async function startPage(params) {
       installPageNavigationReset(session);
 
       traceDriver(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto start url=${targetUrl}`,
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto start url=${appUrl}`,
       );
       await withOperationTimeout(
         `start_page_goto:${instanceId}`,
@@ -3888,7 +3924,7 @@ async function startPage(params) {
 
       return {
         instance_id: instanceId,
-        app_url: targetUrl,
+        app_url: appUrl,
         data_dir: dataDir,
         headless,
       };

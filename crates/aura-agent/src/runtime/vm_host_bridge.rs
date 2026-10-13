@@ -647,26 +647,18 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
 }
 
 #[cfg(test)]
-pub(in crate::runtime) fn opening_vm_test_holds() -> &'static std::sync::Mutex<
-    std::collections::HashMap<
-        super::subsystems::choreography::RuntimeChoreographySessionId,
-        (
-            tokio::sync::oneshot::Sender<()>,
-            tokio::sync::oneshot::Receiver<()>,
-        ),
-    >,
-> {
-    static HOLDS: std::sync::OnceLock<
-        std::sync::Mutex<
-            std::collections::HashMap<
-                super::subsystems::choreography::RuntimeChoreographySessionId,
-                (
-                    tokio::sync::oneshot::Sender<()>,
-                    tokio::sync::oneshot::Receiver<()>,
-                ),
-            >,
-        >,
-    > = std::sync::OnceLock::new();
+type OpeningVmTestHolds = std::collections::HashMap<
+    super::subsystems::choreography::RuntimeChoreographySessionId,
+    (
+        tokio::sync::oneshot::Sender<()>,
+        tokio::sync::oneshot::Receiver<()>,
+    ),
+>;
+
+#[cfg(test)]
+pub(in crate::runtime) fn opening_vm_test_holds() -> &'static std::sync::Mutex<OpeningVmTestHolds> {
+    static HOLDS: std::sync::OnceLock<std::sync::Mutex<OpeningVmTestHolds>> =
+        std::sync::OnceLock::new();
     HOLDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 

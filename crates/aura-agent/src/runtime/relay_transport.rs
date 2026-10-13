@@ -228,6 +228,8 @@ enum RelayForwarderCommand {
     category = "actor_owned"
 )]
 pub struct RelayForwarderActor {
+    // Registration and try_send forwarding complete under a short synchronous read/write guard.
+    #[allow(clippy::disallowed_types)]
     sessions: parking_lot::RwLock<HashMap<AuthorityId, HashMap<String, RegisteredSession>>>,
     next_generation: AtomicU64,
     forwarded: AtomicU64,
@@ -480,6 +482,8 @@ impl RelaySessionState {
 }
 
 struct RelaySessionShared {
+    // Session ownership updates this hint synchronously before any awaited work.
+    #[allow(clippy::disallowed_types)]
     relay_authority: parking_lot::RwLock<Option<AuthorityId>>,
     connections: AtomicU64,
     tasks: RwLock<Option<TaskGroup>>,
@@ -519,6 +523,7 @@ impl RelaySessionService {
             authority_id,
             device_id,
             shared: Arc::new(RelaySessionShared {
+                #[allow(clippy::disallowed_types)] // Synchronous relay hint slot.
                 relay_authority: parking_lot::RwLock::new(None),
                 connections: AtomicU64::new(0),
                 tasks: RwLock::new(None),

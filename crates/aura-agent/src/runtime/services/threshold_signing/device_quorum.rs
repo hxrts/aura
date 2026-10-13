@@ -125,6 +125,7 @@ fn is_quorum_envelope(envelope: &TransportEnvelope) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types)] // Test-only signal registry; lock guards never cross await.
 fn request_intake_test_signals(
 ) -> &'static std::sync::Mutex<std::collections::HashMap<[u8; 32], tokio::sync::oneshot::Sender<()>>>
 {
@@ -135,6 +136,7 @@ fn request_intake_test_signals(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types)] // Test-only signal registry; lock guards never cross await.
 fn round_intake_test_signals(
 ) -> &'static std::sync::Mutex<std::collections::HashMap<[u8; 32], tokio::sync::oneshot::Sender<()>>>
 {
@@ -418,7 +420,7 @@ impl ThresholdSigningService {
         {
             if *recipient == context.authority
                 || !matches!(
-                    invitation_type,
+                    invitation_type.as_ref(),
                     aura_core::invitation::InvitationType::Contact { .. }
                         | aura_core::invitation::InvitationType::Guardian { .. }
                 )
@@ -833,10 +835,9 @@ impl ThresholdSigningService {
         if matches!(
             &request.context.operation,
             SignableOperation::InvitationCode { .. } | SignableOperation::InvitationResponse { .. }
-        ) {
-            if policy.threshold < 2 || invitation_source_device != Some(request.coordinator) {
-                return Err(refused(DeviceQuorumError::Binding));
-            }
+        ) && (policy.threshold < 2 || invitation_source_device != Some(request.coordinator))
+        {
+            return Err(refused(DeviceQuorumError::Binding));
         }
         if policy.epoch != request.epoch {
             return Err(refused(DeviceQuorumError::Binding));

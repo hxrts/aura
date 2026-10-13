@@ -1784,12 +1784,12 @@ mod original_shortcut_delivery_tests {
                 ).await;
             let selected_time = aura_core::effects::PhysicalTimeEffects::physical_time(&clock)
                 .await
-                .unwrap();
+                .expect("selected manual physical time");
             let budget = aura_core::TimeoutBudget::from_start_and_timeout(
                 &selected_time,
                 std::time::Duration::from_millis(100),
             )
-            .unwrap();
+            .expect("shortcut delivery timeout budget");
             let mut continuation = original.begin_shortcut_delivery(budget, purpose);
             {
                 let observation = continuation.observe_disposal();
@@ -1851,7 +1851,10 @@ mod original_shortcut_delivery_tests {
                 foreign_proof.outcome(),
                 RequiredTaskExit::Completed
             ));
-            let observation = continuation.observation.as_ref().unwrap();
+            let observation = continuation
+                .observation
+                .as_ref()
+                .expect("original continuation has a disposal observation");
             assert!(
                 observation
                     .consume_positive(&foreign_proof, purpose)
@@ -1862,7 +1865,10 @@ mod original_shortcut_delivery_tests {
                 .acknowledge_positive_authority()
                 .await
                 .expect("same issued handle and actual positive receipt");
-            let authority = continuation.authority.as_ref().unwrap();
+            let authority = continuation
+                .authority
+                .as_ref()
+                .expect("positive acknowledgment grants original shortcut authority");
             assert_eq!(authority.subject(), issuer.authority_id());
             assert_eq!(authority.device(), start.device_id);
             assert_eq!(authority.original_invitation(), &invitation.invitation_id);
@@ -1941,7 +1947,9 @@ mod original_shortcut_delivery_tests {
                 )
                 .await
                 .expect("joined device restores its native account share");
-            let service = issuer.invitations().unwrap();
+            let service = issuer
+                .invitations()
+                .expect("issuer invitation service after account enrollment");
             let co_signer = joined.threshold_signing();
             use aura_core::effects::ThresholdSigningEffects;
             let issuer_state = issuer
@@ -1967,7 +1975,10 @@ mod original_shortcut_delivery_tests {
                 Some(issuer.authority_id()),
             );
             assert_eq!(
-                co_signer.device_signing_consent().await.unwrap(),
+                co_signer
+                    .device_signing_consent()
+                    .await
+                    .expect("joined device signing consent"),
                 aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser,
             );
             let mut before_invitations: Vec<_> = service
@@ -1977,7 +1988,12 @@ mod original_shortcut_delivery_tests {
                 .map(|invitation| invitation.invitation_id)
                 .collect();
             before_invitations.sort();
-            let before_storage = issuer.runtime().effects().list_keys(None).await.unwrap();
+            let before_storage = issuer
+                .runtime()
+                .effects()
+                .list_keys(None)
+                .await
+                .expect("issuer storage keys before shortcut refusal");
             let before_facts = issuer
                 .runtime()
                 .effects()
@@ -2027,7 +2043,14 @@ mod original_shortcut_delivery_tests {
                     .collect()
             };
             assert_eq!(
-                invitation_keys(issuer.runtime().effects().list_keys(None).await.unwrap()),
+                invitation_keys(
+                    issuer
+                        .runtime()
+                        .effects()
+                        .list_keys(None)
+                        .await
+                        .expect("issuer storage keys after shortcut refusal")
+                ),
                 invitation_keys(before_storage),
                 "refused signature cannot persist an invitation"
             );
@@ -2351,9 +2374,12 @@ mod original_shortcut_delivery_tests {
                 continuation
                     .observation
                     .as_ref()
-                    .unwrap()
+                    .expect("original continuation retains disposal observation")
                     .consume_positive(
-                        continuation.disposal.as_ref().unwrap(),
+                        continuation
+                            .disposal
+                            .as_ref()
+                            .expect("original continuation retains disposal proof"),
                         if purpose == EnrolledDeviceShortcutPurpose::Contact {
                             EnrolledDeviceShortcutPurpose::Guardian
                         } else {
@@ -2392,7 +2418,7 @@ mod original_shortcut_delivery_tests {
                     .effects()
                     .list_keys(None)
                     .await
-                    .unwrap()
+                    .expect("issuer invitation keys before profile reopen")
                     .into_iter()
                     .filter(|key| key.starts_with("invitation/"))
                     .collect();
@@ -2453,7 +2479,7 @@ mod original_shortcut_delivery_tests {
                     .effects()
                     .list_keys(None)
                     .await
-                    .unwrap()
+                    .expect("issuer invitation keys after profile reopen")
                     .into_iter()
                     .filter(|key| key.starts_with("invitation/"))
                     .collect();

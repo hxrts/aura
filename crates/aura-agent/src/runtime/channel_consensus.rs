@@ -564,6 +564,7 @@ mod tests {
             crate::runtime::subsystems::transport::QueueEnvelopeOutcome::Queued
         ));
         let (standing_tx, standing_rx) = tokio::sync::oneshot::channel();
+        #[allow(clippy::disallowed_types)] // Test-only handoff; lock guard never crosses await.
         let standing_tx = Arc::new(std::sync::Mutex::new(Some(standing_tx)));
         let held_witness = witness.clone();
         let held_signal = standing_tx.clone();

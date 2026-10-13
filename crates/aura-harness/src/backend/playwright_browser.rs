@@ -20,8 +20,9 @@ use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::signal;
 use nix::unistd::Pid;
+use rand::RngCore;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -45,6 +46,13 @@ const DEFAULT_START_RETRY_BACKOFF_MS: u64 = 1_200;
 const MAX_START_ATTEMPTS: u32 = 10;
 const MAX_TIMEOUT_MS: u64 = 600_000;
 const PLAYWRIGHT_DRIVER_OWNED_MARKER: &str = "--aura-harness-owned-playwright-driver";
+
+#[derive(Serialize)]
+struct BrowserBrokerCredentials {
+    url: String,
+    auth: String,
+    invitation: String,
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -258,6 +266,7 @@ pub struct PlaywrightBrowserBackend {
     session: Option<Mutex<RunningSession>>,
     stderr_log: Arc<Mutex<Vec<String>>>,
     app_url: String,
+    broker: Option<BrowserBrokerCredentials>,
     headless: bool,
     capture_screenshots: bool,
     artifact_dir: PathBuf,
@@ -277,6 +286,7 @@ pub struct PlaywrightBrowserBackend {
 impl PlaywrightBrowserBackend {
     pub fn new(config: InstanceConfig) -> Result<Self> {
         let app_url = browser_app_url(&config.env);
+        let broker = browser_broker_credentials(&config.env)?;
         let headless = parse_bool_setting("AURA_HARNESS_BROWSER_HEADLESS", &config.env, true)?;
         let capture_screenshots = parse_bool_setting(
             "AURA_HARNESS_BROWSER_SNAPSHOT_SCREENSHOT",
@@ -328,6 +338,7 @@ impl PlaywrightBrowserBackend {
             session: None,
             stderr_log: Arc::new(Mutex::new(Vec::new())),
             app_url,
+            broker,
             headless,
             capture_screenshots,
             artifact_dir,
@@ -548,6 +559,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             json!({
                 "instance_id": self.config.id,
                 "app_url": self.app_url,
+                "broker": self.broker.as_ref(),
                 "harness_run_token": env_value("AURA_HARNESS_RUN_TOKEN", &self.config.env),
                 "scenario_seed": env_value("AURA_HARNESS_SCENARIO_SEED", &self.config.env),
                 "data_dir": absolutize_path(self.config.data_dir.clone()),
@@ -1216,6 +1228,37 @@ fn browser_app_url(env_entries: &[String]) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:4173".to_string())
 }
 
+fn browser_broker_credentials(env_entries: &[String]) -> Result<Option<BrowserBrokerCredentials>> {
+    let url = env_or_process_value("AURA_HARNESS_BROWSER_BROKER_URL", env_entries);
+    let auth = env_or_process_value("AURA_HARNESS_BROWSER_BROKER_AUTH", env_entries);
+    match (url, auth) {
+        (None, None) => Ok(None),
+        (Some(url), Some(auth)) => {
+            let port = url
+                .strip_prefix("http://127.0.0.1:")
+                .and_then(|port| port.parse::<u16>().ok())
+                .filter(|port| *port > 0);
+            if port.is_none()
+                || auth.len() < 32
+                || !auth.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                bail!("browser broker requires a loopback HTTP URL and a 32+ character hex authorization token");
+            }
+            // Each page receives a separate unpredictable retrieval credential.
+            // The backend retains it across browser restart in this run.
+            let mut invitation_bytes = [0_u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut invitation_bytes);
+            let invitation = hex::encode(invitation_bytes);
+            Ok(Some(BrowserBrokerCredentials {
+                url,
+                auth,
+                invitation,
+            }))
+        }
+        _ => bail!("browser broker URL and authorization token must be configured together"),
+    }
+}
+
 fn parse_bool_setting(key: &str, env_entries: &[String], default: bool) -> Result<bool> {
     let Some(raw) = env_or_process_value(key, env_entries) else {
         return Ok(default);
@@ -1385,10 +1428,11 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        browser_app_url, click_error_is_disabled_control, control_selector, decode_rpc_payload,
-        field_selector, navigation_control_id, navigation_target_screen, parse_bool_setting,
-        parse_u64_setting, tool_key_name, BrowserDiagnosticScreenPayload,
-        DEFAULT_PAGE_GOTO_TIMEOUT_MS, PLAYWRIGHT_DRIVER_OWNED_MARKER,
+        browser_app_url, browser_broker_credentials, click_error_is_disabled_control,
+        control_selector, decode_rpc_payload, field_selector, navigation_control_id,
+        navigation_target_screen, parse_bool_setting, parse_u64_setting, tool_key_name,
+        BrowserDiagnosticScreenPayload, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
 
     #[test]
@@ -1442,6 +1486,33 @@ mod tests {
             "AURA_WEB_APP_URL=http://127.0.0.1:4173".to_string(),
         ];
         assert_eq!(browser_app_url(&env), "http://127.0.0.1:5000");
+    }
+
+    #[test]
+    fn browser_broker_requires_complete_loopback_auth_and_unique_retrieval() {
+        let token = "a".repeat(64);
+        let credentials = || {
+            browser_broker_credentials(&[
+                "AURA_HARNESS_BROWSER_BROKER_URL=http://127.0.0.1:43102".into(),
+                format!("AURA_HARNESS_BROWSER_BROKER_AUTH={token}"),
+            ])
+            .unwrap()
+            .unwrap()
+        };
+        let alice = credentials();
+        let bob = credentials();
+        assert_eq!(alice.url, "http://127.0.0.1:43102");
+        assert_eq!(alice.auth, token);
+        assert_ne!(alice.invitation, bob.invitation);
+        assert!(browser_broker_credentials(&[
+            "AURA_HARNESS_BROWSER_BROKER_URL=http://0.0.0.0:43102".into(),
+            format!("AURA_HARNESS_BROWSER_BROKER_AUTH={token}"),
+        ])
+        .is_err());
+        assert!(browser_broker_credentials(&[
+            "AURA_HARNESS_BROWSER_BROKER_URL=http://127.0.0.1:43102".into(),
+        ])
+        .is_err());
     }
 
     #[test]

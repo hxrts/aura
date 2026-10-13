@@ -577,7 +577,10 @@ value types while matching a configured owner or capability container.
 ### Allocation lifetime provider ownership
 
 Selected allocation lifetime factories and provider identities originate only
-from the actual exclusive physical profile owner. Native crypto retirement
+from the actual exclusive physical profile owner. The syntax fence names the
+native profile acquisition and selected-profile issuer plus their browser Web
+Locks/IndexedDB counterparts exactly; no adjacent browser helper may mint
+either capability. Native crypto retirement
 requires the held original negative decision capability; positive sealing
 requires the original activation capability. A serialized allocation locator
 is observation, never recovery or retirement authority. Trusted custom effect

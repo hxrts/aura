@@ -2336,6 +2336,86 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
+    async fn return_mailbox_http_requires_selected_physical_time_provider() {
+        let without_time = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker without selected time should bind");
+        let with_time = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker with selected time should bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
+        let supervisor = TaskSupervisor::new();
+        without_time.start(&supervisor.group("return_mailbox_without_time"));
+        with_time.start(&supervisor.group("return_mailbox_with_time"));
+        tokio::task::yield_now().await;
+
+        let subject: AuthorityId = uuid::Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+            .expect("fixed test authority id")
+            .into();
+        let issuer_device = DeviceId::from_bytes([7; 32]);
+        let digest = [9; 32];
+        let error = fetch_remote_issuer_return_mailbox_registration(
+            without_time.public_url(),
+            AUTH_TOKEN,
+            subject,
+            issuer_device,
+            digest,
+        )
+        .await
+        .expect_err("missing selected provider must refuse return-mailbox reads");
+        assert_eq!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            503
+        );
+        assert!(fetch_remote_issuer_return_mailbox_registration(
+            with_time.public_url(),
+            AUTH_TOKEN,
+            subject,
+            issuer_device,
+            digest,
+        )
+        .await
+        .expect("selected provider permits a valid empty result")
+        .is_none());
+        let error = fetch_remote_issuer_return_mailbox_registration(
+            with_time.public_url(),
+            "wrong-token",
+            subject,
+            issuer_device,
+            digest,
+        )
+        .await
+        .expect_err("selected provider must not bypass bearer authorization");
+        assert_eq!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
+        supervisor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await
+            .expect("broker shutdown");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
     async fn broker_client_mixed_purposes_preserve_every_original_delivery() {
         let broker = LocalBootstrapBrokerService::bind(
             "127.0.0.1:0",

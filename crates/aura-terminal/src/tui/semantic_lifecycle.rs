@@ -193,15 +193,13 @@ fn admit_native_publisher(
     Ok((TuiSubmittedOperationPublisher { publication }, instance_id))
 }
 
-fn observe_required_terminal<T: Send + 'static>(
+async fn observe_required_terminal<T: Send + 'static>(
     observation: impl Future<Output = Result<T, aura_core::AuraError>> + Send + 'static,
-) -> impl Future<Output = ()> + Send {
-    async move {
-        if let Err(source) = observation.await {
-            // Actual custody and the concrete source remain in the required root;
-            // this diagnostic does not acknowledge failed channel publication.
-            tracing::error!(%source, "required native terminal publication unresolved");
-        }
+) {
+    if let Err(source) = observation.await {
+        // Actual custody and the concrete source remain in the required root;
+        // this diagnostic does not acknowledge failed channel publication.
+        tracing::error!(%source, "required native terminal publication unresolved");
     }
 }
 

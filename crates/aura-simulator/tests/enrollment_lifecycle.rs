@@ -1,5 +1,10 @@
 //! Genuine signed runtime lifecycle scenarios: no protected records or success
 //! outcomes are fabricated by this L8 driver.
+// Test setup and assertions intentionally fail immediately when a genuine runtime
+// operation fails. The synchronous mutexes only capture callback observations;
+// no guard is held across an await or used by production code.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::disallowed_types)]
+
 use std::{error::Error, sync::Arc, time::Duration};
 
 use aura_agent::{
@@ -32,14 +37,19 @@ async fn issued_with_broker_and_clock(
         .collect();
     let profiles = std::array::from_fn(|index| {
         let seed = 151 + index as u8 * 3;
-        let mut config = AgentConfig::default();
-        config.device_id = DeviceId::new_from_entropy([seed + 1; 32]);
-        config.storage.base_path = roots[index].path().to_path_buf();
-        if index == 1 {
-            if let Some(broker) = &broker {
-                config.bootstrap_broker = broker.clone();
-            }
-        }
+        let config = AgentConfig {
+            device_id: DeviceId::new_from_entropy([seed + 1; 32]),
+            storage: aura_agent::core::config::StorageConfig {
+                base_path: roots[index].path().to_path_buf(),
+                ..Default::default()
+            },
+            bootstrap_broker: if index == 1 {
+                broker.clone().unwrap_or_default()
+            } else {
+                aura_agent::BootstrapBrokerConfig::default()
+            },
+            ..Default::default()
+        };
         EnrollmentParticipantProfile {
             config,
             authority: AuthorityId::new_from_entropy([seed; 32]),

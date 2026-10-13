@@ -571,7 +571,7 @@ impl AuraAgent {
             for delivery in deliveries {
                 verify_delivery(effects.as_ref(), &registration, &setup, &delivery).await?;
                 let location = frame_location(statement.manifest_digest(), &delivery.message_id);
-                let already_retained = frame_keys.iter().any(|key| *key == location.key);
+                let already_retained = frame_keys.contains(&location.key);
                 if !already_retained
                     && (frame_keys.len() >= MAX_RETAINED_FRAMES
                         || scoped_count >= MAX_FRAMES_PER_REGISTRATION)

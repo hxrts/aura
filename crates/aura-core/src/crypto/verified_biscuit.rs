@@ -23,7 +23,7 @@ impl VerifiedBiscuitToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_auth::KeyPair;
+    use biscuit_auth::{datalog::SymbolTable, KeyPair};
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
@@ -34,15 +34,14 @@ mod tests {
         let root = KeyPair::new_with_rng(&mut rng);
         let other = KeyPair::new_with_rng(&mut rng);
         let token = Biscuit::builder()
-            .build_with_rng(&root, Default::default(), &mut rng)
+            .build_with_rng(&root, SymbolTable::default(), &mut rng)
             .unwrap();
-        let bytes = token.to_vec().unwrap();
+        let mut bytes = token.to_vec().unwrap();
         assert!(VerifiedBiscuitToken::from_bytes(&bytes, root.public()).is_ok());
         assert!(VerifiedBiscuitToken::from_bytes(&bytes, other.public()).is_err());
-        let mut tampered = bytes.clone();
-        let last = tampered.len() - 1;
-        tampered[last] ^= 1;
-        assert!(VerifiedBiscuitToken::from_bytes(&tampered, root.public()).is_err());
+        let last = bytes.len() - 1;
+        bytes[last] ^= 1;
+        assert!(VerifiedBiscuitToken::from_bytes(&bytes, root.public()).is_err());
         assert!(VerifiedBiscuitToken::from_bytes(b"not a biscuit", root.public()).is_err());
     }
 }
