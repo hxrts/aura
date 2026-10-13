@@ -122,6 +122,16 @@ impl AuraAgent {
         self.services.invitations()
     }
 
+    /// Observe only currently admitted pre-adoption mailbox selectors. This
+    /// does not confer authority to accept any envelope or activate an account.
+    pub async fn pending_enrollment_transport_scopes(
+        &self,
+    ) -> AgentResult<Vec<crate::handlers::PendingEnrollmentTransportScope>> {
+        self.invitations()?
+            .pending_enrollment_transport_scopes()
+            .await
+    }
+
     /// Get the recovery service
     ///
     /// Provides access to guardian-based recovery operations including device

@@ -90,6 +90,8 @@ impl DemoHandler {
             data_dir: None,
             device_id: Some(device_id.to_string()),
             bind_address: None,
+            relay_address: None,
+            serve_relay: false,
             demo: true,
         };
 

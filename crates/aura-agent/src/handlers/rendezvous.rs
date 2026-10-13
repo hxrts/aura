@@ -322,6 +322,15 @@ impl RendezvousHandler {
     }
 
     /// Get a peer's cached descriptor
+    /// Registry holding the shared peer path state: the manager's when one is
+    /// attached (so sends and channel preparation agree), else the handler's.
+    fn path_registry(&self) -> Arc<ServiceRegistry> {
+        match self.rendezvous_manager.as_ref() {
+            Some(manager) => manager.registry(),
+            None => self.registry.clone(),
+        }
+    }
+
     pub async fn get_peer_descriptor(
         &self,
         context_id: ContextId,
@@ -424,14 +433,19 @@ impl RendezvousHandler {
         // Retrieve remote public key from descriptor
         let remote_public_key = peer_descriptor.public_key;
 
-        let establish_path = peer_descriptor
-            .advertised_establish_paths()
-            .into_iter()
-            .next()
-            .ok_or_else(|| AgentError::invalid("Peer descriptor has no establish path"))?;
-        self.registry
-            .record_selected_path(context_id, peer, &establish_path, current_time)
-            .await;
+        // Relay-first selection shared with every send toward this peer; the
+        // registry keeps the retry state and exposes the choice as an observation.
+        let candidates: Vec<EstablishPath> =
+            crate::runtime::effects::usable_establish_paths(effects, &peer_descriptor)
+                .await
+                .into_iter()
+                .map(|candidate| candidate.path)
+                .collect();
+        let establish_path = self
+            .path_registry()
+            .select_peer_path(peer_descriptor.context_id, peer, &candidates, current_time)
+            .await
+            .ok_or_else(|| AgentError::invalid("Peer descriptor has no usable establish path"))?;
 
         let outcome = self
             .service

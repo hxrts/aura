@@ -221,6 +221,9 @@ impl NetworkLabBackend for PatchbayBackend {
                     for (key, value) in &env_vars {
                         env.insert(key.clone(), value.clone());
                     }
+                    env.extend(super::relay_launch_env(&topology, authority, |device_name| {
+                        lab.device_by_name(device_name).and_then(|device| device.ip())
+                    }));
 
                     authorities.insert(
                         authority.authority_id.clone(),

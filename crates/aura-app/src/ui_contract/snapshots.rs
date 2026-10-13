@@ -256,8 +256,14 @@ pub enum RuntimeFact {
         peer_authority_id: String,
         /// `relay` or `direct`.
         path: String,
-        /// Link protocol of the selected endpoint, e.g. `tcp`, `web_socket_relay`.
+        /// Link protocol of the selected endpoint, e.g. `tcp`, `websocketrelay`.
         protocol: String,
+        /// Generation of the peer's candidate path set the selection came from.
+        #[serde(default)]
+        candidate_generation: u64,
+        /// Local network epoch the selection was made in.
+        #[serde(default)]
+        network_generation: u64,
     },
 }
 
@@ -405,8 +411,12 @@ impl RuntimeFact {
             Self::PeerPathSelected {
                 peer_authority_id,
                 path,
+                candidate_generation,
+                network_generation,
                 ..
-            } => format!("peer_path_selected:{peer_authority_id}:{path}"),
+            } => format!(
+                "peer_path_selected:{peer_authority_id}:{path}:{candidate_generation}:{network_generation}"
+            ),
         }
     }
 
@@ -527,10 +537,14 @@ impl RuntimeFact {
                 peer_authority_id,
                 path,
                 protocol,
+                candidate_generation,
+                network_generation,
             } => {
                 peer_authority_id.contains(needle)
                     || path.contains(needle)
                     || protocol.contains(needle)
+                    || format!("candidate_generation:{candidate_generation}").contains(needle)
+                    || format!("network_generation:{network_generation}").contains(needle)
             }
             Self::AmpChannelTransitionUpdated { transition } => {
                 transition.channel.matches_needle(needle)

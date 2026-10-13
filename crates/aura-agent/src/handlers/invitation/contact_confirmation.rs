@@ -992,6 +992,7 @@ mod transcript_tests {
 #[cfg(test)]
 mod required_contact_identity_tests {
     use super::*;
+    use aura_core::effects::CryptoCoreEffects;
 
     #[tokio::test]
     async fn quorum_response_requires_retained_signer_from_issuing_runtime() {

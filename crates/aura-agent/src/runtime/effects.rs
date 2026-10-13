@@ -146,7 +146,9 @@ mod sync;
 mod system;
 mod time;
 mod transport;
-pub(crate) use transport::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
+pub(crate) use transport::{
+    usable_establish_paths, DeferredInboundEnvelopeReturns, InboundEnvelopeLease,
+};
 mod tree;
 
 const DEFAULT_WINDOW: u32 = 1024;
@@ -390,6 +392,16 @@ pub struct AuraEffectSystem {
 
     /// LAN transport service (optional, for TCP envelope delivery)
     lan_transport: parking_lot::RwLock<Option<Arc<LanTransportService>>>,
+
+    /// Relay session toward this peer's configured relay (optional).
+    #[cfg(not(target_arch = "wasm32"))]
+    relay_session:
+        parking_lot::RwLock<Option<Arc<crate::runtime::relay_transport::RelaySessionService>>>,
+
+    /// Relay forwarder when this node serves as a relay (optional).
+    #[cfg(not(target_arch = "wasm32"))]
+    relay_forwarder:
+        parking_lot::RwLock<Option<Arc<crate::runtime::relay_transport::RelayForwarderActor>>>,
 
     /// Rendezvous manager (optional, for address resolution)
     rendezvous_manager: parking_lot::RwLock<Option<RendezvousManager>>,
@@ -1379,6 +1391,10 @@ impl AuraEffectSystem {
             choreography_state: parking_lot::RwLock::new(ChoreographyState::default()),
             vm_fragment_registry: parking_lot::RwLock::new(VmFragmentRegistry::default()),
             lan_transport: parking_lot::RwLock::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_session: parking_lot::RwLock::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_forwarder: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
@@ -2090,6 +2106,40 @@ impl AuraEffectSystem {
 
     pub fn lan_transport(&self) -> Option<Arc<LanTransportService>> {
         self.lan_transport.read().clone()
+    }
+
+    /// Attach the relay session this peer keeps toward its configured relay.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn attach_relay_session(
+        &self,
+        service: Arc<crate::runtime::relay_transport::RelaySessionService>,
+    ) {
+        *self.relay_session.write() = Some(service);
+    }
+
+    /// The relay session, when a relay is configured.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn relay_session(
+        &self,
+    ) -> Option<Arc<crate::runtime::relay_transport::RelaySessionService>> {
+        self.relay_session.read().clone()
+    }
+
+    /// Attach the forwarder that makes this node a relay for registered peers.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn attach_relay_forwarder(
+        &self,
+        forwarder: Arc<crate::runtime::relay_transport::RelayForwarderActor>,
+    ) {
+        *self.relay_forwarder.write() = Some(forwarder);
+    }
+
+    /// The relay forwarder, when this node serves as a relay.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn relay_forwarder(
+        &self,
+    ) -> Option<Arc<crate::runtime::relay_transport::RelayForwarderActor>> {
+        self.relay_forwarder.read().clone()
     }
 
     pub fn attach_rendezvous_manager(&self, manager: RendezvousManager) {

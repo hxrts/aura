@@ -169,6 +169,7 @@ pub use handlers::{
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{
     Invitation, InvitationResult, InvitationServiceApi, InvitationStatus, InvitationType,
+    PendingEnrollmentTransportScope,
 };
 
 // Recovery types

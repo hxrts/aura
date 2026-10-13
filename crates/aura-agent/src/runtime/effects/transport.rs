@@ -7,7 +7,7 @@ use aura_core::effects::transport::{
     MAX_TRANSPORT_SIGNATURE_BYTES,
 };
 use aura_core::effects::TransportEffects;
-use aura_core::service::{LinkEndpoint, LinkProtocol, Route};
+use aura_core::service::{EstablishPath, LinkEndpoint, LinkProtocol, PeerPathKind, Route};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::{AuthorityId, ContextId};
@@ -364,6 +364,7 @@ impl TransportEffects for AuraEffectSystem {
     }
 }
 
+#[cfg(test)]
 async fn resolve_peer_addr(
     effects: &AuraEffectSystem,
     context: ContextId,
@@ -378,6 +379,7 @@ async fn resolve_peer_addr(
 /// address. Only for choreography envelopes, which travel on the peer's
 /// authority-scoped path: a browser never learns LAN-discovered descriptors,
 /// only the ones its invitations cached.
+#[cfg(test)]
 async fn resolve_any_authority_addr(
     effects: &AuraEffectSystem,
     peer: AuthorityId,
@@ -597,43 +599,277 @@ async fn send_planned_envelope(
     } else {
         None
     };
-    let addr = match sibling_device_addr {
-        Some(addr) => Some(addr),
-        None => resolve_peer_addr(effects, envelope.context, envelope.destination).await,
-    };
-    let addr = match addr {
-        Some(addr) => Some(addr),
-        // Choreography sessions run in a fresh per-session context that never
-        // has a peer descriptor. Like invitation delivery, they ride the
-        // receiver's authority-scoped peer path; the envelope keeps its session
-        // context so the receiver can still match it.
-        None if is_choreography_envelope(&envelope) => resolve_peer_addr(
-            effects,
-            default_context_id_for_authority(envelope.destination),
-            envelope.destination,
-        )
-        .await
-        .or(resolve_any_authority_addr(effects, envelope.destination).await),
-        None => None,
-    }
-    .ok_or(TransportError::DestinationUnreachable {
-        destination: envelope.destination,
-    })?;
     enforce_production_payload_encryption(effects, &envelope)?;
+    if let Some(addr) = sibling_device_addr {
+        return send_envelope_tcp(&addr, &envelope).await;
+    }
+
+    let destination = envelope.destination;
+    let unreachable = || TransportError::DestinationUnreachable { destination };
+    // Choreography sessions run in a fresh per-session context that never has
+    // a peer descriptor. Like invitation delivery, they ride the receiver's
+    // authority-scoped peer path; the envelope keeps its session context so
+    // the receiver can still match it.
+    let descriptor = descriptor_for_send(
+        effects,
+        envelope.context,
+        destination,
+        is_choreography_envelope(&envelope),
+    )
+    .await
+    .ok_or_else(unreachable)?;
+    let registry = effects
+        .rendezvous_manager()
+        .map(|manager| manager.registry())
+        .ok_or_else(unreachable)?;
+    let dialable = usable_establish_paths(effects, &descriptor).await;
+    let candidates: Vec<EstablishPath> = dialable
+        .iter()
+        .map(|candidate| candidate.path.clone())
+        .collect();
+    let addr_for = |path: &EstablishPath| {
+        dialable
+            .iter()
+            .find(|candidate| candidate.path == *path)
+            .map(|candidate| candidate.addr.clone())
+    };
+    let now_ms = effects
+        .time_effects()
+        .physical_time()
+        .await
+        .map(|time| time.ts_ms)
+        .unwrap_or(0);
+    let path_context = descriptor.context_id;
+    let plan = registry
+        .plan_peer_send(path_context, destination, &candidates, now_ms)
+        .await
+        .ok_or_else(unreachable)?;
+    let addr = addr_for(&plan.path).ok_or_else(unreachable)?;
     if envelope
         .metadata
         .get("content-type")
         .is_some_and(|value| value == "application/aura-invitation")
     {
         tracing::info!(
-            destination = %envelope.destination,
+            destination = %destination,
             context = %envelope.context,
             addr = %addr,
+            path = plan.kind.as_str(),
             "Resolved invitation transport target"
         );
     }
-    send_envelope_tcp(&addr, &envelope).await
+    let result = send_envelope_tcp(&addr, &envelope).await;
+    registry
+        .record_peer_path_outcome(
+            path_context,
+            destination,
+            &plan.path,
+            result.is_ok(),
+            now_ms,
+        )
+        .await;
+    let result = match result {
+        Err(error) if plan.kind == PeerPathKind::Direct => {
+            // The failed direct dial degraded the state back to the relay when
+            // one is advertised: carry this send on it instead of failing.
+            let fallback = registry
+                .plan_peer_send(path_context, destination, &candidates, now_ms)
+                .await
+                .filter(|fallback| fallback.kind == PeerPathKind::Relay);
+            match fallback
+                .and_then(|fallback| addr_for(&fallback.path).map(|addr| (fallback, addr)))
+            {
+                Some((fallback, relay_addr)) => {
+                    tracing::info!(destination = %destination, error = %error, relay_addr = %relay_addr, "direct send failed; carrying it over the relay");
+                    let relayed = send_envelope_tcp(&relay_addr, &envelope).await;
+                    registry
+                        .record_peer_path_outcome(
+                            path_context,
+                            destination,
+                            &fallback.path,
+                            relayed.is_ok(),
+                            now_ms,
+                        )
+                        .await;
+                    relayed
+                }
+                None => Err(error),
+            }
+        }
+        other => other,
+    };
+    if let Some(probe) = plan.probe {
+        if let Some(probe_addr) = addr_for(&probe) {
+            let reachable = probe_direct_path(&probe_addr, destination).await;
+            tracing::info!(destination = %destination, probe_addr = %probe_addr, reachable, "direct upgrade probe");
+            registry
+                .record_peer_path_outcome(path_context, destination, &probe, reachable, now_ms)
+                .await;
+        }
+    }
+    result
 }
+
+/// The descriptor whose paths carry a send to `peer` in `context`.
+async fn descriptor_for_send(
+    effects: &AuraEffectSystem,
+    context: ContextId,
+    peer: AuthorityId,
+    choreography: bool,
+) -> Option<RendezvousDescriptor> {
+    let manager = effects.rendezvous_manager()?;
+    let usable = |descriptor: RendezvousDescriptor| {
+        if descriptor_has_placeholder_crypto(&descriptor)
+            && !(effects.is_testing() || effects.harness_mode_enabled())
+        {
+            tracing::warn!(
+                peer = %peer,
+                context = %descriptor.context_id,
+                "Rejecting placeholder rendezvous descriptor for transport route resolution"
+            );
+            return None;
+        }
+        Some(descriptor)
+    };
+    if let Some(descriptor) = manager.get_descriptor(context, peer).await.and_then(usable) {
+        return Some(descriptor);
+    }
+    if !choreography {
+        return None;
+    }
+    if let Some(descriptor) = manager
+        .get_descriptor(default_context_id_for_authority(peer), peer)
+        .await
+        .and_then(usable)
+    {
+        return Some(descriptor);
+    }
+    manager
+        .get_any_descriptor_for_authority(peer)
+        .await
+        .and_then(usable)
+}
+
+/// An advertised establish path this runtime can dial, with where to dial it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DialCandidate {
+    /// The advertised path, as the peer path state identifies it.
+    pub path: EstablishPath,
+    /// Address to dial: the relay's own address for a relay path, the
+    /// endpoint's address otherwise.
+    pub addr: String,
+}
+
+/// Establish paths of `descriptor` this runtime can dial, relay first: relay
+/// endpoints whose relay authority resolves to a permitted address, then
+/// direct endpoints with a dialable protocol and a permitted address.
+pub(crate) async fn usable_establish_paths(
+    effects: &AuraEffectSystem,
+    descriptor: &RendezvousDescriptor,
+) -> Vec<DialCandidate> {
+    let mut relays = Vec::new();
+    let mut direct = Vec::new();
+    for path in descriptor.advertised_establish_paths() {
+        let endpoint = &path.route.destination;
+        if endpoint.protocol == LinkProtocol::WebSocketRelay {
+            let Some(relay) = endpoint.relay_authority else {
+                continue;
+            };
+            if let Some(addr) = relay_dial_addr(effects, relay).await {
+                relays.push(DialCandidate { path, addr });
+            }
+            continue;
+        }
+        if !path.route.is_direct()
+            || !LOCAL_DIALABLE_PROTOCOLS.contains(&endpoint.protocol)
+            || !direct_route_allowed(effects, &path.route)
+        {
+            continue;
+        }
+        if let Some(addr) = route_destination_addr(endpoint) {
+            direct.push(DialCandidate { path, addr });
+        }
+    }
+    direct.sort_by_key(|candidate| {
+        LOCAL_DIALABLE_PROTOCOLS
+            .iter()
+            .position(|protocol| *protocol == candidate.path.route.destination.protocol)
+            .unwrap_or(LOCAL_DIALABLE_PROTOCOLS.len())
+    });
+    relays.extend(direct);
+    relays
+}
+
+/// Where to dial `relay`: its own descriptor's first dialable direct endpoint
+/// (the descriptor arrives in the relay's registration acknowledgment or by
+/// the usual descriptor propagation), else this peer's own configured relay
+/// address when that is the same relay.
+async fn relay_dial_addr(effects: &AuraEffectSystem, relay: AuthorityId) -> Option<String> {
+    if let Some(descriptor) = effects
+        .rendezvous_manager()?
+        .get_any_descriptor_for_authority(relay)
+        .await
+    {
+        let addr = order_routes_for_local_dialer(
+            descriptor
+                .advertised_establish_paths()
+                .into_iter()
+                .filter(|path| path.route.destination.protocol != LinkProtocol::WebSocketRelay)
+                .map(|path| path.route)
+                .collect(),
+            LOCAL_DIALABLE_PROTOCOLS,
+        )
+        .into_iter()
+        .find(|route| direct_route_allowed(effects, route))
+        .and_then(|route| route_destination_addr(&route.destination));
+        if addr.is_some() {
+            return addr;
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(session) = effects.relay_session() {
+        if session.relay_authority() == Some(relay) {
+            return Some(session.relay_addr().to_string());
+        }
+    }
+    None
+}
+
+/// Whether a direct candidate accepts a TCP connection within a short bound.
+/// A reachable listener is the recoverable-direct-path evidence the upgrade
+/// policy promotes on; nothing is sent over the probe.
+#[cfg(not(target_arch = "wasm32"))]
+async fn probe_direct_path(addr: &str, destination: AuthorityId) -> bool {
+    let Ok(socket_addr) = addr.parse::<SocketAddr>() else {
+        return false;
+    };
+    execute_transport_timeout(
+        DIRECT_PROBE_TIMEOUT,
+        || TransportError::SendFailed {
+            destination,
+            reason: "direct probe timeout".to_string(),
+        },
+        || async {
+            TcpStream::connect(socket_addr)
+                .await
+                .map(drop)
+                .map_err(|error| TransportError::SendFailed {
+                    destination,
+                    reason: format!("direct probe failed: {error}"),
+                })
+        },
+    )
+    .await
+    .is_ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn probe_direct_path(_addr: &str, _destination: AuthorityId) -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const DIRECT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1_000);
 
 fn is_choreography_envelope(envelope: &TransportEnvelope) -> bool {
     envelope
@@ -1289,7 +1525,7 @@ impl AuraEffectSystem {
         }
     }
 
-    fn addressed_here(&self, env: &TransportEnvelope) -> bool {
+    pub(crate) fn addressed_here(&self, env: &TransportEnvelope) -> bool {
         match env.metadata.get("aura-destination-device-id") {
             Some(dst) => dst == &self.config.device_id.to_string(),
             // Device-less envelopes are addressed to the whole authority.

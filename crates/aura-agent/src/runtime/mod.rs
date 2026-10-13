@@ -62,6 +62,8 @@ pub mod errors;
 pub(crate) mod flow_ingress;
 pub mod instrumentation;
 pub(crate) mod receipt_model;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod relay_transport;
 pub mod reliability;
 pub mod session_ingress;
 pub mod transport_boundary;

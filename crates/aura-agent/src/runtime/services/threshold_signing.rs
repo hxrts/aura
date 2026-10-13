@@ -89,6 +89,10 @@ use aura_core::{
     AuraError, ContextId, Epoch, Hash32,
 };
 use aura_effects::RuntimeCapabilityHandler;
+use aura_invitation::enrollment_mailbox::{
+    PendingEnrollmentMailboxError, PendingEnrollmentMailboxRegistration,
+    PendingEnrollmentMailboxStatement,
+};
 use aura_invitation::enrollment_setup::{
     DeviceEnrollmentSetupRequest, DeviceEnrollmentSetupStatement, EnrollmentSetupExportError,
 };
@@ -453,7 +457,71 @@ impl VerifiedPendingSigningGeneration {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum PendingEnrollmentMailboxSigningError {
+    #[error("pending enrollment mailbox setup belongs to another runtime or signing policy")]
+    ForeignSetup,
+    #[error("pending enrollment mailbox provisional signing context is absent")]
+    MissingContext,
+    #[error("pending enrollment mailbox selected time failed: {0}")]
+    Time(#[from] aura_core::effects::time::TimeError),
+    #[error("pending enrollment mailbox binding or verification failed: {0}")]
+    Registration(#[from] PendingEnrollmentMailboxError),
+    #[error("pending enrollment mailbox signing failed: {0}")]
+    Signing(#[from] AuraError),
+}
+
 impl ThresholdSigningService {
+    /// Sign only while the actual provisional device key still owns the
+    /// admitted setup context. This signature proves mailbox registration
+    /// possession; it never authorizes account membership or identity signing.
+    pub(crate) async fn sign_pending_enrollment_mailbox_registration(
+        &self,
+        baseline: &aura_invitation::enrollment_manifest::VerifiedEnrollmentBaseline,
+        setup: &aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+        retrieval_credential_commitment: [u8; 32],
+    ) -> Result<PendingEnrollmentMailboxRegistration, PendingEnrollmentMailboxSigningError> {
+        let _transition = self.shared.transitions.lock().await;
+        let now = self.effects.physical_time().await?.ts_ms;
+        let statement = PendingEnrollmentMailboxStatement::for_admitted_original(
+            baseline,
+            setup,
+            retrieval_credential_commitment,
+        )?;
+        let setup_statement = setup.statement();
+        if self.effects.device_id() != setup_statement.device
+            || setup_statement.signing_mode != SigningMode::SingleSigner
+            || setup_statement.threshold != 1
+            || setup_statement.participants != 1
+        {
+            return Err(PendingEnrollmentMailboxSigningError::ForeignSetup);
+        }
+        let guard = self.shared.state.read().await;
+        let state = guard
+            .contexts
+            .get(&setup_statement.authority)
+            .ok_or(PendingEnrollmentMailboxSigningError::MissingContext)?;
+        if state.my_signer_index != Some(1)
+            || state.mode != setup_statement.signing_mode
+            || state.epoch != setup_statement.signing_epoch
+            || state.config.threshold != setup_statement.threshold
+            || state.config.total_participants != setup_statement.participants
+            || state.public_key_package != setup_statement.public_key_package
+        {
+            return Err(PendingEnrollmentMailboxSigningError::ForeignSetup);
+        }
+        let context = statement.signing_context()?;
+        let message = Self::serialize_signing_context(&context, state.epoch)?;
+        let proof = self
+            .sign_solo(&setup_statement.authority, &message, state)
+            .await?;
+        let registration = PendingEnrollmentMailboxRegistration { statement, proof };
+        registration
+            .clone()
+            .verify_for_admitted_original(self.effects.as_ref(), baseline, setup, now)
+            .await?;
+        Ok(registration)
+    }
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "ThresholdSigningService", receiver_type = ThresholdSigningService, family = "runtime_helper")]
     pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
         if !std::ptr::eq(self.effects.as_ref(), effects) {

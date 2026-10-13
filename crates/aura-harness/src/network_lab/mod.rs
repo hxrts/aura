@@ -173,6 +173,48 @@ impl LinkConditionPreset {
     }
 }
 
+/// Environment variable naming the relay a lab instance registers with.
+pub const RELAY_ADDR_ENV: &str = "AURA_RELAY_ADDR";
+/// Environment variable that makes a lab instance serve as the relay.
+pub const RELAY_SERVE_ENV: &str = "AURA_RELAY_SERVE";
+
+/// Relay environment for `authority` in a topology with a required relay:
+/// the relay authority serves (`AURA_RELAY_SERVE=1`); every other authority
+/// registers with it at the relay device's lab address and configured port
+/// (`AURA_RELAY_ADDR=ip:port`). `relay_ip` resolves a device name to its lab
+/// address; without one, peers get no relay address. Topologies without a
+/// required relay add nothing.
+pub fn relay_launch_env(
+    topology: &TopologySpec,
+    authority: &AuthoritySpec,
+    relay_ip: impl Fn(&str) -> Option<std::net::Ipv4Addr>,
+) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    let Some(required) = topology.required_relay_authority.as_deref() else {
+        return env;
+    };
+    if authority.authority_id == required {
+        env.insert(RELAY_SERVE_ENV.to_string(), "1".to_string());
+        return env;
+    }
+    let Some(relay) = topology
+        .authorities
+        .iter()
+        .find(|candidate| candidate.authority_id == required)
+    else {
+        return env;
+    };
+    let port = relay
+        .bind_address
+        .rsplit_once(':')
+        .map(|(_, port)| port)
+        .unwrap_or_default();
+    if let Some(ip) = relay_ip(&relay.device_name) {
+        env.insert(RELAY_ADDR_ENV.to_string(), format!("{ip}:{port}"));
+    }
+    env
+}
+
 /// Runtime network context for a launched authority.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -779,7 +821,11 @@ impl NetworkLabBackend for MockNetworkLabBackend {
                     namespace: format!("mock:{}", authority.device_name),
                     bind_address: authority.bind_address.clone(),
                     rendezvous_endpoints: Vec::new(),
-                    env: authority.env.clone(),
+                    env: {
+                        let mut env = authority.env.clone();
+                        env.extend(relay_launch_env(&topology, authority, |_| None));
+                        env
+                    },
                 },
             );
         }
@@ -1175,6 +1221,52 @@ pub fn validate_runtime_bindings(topology: &TopologySpec) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_launch_env_serves_the_relay_and_points_peers_at_it() {
+        let authority = |id: &str, relay: bool| AuthoritySpec {
+            authority_id: id.to_string(),
+            device_name: format!("{id}-dev"),
+            gateway_router: "core".to_string(),
+            bind_address: if relay {
+                "0.0.0.0:41000".to_string()
+            } else {
+                "0.0.0.0:41001".to_string()
+            },
+            relay_capable: relay,
+            env: BTreeMap::new(),
+        };
+        let topology = TopologySpec {
+            name: "relay-env".to_string(),
+            routers: Vec::new(),
+            links: Vec::new(),
+            authorities: vec![authority("relay", true), authority("alice", false)],
+            required_relay_authority: Some("relay".to_string()),
+        };
+        let relay_ip =
+            |device: &str| (device == "relay-dev").then(|| std::net::Ipv4Addr::new(10, 7, 0, 2));
+
+        let relay_env = relay_launch_env(&topology, &topology.authorities[0], relay_ip);
+        assert_eq!(
+            relay_env.get(RELAY_SERVE_ENV).map(String::as_str),
+            Some("1")
+        );
+        assert!(!relay_env.contains_key(RELAY_ADDR_ENV));
+
+        let peer_env = relay_launch_env(&topology, &topology.authorities[1], relay_ip);
+        assert_eq!(
+            peer_env.get(RELAY_ADDR_ENV).map(String::as_str),
+            Some("10.7.0.2:41000")
+        );
+        assert!(!peer_env.contains_key(RELAY_SERVE_ENV));
+
+        // Without a resolvable relay address the peer gets nothing to dial.
+        assert!(relay_launch_env(&topology, &topology.authorities[1], |_| None).is_empty());
+
+        let mut no_relay = topology.clone();
+        no_relay.required_relay_authority = None;
+        assert!(relay_launch_env(&no_relay, &no_relay.authorities[1], relay_ip).is_empty());
+    }
 
     fn topology() -> TopologySpec {
         TopologySpec {

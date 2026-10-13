@@ -39,7 +39,7 @@ pub use invitation::{
     Invitation, InvitationHandler, InvitationResult, InvitationStatus, InvitationType,
     ShareableInvitation, ShareableInvitationError,
 };
-pub use invitation_service::InvitationServiceApi;
+pub use invitation_service::{InvitationServiceApi, PendingEnrollmentTransportScope};
 pub use ota_activation_service::OtaActivationServiceApi;
 
 // Re-export recovery types for public API

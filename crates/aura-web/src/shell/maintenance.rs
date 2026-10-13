@@ -74,12 +74,13 @@ fn delay_ticks(delay_ms: u64) -> u64 {
     delay_ms.div_ceil(HARNESS_TRANSPORT_POLL_INTERVAL_MS)
 }
 
-fn harness_transport_poll_url(agent: &AuraAgent) -> Option<String> {
+fn harness_transport_poll_url(
+    authority: aura_core::AuthorityId,
+    device: aura_core::DeviceId,
+) -> Option<String> {
     let window = web_sys::window()?;
     let location = window.location();
     let origin = location.origin().ok()?;
-    let authority = agent.authority_id().to_string();
-    let device = agent.runtime().device_id().to_string();
     Some(format!(
         "{origin}{HARNESS_TRANSPORT_POLL_PATH}?authority={authority}&device={device}"
     ))
@@ -104,10 +105,46 @@ async fn yield_browser_maintenance_step(
 }
 
 async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, WebUiError> {
-    let Some(url) = harness_transport_poll_url(agent) else {
+    let device = agent.runtime().device_id();
+    let local = (agent.authority_id(), device);
+    // The original signed enrollment admission can temporarily address this
+    // device as a member of the issuer's authority. Revalidate that retained
+    // admission on each tick; the browser must not infer a second mailbox from
+    // a raw manifest, setup code, or harness scenario value.
+    let pending = agent
+        .pending_enrollment_transport_scopes()
+        .await
+        .map_err(|error| {
+            WebUiError::operation(
+                WebUiOperation::BackgroundSync,
+                "WEB_HARNESS_ENROLLMENT_TRANSPORT_SCOPE_FAILED",
+                error.to_string(),
+            )
+        })?;
+    let mut mailboxes = vec![local];
+    for scope in pending {
+        let mailbox = (scope.subject(), scope.device());
+        if !mailboxes.contains(&mailbox) {
+            mailboxes.push(mailbox);
+        }
+    }
+    let mut drained = 0_usize;
+    for (authority, device) in mailboxes {
+        drained = drained.saturating_add(
+            drain_harness_transport_mailbox_for(agent, authority, device).await?,
+        );
+    }
+    Ok(drained)
+}
+
+async fn drain_harness_transport_mailbox_for(
+    agent: &AuraAgent,
+    authority: aura_core::AuthorityId,
+    device: aura_core::DeviceId,
+) -> Result<usize, WebUiError> {
+    let Some(url) = harness_transport_poll_url(authority, device) else {
         return Ok(0);
     };
-    let authority = agent.authority_id().to_string();
     emit_browser_harness_debug_event(
         "transport_poll_url_ready",
         &format!("authority={authority};url={url}"),

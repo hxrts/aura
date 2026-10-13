@@ -469,7 +469,20 @@ storage or header-bearing runtime configuration. Harnesses should assert this
 through the browser storage/bridge contract rather than by inspecting URL
 parameters.
 
+Browser harness transport upkeep polls the ordinary runtime identity mailbox
+and only additional subject/device mailboxes returned by the agent's
+`pending_enrollment_transport_scopes` getter. That getter revalidates the
+protected signed pending-enrollment admission on each tick and excludes expired,
+confirmed, or failed generations. A failed scope read surfaces a transport-tick
+error rather than selecting from a raw manifest, setup code, or scenario value.
+Drained envelopes are requeued through the agent VM for normal signed receive
+validation. The scope is a mailbox selector, not receipt acceptance,
+membership, or outbound broker routing authority. An authenticated broker
+mailbox protocol still needs separate implementation and end-to-end evidence.
+
 Browser harness failures surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__`, `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`, and the page-owned semantic submit publication surface. Those globals are diagnostic-only and do not replace the authoritative `UiSnapshot` and `RenderHeartbeat` payloads. They are the canonical observed source for browser bootstrap and rebinding state. Driver-owned `restart_page_session` is infrastructure recovery only. Semantic command submission and runtime-identity staging must wait on or fail from the page-owned publication contract rather than replaying work through a restarted browser session.
+
+The approved-transfer browser scenario submits through the mounted modal confirm button, then requires the exact `device_enrollment` operation instance to reach `Succeeded`, a matching `device_enrollment_accepted` event from the host's added-device settings projection, and a two-device settings count before restarting Bob. After reopen it checks the projection again. Immediately before restart, the Playwright driver writes a private `*-pre-restart-*.json` artifact with the observed operation instance and state, typed failure (if any), matching host acknowledgment, revision, and filtered console tail. Preserve this artifact when a later restart loses page diagnostics; neither a generic success state nor a modal dismissal proves the enrollment chain.
 
 `submitSemanticCommand` follows that rule directly. After bounded same-page recovery it must fail closed instead of replaying the semantic request through a fresh browser session. The browser publication owner classifies diagnostics by typed publication status, binding mode, and reliability before serializing them to page globals. Compatibility-sensitive waits keep one canonical publication path instead of ad hoc string assembly.
 
@@ -1235,9 +1248,13 @@ Route builds through `scripts/dev/build-budget.sh`. It writes to the
 checkout's own `target/` (it unsets `CARGO_TARGET_DIR`), uses a per-checkout
 soft target (`AURA_BUILD_TARGET_CAP_GIB`, default 10 GiB), and admits a
 build only if the volume keeps `AURA_BUILD_MIN_FREE_GIB` (default 15) free
-after the reservations of other admitted builds. Each admitted build reserves
-`AURA_BUILD_RESERVE_GIB` (default 4) under `~/.cache/aura-build/reservations`
-until it exits. The admission lock is held only while checking and reserving,
+after the reservations of other admitted builds and the incoming build's
+estimated growth. `AURA_BUILD_RESERVE_GIB` (default 4) GiB is the fallback
+without prior measurements. With same-lane structured receipts, admission uses
+the largest observed growth plus 1 GiB for sampling margin; older TSV peaks
+for the same profile and target triple provide migration data. Each admitted
+build holds that amount under `~/.cache/aura-build/reservations` until it exits.
+The admission lock is held only while checking and reserving,
 and only builders of the same checkout block its sweeps, so two worktrees can
 build at once.
 
@@ -1433,16 +1450,26 @@ corporate variant use them after the contact link.
 
 The path the runtime selects toward a peer is observable as the
 `peer_path_selected` runtime event (`RuntimeFact::PeerPathSelected` with
-`relay` or `direct` and the link protocol). It is recorded by
-`aura-rendezvous` when a channel is prepared toward a peer, read through the
-runtime bridge into the discovered-peers signal, and surfaced by the TUI as a
-runtime fact. It records the selection, not that the channel came up, and it
-fires only on rendezvous establishment: a contact link over one LAN segment is
-carried by LAN transport and selects no path, so the single-LAN scenarios do
-not assert it, while the relay-first scenarios assert it after the shared
-channel is joined. Retry generations (`CandidateGeneration`,
-`NetworkGeneration`) are not observable: the `PeerConnectionActor` state
-machine that owns them is not yet driven by the runtime.
+`relay` or `direct`, the link protocol, and the candidate and network
+generations). It is the relay-first path state the agent's service registry
+keeps per `(context, peer)` and consults for every send and channel
+preparation (`docs/113_rendezvous.md` §3.2), read through the runtime bridge
+into the discovered-peers signal and surfaced by the TUI as a runtime fact. It
+records the selection, not that the channel came up. A step can narrow it with
+`contains`: `relay`, `direct`, or a generation such as
+`network_generation:1`, which appears after the peer re-established its relay
+session. The relay-first scenarios assert `relay` after the shared channel is
+joined and bob's `network_generation:1` after the NAT flush on bob's router.
+
+Relay-first topologies (`required_relay_authority`) give lab instances the
+relay environment the `aura` binary reads: the relay authority's instance gets
+`AURA_RELAY_SERVE=1`, every other instance gets `AURA_RELAY_ADDR` set to the
+relay device's lab address and the relay's configured transport port, both
+taken from the provisioned topology. That seed address is the only address a
+peer is configured with (the same role the bootstrap broker URL plays); relay
+hints name the relay authority, and the relay's descriptor says where it is.
+Outside the lab the same settings are `--serve-relay` and `--relay-address`
+on `aura tui`.
 
 Lab artifacts land under the run directory: `network_lab_runtime.json` (device,
 namespace and address per authority), `network-lab-artifacts/` with the

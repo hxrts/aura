@@ -2,6 +2,8 @@
 //!
 //! Main runtime system that orchestrates all agent operations.
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::relay_transport;
 use super::services::ceremony_runner::CeremonyRunner;
 #[cfg(not(target_arch = "wasm32"))]
 use super::services::lan_transport::LanTransportMetrics;
@@ -737,6 +739,10 @@ pub struct RuntimeSystem {
     /// Service-owned LAN transport listeners.
     lan_listener_service: Option<LanTransportListenerService>,
 
+    /// Service-owned relay session toward the configured relay.
+    #[cfg(not(target_arch = "wasm32"))]
+    relay_session_service: Option<relay_transport::RelaySessionService>,
+
     /// Service-owned runtime maintenance loops.
     maintenance_service: RuntimeMaintenanceService,
 
@@ -837,6 +843,8 @@ impl RuntimeSystem {
             threshold_signing,
             reactive_pipeline_service,
             lan_listener_service: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_session_service: None,
             maintenance_service,
             reconfiguration_manager,
             runtime_tasks,
@@ -913,6 +921,8 @@ impl RuntimeSystem {
             threshold_signing,
             reactive_pipeline_service,
             lan_listener_service: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_session_service: None,
             maintenance_service,
             reconfiguration_manager,
             runtime_tasks,
@@ -989,6 +999,8 @@ impl RuntimeSystem {
             threshold_signing,
             reactive_pipeline_service,
             lan_listener_service: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_session_service: None,
             maintenance_service,
             reconfiguration_manager,
             runtime_tasks,
@@ -1035,6 +1047,36 @@ impl RuntimeSystem {
         let lan_listener_service = lan_transport.clone().map(|lan_transport| {
             LanTransportListenerService::new(effect_system.clone(), lan_transport)
         });
+        #[cfg(not(target_arch = "wasm32"))]
+        let relay_session_service = {
+            if config.network.serve_relay {
+                effect_system.attach_relay_forwarder(Arc::new(
+                    relay_transport::RelayForwarderActor::default(),
+                ));
+                tracing::info!(authority = %authority_id, "serving as a relay for registered peers");
+            }
+            match (&config.network.relay_address, rendezvous_manager.as_ref()) {
+                (Some(relay_addr), Some(manager)) => {
+                    let service = relay_transport::RelaySessionService::new(
+                        effect_system.clone(),
+                        manager.registry(),
+                        relay_addr.clone(),
+                        authority_id,
+                        device_id,
+                    );
+                    effect_system.attach_relay_session(Arc::new(service.clone()));
+                    Some(service)
+                }
+                (Some(relay_addr), None) => {
+                    tracing::warn!(
+                        relay_addr = %relay_addr,
+                        "relay address configured but rendezvous is disabled; no relay session"
+                    );
+                    None
+                }
+                (None, _) => None,
+            }
+        };
         let maintenance_service = RuntimeMaintenanceService::new(
             effect_system.clone(),
             authority_id,
@@ -1077,6 +1119,8 @@ impl RuntimeSystem {
             threshold_signing,
             reactive_pipeline_service,
             lan_listener_service,
+            #[cfg(not(target_arch = "wasm32"))]
+            relay_session_service,
             maintenance_service,
             reconfiguration_manager,
             runtime_tasks,
@@ -1708,6 +1752,42 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                             }
                         }
 
+                        if relay_transport::is_relay_control(&envelope) {
+                            match effects.relay_forwarder() {
+                                Some(forwarder) => {
+                                    relay_transport::serve_relay_connection(
+                                        stream,
+                                        envelope,
+                                        effects,
+                                        forwarder,
+                                    )
+                                    .await;
+                                }
+                                None => tracing::debug!(
+                                    addr = %addr,
+                                    "relay registration refused: this node does not serve as a relay"
+                                ),
+                            }
+                            return;
+                        }
+                        if !effects.addressed_here(&envelope) {
+                            // Not for this authority or device: forward it when
+                            // serving as a relay, otherwise it has no consumer here.
+                            match effects.relay_forwarder() {
+                                Some(forwarder) => {
+                                    if let Err(error) = forwarder.forward(envelope) {
+                                        tracing::debug!(addr = %addr, error = %error, "relay forward refused");
+                                    }
+                                }
+                                None => tracing::debug!(
+                                    addr = %addr,
+                                    destination = %envelope.destination,
+                                    "dropping LAN envelope addressed to another authority"
+                                ),
+                            }
+                            return;
+                        }
+
                         let _ = handle_inbound_transport_envelope(effects, metrics, envelope).await;
                     });
             }
@@ -1916,7 +1996,7 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn handle_inbound_transport_envelope(
+pub(crate) async fn handle_inbound_transport_envelope(
     effects: Arc<AuraEffectSystem>,
     metrics: Arc<tokio::sync::RwLock<LanTransportMetrics>>,
     envelope: TransportEnvelope,
@@ -2118,6 +2198,17 @@ pub(crate) async fn publish_lan_descriptor_with(
                 );
             }
         }
+    }
+
+    // A registered relay session makes this peer reachable through the relay;
+    // the hint names the relay authority, which senders resolve from the
+    // relay's own descriptor.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(hint) = effects
+        .relay_session()
+        .and_then(|session| session.advertised_hint())
+    {
+        hints.push(hint);
     }
 
     if hints.is_empty() {

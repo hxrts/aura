@@ -430,10 +430,6 @@ impl RendezvousManager {
         self.state().await == RendezvousManagerState::Running
     }
 
-    pub fn registry(&self) -> Arc<ServiceRegistry> {
-        self.registry.clone()
-    }
-
     async fn command_handle(
         &self,
     ) -> Result<ServiceActorHandle<RendezvousManager, RendezvousCommand>, ServiceError> {
@@ -939,11 +935,19 @@ impl RendezvousManager {
                 context_id: descriptor.context_id,
             });
         }
-        let establish_path = Self::relay_first_initial_path(&descriptor)
+        // Relay-first selection shared with every send: the registry's path
+        // state for this peer decides, and this preparation is what it observes.
+        let candidates: Vec<EstablishPath> =
+            crate::runtime::effects::usable_establish_paths(effects, &descriptor)
+                .await
+                .into_iter()
+                .map(|candidate| candidate.path)
+                .collect();
+        let establish_path = self
+            .registry
+            .select_peer_path(descriptor.context_id, peer, &candidates, now_ms)
+            .await
             .ok_or(RendezvousManagerError::PeerDescriptorNotFound { peer })?;
-        self.registry
-            .record_selected_path(context_id, peer, &establish_path, now_ms)
-            .await;
 
         // Retrieve identity keys
         let identity = require_active_identity_signing_context(effects, &self.authority_id)
@@ -1831,13 +1835,9 @@ impl RendezvousManager {
         &self.config
     }
 
-    fn relay_first_initial_path(descriptor: &RendezvousDescriptor) -> Option<EstablishPath> {
-        let mut paths = descriptor.advertised_establish_paths();
-        paths.sort_by_key(|path| match path.route.destination.protocol {
-            LinkProtocol::WebSocketRelay => 0u8,
-            _ => 1u8,
-        });
-        paths.into_iter().next()
+    /// Shared runtime-local service registry (descriptors, path state).
+    pub(crate) fn registry(&self) -> Arc<ServiceRegistry> {
+        self.registry.clone()
     }
 
     fn relay_first_order(mut hints: Vec<TransportHint>) -> Vec<TransportHint> {

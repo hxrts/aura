@@ -161,6 +161,10 @@ impl RuntimeSystem {
         if let Some(lan_listener_service) = &self.lan_listener_service {
             services.push(lan_listener_service);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(relay_session_service) = &self.relay_session_service {
+            services.push(relay_session_service);
+        }
         services.push(&self.sync_command_registry);
         services.push(&self.maintenance_service);
         services

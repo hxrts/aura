@@ -40,6 +40,7 @@ use crate::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, EchoPeer};
 use crate::env::{
     bootstrap_broker_override as bootstrap_broker_env_override,
     harness_lan_discovery_override as harness_lan_discovery_env_override,
+    relay_override as relay_env_override,
 };
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
@@ -134,6 +135,8 @@ struct TuiLaunchRequest<'a> {
     data_dir: Option<&'a str>,
     requested_device_id: Option<&'a str>,
     bind_address: Option<&'a str>,
+    relay_address: Option<&'a str>,
+    serve_relay: bool,
     mode: TuiMode,
 }
 
@@ -159,6 +162,8 @@ impl<'a> TuiLaunchRequest<'a> {
                 .as_deref()
                 .or_else(|| mode.default_device_id()),
             bind_address: args.bind_address.as_deref(),
+            relay_address: args.relay_address.as_deref(),
+            serve_relay: args.serve_relay,
             mode,
         }
     }
@@ -172,6 +177,8 @@ impl<'a> TuiLaunchRequest<'a> {
                 .map(crate::ids::device_id)
                 .unwrap_or_else(|| crate::ids::device_id("tui:production-device")),
             bind_address: self.bind_address.map(str::to_string),
+            relay_address: self.relay_address.map(str::to_string),
+            serve_relay: self.serve_relay,
         }
     }
 }
@@ -182,6 +189,8 @@ struct ResolvedTuiLaunch {
     base_path: PathBuf,
     configured_device_id: DeviceId,
     bind_address: Option<String>,
+    relay_address: Option<String>,
+    serve_relay: bool,
 }
 
 impl ResolvedTuiLaunch {
@@ -195,6 +204,12 @@ impl ResolvedTuiLaunch {
         stdio.println(format_args!("Device ID: {}", self.configured_device_id));
         if let Some(address) = self.bind_address.as_deref() {
             stdio.println(format_args!("Bind address: {address}"));
+        }
+        if let Some(address) = self.relay_address.as_deref() {
+            stdio.println(format_args!("Relay: {address}"));
+        }
+        if self.serve_relay {
+            stdio.println(format_args!("Serving as relay"));
         }
     }
 
@@ -253,6 +268,14 @@ impl RuntimeLaunchSpec<'_> {
         }
         harness_lan_discovery_override(&mut config);
         bootstrap_broker_override(&mut config);
+        relay_override(&mut config);
+        // Explicit arguments win over the environment.
+        if let Some(relay_address) = self.launch.relay_address.as_deref() {
+            config.network.relay_address = Some(relay_address.to_string());
+        }
+        if self.launch.serve_relay {
+            config.network.serve_relay = true;
+        }
         Ok(config)
     }
 
@@ -323,6 +346,23 @@ fn harness_lan_discovery_override(current: &mut aura_agent::core::config::AgentC
         broadcast_addr = %current.lan_discovery.broadcast_addr,
         port = current.lan_discovery.port,
         "Applied harness LAN discovery overrides from environment"
+    );
+}
+
+fn relay_override(current: &mut aura_agent::core::config::AgentConfig) {
+    let Some(override_env) = relay_env_override() else {
+        return;
+    };
+    if override_env.relay_addr.is_some() {
+        current.network.relay_address = override_env.relay_addr;
+    }
+    if override_env.serve_relay {
+        current.network.serve_relay = true;
+    }
+    tracing::info!(
+        relay_address = ?current.network.relay_address,
+        serve_relay = current.network.serve_relay,
+        "Applied relay transport overrides from environment"
     );
 }
 

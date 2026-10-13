@@ -20,6 +20,13 @@ pub struct TuiArgs {
     /// Bind address for runtime transport listener (for multi-instance runs)
     pub bind_address: Option<String>,
 
+    /// Relay to register with (`host:port` of a relay-serving instance's
+    /// transport listener) so peers behind other NATs can reach this one.
+    pub relay_address: Option<String>,
+
+    /// Serve as a relay for peers that register over the transport listener.
+    pub serve_relay: bool,
+
     /// Run in demo mode with simulated Alice and Carol peer agents.
     /// Uses a real agent runtime with deterministic simulation.
     /// Demo data is stored in .aura-demo and cleared on each startup.
@@ -42,6 +49,13 @@ pub fn tui_parser() -> impl Parser<TuiArgs> {
         .help("Bind address for runtime transport listener (e.g. 127.0.0.1:43101)")
         .argument::<String>("ADDR")
         .optional();
+    let relay_address = long("relay-address")
+        .help("Transport address of a relay-serving instance to register with, so NAT-separated peers can reach this one")
+        .argument::<String>("ADDR")
+        .optional();
+    let serve_relay = long("serve-relay")
+        .help("Serve as a relay for peers that register over the transport listener")
+        .switch();
     let demo = long("demo")
         .help("Run demo mode with simulated Alice/Carol peers (data in .aura-demo, cleared on startup)")
         .switch();
@@ -49,6 +63,8 @@ pub fn tui_parser() -> impl Parser<TuiArgs> {
         data_dir,
         device_id,
         bind_address,
+        relay_address,
+        serve_relay,
         demo
     })
 }

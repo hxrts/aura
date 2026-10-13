@@ -330,9 +330,15 @@ impl PeerPathKind {
     }
 }
 
-/// Observation of the establish path most recently selected toward a peer in a
-/// context. This records what the runtime chose when it prepared the channel;
-/// it does not attest that the channel came up.
+/// Observation of the establish path currently selected toward a peer in a
+/// context. This records what the runtime chose for its sends and channel
+/// preparation; it does not attest that the channel came up.
+///
+/// The generations come from the peer-connection retry state the runtime
+/// drives for this peer: the candidate generation advances when the peer's
+/// advertised path set changes, the network generation when the local network
+/// epoch changes (relay session re-established). Either change resets the
+/// bounded direct-upgrade attempt budget.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SelectedPeerPath {
     /// Peer the path leads to.
@@ -345,6 +351,15 @@ pub struct SelectedPeerPath {
     pub protocol: LinkProtocol,
     /// Physical time (ms) the selection was made, from the caller's clock.
     pub selected_at_ms: u64,
+    /// Generation of the peer's candidate path set this selection was made from.
+    #[serde(default)]
+    pub candidate_generation: u64,
+    /// Local network epoch this selection was made in.
+    #[serde(default)]
+    pub network_generation: u64,
+    /// Direct-upgrade attempts consumed in the current generation window.
+    #[serde(default)]
+    pub attempts_used: u8,
 }
 
 /// One backwards-built transparent anonymous setup layer.

@@ -144,6 +144,17 @@ pub struct NetworkConfig {
 
     /// Connection timeout in seconds
     pub connection_timeout: u64,
+
+    /// Relay this peer registers with (`host:port` of a relay-capable node's
+    /// transport listener). While registered, the peer advertises a relay
+    /// transport hint so peers that cannot reach it directly dial the relay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_address: Option<String>,
+
+    /// Serve as a relay: accept registrations on the transport listener and
+    /// forward frames addressed to registered peers.
+    #[serde(default)]
+    pub serve_relay: bool,
 }
 
 impl Default for NetworkConfig {
@@ -152,6 +163,8 @@ impl Default for NetworkConfig {
             bind_address: "0.0.0.0:0".to_string(),
             max_connections: 64,
             connection_timeout: 10,
+            relay_address: None,
+            serve_relay: false,
         }
     }
 }

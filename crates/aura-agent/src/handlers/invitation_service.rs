@@ -2276,6 +2276,34 @@ pub struct InvitationServiceApi {
     tasks: Arc<TaskSupervisor>,
 }
 
+/// Read-only mailbox selector for a still-admitted, unconfirmed enrollment.
+/// Born only from the encrypted original transfer and its retained verifier;
+/// it does not authorize transport receipt acceptance or account membership.
+pub struct PendingEnrollmentTransportScope {
+    subject: AuthorityId,
+    device: aura_core::DeviceId,
+    invitation: InvitationId,
+    manifest_digest: [u8; 32],
+}
+
+impl PendingEnrollmentTransportScope {
+    pub fn subject(&self) -> AuthorityId {
+        self.subject
+    }
+
+    pub fn device(&self) -> aura_core::DeviceId {
+        self.device
+    }
+
+    pub fn invitation(&self) -> &InvitationId {
+        &self.invitation
+    }
+
+    pub fn manifest_digest(&self) -> [u8; 32] {
+        self.manifest_digest
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum EnrollmentManifestExportValidationError {
     #[error("issued enrollment manifest signature validation failed")]
@@ -2395,6 +2423,40 @@ impl CancellationIngressWindowCapability {
 }
 
 impl InvitationServiceApi {
+    /// Observe exact pending mailbox scopes for the local pre-adoption device.
+    /// Every call revalidates protected admission and excludes expired,
+    /// confirmed or failed generations. The returned selector never bypasses
+    /// ordinary signed VM/transport validation of received envelopes.
+    pub async fn pending_enrollment_transport_scopes(
+        &self,
+    ) -> AgentResult<Vec<PendingEnrollmentTransportScope>> {
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|source| {
+                AgentError::from(aura_core::AuraError::from(
+                    aura_core::TimeoutBudgetError::time_source_failure(source),
+                ))
+            })?
+            .ts_ms;
+        let admitted =
+            super::invitation::enrollment_manifest_admission::load_recoverable_negative_admissions(
+                self.effects.as_ref(),
+            )
+            .await?;
+        Ok(admitted
+            .into_iter()
+            .filter(|admitted| now_ms < admitted.manifest().expires_at_ms)
+            .map(|admitted| PendingEnrollmentTransportScope {
+                subject: admitted.manifest().subject,
+                device: admitted.manifest().invitee_device,
+                invitation: admitted.manifest().invitation.clone(),
+                manifest_digest: admitted.manifest_digest(),
+            })
+            .collect())
+    }
+
     /// Create a new invitation service with shared runtime-owned supervisors.
     pub fn new_with_runner(
         effects: Arc<AuraEffectSystem>,

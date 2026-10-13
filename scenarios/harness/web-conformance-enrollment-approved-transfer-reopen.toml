@@ -195,6 +195,44 @@ operation_state = "succeeded"
 timeout_ms = 60000
 
 [[steps]]
+id = "bob-capture-original-enrollment-instance"
+action = "capture_operation_instance"
+actor = "bob"
+operation_id = "device_enrollment"
+name = "bob_enrollment_instance"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-host-acknowledged-adopted-device"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "device_enrollment_accepted"
+value = "BobApp"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-open-settings-after-host-ack"
+action = "open_screen"
+actor = "bob"
+screen_id = "settings"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-open-devices-after-host-ack"
+action = "open_settings_section"
+actor = "bob"
+section = "devices"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-host-devices-persisted-before-restart"
+action = "list_count_is"
+actor = "bob"
+list_id = "devices"
+count = 2
+timeout_ms = 30000
+
+[[steps]]
 id = "bob-restart-adopted-browser-profile"
 action = "restart_actor"
 actor = "bob"

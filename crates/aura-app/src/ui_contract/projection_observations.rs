@@ -156,8 +156,9 @@ mod tests {
 }
 
 /// Describe the establish paths the runtime selected toward peers. One fact
-/// per selection; a relay path says the peer was not reached directly, nothing
-/// more.
+/// per selection and generation; a relay path says the peer is not reached
+/// directly, and a new generation says the runtime re-evaluated the path after
+/// the peer's candidates or the local network changed.
 pub fn observed_peer_paths(paths: &[aura_core::service::SelectedPeerPath]) -> Vec<RuntimeFact> {
     paths
         .iter()
@@ -165,6 +166,8 @@ pub fn observed_peer_paths(paths: &[aura_core::service::SelectedPeerPath]) -> Ve
             peer_authority_id: selected.peer.to_string(),
             path: selected.kind.as_str().to_string(),
             protocol: format!("{:?}", selected.protocol).to_lowercase(),
+            candidate_generation: selected.candidate_generation,
+            network_generation: selected.network_generation,
         })
         .collect()
 }
@@ -185,12 +188,17 @@ mod peer_path_observation_tests {
             kind: PeerPathKind::Relay,
             protocol: LinkProtocol::WebSocketRelay,
             selected_at_ms: 42,
+            candidate_generation: 1,
+            network_generation: 2,
+            attempts_used: 3,
         }]);
         assert_eq!(facts.len(), 1);
         let RuntimeFact::PeerPathSelected {
             peer_authority_id,
             path,
             protocol,
+            candidate_generation,
+            network_generation,
         } = &facts[0]
         else {
             panic!("expected a peer path fact, got {:?}", facts[0]);
@@ -198,7 +206,14 @@ mod peer_path_observation_tests {
         assert_eq!(peer_authority_id, &peer.to_string());
         assert_eq!(path, "relay");
         assert_eq!(protocol, "websocketrelay");
+        assert_eq!(*candidate_generation, 1);
+        assert_eq!(*network_generation, 2);
         assert_eq!(facts[0].kind(), RuntimeEventKind::PeerPathSelected);
-        assert_eq!(facts[0].key(), format!("peer_path_selected:{peer}:relay"));
+        assert_eq!(
+            facts[0].key(),
+            format!("peer_path_selected:{peer}:relay:1:2")
+        );
+        assert!(facts[0].matches_needle("network_generation:2"));
+        assert!(!facts[0].matches_needle("network_generation:3"));
     }
 }

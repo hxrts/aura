@@ -5,9 +5,9 @@
 # (configs/harness/topologies/relay-first-double-nat.toml). Contact phases of scenario 13 run between
 # the peers, then network events exercise the rendezvous path: a NAT flush on
 # bob's router and a link toggle on alice. Observations are the shared semantic
-# contract's (contact link readiness and UI readiness); a path-state
-# observation (direct vs relay) is not yet part of the UI contract, so this
-# scenario asserts recovery, not promotion.
+# contract's: contact link readiness, the runtime's selected path toward bob
+# (`peer_path_selected`, relay across NATs) and the network generation that
+# advances when bob re-establishes its relay session after the NAT flush.
 id = "holepunch-relay-first"
 goal = "Link two NAT-separated peers through a relay, then survive a NAT flush and a link toggle."
 
@@ -225,13 +225,14 @@ actor = "alice"
 runtime_event_kind = "recipient_peers_resolved"
 timeout_ms = 120000
 
-# Channel establishment toward bob is where the runtime selects a path; a
-# relay-first link across NATs must show `relay` here.
+# Every send toward bob goes through the runtime's relay-first path selection;
+# across NATs the selected path must be the relay.
 [[steps]]
 id = "alice-peer-path-selected"
 action = "runtime_event_occurred"
 actor = "alice"
 runtime_event_kind = "peer_path_selected"
+contains = "relay"
 timeout_ms = 30000
 
 
@@ -259,6 +260,16 @@ action = "network_set_link_condition"
 actor = "alice"
 value = "wifi_bursty"
 timeout_ms = 5000
+
+# The NAT flush broke bob's relay session; re-registering advances bob's
+# network generation, which the next send toward alice re-evaluates under.
+[[steps]]
+id = "bob-peer-path-regenerated"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "peer_path_selected"
+contains = "network_generation:1"
+timeout_ms = 120000
 
 [[steps]]
 id = "alice-ready-after-network-events"

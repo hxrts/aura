@@ -1147,6 +1147,15 @@ mod tests {
                 candidates[0].canonical_invitation().invitation_id,
                 invitation.invitation_id
             );
+            let scopes = invitee
+                .pending_enrollment_transport_scopes()
+                .await
+                .expect("retained original admission authorizes mailbox observation");
+            assert_eq!(scopes.len(), 1);
+            assert_eq!(scopes[0].subject(), candidates[0].manifest().subject);
+            assert_eq!(scopes[0].device(), invitee.runtime().device_id());
+            assert_eq!(scopes[0].invitation(), &invitation.invitation_id);
+            assert_eq!(scopes[0].manifest_digest(), candidates[0].manifest_digest());
             let original = effects
                 .secure_retrieve(&key, &[SecureStorageCapability::Read])
                 .await
@@ -1161,6 +1170,10 @@ mod tests {
                 load_recoverable_negative_admissions(effects.as_ref()).await,
                 Err(EnrollmentManifestError::Pin)
             ));
+            assert!(
+                invitee.pending_enrollment_transport_scopes().await.is_err(),
+                "foreign protected admission candidate cannot mint a poll scope"
+            );
             assert!(effects
                 .fault_remove_secure_record_for_test(&foreign)
                 .await

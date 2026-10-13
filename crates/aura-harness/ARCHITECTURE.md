@@ -102,6 +102,12 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   fresh-instance condition before an available matching submission handle is
   checked for exact instance/state. Browser approval activates the mounted
   `modal_confirm_button` through the semantic control contract.
+- Browser enrollment conformance requires the accepted-device runtime fact and
+  two-device host projection before restarting the original receiver. The
+  driver writes a bounded pre-restart artifact with the observed operation
+  instance, state, typed failure, host acknowledgment, and safe console
+  diagnostics before closing that page; the reopened profile must retain the
+  two-device projection.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
 - Shared scenario inventory discipline: `scenarios/harness_inventory.toml` is semantic-only for shared flows. The remaining compatibility-step IR is justified only by `tests/phases/phase3_state_machine.rs` plus executor-internal metadata/wait shaping, and must not expand back into authoritative scenario coverage.
 - AMP transition shared scenarios observe reducer-derived transition facts
@@ -247,6 +253,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - The network lab has two backends, `mock` and native `patchbay` (Linux). The retired `patchbay-vm` mode must not come back as a shell-out to patchbay's sim runner; a lab backend launches real Aura instances inside its namespaces or it is not a backend.
 - `ProvisionedLab` owns the lab for the whole run: provisioned in `main` before the coordinator exists, torn down by `finish` after the coordinator is dropped, so namespaces outlive every child. `InstanceNamespace::run_sync` is the only way a child enters a lab namespace (patchbay namespaces are anonymous fds). Packet captures started at provisioning are stopped by `finish` before the lab drops; a capture left running would keep its namespace alive.
 - The backend timeline is built from patchbay's flushed `events.jsonl` plus harness receipts after teardown; anything collected while the lab is alive is provisional and marked so.
+- A topology with `required_relay_authority` gives each lab instance its relay environment at provisioning (`relay_launch_env`): `AURA_RELAY_SERVE=1` for the relay authority, and for everyone else `AURA_RELAY_ADDR` built from the relay device's lab address and the relay's configured transport port. Nothing is hard-coded: both come from the provisioned topology, and the harness never relays frames itself.
 - `ToolApi` owns the `ProvisionedLab` while scenarios run so the `network_*` environment actions can apply lab events; `main` takes it back after the coordinator is dropped and finishes it. Network event scenario steps resolve actors to lab authorities through the coordinator, never by device name.
 - Matrix-run temp cleanup stays the default, but diagnostics may retain the per-run temp and transient roots by setting `AURA_HARNESS_KEEP_TMP=1`; this changes artifact retention only and must not change scenario semantics.
 

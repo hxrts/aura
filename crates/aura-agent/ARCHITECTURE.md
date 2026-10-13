@@ -83,6 +83,19 @@ acceptance does not create a task merely to control stack allocation.
 future budget. The simulator's required AMP lifecycle replay runs on the
 default test stack and exercises this facade through real channel invitations.
 
+Relay transport (`runtime/relay_transport.rs`, `docs/113_rendezvous.md` §3.3)
+has two actor-owned roots. `RelaySessionService` is the runtime service a peer
+with `network.relay_address` runs: one owned task keeps the registered TCP
+session to the relay, feeds forwarded frames into the ordinary inbox through
+the LAN ingress handler, re-registers with bounded backoff, and advances the
+service registry's network generation on every re-established session.
+`RelayForwarderActor` is attached to the effect system when `network.serve_relay`
+is set; the LAN connection task hands it registration connections and the
+frames addressed to other authorities. Relay-first path selection is the
+registry's `PeerPathState` per `(context, peer)`: transport sends and channel
+preparation both go through it, so the `SelectedPeerPath` observation is what
+the runtime actually dialed. No other module may pick an establish path.
+
 - `core/`: Public API (`AgentBuilder`, `AuraAgent`, `AuthorityContext`).
 - `builder/`: Platform-specific preset builders (CLI, iOS, Android, Web).
 - `runtime/`: Service actors, subsystems, choreography adapters.

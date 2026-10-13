@@ -116,6 +116,8 @@ Aura uses a relay-first, direct-upgrade model for NAT traversal:
 
 Retry state is tracked with typed generations (`CandidateGeneration`, `NetworkGeneration`) and bounded backoff (`AttemptBudget`, `BackoffWindow`) in `PeerConnectionActor`. Generation changes reset retry budgets, which avoids stale retry loops after interface/NAT changes.
 
+The runtime drives one such actor per `(context, peer)` in its service registry (`PeerPathState`). Every transport send toward the peer, and every channel preparation, asks that state which establish path to use: the relay when the peer advertises one, otherwise its first dialable direct endpoint. While on the relay, a send may also carry a bounded direct probe (a TCP connect to a direct candidate, nothing sent); a reachable listener promotes the state to direct, and a failed direct send degrades it back to the relay and carries the send over the relay. The candidate generation advances when the peer's usable path set changes; the network generation advances when the peer's own relay session is re-established. The current selection, with both generations and the attempts used, is the `SelectedPeerPath` observation exposed through the runtime bridge and surfaced as the `peer_path_selected` runtime event.
+
 Recoverability is evaluated from local binding/interface provenance, not from reflexive addresses alone. This prevents treating stale external mappings as viable direct paths.
 
 Operationally:
@@ -123,6 +125,14 @@ Operationally:
 - Relay path is the safety baseline.
 - Direct holepunch is an optimization path.
 - Network changes can trigger a fresh upgrade cycle without dropping relay connectivity.
+
+### 3.3 Relay Transport
+
+A relay-capable node (`serve_relay` in the agent network configuration) accepts relay registrations on its ordinary transport listener. A peer configured with a `relay_address` keeps one outbound TCP connection to that node (`RelaySessionService`): it sends a `register` control frame naming its authority and device, receives a `registered` acknowledgment that names the relay's authority, then keeps the session alive with periodic `keepalive` frames that the relay acknowledges. A missing acknowledgment or a broken socket ends the session; the peer reconnects with bounded backoff and advances its network generation.
+
+The acknowledgment carries the relay's own descriptor, which the peer caches like any other descriptor. While registered, the peer's published descriptor carries a `WebSocketRelay` transport hint naming only the relay authority; addresses never enter a relay hint. A sender whose path state selects that hint resolves the relay authority to a dialable address from the relay's descriptor (cached from its own registration acknowledgment, or propagated like any descriptor), dials the relay and writes the frame unchanged; the relay (`RelayForwarderActor`) reads only the frame's routing header and writes it down the destination's session connection (the matching device when the frame is device-addressed, every registered device otherwise). The frame keeps the sender's guard-chain receipt, so the receiver's LAN integrity check is the same as for a direct frame. Control frames never enter the runtime inbox, and a node that does not serve as a relay drops frames addressed to other authorities.
+
+Registration binds an authority id to a connection without proving the registrant holds that authority's keys. Payloads are end-to-end protected, so a false registration can only divert or drop frames; the relay forwards only to registered destinations and only from accepted connections, and later registrations for the same authority and device replace earlier ones. Authenticated registration against the registrant's descriptor key is a follow-up.
 
 ## 4. Data Structures
 
@@ -177,6 +187,8 @@ pub struct RendezvousDescriptor {
     pub nickname_suggestion: Option<String>,
 }
 ```
+
+A `WebSocketRelay` hint names only the relay authority. The relay's own descriptor, not the hint, says where the relay is reached, so a relay can move without every peer republishing.
 
 `RendezvousDescriptor` is the authoritative shared object in the journal. Callers derive `LinkEndpoint` and `ServiceDescriptor` views from it. This keeps the fact schema stable during migration while preventing route policy from hardening into the fact format.
 

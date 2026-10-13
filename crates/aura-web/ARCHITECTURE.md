@@ -246,6 +246,13 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   observed account state, but full discovery/sync convergence stays on the
   slower background-sync cadence so transport polling does not create a
   browser-owned convergence feedback loop.
+- Each harness transport tick polls the runtime identity mailbox and only the
+  pending signed-enrollment subject/device scopes revalidated from protected
+  agent admission. The browser does not derive a mailbox from a manifest, code,
+  or scenario value. Drained envelopes reenter the agent's VM inbox; a scope
+  read failure is surfaced as an upkeep error. This selector grants neither
+  receipt acceptance nor account membership or an outbound broker route; the
+  authenticated broker mailbox protocol remains pending.
 - In harness mode, browser background sync must leave an explicit initial
   interactivity window after bootstrap handoff and use a coarser cadence than
   production so upkeep does not starve Playwright page-execution and semantic

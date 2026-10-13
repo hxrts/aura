@@ -6,13 +6,13 @@
 //! must not be treated as replicated truth.
 
 use super::invariant::InvariantViolation;
+use super::peer_path_state::{PeerPathState, SendPlan};
 use super::state::with_state_mut_validated;
-use aura_core::service::{
-    EstablishPath, PeerPathKind, Route, SelectedPeerPath, SelectionState, ServiceFamily,
-};
+use aura_core::service::{EstablishPath, Route, SelectedPeerPath, SelectionState, ServiceFamily};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_rendezvous::{DescriptorValidity, RendezvousDescriptor};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
 
 #[allow(dead_code)] // Declaration-layer ingress inventory; sanctioned surfaces call methods directly.
@@ -155,44 +155,136 @@ fn family_sort_key(family: ServiceFamily) -> u8 {
 )]
 pub struct ServiceRegistryService {
     state: RwLock<ServiceRegistryState>,
-    /// Most recent establish path selected per (context, peer). An observation
-    /// shared by the rendezvous handler (which selects) and the manager (which
-    /// reports); it never attests that a channel came up.
-    selected_paths: RwLock<HashMap<(ContextId, AuthorityId), SelectedPeerPath>>,
+    /// Relay-first path state per (context, peer), driven by the transport's
+    /// sends and read by channel preparation. Shared by the rendezvous handler
+    /// and manager; its selection never attests that a channel came up.
+    peer_paths: RwLock<HashMap<(ContextId, AuthorityId), PeerPathState>>,
+    /// Local network epoch: advanced when the relay session is re-established.
+    /// Every peer path state reopens its upgrade budget on the next refresh.
+    network_generation: AtomicU64,
 }
 
 impl ServiceRegistryService {
     pub fn new() -> Self {
         Self {
             state: RwLock::new(ServiceRegistryState::default()),
-            selected_paths: RwLock::new(HashMap::new()),
+            peer_paths: RwLock::new(HashMap::new()),
+            network_generation: AtomicU64::new(0),
         }
     }
 
-    /// Record which establish path was selected toward `peer` in `context_id`.
-    pub async fn record_selected_path(
+    /// Current local network epoch.
+    pub fn network_generation(&self) -> u64 {
+        self.network_generation.load(Ordering::SeqCst)
+    }
+
+    /// Advance the local network epoch; returns the new value.
+    pub fn bump_network_generation(&self) -> u64 {
+        self.network_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Select the establish path toward `peer` in `context_id` from its usable
+    /// `candidates` (relay first, then direct), refreshing the retry state.
+    /// `None` when no candidate is usable.
+    pub async fn select_peer_path(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+        candidates: &[EstablishPath],
+        now_ms: u64,
+    ) -> Option<EstablishPath> {
+        let network_generation = self.network_generation();
+        let mut paths = self.peer_paths.write().await;
+        let state = Self::refreshed_state(
+            &mut paths,
+            context_id,
+            peer,
+            candidates,
+            network_generation,
+            now_ms,
+        )?;
+        Some(state.selected_path().clone())
+    }
+
+    /// Plan one send toward `peer`: the path to dial now and an optional direct
+    /// probe when a bounded upgrade attempt is due.
+    pub async fn plan_peer_send(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+        candidates: &[EstablishPath],
+        now_ms: u64,
+    ) -> Option<SendPlan> {
+        let network_generation = self.network_generation();
+        let mut paths = self.peer_paths.write().await;
+        let state = Self::refreshed_state(
+            &mut paths,
+            context_id,
+            peer,
+            candidates,
+            network_generation,
+            now_ms,
+        )?;
+        Some(state.plan_send(now_ms))
+    }
+
+    /// Record how dialing `path` toward `peer` went.
+    pub async fn record_peer_path_outcome(
         &self,
         context_id: ContextId,
         peer: AuthorityId,
         path: &EstablishPath,
+        ok: bool,
         now_ms: u64,
     ) {
-        self.selected_paths.write().await.insert(
-            (context_id, peer),
-            SelectedPeerPath {
-                peer,
-                context_id,
-                kind: PeerPathKind::of(path),
-                protocol: path.route.destination.protocol,
-                selected_at_ms: now_ms,
-            },
-        );
+        if let Some(state) = self.peer_paths.write().await.get_mut(&(context_id, peer)) {
+            let before = state.phase_name();
+            state.record_outcome(path, ok, now_ms);
+            let after = state.phase_name();
+            if before != after {
+                tracing::info!(
+                    peer = %peer,
+                    context = %context_id,
+                    from = before,
+                    to = after,
+                    ok,
+                    "peer path phase changed"
+                );
+            }
+        }
+    }
+
+    fn refreshed_state<'a>(
+        paths: &'a mut HashMap<(ContextId, AuthorityId), PeerPathState>,
+        context_id: ContextId,
+        peer: AuthorityId,
+        candidates: &[EstablishPath],
+        network_generation: u64,
+        now_ms: u64,
+    ) -> Option<&'a mut PeerPathState> {
+        match paths.entry((context_id, peer)) {
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                let state = entry.into_mut();
+                state.refresh(candidates, network_generation, now_ms);
+                Some(state)
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let state =
+                    PeerPathState::new(context_id, peer, candidates, network_generation, now_ms)?;
+                Some(entry.insert(state))
+            }
+        }
     }
 
     /// Observed establish-path selections, ordered by context, peer and time.
     pub async fn list_selected_paths(&self) -> Vec<SelectedPeerPath> {
-        let mut paths: Vec<SelectedPeerPath> =
-            self.selected_paths.read().await.values().cloned().collect();
+        let mut paths: Vec<SelectedPeerPath> = self
+            .peer_paths
+            .read()
+            .await
+            .values()
+            .map(PeerPathState::selected)
+            .collect();
         paths.sort_by(|a, b| {
             (a.context_id, a.peer, a.selected_at_ms).cmp(&(b.context_id, b.peer, b.selected_at_ms))
         });

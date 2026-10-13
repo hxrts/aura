@@ -23,6 +23,8 @@ const AURA_BOOTSTRAP_BROKER_URL: &str = "AURA_BOOTSTRAP_BROKER_URL";
 const AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND: &str = "AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND";
 const AURA_BOOTSTRAP_BROKER_AUTH_TOKEN: &str = "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN";
 const AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN: &str = "AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN";
+const AURA_RELAY_ADDR: &str = "AURA_RELAY_ADDR";
+const AURA_RELAY_SERVE: &str = "AURA_RELAY_SERVE";
 
 fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key)
@@ -99,6 +101,29 @@ pub fn harness_lan_discovery_override() -> Option<HarnessLanDiscoveryEnv> {
         port: non_empty_env(AURA_HARNESS_LAN_DISCOVERY_PORT)
             .and_then(|value| value.parse::<u16>().ok()),
     })
+}
+
+/// Relay transport settings from the environment (`docs/113_rendezvous.md`
+/// §3.3): the relay this peer registers with, and whether it serves as one.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RelayEnv {
+    pub relay_addr: Option<String>,
+    pub serve_relay: bool,
+}
+
+pub fn relay_override() -> Option<RelayEnv> {
+    let relay_env = RelayEnv {
+        relay_addr: non_empty_env(AURA_RELAY_ADDR),
+        serve_relay: non_empty_env(AURA_RELAY_SERVE)
+            .and_then(|value| {
+                value
+                    .parse::<bool>()
+                    .ok()
+                    .or((value == "1").then_some(true))
+            })
+            .unwrap_or(false),
+    };
+    (relay_env.relay_addr.is_some() || relay_env.serve_relay).then_some(relay_env)
 }
 
 pub fn bootstrap_broker_override() -> Option<BootstrapBrokerEnv> {
