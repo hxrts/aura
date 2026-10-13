@@ -2064,6 +2064,13 @@ profile-owned retirement decision. They do not delete protected bytes or grant
 physical retirement; that operation still requires the provider's exact-record
 retirement contract and its own authorized lifetime owner.
 
+The pending invitee mailbox likewise seals an immutable root over its original
+signed registration and retrieval credential before broker registration. Each
+retained first-VM frame gets an immutable leaf bound to that root and its exact
+key and bytes before broker acknowledgment. Reopen verifies the same inventory
+before replay. This inventory is evidence for future retirement, not authority
+to delete the protected records.
+
 The issuer completion registry owns a restricted move-only
 `HeldIssuerCompletionObserver`, without an execution lease or arbitrary executor.
 Execution remains in the original issuer frame; completion/drain observes its

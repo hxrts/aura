@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 const FRAME_NAMESPACE: &str = "pending_enrollment_mailbox_frame_v1";
+const RETIREMENT_ROOT_NAMESPACE: &str = "pending_enrollment_mailbox_retirement_root_v1";
+const RETIREMENT_LEAF_NAMESPACE: &str = "pending_enrollment_mailbox_retirement_leaf_v1";
 const MAX_RETAINED_FRAMES_PER_ADMISSION: usize = 64;
 const MAX_RETAINED_FRAMES_TOTAL: usize = 1024;
 
@@ -33,6 +35,119 @@ struct RetainedMailboxFrame {
 pub(crate) struct RetainedMailboxCredential {
     pub(crate) credential: String,
     registration: PendingEnrollmentMailboxRegistration,
+}
+
+/// Byte-bound inventory retained before broker publication. This is evidence
+/// for the storage owner's later retirement decision, not deletion authority.
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PendingMailboxRetirementRoot {
+    manifest_digest: [u8; 32],
+    credential_digest: [u8; 32],
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PendingMailboxRetirementLeaf {
+    root_digest: [u8; 32],
+    frame_key: String,
+    frame_digest: [u8; 32],
+}
+
+impl PendingMailboxRetirementRoot {
+    pub(crate) fn verifies(&self, digest: [u8; 32], credential: &[u8]) -> bool {
+        self.manifest_digest == digest && self.credential_digest == hash(credential)
+    }
+}
+
+impl PendingMailboxRetirementLeaf {
+    pub(crate) fn verifies(&self, root_digest: [u8; 32], frame_key: &str, frame: &[u8]) -> bool {
+        self.root_digest == root_digest
+            && self.frame_key == frame_key
+            && self.frame_digest == hash(frame)
+    }
+}
+
+pub(crate) fn retirement_root_location(digest: [u8; 32]) -> SecureStorageLocation {
+    SecureStorageLocation::new(RETIREMENT_ROOT_NAMESPACE, hex::encode(digest))
+}
+
+pub(crate) fn retirement_leaf_location(frame_key: &str) -> SecureStorageLocation {
+    SecureStorageLocation::new(RETIREMENT_LEAF_NAMESPACE, frame_key)
+}
+
+async fn retain_retirement_root(
+    effects: &crate::runtime::AuraEffectSystem,
+    digest: [u8; 32],
+    credential_bytes: &[u8],
+) -> AgentResult<[u8; 32]> {
+    let root = PendingMailboxRetirementRoot {
+        manifest_digest: digest,
+        credential_digest: hash(credential_bytes),
+    };
+    let encoded = aura_core::util::serialization::to_vec(&root).map_err(boundary)?;
+    let location = retirement_root_location(digest);
+    effects
+        .secure_store_immutable(
+            &location,
+            &encoded,
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+            ],
+        )
+        .await
+        .map_err(boundary)?;
+    let original = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(boundary)?;
+    let retained: PendingMailboxRetirementRoot =
+        aura_core::util::serialization::from_slice(&original).map_err(boundary)?;
+    if original != encoded || !retained.verifies(digest, credential_bytes) {
+        return Err(AgentError::from(AuraError::permission_denied(
+            "pending mailbox retirement root differs from original credential",
+        )));
+    }
+    Ok(hash(&original))
+}
+
+async fn retain_retirement_leaf(
+    effects: &crate::runtime::AuraEffectSystem,
+    root_digest: [u8; 32],
+    frame_key: &str,
+    frame: &[u8],
+) -> AgentResult<()> {
+    let leaf = PendingMailboxRetirementLeaf {
+        root_digest,
+        frame_key: frame_key.to_owned(),
+        frame_digest: hash(frame),
+    };
+    let encoded = aura_core::util::serialization::to_vec(&leaf).map_err(boundary)?;
+    let location = retirement_leaf_location(frame_key);
+    effects
+        .secure_store_immutable(
+            &location,
+            &encoded,
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+            ],
+        )
+        .await
+        .map_err(boundary)?;
+    let original = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(boundary)?;
+    let retained: PendingMailboxRetirementLeaf =
+        aura_core::util::serialization::from_slice(&original).map_err(boundary)?;
+    if original != encoded || !retained.verifies(root_digest, frame_key, frame) {
+        return Err(AgentError::from(AuraError::permission_denied(
+            "pending mailbox retirement leaf differs from original frame",
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn retained_location(
@@ -175,6 +290,7 @@ impl AuraAgent {
         &self,
         admitted: &crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
         keys: &[String],
+        root_digest: [u8; 32],
     ) -> AgentResult<usize> {
         let effects = self.runtime().effects();
         let prefix = frame_prefix(admitted.manifest_digest());
@@ -201,6 +317,7 @@ impl AuraAgent {
                 )));
             }
             verify_frame(admitted, &record)?;
+            retain_retirement_leaf(effects.as_ref(), root_digest, key, &bytes).await?;
             replayed += usize::from(self.queue_retained_mailbox_frame_once(key, record.envelope)?);
         }
         Ok(replayed)
@@ -234,66 +351,69 @@ impl AuraAgent {
             if now_ms >= admitted.manifest().expires_at_ms {
                 continue;
             }
-            admitted_frames += self
-                .replay_retained_mailbox_frames(&admitted, &retained_keys)
-                .await?;
-            let Some(manager) = manager.as_ref() else {
-                continue;
-            };
             let location = retained_location(&admitted);
-            let retained = if effects.secure_exists(&location).await.map_err(boundary)? {
-                let bytes = effects
-                    .secure_retrieve(&location, &[SecureStorageCapability::Read])
-                    .await
+            let (retained, retained_bytes) =
+                if effects.secure_exists(&location).await.map_err(boundary)? {
+                    let bytes = effects
+                        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                        .await
+                        .map_err(boundary)?;
+                    let retained = aura_core::util::serialization::from_slice::<
+                        RetainedMailboxCredential,
+                    >(&bytes)
                     .map_err(boundary)?;
-                aura_core::util::serialization::from_slice::<RetainedMailboxCredential>(&bytes)
-                    .map_err(boundary)?
-            } else {
-                let secret = effects.random_bytes(32).await;
-                if secret.len() != 32 {
-                    return Err(AgentError::from(AuraError::invalid(
-                        "pending mailbox credential source returned invalid length",
-                    )));
-                }
-                let credential = secret
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>();
-                let registration = self
-                    .threshold_signing()
-                    .sign_pending_enrollment_mailbox_registration(
-                        admitted.baseline(),
-                        admitted.local_setup(),
-                        hash(credential.as_bytes()),
-                    )
-                    .await
+                    (retained, bytes)
+                } else {
+                    let Some(_manager) = manager.as_ref() else {
+                        continue;
+                    };
+                    let secret = effects.random_bytes(32).await;
+                    if secret.len() != 32 {
+                        return Err(AgentError::from(AuraError::invalid(
+                            "pending mailbox credential source returned invalid length",
+                        )));
+                    }
+                    let credential = secret
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>();
+                    let registration = self
+                        .threshold_signing()
+                        .sign_pending_enrollment_mailbox_registration(
+                            admitted.baseline(),
+                            admitted.local_setup(),
+                            hash(credential.as_bytes()),
+                        )
+                        .await
+                        .map_err(boundary)?;
+                    let candidate = RetainedMailboxCredential {
+                        credential,
+                        registration,
+                    };
+                    let bytes =
+                        aura_core::util::serialization::to_vec(&candidate).map_err(boundary)?;
+                    effects
+                        .secure_store_immutable(
+                            &location,
+                            &bytes,
+                            &[
+                                SecureStorageCapability::Read,
+                                SecureStorageCapability::Write,
+                                SecureStorageCapability::Delete,
+                            ],
+                        )
+                        .await
+                        .map_err(boundary)?;
+                    let retained_bytes = effects
+                        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                        .await
+                        .map_err(boundary)?;
+                    let retained = aura_core::util::serialization::from_slice::<
+                        RetainedMailboxCredential,
+                    >(&retained_bytes)
                     .map_err(boundary)?;
-                let candidate = RetainedMailboxCredential {
-                    credential,
-                    registration,
+                    (retained, retained_bytes)
                 };
-                let bytes = aura_core::util::serialization::to_vec(&candidate).map_err(boundary)?;
-                effects
-                    .secure_store_immutable(
-                        &location,
-                        &bytes,
-                        &[
-                            SecureStorageCapability::Read,
-                            SecureStorageCapability::Write,
-                            SecureStorageCapability::Delete,
-                        ],
-                    )
-                    .await
-                    .map_err(boundary)?;
-                let retained_bytes = effects
-                    .secure_retrieve(&location, &[SecureStorageCapability::Read])
-                    .await
-                    .map_err(boundary)?;
-                aura_core::util::serialization::from_slice::<RetainedMailboxCredential>(
-                    &retained_bytes,
-                )
-                .map_err(boundary)?
-            };
             retained
                 .registration
                 .clone()
@@ -315,6 +435,18 @@ impl AuraAgent {
                     "retained mailbox credential changed",
                 )));
             }
+            let root_digest = retain_retirement_root(
+                effects.as_ref(),
+                admitted.manifest_digest(),
+                &retained_bytes,
+            )
+            .await?;
+            admitted_frames += self
+                .replay_retained_mailbox_frames(&admitted, &retained_keys, root_digest)
+                .await?;
+            let Some(manager) = manager.as_ref() else {
+                continue;
+            };
             manager
                 .register_original_pending_mailbox(BootstrapPendingEnrollmentMailboxRegistration {
                     registration: retained.registration,
@@ -374,6 +506,13 @@ impl AuraAgent {
                         "broker redelivery changed an immutable original frame",
                     )));
                 }
+                retain_retirement_leaf(
+                    effects.as_ref(),
+                    root_digest,
+                    &location.key,
+                    &retained_bytes,
+                )
+                .await?;
                 if is_new {
                     retained_keys.push(location.key.clone());
                 }

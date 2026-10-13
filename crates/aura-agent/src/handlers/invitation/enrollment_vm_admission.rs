@@ -2244,6 +2244,63 @@ mod tests {
                 "first return frame must fail only at injected broker ACK status: {ack_failure:?}"
             );
             use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+            let pending_location =
+                crate::core::agent::pending_enrollment_mailbox::retained_location(&admitted);
+            let pending_credential = invitee_effects
+                .secure_retrieve(&pending_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("Bob retained his exact signed mailbox credential");
+            let pending_root_bytes = invitee_effects
+                .secure_retrieve(
+                    &crate::core::agent::pending_enrollment_mailbox::retirement_root_location(
+                        admitted.manifest_digest(),
+                    ),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("Bob sealed the original credential before broker registration");
+            let pending_root: crate::core::agent::pending_enrollment_mailbox::PendingMailboxRetirementRoot =
+                aura_core::util::serialization::from_slice(&pending_root_bytes).unwrap();
+            assert!(pending_root.verifies(admitted.manifest_digest(), &pending_credential));
+            let pending_root_digest = aura_core::hash::hash(&pending_root_bytes);
+            let pending_frame_keys = invitee_effects
+                .secure_list_keys(
+                    "pending_enrollment_mailbox_frame_v1",
+                    &[SecureStorageCapability::List],
+                )
+                .await
+                .expect("Bob's protected first-frame inventory");
+            assert!(
+                !pending_frame_keys.is_empty(),
+                "Bob retained Alice's first VM frame"
+            );
+            for key in pending_frame_keys {
+                let frame = invitee_effects
+                    .secure_retrieve(
+                        &aura_core::effects::SecureStorageLocation::new(
+                            "pending_enrollment_mailbox_frame_v1",
+                            &key,
+                        ),
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await
+                    .expect("Bob's original protected frame");
+                let leaf_bytes = invitee_effects
+                    .secure_retrieve(
+                        &crate::core::agent::pending_enrollment_mailbox::retirement_leaf_location(
+                            &key,
+                        ),
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await
+                    .expect("Bob sealed original frame before broker ACK");
+                let leaf: crate::core::agent::pending_enrollment_mailbox::PendingMailboxRetirementLeaf =
+                    aura_core::util::serialization::from_slice(&leaf_bytes).unwrap();
+                assert!(leaf.verifies(pending_root_digest, &key, &frame));
+                let mut substituted = frame.clone();
+                substituted[0] ^= 1;
+                assert!(!leaf.verifies(pending_root_digest, &key, &substituted));
+            }
             let frame_keys = issuer_effects
                 .secure_list_keys(
                     "issuer_return_mailbox_frame_v1",
