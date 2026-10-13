@@ -9,6 +9,7 @@ lane=manual
 dry_run=0
 allow_live_harness=0
 no_prune=0
+preserve_cache_lane=''
 cap_gib="${AURA_BUILD_TARGET_CAP_GIB:-10}"
 min_free_gib="${AURA_BUILD_MIN_FREE_GIB:-15}"
 emergency_gib="${AURA_BUILD_EMERGENCY_FREE_GIB:-5}"
@@ -25,6 +26,7 @@ export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 usage() {
   cat <<'EOF'
 Usage: build-budget.sh [--root PATH] [--lane NAME] [--dry-run]
+                       [--preserve-cache-lane wasm-debug]
                        [--allow-live-harness] [--no-prune] -- COMMAND [ARGS...]
 
 Defaults: per-checkout target soft cap 10 GiB, volume admission floor 15 GiB free
@@ -44,11 +46,37 @@ while [[ $# -gt 0 ]]; do
     --dry-run) dry_run=1; shift ;;
     --allow-live-harness) allow_live_harness=1; shift ;;
     --no-prune) no_prune=1; shift ;;
+    --preserve-cache-lane) preserve_cache_lane="${2:?missing cache lane}"; shift 2 ;;
     --) shift; break ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
 done
+
+# Direct Cargo wasm test/check/build commands identify their own cache. Shell
+# batches must declare the incoming lane explicitly because their argv hides
+# the actual compiler command from this wrapper.
+if [[ -z "$preserve_cache_lane" && "${1:-}" == cargo ]]; then
+  cargo_target='' cargo_profile=debug
+  cargo_args=("$@")
+  for ((index=1; index<${#cargo_args[@]}; index++)); do
+    case "${cargo_args[index]}" in
+      --target)
+        if (( index + 1 < ${#cargo_args[@]} )); then cargo_target="${cargo_args[index+1]}"; fi ;;
+      --target=*) cargo_target="${cargo_args[index]#--target=}" ;;
+      --release|--profile) cargo_profile=other ;;
+      --profile=*) cargo_profile=other ;;
+    esac
+  done
+  if [[ "$cargo_target" == wasm32-unknown-unknown && "$cargo_profile" == debug ]]; then
+    preserve_cache_lane=wasm-debug
+  fi
+fi
+
+case "$preserve_cache_lane" in
+  ''|wasm-debug) ;;
+  *) echo 'build-budget: unsupported preserve-cache-lane' >&2; exit 2 ;;
+esac
 
 root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo "build-budget: no Cargo.toml in $root" >&2; exit 2; }
@@ -237,28 +265,38 @@ sweep() {
   return "$rc"
 }
 sweep_original() {
-  local mode="$1" preview release_count rc
+  local mode="$1" preview release_count incoming_count incoming_path rc
   sweep_skip_reason=unknown
   sweep_failure_reason=preview
   preview="$(mktemp "${TMPDIR:-/tmp}/aura-sweep-preview.XXXXXX")"
   printf 'Sweep preview: cargo sweep --maxsize %sGiB --dry-run -v .\n' "$cap_gib"
   if (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" --dry-run -v .) > "$preview" 2>&1; then
-    grep -F '[INFO]' "$preview" || cat "$preview"
+    rg '\[INFO\]' "$preview" || cat "$preview"
   else
     rc=$?
     cat "$preview" >&2
     rm -f "$preview"
     return "$rc"
   fi
-  release_count="$(grep -c -E 'Would remove: .*target/(release/|wasm-release/|wasm32-unknown-unknown/release/)' "$preview" || true)"
+  release_count="$(rg -c 'Would remove: .*target/(release/|wasm-release/|wasm32-unknown-unknown/release/)' "$preview" || true)"
   release_count="${release_count:-0}"
   printf 'Protected production/web candidates: %s\n' "$release_count"
+  incoming_count=0
+  case "$preserve_cache_lane" in
+    wasm-debug) incoming_path='target/wasm32-unknown-unknown/debug/' ;;
+    *) incoming_path='' ;;
+  esac
+  if [[ -n "$incoming_path" ]]; then
+    incoming_count="$(rg -c -F "$incoming_path" "$preview" || true)"
+    incoming_count="${incoming_count:-0}"
+  fi
   rm -f "$preview"
   [[ "$mode" == dry ]] && return 0
-  if (( release_count > 0 || allow_live_harness == 1 )); then
+  if (( release_count > 0 || incoming_count > 0 || allow_live_harness == 1 )); then
     if (( release_count > 0 )); then sweep_skip_reason=protected-production;
+    elif (( incoming_count > 0 )); then sweep_skip_reason=protected-incoming-lane;
     else sweep_skip_reason=live-harness-mode; fi
-    echo 'build-budget: preserving production/web caches and live harness artifacts; skipping global sweep' >&2
+    echo 'build-budget: preserving protected caches and live harness artifacts; skipping global sweep' >&2
     return 3
   fi
   sweep_failure_reason=active-consumer
@@ -311,6 +349,10 @@ prune_safe_lanes() {
   if [[ "$CARGO_INCREMENTAL" == 1 ]]; then candidates=(wasm-debug dylint trybuild); fi
   if (( allow_live_harness == 1 )); then candidates=(wasm-debug); fi
   for candidate in "${candidates[@]}"; do
+    if [[ "$candidate" == "$preserve_cache_lane" ]]; then
+      echo "build-budget: retaining incoming $candidate cache"
+      continue
+    fi
     if [[ "$mode" == dry ]]; then
       bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" --lane "$candidate" --dry-run
     else

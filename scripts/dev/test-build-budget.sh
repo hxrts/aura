@@ -26,6 +26,7 @@ export WASM_SIZE_FILE="$test_root/wasm-size"
 export DYLINT_SIZE_FILE="$test_root/dylint-size"
 export TRYBUILD_SIZE_FILE="$test_root/trybuild-size"
 export EVICT_ON_SWEEP_FILE="$test_root/evict-on-sweep"
+export PREVIEW_INCOMING_FILE="$test_root/preview-incoming"
 export AURA_BUILD_TARGET_CAP_GIB=8
 # Cases choose their own waits; a caller's AURA_BUILD_WAIT_SECONDS (gates and
 # ship.sh export one) must not turn an expected refusal into a long wait.
@@ -96,6 +97,9 @@ fi
 if [[ -f "$PROTECTED_WEB_FILE" && " $* " == *' --dry-run '* ]]; then
   printf '[DEBUG] Would remove: "%s/target/wasm-release/deps/libweb.rlib"\n' "$PWD"
 fi
+if [[ -f "$PREVIEW_INCOMING_FILE" && " $* " == *' --dry-run '* ]]; then
+  printf '[DEBUG] Would remove: "%s/target/wasm32-unknown-unknown/debug/deps/libincoming.rlib"\n' "$PWD"
+fi
 if [[ -f "$RACE_ON_PREVIEW_FILE" && " $* " == *' --dry-run '* ]]; then
   printf 'cargo\n' > "$ACTIVE_FILE"
 fi
@@ -112,7 +116,7 @@ reset_case() {
   printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
   printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
   : > "$CALLS_FILE"
-  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE" "$EVICT_ON_SWEEP_FILE"
+  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$PREVIEW_INCOMING_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE" "$EVICT_ON_SWEEP_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
   rm -f "$project/target/debug/deps/reusable.rlib"
   rmdir "$project/target/debug/deps" "$project/target/debug" 2>/dev/null || true
@@ -309,6 +313,46 @@ jq -e 'all(.cleanup_events[]; .operation!="sweep" or .stage!="pre-admission") an
   any(.cleanup_events[];.operation=="guarded-lane" and .lane=="wasm-debug" and
   .outcome=="removed" and .before_kib==5242880 and .after_kib==0)' "$receipt" >/dev/null
 
+# A declared incoming wasm lane survives pre-admission and post-command cache
+# recovery. Other inactive lanes remain reclaimable, and a hard floor cannot
+# authorize a global sweep that would evict the incoming lane.
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
+printf '%s\n' $((2 * 1024 * 1024)) > "$DYLINT_SIZE_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug" "$project/target/dylint"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --lane wasm-rebuild \
+  --preserve-cache-lane wasm-debug -- sh -c 'test -d target/wasm32-unknown-unknown/debug && test ! -d target/dylint'
+[[ -d "$project/target/wasm32-unknown-unknown/debug" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e 'all(.cleanup_events[]; .lane!="wasm-debug" or .outcome!="removed") and
+  any(.cleanup_events[]; .lane=="dylint" and .outcome=="removed") and
+  .cleanup.target_above_soft_cap==true and
+  any(.cleanup_events[]; .stage=="post-command" and .operation=="guarded-lane")' "$receipt" >/dev/null
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
+printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+touch "$PREVIEW_INCOMING_FILE"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --preserve-cache-lane wasm-debug -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ ! -e "$FREE_FILE.build-ran" && -d "$project/target/wasm32-unknown-unknown/debug" ]]
+! rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e 'any(.cleanup_events[]; .operation=="sweep" and .reason=="protected-incoming-lane")' "$receipt" >/dev/null
+
+# A direct debug wasm Cargo invocation identifies its own incoming cache.
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --lane wasm-rebuild -- \
+  cargo test --target wasm32-unknown-unknown
+[[ -d "$project/target/wasm32-unknown-unknown/debug" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e 'all(.cleanup_events[]; .lane!="wasm-debug" or .outcome!="removed")' "$receipt" >/dev/null
+
 # The soft cap may still be exceeded by useful debug dependencies after all
 # independent inactive wasm, dylint and trybuild caches have been reclaimed.
 reset_case
@@ -489,7 +533,7 @@ expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.growth-ran"'
 rg -q 'incoming-reservation=6291456 KiB' "$test_root/output"
 [[ -z "$(ls -A "$AURA_BUILD_SHARED_DIR/reservations")" ]]
 printf '%s\n' $((22 * 1024 * 1024)) > "$FREE_FILE"
-expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 6291456'
+expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 6291456'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==6291456 and .disk.measured_growth_kib==0' "$receipt" >/dev/null
 
@@ -498,7 +542,7 @@ mkdir -p "$project/artifacts/disk-budget/receipts/run.foreign" "$project/artifac
 printf '{"root":"%s","lane":"foreign","command_exit_status":0,"disk":{"measured_growth_kib":10485760}}\n' \
   "$project" > "$project/artifacts/disk-budget/receipts/run.foreign/receipt.json"
 printf 'corrupt receipt\n' > "$project/artifacts/disk-budget/receipts/run.bad/receipt.json"
-expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 4194304'
+expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 4194304'
 
 # Legacy TSV migration also works with BSD awk: -v assignments are single
 # arguments and a different lane with the same native profile can supply a
@@ -510,13 +554,13 @@ printf 'start\tfinish\tlane\tprofile\ttriple\tfeatures\tcap\tmin\temergency\tbef
   > "$project/artifacts/disk-budget/builds.tsv"
 printf 'start\tfinish\tother-native\tunlabelled\t%s\tunlabelled\t8\t15\t5\t20971520\t6291456\t20971520\t6291456\t18874368\t6291456\t18874368\t6291456\t0\n' \
   "$host_triple" >> "$project/artifacts/disk-budget/builds.tsv"
-expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 3145728'
+expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 3145728'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==3145728' "$receipt" >/dev/null
 mkdir -p "$project/artifacts/disk-budget/receipts/run.failed-before-link"
 printf '{"root":"%s","lane":"test","command_exit_status":101,"disk":{"measured_growth_kib":31748}}\n' \
   "$project" > "$project/artifacts/disk-budget/receipts/run.failed-before-link/receipt.json"
-expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 3145728'
+expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 3145728'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==3145728' "$receipt" >/dev/null
 
