@@ -1354,7 +1354,11 @@ impl HarnessCoordinator {
         Ok(setup_code)
     }
 
-    pub fn restart(&mut self, instance_id: &str) -> Result<()> {
+    pub fn restart(
+        &mut self,
+        instance_id: &str,
+        expected_operation_instance: Option<&str>,
+    ) -> Result<()> {
         let backend = self
             .backends
             .get_mut(instance_id)
@@ -1365,7 +1369,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             event_details!(),
         );
-        backend.restart()
+        backend.restart(expected_operation_instance)
     }
 
     pub fn kill(&mut self, instance_id: &str) -> Result<()> {

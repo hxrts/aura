@@ -432,6 +432,11 @@ pub struct VerifiedEnrollmentSetupPossession {
 }
 
 impl VerifiedEnrollmentSetupPossession {
+    /// The broker receives only this public possession proof. It cannot use
+    /// these self-contained bytes to authorize an issuer or device by itself.
+    pub fn public_request(&self) -> DeviceEnrollmentSetupRequest {
+        self.request.clone()
+    }
     /// Export the same public proof envelope. A recipient must independently
     /// verify/pin this transfer; serialized bytes cannot mint possession trust.
     pub fn transfer_code(&self) -> Result<String, EnrollmentSetupError> {

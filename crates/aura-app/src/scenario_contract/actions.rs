@@ -1324,6 +1324,7 @@ pub enum EnvironmentAction {
     LaunchActors,
     RestartActor {
         actor: ActorId,
+        at_instance: Option<String>,
     },
     KillActor {
         actor: ActorId,

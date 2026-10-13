@@ -2,6 +2,7 @@
 //! Deserialization/validation establishes shape, never local signing authority.
 use crate::{
     enrollment_initial_request::EnrollmentInitialRequestTranscript,
+    enrollment_mailbox::IssuerEnrollmentReturnStatement,
     enrollment_manifest::EnrollmentTrustManifest,
     shareable::PublicEnrollmentTransportSigningIntent,
 };
@@ -19,6 +20,8 @@ pub enum EnrollmentSigningDomain {
     PublicTransport,
     /// Exact deterministic initial enrollment Request control transcript.
     InitialRequest,
+    /// Exact original issuer return mailbox, signed before initial material retirement.
+    IssuerReturnMailbox,
     /// Conditional negative terminal policy; never an initiation signature.
     NegativeTerminalPolicy,
 }
@@ -89,24 +92,27 @@ impl EnrollmentNegativeTerminalPolicy {
 /// Validation establishes public shape and binding, never native user approval.
 pub struct EnrollmentSigningIntent {
     version: u16,
-    domains: [EnrollmentSigningDomain; 4],
+    domains: [EnrollmentSigningDomain; 5],
     manifest: EnrollmentTrustManifest,
     transport: PublicEnrollmentTransportSigningIntent,
     initial_request: EnrollmentInitialRequestTranscript,
+    issuer_return_mailbox: IssuerEnrollmentReturnStatement,
     negative_terminal_policy: EnrollmentNegativeTerminalPolicy,
 }
 
 impl EnrollmentSigningIntent {
-    const DOMAINS: [EnrollmentSigningDomain; 4] = [
+    const DOMAINS: [EnrollmentSigningDomain; 5] = [
         EnrollmentSigningDomain::Manifest,
         EnrollmentSigningDomain::PublicTransport,
         EnrollmentSigningDomain::InitialRequest,
+        EnrollmentSigningDomain::IssuerReturnMailbox,
         EnrollmentSigningDomain::NegativeTerminalPolicy,
     ];
     /// Construct and validate the complete domain declaration from the exact manifest and transport.
     pub fn new(
         manifest: EnrollmentTrustManifest,
         transport: PublicEnrollmentTransportSigningIntent,
+        credential_commitment: [u8; 32],
     ) -> Result<Self, AuraError> {
         let initial_request = EnrollmentInitialRequestTranscript::from_manifest(&manifest)
             .map_err(|source| {
@@ -116,12 +122,23 @@ impl EnrollmentSigningIntent {
                 )
             })?;
         let negative_terminal_policy = EnrollmentNegativeTerminalPolicy::from_manifest(&manifest)?;
+        let issuer_return_mailbox = IssuerEnrollmentReturnStatement::for_approved_manifest(
+            &manifest,
+            credential_commitment,
+        )
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "derive original issuer return mailbox transcript",
+                Arc::new(source),
+            )
+        })?;
         let intent = Self {
-            version: 3,
+            version: 4,
             domains: Self::DOMAINS,
             manifest,
             transport,
             initial_request,
+            issuer_return_mailbox,
             negative_terminal_policy,
         };
         intent.validate()?;
@@ -139,18 +156,21 @@ impl EnrollmentSigningIntent {
     pub fn initial_request(&self) -> &EnrollmentInitialRequestTranscript {
         &self.initial_request
     }
+    pub fn issuer_return_mailbox(&self) -> &IssuerEnrollmentReturnStatement {
+        &self.issuer_return_mailbox
+    }
     /// Borrow the exact conditional policy reviewed with the initiation transcripts.
     pub fn negative_terminal_policy(&self) -> &EnrollmentNegativeTerminalPolicy {
         &self.negative_terminal_policy
     }
     /// Observe the fixed ordered set of explicitly declared initiation domains.
-    pub fn domains(&self) -> &[EnrollmentSigningDomain; 4] {
+    pub fn domains(&self) -> &[EnrollmentSigningDomain] {
         &self.domains
     }
     /// Reject unsupported versions, domains, incomplete final inventory, or transcript substitution.
     /// Successful validation does not authorize native signing or control admission.
     pub fn validate(&self) -> Result<(), AuraError> {
-        if self.version != 3
+        if self.version != 4
             || self.domains != Self::DOMAINS
             || self.manifest.version != 3
             || self.manifest.final_inventory.is_empty()
@@ -189,6 +209,21 @@ impl EnrollmentSigningIntent {
         if supplied != expected {
             return Err(AuraError::permission_denied(
                 "declared initial request differs from exact approved manifest",
+            ));
+        }
+        let expected = IssuerEnrollmentReturnStatement::for_approved_manifest(
+            &self.manifest,
+            self.issuer_return_mailbox.retrieval_credential_commitment(),
+        )
+        .map_err(|source| {
+            AuraError::crypto_with_source(
+                "validate original issuer return mailbox transcript",
+                Arc::new(source),
+            )
+        })?;
+        if self.issuer_return_mailbox != expected {
+            return Err(AuraError::permission_denied(
+                "issuer return mailbox differs from exact approved manifest",
             ));
         }
         Ok(())

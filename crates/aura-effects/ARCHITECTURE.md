@@ -223,6 +223,26 @@ The keyring namespace owner uses the actual OS user identity and root-owned stic
 
 Immutable secure publication seals the exact original record, including a legacy original, and rejects generic replacement, deletion, and key generation at that location. Provider-authenticated protection metadata is published in the same complete encrypted record. Atomic initial mutable publication is separate: required clock/profile checkpoints remain mutable under their own domain owner. Cooperating fallback writer views share the selected physical profile's record decision gate; platform keyring writers share the actual original service namespace owner; browser writes authenticate the original and compare exact ciphertext inside one strict IndexedDB transaction. Interrupted publication may have succeeded; an immutable retry acknowledges unchanged original bytes before reporting success.
 
+On Unix, profile-owned filesystem `secure_retrieve` and `secure_exists` use
+that same record decision gate as immutable publication. Publication briefly
+links the staged inode at its final name before removing the stage; readers
+wait for that window to finish, then inspect the completed record. The
+descriptor-relative read still requires an unaliased private regular file, so
+an independently created second link or an unsafe file never becomes valid
+merely because a read waited for publication.
+
+Protected-record retirement uses a private exact-record compare/delete
+primitive. The caller must present the authenticated original record and its
+selected location; the provider deletes only if the currently protected record
+still matches that original. The Unix profile-owned fallback makes that
+decision under the same record gate and acknowledges the directory change.
+The browser adapter makes the comparison and deletion within one strict
+IndexedDB transaction. A changed, absent, or unauthenticated record fails
+closed. This primitive supplies storage atomicity to a separate authorized
+lifetime owner; it is not a public `secure_delete` escape or retirement grant.
+The platform keyring adapter reports this operation unsupported until it has
+an equivalent exact-record transactional contract.
+
 The native fallback and browser adapters read historical v1 encrypted records and seal original plaintext without using caller replacement bytes. Platform keyring records retain original service/key addresses. Provider-private wrapping-key/inventory addresses are unreachable through normal location mapping; a missing original key with prior inventory fails closed. A historical raw keyring value colliding with the reserved encrypted format is rejected rather than reinterpreted or repaired. Generic retirement cannot delete protected records; no unrestricted retirement escape is supplied.
 
 Ordinary filesystem IO, enumeration, statistics, and clear operations exclude the existing infrastructure secure-provider subtree before traversal. This prevents filename collisions and ordinary clear from bypassing secure-record protection. Existing physical data is not relocated. Real native child-process recreation and historical codec fixtures exercise the selected fallback provider. Browser multi-context/process-death and actual OS credential-provider loss/legacy-collision fixtures remain required validation for the platform paths; syntax validation alone establishes none of those runtime guarantees.

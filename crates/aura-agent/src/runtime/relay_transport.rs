@@ -111,7 +111,7 @@ fn control_frame(
 /// budget fails the attempt, and the session loop's bounded backoff decides
 /// when to try again.
 async fn relay_timeout<F, Fut, T>(
-    time: &(impl PhysicalTimeEffects + ?Sized),
+    time: &impl PhysicalTimeEffects,
     timeout: Duration,
     what: &str,
     f: F,

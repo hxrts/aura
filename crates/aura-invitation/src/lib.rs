@@ -96,6 +96,8 @@ pub mod view;
 pub mod descriptor;
 pub mod enrollment_admission;
 pub mod enrollment_initial_request;
+pub mod enrollment_mailbox;
+pub mod enrollment_mailbox_session;
 pub mod enrollment_manifest;
 /// Device-owned enrollment setup codes and sealed possession evidence.
 pub mod enrollment_setup;

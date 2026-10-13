@@ -416,6 +416,14 @@ pub struct AuraEffectSystem {
         >,
     >,
 
+    /// Bob's actual initialized setup signer, held weakly while this runtime
+    /// owns an independently protected original enrollment admission.
+    original_return_signer: parking_lot::RwLock<
+        Option<
+            Arc<dyn crate::runtime::services::threshold_signing::OriginalEnrollmentReturnSigner>,
+        >,
+    >,
+
     /// Move manager (optional, for bounded movement planning and replay windows).
     move_manager: parking_lot::RwLock<Option<MoveManager>>,
 
@@ -1407,6 +1415,7 @@ impl AuraEffectSystem {
             relay_forwarder: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
             original_mailbox_issuers: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            original_return_signer: parking_lot::RwLock::new(None),
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             receipt_signing_key,
@@ -2202,6 +2211,20 @@ impl AuraEffectSystem {
             .read()
             .get(&session)
             .and_then(std::sync::Weak::upgrade)
+    }
+
+    pub(crate) fn retain_original_return_signer(
+        &self,
+        signer: crate::runtime::services::threshold_signing::WeakEnrollmentReturnSigner,
+    ) {
+        *self.original_return_signer.write() = Some(Arc::new(signer));
+    }
+
+    pub(crate) fn original_return_signer(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::services::threshold_signing::OriginalEnrollmentReturnSigner>>
+    {
+        self.original_return_signer.read().clone()
     }
 
     pub fn attach_move_manager(&self, manager: MoveManager) {

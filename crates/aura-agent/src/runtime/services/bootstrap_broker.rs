@@ -11,9 +11,13 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 mod mailbox;
 #[cfg(not(target_arch = "wasm32"))]
+mod return_mailbox;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::time::PhysicalTimeEffects;
 #[cfg(not(target_arch = "wasm32"))]
 use mailbox::{PendingEnrollmentMailboxes, PendingMailboxKey};
+#[cfg(not(target_arch = "wasm32"))]
+use return_mailbox::{EnrollmentReturnMailboxes, ReturnMailboxKey};
 
 #[cfg(test)]
 use aura_core::invitation::InvitationPurpose;
@@ -36,6 +40,8 @@ const DEFAULT_LOOPBACK_BIND_ADDR: &str = "127.0.0.1:0";
 const AUTHORIZATION_HEADER: &str = "authorization";
 const INVITATION_RETRIEVAL_HEADER: &str = "x-aura-invitation-retrieval-token";
 const ENROLLMENT_MAILBOX_RETRIEVAL_HEADER: &str = "x-aura-enrollment-mailbox-retrieval-token";
+const ENROLLMENT_RETURN_MAILBOX_RETRIEVAL_HEADER: &str =
+    "x-aura-enrollment-return-mailbox-retrieval-token";
 #[cfg(not(target_arch = "wasm32"))]
 const BEARER_PREFIX: &str = "Bearer ";
 #[cfg(not(target_arch = "wasm32"))]
@@ -206,6 +212,36 @@ pub struct BootstrapPendingEnrollmentMailboxEnvelope {
     pub envelope: aura_core::effects::transport::TransportEnvelope,
 }
 
+/// Untrusted public issuer proof plus an independent Alice-only retrieval
+/// credential. Neither broker registration nor its receipt grants membership.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootstrapIssuerReturnMailboxRegistration {
+    pub registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration,
+    pub retrieval_credential: String,
+}
+
+/// The original Bob setup request proves possession only; Alice still checks
+/// it against protected admission and verifies the resulting VM frame.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootstrapIssuerReturnMailboxEnvelope {
+    pub manifest_digest: [u8; 32],
+    pub setup_request: aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest,
+    pub authorization: aura_invitation::enrollment_mailbox::EnrollmentReturnEnvelopeAuthorization,
+    pub envelope: aura_core::effects::transport::TransportEnvelope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct IssuerReturnMailboxDelivery {
+    pub(crate) message_id: String,
+    pub(crate) setup_request: aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest,
+    pub(crate) authorization:
+        aura_invitation::enrollment_mailbox::EnrollmentReturnEnvelopeAuthorization,
+    pub(crate) envelope: aura_core::effects::transport::TransportEnvelope,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PendingMailboxDelivery {
@@ -233,6 +269,7 @@ struct BootstrapBrokerState {
     invitations: HashMap<(String, DeviceId), Vec<BootstrapBrokerInvitation>>,
     invitation_credentials: HashMap<(String, DeviceId), String>,
     pending_enrollment_mailboxes: PendingEnrollmentMailboxes,
+    enrollment_return_mailboxes: EnrollmentReturnMailboxes,
     started_at: Instant,
 }
 
@@ -258,6 +295,7 @@ impl BootstrapBrokerState {
             invitations: HashMap::new(),
             invitation_credentials: HashMap::new(),
             pending_enrollment_mailboxes: PendingEnrollmentMailboxes::new(retention),
+            enrollment_return_mailboxes: EnrollmentReturnMailboxes::new(retention),
             started_at: Instant::now(),
         }
     }
@@ -505,6 +543,153 @@ impl LocalBootstrapBrokerService {
             .write()
             .await
             .pending_enrollment_mailboxes
+            .fail_next_ack_for_test();
+    }
+
+    pub(crate) async fn register_issuer_return_mailbox(
+        &self,
+        payload: BootstrapIssuerReturnMailboxRegistration,
+    ) -> Result<(), String> {
+        if constant_time_eq_str(&payload.retrieval_credential, &self.auth_token) {
+            return Err("return mailbox credential must be scoped independently".into());
+        }
+        let provider = self
+            .mailbox_time
+            .as_deref()
+            .ok_or("return mailbox selected physical-time provider is absent")?;
+        payload
+            .registration
+            .verify_untrusted_broker_registration(
+                &aura_effects::crypto::RealCryptoHandler::new(),
+                provider,
+            )
+            .await
+            .map_err(|source| source.to_string())?;
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
+            .register(payload.registration, &payload.retrieval_credential, now_ms)
+            .map_err(str::to_string)
+    }
+
+    pub(crate) async fn issuer_return_mailbox_registration(
+        &self,
+        subject: AuthorityId,
+        issuer_device: DeviceId,
+        manifest_digest: [u8; 32],
+    ) -> Result<
+        Option<aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration>,
+        String,
+    > {
+        let now_ms = self.mailbox_now_ms().await?;
+        Ok(self
+            .shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
+            .registration(
+                ReturnMailboxKey::new(subject, issuer_device, manifest_digest),
+                now_ms,
+            ))
+    }
+
+    pub(crate) async fn queue_issuer_return_vm_envelope(
+        &self,
+        payload: BootstrapIssuerReturnMailboxEnvelope,
+    ) -> Result<(), String> {
+        let issuer_device = payload
+            .envelope
+            .metadata
+            .get("aura-destination-device-id")
+            .and_then(|raw| DeviceId::from_str(raw).ok())
+            .ok_or("return VM envelope has no exact issuer device")?;
+        let key = ReturnMailboxKey::new(
+            payload.envelope.destination,
+            issuer_device,
+            payload.manifest_digest,
+        );
+        let now_ms = self.mailbox_now_ms().await?;
+        let registration = self
+            .shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
+            .registration(key, now_ms)
+            .ok_or("return mailbox registration is absent")?;
+        let provider = self
+            .mailbox_time
+            .as_deref()
+            .ok_or("return mailbox selected physical-time provider is absent")?;
+        payload
+            .authorization
+            .verify_untrusted_broker_admission(
+                &aura_effects::crypto::RealCryptoHandler::new(),
+                provider,
+                &registration,
+                &payload.setup_request,
+                &payload.envelope,
+            )
+            .await
+            .map_err(|source| source.to_string())?;
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
+            .enqueue_verified(key, &registration, payload, now_ms)
+            .map_err(str::to_string)
+    }
+
+    pub(crate) async fn take_issuer_return_vm_envelopes(
+        &self,
+        subject: AuthorityId,
+        issuer_device: DeviceId,
+        manifest_digest: [u8; 32],
+        credential: &str,
+    ) -> Result<Vec<IssuerReturnMailboxDelivery>, String> {
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
+            .take(
+                ReturnMailboxKey::new(subject, issuer_device, manifest_digest),
+                credential,
+                now_ms,
+            )
+            .map_err(str::to_string)
+    }
+
+    pub(crate) async fn acknowledge_issuer_return_vm_envelope(
+        &self,
+        subject: AuthorityId,
+        issuer_device: DeviceId,
+        manifest_digest: [u8; 32],
+        credential: &str,
+        message_id: &str,
+    ) -> Result<(), String> {
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
+            .acknowledge(
+                ReturnMailboxKey::new(subject, issuer_device, manifest_digest),
+                credential,
+                message_id,
+                now_ms,
+            )
+            .map_err(str::to_string)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn interrupt_next_issuer_return_ack_for_test(&self) {
+        self.shared
+            .write()
+            .await
+            .enrollment_return_mailboxes
             .fail_next_ack_for_test();
     }
 
@@ -1144,6 +1329,286 @@ async fn handle_http_connection(
                 }
             }
         }
+        ("POST", "/v2/bootstrap/enrollment-return-mailbox/register") => {
+            let Ok(payload) =
+                serde_json::from_slice::<BootstrapIssuerReturnMailboxRegistration>(&request.body)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid return mailbox registration",
+                )
+                .await;
+                return;
+            };
+            if constant_time_eq_str(&payload.retrieval_credential, &auth_token) {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"return credential must be scoped independently",
+                )
+                .await;
+                return;
+            }
+            let Some(provider) = mailbox_time.as_deref() else {
+                let _ = write_http_response(
+                    &mut stream,
+                    503,
+                    "text/plain; charset=utf-8",
+                    b"selected physical-time provider unavailable",
+                )
+                .await;
+                return;
+            };
+            if payload
+                .registration
+                .verify_untrusted_broker_registration(
+                    &aura_effects::crypto::RealCryptoHandler::new(),
+                    provider,
+                )
+                .await
+                .is_err()
+            {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"return issuer proof rejected",
+                )
+                .await;
+                return;
+            }
+            let now_ms = mailbox_now!();
+            let result = shared.write().await.enrollment_return_mailboxes.register(
+                payload.registration,
+                &payload.retrieval_credential,
+                now_ms,
+            );
+            let status = if result.is_ok() { 204 } else { 429 };
+            let _ =
+                write_http_response(&mut stream, status, "text/plain; charset=utf-8", b"").await;
+        }
+        ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-return-mailbox/register/") => {
+            let Some(key) = enrollment_return_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-return-mailbox/register/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid return mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let found = shared
+                .write()
+                .await
+                .enrollment_return_mailboxes
+                .registration(key, now_ms);
+            match serde_json::to_vec(&found) {
+                Ok(body) => {
+                    let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
+                }
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        500,
+                        "text/plain; charset=utf-8",
+                        b"return registration encoding failed",
+                    )
+                    .await;
+                }
+            }
+        }
+        ("POST", "/v2/bootstrap/enrollment-return-mailbox/envelopes") => {
+            let Ok(payload) =
+                serde_json::from_slice::<BootstrapIssuerReturnMailboxEnvelope>(&request.body)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid return VM envelope",
+                )
+                .await;
+                return;
+            };
+            let Some(issuer_device) = payload
+                .envelope
+                .metadata
+                .get("aura-destination-device-id")
+                .and_then(|raw| DeviceId::from_str(raw).ok())
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"return VM envelope lacks issuer device",
+                )
+                .await;
+                return;
+            };
+            let key = ReturnMailboxKey::new(
+                payload.envelope.destination,
+                issuer_device,
+                payload.manifest_digest,
+            );
+            let now_ms = mailbox_now!();
+            let Some(registration) = shared
+                .write()
+                .await
+                .enrollment_return_mailboxes
+                .registration(key, now_ms)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    404,
+                    "text/plain; charset=utf-8",
+                    b"return mailbox registration absent",
+                )
+                .await;
+                return;
+            };
+            let Some(provider) = mailbox_time.as_deref() else {
+                let _ = write_http_response(
+                    &mut stream,
+                    503,
+                    "text/plain; charset=utf-8",
+                    b"selected physical-time provider unavailable",
+                )
+                .await;
+                return;
+            };
+            if payload
+                .authorization
+                .verify_untrusted_broker_admission(
+                    &aura_effects::crypto::RealCryptoHandler::new(),
+                    provider,
+                    &registration,
+                    &payload.setup_request,
+                    &payload.envelope,
+                )
+                .await
+                .is_err()
+            {
+                let _ = write_http_response(
+                    &mut stream,
+                    403,
+                    "text/plain; charset=utf-8",
+                    b"return setup-key envelope authorization rejected",
+                )
+                .await;
+                return;
+            }
+            let now_ms = mailbox_now!();
+            let result = shared
+                .write()
+                .await
+                .enrollment_return_mailboxes
+                .enqueue_verified(key, &registration, payload, now_ms);
+            let status = if result.is_ok() { 204 } else { 429 };
+            let _ =
+                write_http_response(&mut stream, status, "text/plain; charset=utf-8", b"").await;
+        }
+        ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-return-mailbox/envelopes/") => {
+            let Some(key) = enrollment_return_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-return-mailbox/envelopes/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid return mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let Some(credential) =
+                request_header(&request, ENROLLMENT_RETURN_MAILBOX_RETRIEVAL_HEADER)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    401,
+                    "text/plain; charset=utf-8",
+                    b"missing return retrieval credential",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let result = shared
+                .write()
+                .await
+                .enrollment_return_mailboxes
+                .take(key, credential, now_ms);
+            match result.and_then(|deliveries| {
+                serde_json::to_vec(&deliveries).map_err(|_| "return envelope encoding failed")
+            }) {
+                Ok(body) => {
+                    let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
+                }
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        401,
+                        "text/plain; charset=utf-8",
+                        b"return retrieval refused",
+                    )
+                    .await;
+                }
+            }
+        }
+        ("POST", path) if path.starts_with("/v2/bootstrap/enrollment-return-mailbox/ack/") => {
+            let Some(key) = enrollment_return_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-return-mailbox/ack/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid return mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let Some(credential) =
+                request_header(&request, ENROLLMENT_RETURN_MAILBOX_RETRIEVAL_HEADER)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    401,
+                    "text/plain; charset=utf-8",
+                    b"missing return retrieval credential",
+                )
+                .await;
+                return;
+            };
+            let Ok(ack) =
+                serde_json::from_slice::<BootstrapPendingEnrollmentMailboxAck>(&request.body)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid return mailbox acknowledgment",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let result = shared
+                .write()
+                .await
+                .enrollment_return_mailboxes
+                .acknowledge(key, credential, &ack.message_id, now_ms);
+            let status = if result.is_ok() { 204 } else { 401 };
+            let _ =
+                write_http_response(&mut stream, status, "text/plain; charset=utf-8", b"").await;
+        }
         _ => {
             let _ =
                 write_http_response(&mut stream, 404, "text/plain; charset=utf-8", b"not found")
@@ -1185,6 +1650,23 @@ fn pending_enrollment_mailbox_key(path_tail: &str) -> Option<PendingMailboxKey> 
     let mut digest = [0; 32];
     digest.copy_from_slice(&digest_bytes);
     Some(PendingMailboxKey::new(subject, device, digest))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn enrollment_return_mailbox_key(path_tail: &str) -> Option<ReturnMailboxKey> {
+    if path_tail.contains('?') {
+        return None;
+    }
+    let mut parts = path_tail.split('/');
+    let subject = AuthorityId::from_str(parts.next()?).ok()?;
+    let issuer_device = DeviceId::from_str(parts.next()?).ok()?;
+    let digest_bytes = hex::decode(parts.next()?).ok()?;
+    if parts.next().is_some() || digest_bytes.len() != 32 {
+        return None;
+    }
+    let mut digest = [0; 32];
+    digest.copy_from_slice(&digest_bytes);
+    Some(ReturnMailboxKey::new(subject, issuer_device, digest))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1250,7 +1732,10 @@ async fn read_http_request(
                 .flatten()
         })
         .unwrap_or(0);
-    let body_limit = if method == "POST" && path == "/v2/bootstrap/enrollment-mailbox/envelopes" {
+    let body_limit = if method == "POST"
+        && (path == "/v2/bootstrap/enrollment-mailbox/envelopes"
+            || path == "/v2/bootstrap/enrollment-return-mailbox/envelopes")
+    {
         MAX_ENROLLMENT_MAILBOX_BODY_BYTES
     } else {
         MAX_BOOTSTRAP_BODY_BYTES
@@ -1305,7 +1790,7 @@ async fn write_http_response(
         _ => "OK",
     };
     let headers = format!(
-        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, {INVITATION_RETRIEVAL_HEADER}, {ENROLLMENT_MAILBOX_RETRIEVAL_HEADER}\r\n\r\n",
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, {INVITATION_RETRIEVAL_HEADER}, {ENROLLMENT_MAILBOX_RETRIEVAL_HEADER}, {ENROLLMENT_RETURN_MAILBOX_RETRIEVAL_HEADER}\r\n\r\n",
         body.len()
     );
     stream.write_all(headers.as_bytes()).await?;
@@ -1348,6 +1833,20 @@ pub fn pending_enrollment_mailbox_endpoint(
 ) -> String {
     format!(
         "{}/v2/bootstrap/enrollment-mailbox/{resource}/{subject}/{device}/{}",
+        normalize_base_url(base_url),
+        hex::encode(manifest_digest)
+    )
+}
+
+pub fn issuer_return_mailbox_endpoint(
+    base_url: &str,
+    resource: &str,
+    subject: AuthorityId,
+    issuer_device: DeviceId,
+    manifest_digest: [u8; 32],
+) -> String {
+    format!(
+        "{}/v2/bootstrap/enrollment-return-mailbox/{resource}/{subject}/{issuer_device}/{}",
         normalize_base_url(base_url),
         hex::encode(manifest_digest)
     )
@@ -1698,6 +2197,128 @@ pub(crate) async fn acknowledge_remote_pending_enrollment_vm_envelope(
         &pending_enrollment_mailbox_endpoint(base_url, "ack", subject, device, manifest_digest),
         auth_token,
         &[(ENROLLMENT_MAILBOX_RETRIEVAL_HEADER, retrieval_credential)],
+        Some(&body),
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn register_remote_issuer_return_mailbox(
+    base_url: &str,
+    auth_token: &str,
+    payload: &BootstrapIssuerReturnMailboxRegistration,
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(payload).map_err(aura_core::AuraError::from)?;
+    send_http_request(
+        "POST",
+        &format!(
+            "{}/v2/bootstrap/enrollment-return-mailbox/register",
+            normalize_base_url(base_url)
+        ),
+        auth_token,
+        &[],
+        Some(&body),
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn fetch_remote_issuer_return_mailbox_registration(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    issuer_device: DeviceId,
+    manifest_digest: [u8; 32],
+) -> Result<
+    Option<aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration>,
+    aura_core::AuraError,
+> {
+    let body = send_http_request(
+        "GET",
+        &issuer_return_mailbox_endpoint(
+            base_url,
+            "register",
+            subject,
+            issuer_device,
+            manifest_digest,
+        ),
+        auth_token,
+        &[],
+        None,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
+}
+
+pub(crate) async fn send_remote_issuer_return_vm_envelope(
+    base_url: &str,
+    auth_token: &str,
+    payload: &BootstrapIssuerReturnMailboxEnvelope,
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(payload).map_err(aura_core::AuraError::from)?;
+    send_http_request(
+        "POST",
+        &format!(
+            "{}/v2/bootstrap/enrollment-return-mailbox/envelopes",
+            normalize_base_url(base_url)
+        ),
+        auth_token,
+        &[],
+        Some(&body),
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn take_remote_issuer_return_vm_envelopes(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    issuer_device: DeviceId,
+    manifest_digest: [u8; 32],
+    retrieval_credential: &str,
+) -> Result<Vec<IssuerReturnMailboxDelivery>, aura_core::AuraError> {
+    let body = send_http_request(
+        "GET",
+        &issuer_return_mailbox_endpoint(
+            base_url,
+            "envelopes",
+            subject,
+            issuer_device,
+            manifest_digest,
+        ),
+        auth_token,
+        &[(
+            ENROLLMENT_RETURN_MAILBOX_RETRIEVAL_HEADER,
+            retrieval_credential,
+        )],
+        None,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
+}
+
+pub(crate) async fn acknowledge_remote_issuer_return_vm_envelope(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    issuer_device: DeviceId,
+    manifest_digest: [u8; 32],
+    retrieval_credential: &str,
+    message_id: &str,
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(&BootstrapPendingEnrollmentMailboxAck {
+        message_id: message_id.to_owned(),
+    })
+    .map_err(aura_core::AuraError::from)?;
+    send_http_request(
+        "POST",
+        &issuer_return_mailbox_endpoint(base_url, "ack", subject, issuer_device, manifest_digest),
+        auth_token,
+        &[(
+            ENROLLMENT_RETURN_MAILBOX_RETRIEVAL_HEADER,
+            retrieval_credential,
+        )],
         Some(&body),
     )
     .await?;

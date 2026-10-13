@@ -10,6 +10,9 @@ use aura_core::effects::{
 use aura_core::hash::hash;
 use aura_core::threshold::{SigningContext, ThresholdSignature};
 use aura_core::{AuthorityId, CeremonyId, DeviceId};
+use aura_invitation::enrollment_mailbox::{
+    PendingEnrollmentMailboxRegistration, PendingEnrollmentMailboxStatement,
+};
 use aura_invitation::enrollment_setup::DeviceEnrollmentSetupStatement;
 use aura_signature::{threshold_signing_context_transcript_bytes, SecurityTranscript};
 use serde::{Deserialize, Serialize};
@@ -199,6 +202,88 @@ pub(crate) async fn retain_user_transferred_verifier(
 
 /// This handle is neither public nor deserializable and never comes from a peer.
 pub(crate) struct RetainedEnrollmentVerifier(StoredEnrollmentVerifier);
+
+/// Issuer-owned proof that Bob's temporary broker registration uses the exact
+/// setup key independently transferred for this original enrollment. It is
+/// routing custody only; it cannot grant device membership or VM acceptance.
+pub(crate) struct OriginalPendingMailboxSenderRoute {
+    runtime_owner: std::sync::Weak<AuraEffectSystem>,
+    statement: PendingEnrollmentMailboxStatement,
+}
+
+impl OriginalPendingMailboxSenderRoute {
+    pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        if self
+            .runtime_owner
+            .upgrade()
+            .is_some_and(|owner| std::ptr::eq(owner.as_ref(), effects))
+        {
+            Ok(())
+        } else {
+            Err(EnrollmentVerifierError::RuntimeOwner.into())
+        }
+    }
+
+    pub(crate) fn statement(&self) -> &PendingEnrollmentMailboxStatement {
+        &self.statement
+    }
+}
+
+/// A broker registration is untrusted until the original issuer owner compares
+/// it with the retained user-transferred setup verifier and exact issued
+/// manifest. The broker's candidate address and embedded key are never used.
+pub(crate) async fn verify_original_pending_mailbox_sender_route(
+    retained: &RetainedEnrollmentVmControl,
+    registration: PendingEnrollmentMailboxRegistration,
+) -> AgentResult<OriginalPendingMailboxSenderRoute> {
+    let effects = &retained.runtime_owner;
+    retained.require_runtime_owner(effects)?;
+    let manifest = retained.manifest();
+    let verifier = RetainedEnrollmentVerifier::load(
+        effects,
+        manifest.subject,
+        &manifest.ceremony,
+        manifest.pending_epoch,
+        manifest.initiator_device,
+        manifest.invitee_authority,
+        manifest.invitee_device,
+    )
+    .await?;
+    let statement = &registration.statement;
+    let selected_now = effects
+        .physical_time()
+        .await
+        .map_err(EnrollmentVerifierError::Time)?
+        .ts_ms;
+    if statement.version() != PendingEnrollmentMailboxStatement::VERSION
+        || statement.invitation() != &manifest.invitation
+        || statement.ceremony() != &manifest.ceremony
+        || statement.manifest_digest() != retained.digest()
+        || statement.setup_digest() != verifier.0.setup_digest
+        || statement.subject() != manifest.subject
+        || statement.provisional() != manifest.invitee_authority
+        || statement.invitee_device() != manifest.invitee_device
+        || statement.expires_at_ms() != manifest.expires_at_ms
+        || statement.retrieval_credential_commitment() == [0; 32]
+        || manifest.setup.digest != verifier.0.setup_digest
+        || manifest.setup.nonce != verifier.0.setup.nonce
+    {
+        return Err(EnrollmentVerifierError::RecordBinding.into());
+    }
+    if selected_now < verifier.0.setup.issued_at_ms
+        || selected_now >= statement.expires_at_ms()
+        || statement.expires_at_ms() > verifier.0.setup.expires_at_ms
+    {
+        return Err(EnrollmentVerifierError::OutsideDeadline.into());
+    }
+    verifier
+        .verify_threshold_signing_context_transcript(effects, statement, &registration.proof)
+        .await?;
+    Ok(OriginalPendingMailboxSenderRoute {
+        runtime_owner: Arc::downgrade(effects),
+        statement: registration.statement,
+    })
+}
 
 /// Authenticated remote response; cannot be deserialized or constructed by callers.
 #[derive(Debug, Clone)]
@@ -2130,6 +2215,16 @@ impl RequiredIssuedEnrollmentSelectorCapability {
 
     pub(crate) fn invitation_id(&self) -> &aura_core::InvitationId {
         &self.manifest.invitation
+    }
+
+    pub(crate) fn manifest(
+        &self,
+    ) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
+        &self.manifest
+    }
+
+    pub(crate) fn digest(&self) -> [u8; 32] {
+        self.digest
     }
 
     pub(crate) fn require_control(&self, control: &RetainedEnrollmentVmControl) -> AgentResult<()> {

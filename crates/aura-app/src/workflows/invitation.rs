@@ -24,8 +24,8 @@ mod create;
 mod device_enrollment;
 mod enrollment_import_owner;
 pub use enrollment_import_owner::{
-    EnrollmentImportAdmission, EnrollmentImportAdmissionRefusal, EnrollmentImportHandoffError,
-    EnrollmentImportObservation,
+    EnrollmentHostRecovery, EnrollmentImportAdmission, EnrollmentImportAdmissionRefusal,
+    EnrollmentImportHandoffError, EnrollmentImportObservation,
 };
 mod export;
 mod followups;
@@ -101,8 +101,8 @@ pub use create::{
 };
 pub use device_enrollment::{
     accept_device_enrollment_invitation, import_device_enrollment_with_terminal_status,
-    DeviceEnrollmentImportCompleted, EnrollmentImportHostFuture, EnrollmentImportHostPolicy,
-    PreparedEnrollmentHostCommit,
+    retry_enrollment_host_with_terminal_status, DeviceEnrollmentImportCompleted,
+    EnrollmentImportHostFuture, EnrollmentImportHostPolicy, PreparedEnrollmentHostCommit,
 };
 pub(in crate::workflows) use export::export_invitation_runtime;
 pub use export::{

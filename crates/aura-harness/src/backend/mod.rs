@@ -464,7 +464,13 @@ impl BackendHandle {
         }
     }
 
-    pub fn restart(&mut self) -> Result<()> {
+    pub fn restart(&mut self, expected_operation_instance: Option<&str>) -> Result<()> {
+        if let Self::Browser(backend) = self {
+            return backend.restart_with_evidence(expected_operation_instance);
+        }
+        if expected_operation_instance.is_some() {
+            bail!("exact browser enrollment restart evidence requires a browser backend");
+        }
         self.stop()?;
         self.start()
     }

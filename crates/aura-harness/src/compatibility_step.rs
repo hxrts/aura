@@ -79,6 +79,7 @@ pub struct CompatibilityStep {
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
     pub operation_after_instance: Option<String>,
+    pub operation_exact_instance: Option<String>,
     pub list_id: Option<ListId>,
     pub item_id: Option<String>,
     pub count: Option<u32>,

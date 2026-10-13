@@ -12,9 +12,24 @@ use futures::channel::oneshot;
 type ImportOutcome = crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentImportCompleted>;
 type ImportControl = OwnedTaskHandle<(), Box<dyn aura_core::effects::task::RequiredTaskControl>>;
 
+/// Move-owned authority to request a fresh host commit after the original
+/// app operation failed. Its completion remains subject to native revalidation.
+pub struct EnrollmentHostRecovery {
+    pub(super) completion: DeviceEnrollmentImportCompleted,
+    pub(super) failed_instance: OperationInstanceId,
+}
+
 enum ImportOwnerSlot {
     Armed(Box<SemanticWorkflowOwner>),
     Closed,
+}
+impl ImportOwnerSlot {
+    fn semantic_owner(&self) -> Option<&SemanticWorkflowOwner> {
+        match self {
+            Self::Armed(owner) => Some(owner),
+            Self::Closed => None,
+        }
+    }
 }
 
 /// Original handoff refusal, retained alongside the still-local submission.
@@ -42,6 +57,7 @@ impl EnrollmentImportHandoffError {
 /// Observer of one actual required import; Drop requests original cancellation.
 pub struct EnrollmentImportObservation {
     result: oneshot::Receiver<ImportOutcome>,
+    host_recovery: oneshot::Receiver<Option<EnrollmentHostRecovery>>,
     arm: Option<oneshot::Sender<()>>,
     instance: Option<OperationInstanceId>,
     control: ImportControl,
@@ -49,6 +65,18 @@ pub struct EnrollmentImportObservation {
     owner: Arc<std::sync::OnceLock<ImportOwnerSlot>>,
 }
 impl EnrollmentImportObservation {
+    /// Preserve a failed original result and its separately revalidated host
+    /// recovery candidate. Ordinary frontend observers may continue using Future.
+    pub async fn observe_with_host_recovery(
+        mut self,
+    ) -> (
+        crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentImportCompleted>,
+        Option<EnrollmentHostRecovery>,
+    ) {
+        let outcome = (&mut self).await;
+        let recovery = (&mut self.host_recovery).await.ok().flatten();
+        (outcome, recovery)
+    }
     /// Accept the original submission atomically before it relinquishes publication.
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "WorkflowHandoffSubmission", receiver_type = EnrollmentImportObservation, family = "runtime_helper")]
     pub fn accept_handoff<P: crate::frontend_primitives::SubmittedOperationPublisher>(
@@ -125,7 +153,7 @@ impl std::future::Future for EnrollmentImportObservation {
 #[derive(Clone)]
 pub struct EnrollmentImportAdmission {
     origin: Arc<()>,
-    runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    pub(super) runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
 }
 impl EnrollmentImportAdmission {
     // Only AppCore's canonical runtime constructors/attachment call this.
@@ -137,7 +165,7 @@ impl EnrollmentImportAdmission {
             runtime,
         }
     }
-    fn require_core(&self, app: &AppCore) -> Result<(), AuraError> {
+    pub(super) fn require_core(&self, app: &AppCore) -> Result<(), AuraError> {
         match app.enrollment_import_admission() {
             Some(actual)
                 if Arc::ptr_eq(&actual.origin, &self.origin)
@@ -205,6 +233,8 @@ struct EnrollmentImportCoordinator {
     transfer: Option<crate::ui_contract::EnrollmentManifestTransferInput>,
     host: Option<EnrollmentImportHostPolicy>,
     result: Option<oneshot::Sender<ImportOutcome>>,
+    host_recovery: Option<oneshot::Sender<Option<EnrollmentHostRecovery>>>,
+    instance: Option<OperationInstanceId>,
 }
 impl EnrollmentImportCoordinator {
     async fn execute_original(&mut self) -> Result<(), AuraError> {
@@ -239,14 +269,13 @@ impl EnrollmentImportCoordinator {
             .host
             .take()
             .ok_or_else(|| AuraError::invalid("host policy already admitted"))?;
-        let owner = match self.owner.get() {
-            Some(ImportOwnerSlot::Armed(owner)) => owner.as_ref(),
-            _ => return Err(AuraError::invalid("original semantic owner is not armed")),
-        };
         run_enrollment_accept(
             &mut self.state,
             &self.app,
-            owner,
+            self.owner
+                .get()
+                .and_then(ImportOwnerSlot::semantic_owner)
+                .ok_or_else(|| AuraError::invalid("original semantic owner is not armed"))?,
             prepare_device_enrollment_import(&runtime, &budget, code, transfer),
             match host {
                 EnrollmentImportHostPolicy::RuntimeOnly => None,
@@ -268,11 +297,18 @@ impl EnrollmentImportCoordinator {
         // on the observer dropping its sender, and late handoff retains its
         // original prior publisher when this deposit wins.
         let _ = self.owner.set(ImportOwnerSlot::Closed);
-        let owner = match self.owner.get() {
-            Some(ImportOwnerSlot::Armed(owner)) => owner.as_ref(),
-            _ => return Ok(RequiredTaskSettlement::Resolved),
+        let Some(owner) = self.owner.get().and_then(ImportOwnerSlot::semantic_owner) else {
+            return Ok(RequiredTaskSettlement::Resolved);
         };
-        Self::settle_original(owner, &mut self.state, &mut self.result, exit).await
+        Self::settle_original(
+            owner,
+            &mut self.state,
+            &mut self.result,
+            &mut self.host_recovery,
+            self.instance.as_ref(),
+            exit,
+        )
+        .await
     }
     #[aura_macros::semantic_owner(
         owner="settle_original",wrapper="import_device_enrollment_with_terminal_status",
@@ -287,6 +323,8 @@ impl EnrollmentImportCoordinator {
         >,
         state: &mut EnrollmentAcceptState<DeviceEnrollmentImportCompleted>,
         result_sender: &mut Option<oneshot::Sender<ImportOutcome>>,
+        recovery_sender: &mut Option<oneshot::Sender<Option<EnrollmentHostRecovery>>>,
+        instance: Option<&OperationInstanceId>,
         exit: &RequiredTaskExit,
     ) -> Result<RequiredTaskSettlement, AuraError> {
         if let RequiredTaskExit::Failed(error) = exit {
@@ -317,14 +355,29 @@ impl EnrollmentImportCoordinator {
             ))
         };
         let domain_failure = result.as_ref().err().cloned();
+        let terminal = owner.terminal_status().await;
+        let recovery = if state.host_finalization_failed
+            && domain_failure.is_some()
+            && terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.status.phase == SemanticOperationPhase::Failed)
+        {
+            match (state.completion.take(), instance) {
+                (Some(completion), Some(failed_instance)) => Some(EnrollmentHostRecovery {
+                    completion,
+                    failed_instance: failed_instance.clone(),
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(sender) = recovery_sender.take() {
+            let _ = sender.send(recovery);
+        }
         if let Some(sender) = result_sender.take() {
             // A disconnected observer does not undo the retained terminal result.
-            let _disconnected = sender
-                .send(ImportOutcome {
-                    result,
-                    terminal: owner.terminal_status().await,
-                })
-                .err();
+            let _disconnected = sender.send(ImportOutcome { result, terminal }).err();
         }
         Ok(match domain_failure {
             Some(error) if state.first_failure.is_some() => {
@@ -369,6 +422,7 @@ pub(super) fn admit_import(
 ) -> Result<EnrollmentImportObservation, EnrollmentImportAdmissionRefusal> {
     let (arm_sender, arm_receiver) = oneshot::channel();
     let (sender, receiver) = oneshot::channel();
+    let (recovery_sender, recovery_receiver) = oneshot::channel();
     let owner = Arc::new(std::sync::OnceLock::new());
     let custody = Box::new(EnrollmentImportCoordinator {
         app: app.clone(),
@@ -380,6 +434,8 @@ pub(super) fn admit_import(
         transfer,
         host: Some(host),
         result: Some(sender),
+        host_recovery: Some(recovery_sender),
+        instance: instance.clone(),
     });
     #[cfg(not(target_arch = "wasm32"))]
     let admitted = admission
@@ -395,6 +451,7 @@ pub(super) fn admit_import(
         Ok(control) => Ok(EnrollmentImportObservation {
             control,
             result: receiver,
+            host_recovery: recovery_receiver,
             arm: Some(arm_sender),
             instance,
             app: app.clone(),

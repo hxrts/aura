@@ -14,13 +14,9 @@ use aura_invitation::protocol::DeviceEnrollmentTerminalNotice;
 use std::collections::BTreeMap;
 
 fn notice_session_id(invitation: &InvitationId, digest: &[u8; 32]) -> Uuid {
-    let mut transcript = b"aura.invitation.device-enrollment-terminal-session.v1\0".to_vec();
-    transcript.extend_from_slice(digest);
-    transcript.extend_from_slice(invitation.as_str().as_bytes());
-    let digest = hash(&transcript);
-    let mut id = [0; 16];
-    id.copy_from_slice(&digest[..16]);
-    Uuid::from_bytes(id)
+    aura_invitation::enrollment_mailbox_session::original_terminal_notice_session_id(
+        invitation, digest,
+    )
 }
 
 fn stage(error: impl std::error::Error + Send + Sync + 'static) -> AgentError {

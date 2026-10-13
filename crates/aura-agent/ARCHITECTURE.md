@@ -172,7 +172,8 @@ settlement, the Pending/commit cleanup race, broker invitation prefill, and
 public-app host success and real filesystem refusal. The refusal retains the
 original storage source and one Failed terminal for the submitted instance.
 These in-process observations do not establish production selected-identity
-persistence or browser transport delivery.
+persistence or browser transport delivery. The local broker service is exported
+only for native simulation fixtures; this export grants no production route.
 
 ## Invariants
 
@@ -2030,6 +2031,17 @@ statement under the v4 five-domain declaration; ingress metadata never
 approves a participant. Native material admission retains current generation/tree
 custody and reads only the local physical share. Packet proofs use current ordered
 public verifying shares independently of historical leaf identities.
+
+The original issuer-return mailbox publishes a sealed retirement root with its
+signed statement and exact protected registration, retrieval credential and
+setup-record digests before making the broker route available. Each retained
+return frame has an immutable retirement leaf bound to that root, its frame key
+and its original protected bytes; a received broker frame is sealed and checked
+before its broker acknowledgment. Reopen rechecks the root and leaves against
+the original records. These records preserve the inventory needed for a future
+profile-owned retirement decision. They do not delete protected bytes or grant
+physical retirement; that operation still requires the provider's exact-record
+retirement contract and its own authorized lifetime owner.
 
 The issuer completion registry owns a restricted move-only
 `HeldIssuerCompletionObserver`, without an execution lease or arbitrary executor.

@@ -17,6 +17,15 @@ Use direct effect-handler tests for single-component validation. For distributed
 
 See [Simulation Infrastructure Reference](119_simulator.md) for the complete architecture documentation.
 
+For enrollment, `aura-simulator --test enrollment_lifecycle` uses a
+simulation-feature agent adapter with genuine signed setup, transferred verifier
+pins and native profile owners. Its public-app fixtures cover an acknowledged
+nonsecret host completion write followed by same-profile reopen and a real
+filesystem write refusal with the original app instance and storage source.
+Run exact test discovery and execution together inside one guarded build. The
+fixture does not prove production identity persistence, browser host behavior,
+or network delivery to a pre-adoption device; those require their own adapters.
+
 ## Simulation vs Harness
 
 The simulation architecture is specified in [Simulation Infrastructure Reference](119_simulator.md). The harness architecture is specified in [User Flow Harness](121_user_flow_harness.md).

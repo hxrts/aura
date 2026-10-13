@@ -4233,8 +4233,35 @@ pub(crate) async fn actual_pinned_device_enrollment_fixture_with_original_contin
     ActualDeviceEnrollmentFixture,
     crate::runtime_bridge::OriginalIssuedEnrollmentContinuation,
 ) {
-    actual_pinned_device_enrollment_fixture_configured(label, clock, transport, false, [151, 154])
+    actual_pinned_device_enrollment_fixture_configured(label, clock, transport, false, [151, 154], true)
         .await
+}
+
+/// Real setup/import with no simulator transport route. The original issuer
+/// VM must use its authenticated pending broker mailbox for the first frame.
+pub(crate) async fn actual_pinned_device_enrollment_fixture_for_pending_mailbox(
+    label: &str,
+    clock: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+) -> (
+    ActualDeviceEnrollmentFixture,
+    crate::runtime_bridge::OriginalIssuedEnrollmentContinuation,
+    tokio::sync::oneshot::Receiver<()>,
+    crate::handlers::invitation_service::OriginalIssuerBeforeVmGateGuard,
+) {
+    let (entered, release) =
+        crate::handlers::invitation_service::hold_original_issuer_before_first_vm_for_test(
+            AuthorityId::new_from_entropy([151; 32]),
+        );
+    let (fixture, original) = actual_pinned_device_enrollment_fixture_configured(
+        label,
+        Some(clock),
+        None,
+        true,
+        [151, 154],
+        false,
+    )
+    .await;
+    (fixture, original, entered, release)
 }
 
 pub(crate) async fn actual_pinned_device_enrollment_fixture_with_original_continuation_and_sync(
@@ -4251,6 +4278,7 @@ pub(crate) async fn actual_pinned_device_enrollment_fixture_with_original_contin
         Some(transport),
         true,
         [151, 154],
+        true,
     )
     .await
 }
@@ -4264,7 +4292,7 @@ pub(crate) async fn actual_pinned_device_enrollment_fixture_with_original_identi
     ActualDeviceEnrollmentFixture,
     crate::runtime_bridge::OriginalIssuedEnrollmentContinuation,
 ) {
-    actual_pinned_device_enrollment_fixture_configured(label, clock, transport, false, seeds).await
+    actual_pinned_device_enrollment_fixture_configured(label, clock, transport, false, seeds, true).await
 }
 
 pub(crate) async fn actual_pinned_device_enrollment_fixture_with_sync(
@@ -4278,6 +4306,7 @@ pub(crate) async fn actual_pinned_device_enrollment_fixture_with_sync(
         None,
         true,
         [151, 154],
+        true,
     )
     .await
     .0
@@ -4289,6 +4318,7 @@ async fn actual_pinned_device_enrollment_fixture_configured(
     transport: Option<crate::SharedTransport>,
     with_sync: bool,
     seeds: [u8; 2],
+    use_shared_transport: bool,
 ) -> (
     ActualDeviceEnrollmentFixture,
     crate::runtime_bridge::OriginalIssuedEnrollmentContinuation,
@@ -4326,10 +4356,12 @@ async fn actual_pinned_device_enrollment_fixture_configured(
             crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
                 .expect("actual isolated selected profile custody"),
         );
-        let builder = builder
-            .with_authority(authority)
-            .with_config(config)
-            .with_shared_transport(transport.clone());
+        let builder = builder.with_authority(authority).with_config(config);
+        let builder = if use_shared_transport {
+            builder.with_shared_transport(transport.clone())
+        } else {
+            builder
+        };
         let builder = if with_sync {
             builder.with_sync()
         } else {

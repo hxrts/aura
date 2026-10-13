@@ -418,6 +418,13 @@ impl SimulatedEnrollment {
     /// Observe an actual external app completion, without constructing one.
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "SimulatedEnrollment", receiver_type = SimulatedEnrollment, family = "runtime_helper")]
     pub async fn finish_accepted(self) -> AgentResult<StoppedEnrollmentProfiles> {
+        self.finish_accepted_with_host_failure(None).await
+    }
+
+    async fn finish_accepted_with_host_failure(
+        self,
+        expected_host_failure: Option<&AgentError>,
+    ) -> AgentResult<StoppedEnrollmentProfiles> {
         let result = async {
             let confirmed = enrollment_manifest_admission::load_confirmed_enrollment(
                 self.recipient.runtime().effects().as_ref(),
@@ -442,14 +449,46 @@ impl SimulatedEnrollment {
         .await;
         match result {
             Ok((subject, digest, package)) => {
-                self.shutdown(EnrollmentDisposition::Accepted {
-                    subject,
-                    digest,
-                    package,
-                })
+                self.shutdown(
+                    EnrollmentDisposition::Accepted {
+                        subject,
+                        digest,
+                        package,
+                    },
+                    expected_host_failure,
+                )
                 .await
             }
             Err(primary) => Err(self.fail(primary).await),
+        }
+    }
+
+    /// Preserve an app/host failure after native acceptance while validating
+    /// the original positive disposal and returning the same stopped profiles
+    /// for independent durable reopen. This never publishes semantic success.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "SimulatedEnrollment", receiver_type = SimulatedEnrollment, family = "runtime_helper")]
+    pub async fn settle_accepted_host_failure(
+        self,
+        primary: AgentError,
+    ) -> AgentResult<(AgentError, StoppedEnrollmentProfiles)> {
+        match self.finish_accepted_with_host_failure(Some(&primary)).await {
+            Ok(stopped) => Ok((
+                source_error(EnrollmentLifecycleFailure {
+                    primary,
+                    cleanup: Vec::new(),
+                    settled_execution_failure: None,
+                    cancellation_refusal: None,
+                    positive_disposal_acknowledged: true,
+                }),
+                stopped,
+            )),
+            Err(cleanup) => Err(source_error(EnrollmentLifecycleFailure {
+                primary,
+                cleanup: vec![cleanup],
+                settled_execution_failure: None,
+                cancellation_refusal: None,
+                positive_disposal_acknowledged: false,
+            })),
         }
     }
 
@@ -491,7 +530,7 @@ impl SimulatedEnrollment {
         .await;
         match result {
             Ok(native) => {
-                self.shutdown(EnrollmentDisposition::Rejected { source: native })
+                self.shutdown(EnrollmentDisposition::Rejected { source: native }, None)
                     .await
             }
             Err(primary) => Err(self.fail(primary).await),
@@ -535,7 +574,48 @@ impl SimulatedEnrollment {
     async fn shutdown(
         self,
         disposition: EnrollmentDisposition,
+        expected_host_failure: Option<&AgentError>,
     ) -> AgentResult<StoppedEnrollmentProfiles> {
+        fn matches_original_host_failure(
+            failure: &crate::task_registry::TaskSupervisionError,
+            primary: &AgentError,
+        ) -> bool {
+            use aura_core::effects::task::{RequiredTaskExit, RequiredTaskTerminalFailure};
+            use std::error::Error;
+            let crate::task_registry::TaskSupervisionError::TaskFailed {
+                group,
+                task,
+                source,
+            } = failure
+            else {
+                return false;
+            };
+            if group != "runtime" || task != "app.enrollment_import" {
+                return false;
+            }
+            let mut cause: Option<&(dyn Error + 'static)> = Some(source);
+            let mut terminal = None;
+            while let Some(error) = cause {
+                if let Some(actual) = error.downcast_ref::<RequiredTaskTerminalFailure>() {
+                    terminal = Some(actual);
+                    break;
+                }
+                cause = error.source();
+            }
+            let Some(terminal) = terminal else {
+                return false;
+            };
+            let RequiredTaskExit::Failed(execution) = terminal.execution() else {
+                return false;
+            };
+            // Cloned AuraError envelopes retain the same native host source.
+            // Equal text or error category never suffices to dismiss a task.
+            let primary_source = primary.source().and_then(Error::source);
+            matches!(
+                (primary_source, execution.source(), terminal.terminal().source()),
+                (Some(a), Some(b), Some(c)) if std::ptr::eq(a, b) && std::ptr::eq(a, c)
+            )
+        }
         let issuer_result = self
             .issuer
             .runtime()
@@ -588,7 +668,11 @@ impl SimulatedEnrollment {
             failures.push(source);
         }
         if let Err(source) = recipient_result {
-            failures.push(source_error(source));
+            if !expected_host_failure
+                .is_some_and(|primary| matches_original_host_failure(&source, primary))
+            {
+                failures.push(source_error(source));
+            }
         }
         if !self.issuer.runtime().tasks().active_tasks().is_empty()
             || !self.recipient.runtime().tasks().active_tasks().is_empty()
@@ -661,7 +745,109 @@ enum EnrollmentDisposition {
     },
 }
 
+/// Reopened, authenticated native profiles retained for one new app host
+/// recovery operation. Dropping this owner is not a shutdown acknowledgment.
+pub struct ReopenedEnrollment {
+    agents: [Arc<AuraAgent>; 2],
+    recipient_app: EnrollmentApp,
+    clock: Arc<dyn PhysicalTimeEffects>,
+    startup: TimeoutBudget,
+}
+impl ReopenedEnrollment {
+    pub fn recipient_app(&self) -> EnrollmentApp {
+        self.recipient_app.clone()
+    }
+
+    pub fn recipient(&self) -> &Arc<AuraAgent> {
+        &self.agents[1]
+    }
+
+    pub async fn shutdown(self) -> AgentResult<()> {
+        let mut failures = cleanup_agents(&self.agents, &self.clock, &self.startup).await;
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(source_error(EnrollmentLifecycleFailure {
+                primary: failures.remove(0),
+                cleanup: failures,
+                settled_execution_failure: None,
+                cancellation_refusal: None,
+                positive_disposal_acknowledged: false,
+            }))
+        }
+    }
+}
+
 impl StoppedEnrollmentProfiles {
+    /// Reopen the accepted original profiles and retain actual runtime owners
+    /// while the app retries host persistence under a fresh semantic instance.
+    pub async fn reopen_accepted_for_host_recovery(
+        self,
+        transport: SharedTransport,
+    ) -> AgentResult<ReopenedEnrollment> {
+        let EnrollmentDisposition::Accepted {
+            subject,
+            digest,
+            package,
+        } = &self.disposition
+        else {
+            return Err(AgentError::config(
+                "rejected enrollment cannot recover host storage",
+            ));
+        };
+        let mut recipient_profile = self.profiles[1].clone();
+        recipient_profile.authority = *subject;
+        let mut acquired = Vec::new();
+        let result = async {
+            let issuer = assemble(
+                &self.profiles[0],
+                self.clock.clone(),
+                transport.clone(),
+                &self.startup,
+            )
+            .await?;
+            acquired.push(issuer.clone());
+            let recipient = assemble(
+                &recipient_profile,
+                self.clock.clone(),
+                transport,
+                &self.startup,
+            )
+            .await?;
+            acquired.push(recipient.clone());
+            let confirmed = enrollment_manifest_admission::load_confirmed_enrollment(
+                recipient.runtime().effects().as_ref(),
+                self.profiles[1].authority,
+                &self.invitation.invitation_id,
+            )
+            .await?;
+            if confirmed.confirmation().manifest_digest() != *digest
+                || recipient
+                    .runtime()
+                    .effects()
+                    .public_key_package(subject)
+                    .await
+                    .as_ref()
+                    != Some(package)
+            {
+                return Err(AgentError::config("same-profile confirmed package changed"));
+            }
+            let recipient_app = app(recipient.clone())?;
+            Ok::<_, AgentError>((issuer, recipient, recipient_app))
+        }
+        .await;
+        match result {
+            Ok((issuer, recipient, recipient_app)) => Ok(ReopenedEnrollment {
+                agents: [issuer, recipient],
+                recipient_app,
+                clock: self.clock,
+                startup: self.startup,
+            }),
+            Err(primary) => {
+                Err(fail_with_cleanup(primary, &acquired, &self.clock, &self.startup).await)
+            }
+        }
+    }
     /// The retained native rejection source, if this lifecycle rejected.
     pub fn rejected_source(&self) -> Option<&aura_core::AuraError> {
         match &self.disposition {

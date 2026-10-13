@@ -39,6 +39,353 @@ pub(crate) enum EnrollmentVmAdmissionError {
     #[error("enrollment control stage failed")]
     Stage(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
+
+#[cfg(test)]
+mod original_k1_return_registration_tests {
+    use super::*;
+    use aura_core::effects::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+
+    #[test]
+    fn original_k1_return_registration_uses_pinned_root_and_refuses_mode_substitution() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+            let (issuer, invitee, invitation, start, _, _) =
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock(
+                    "original-k1-return-registration", Arc::new(clock.clone()),
+                ).await;
+            let admissions =
+                super::super::enrollment_manifest_admission::load_recoverable_negative_admissions(
+                    invitee.runtime().effects().as_ref(),
+                )
+                .await
+                .expect("genuine original K1 import retained its baseline");
+            let admitted = admissions
+                .iter()
+                .find(|candidate| candidate.manifest().invitation == invitation.invitation_id)
+                .expect("exact original K1 admission");
+            let manifest = admitted.manifest();
+            assert!(
+                start.manifest_transfer.is_some(),
+                "K1 original has an independently pinned transfer"
+            );
+            let digest = aura_core::hash::hash(&manifest.transcript_bytes().unwrap());
+            let location = SecureStorageLocation::new(
+                "issuer_return_mailbox_registration_v1",
+                format!(
+                    "{}:{}:{}",
+                    manifest.subject,
+                    manifest.invitation,
+                    hex::encode(digest)
+                ),
+            );
+            let bytes = issuer
+                .runtime()
+                .effects()
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await
+                .expect("K1 original retained its signed return proof before export");
+            let keys = issuer
+                .runtime()
+                .effects()
+                .secure_list_keys(
+                    "issuer_return_mailbox_registration_v1",
+                    &[SecureStorageCapability::List],
+                )
+                .await
+                .expect("original return registration inventory is readable");
+            assert_eq!(keys, [location.key.clone()]);
+            let registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                aura_core::util::serialization::from_slice(&bytes).unwrap();
+            let credential_location = SecureStorageLocation::with_sub_key(
+                "issuer_return_mailbox_credential_v1",
+                manifest.subject.to_string(),
+                format!("{}:{}", manifest.invitation, hex::encode(digest)),
+            );
+            let setup_location = SecureStorageLocation::with_sub_key(
+                "issuer_return_mailbox_setup_v1",
+                manifest.subject.to_string(),
+                format!("{}:{}", manifest.invitation, hex::encode(digest)),
+            );
+            let retained_credential = issuer
+                .runtime()
+                .effects()
+                .secure_retrieve(&credential_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("original retrieval credential retained");
+            let retained_setup = issuer
+                .runtime()
+                .effects()
+                .secure_retrieve(&setup_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("original setup retained");
+            let root_bytes = issuer
+                .runtime()
+                .effects()
+                .secure_retrieve(
+                    &crate::core::agent::issuer_return_mailbox::retirement_root_location(
+                        &registration.statement,
+                    ),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("original retirement root sealed before export");
+            let root: crate::core::agent::issuer_return_mailbox::IssuerReturnRetirementRoot =
+                aura_core::util::serialization::from_slice(&root_bytes).unwrap();
+            assert!(root.verifies(
+                &registration.statement,
+                &bytes,
+                &retained_credential,
+                &retained_setup
+            ));
+            let mut foreign_credential = retained_credential.clone();
+            foreign_credential[0] ^= 1;
+            assert!(!root.verifies(
+                &registration.statement,
+                &bytes,
+                &foreign_credential,
+                &retained_setup
+            ));
+            let mut foreign_registration = bytes.clone();
+            foreign_registration[0] ^= 1;
+            assert!(!root.verifies(
+                &registration.statement,
+                &foreign_registration,
+                &retained_credential,
+                &retained_setup
+            ));
+            assert_eq!(registration.statement.setup_digest(), manifest.setup.digest);
+            let mut foreign_setup = serde_json::to_value(&registration).unwrap();
+            foreign_setup["statement"]["setup_digest"] = serde_json::json!(vec![0_u8; 32]);
+            let foreign_setup: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                serde_json::from_value(foreign_setup).unwrap();
+            assert!(matches!(
+                foreign_setup
+                    .verify_for_admitted_original(
+                        invitee.runtime().effects().as_ref(),
+                        admitted.baseline(),
+                        admitted.local_setup(),
+                    )
+                    .await,
+                Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::Binding)
+            ));
+            assert_eq!(
+                registration.mode,
+                aura_core::crypto::single_signer::SigningMode::SingleSigner
+            );
+            assert!(registration.proof.is_single_signer());
+            registration
+                .clone()
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                )
+                .await
+                .expect("independently admitted K1 root verifies distinct return domain");
+            let mut cross_mode = registration.clone();
+            cross_mode.mode = aura_core::crypto::single_signer::SigningMode::Threshold;
+            assert!(matches!(cross_mode.verify_for_admitted_original(
+                invitee.runtime().effects().as_ref(), admitted.baseline(), admitted.local_setup(),
+            ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)));
+            let mut foreign_key = registration.clone();
+            foreign_key.proof.public_key_package[0] ^= 1;
+            assert!(foreign_key
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                )
+                .await
+                .is_err());
+            let mut forged = registration.clone();
+            forged.proof.signature[0] ^= 1;
+            assert!(matches!(forged.verify_for_admitted_original(
+                invitee.runtime().effects().as_ref(), admitted.baseline(), admitted.local_setup(),
+            ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::InvalidSignature)));
+            let verified = registration
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                )
+                .await
+                .expect("original K1 return route is independently admitted");
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert(
+                "aura-message-id".into(),
+                uuid::Uuid::from_bytes([71; 16]).to_string(),
+            );
+            metadata.insert(
+                "session-id".into(),
+                verified.statement().session().to_string(),
+            );
+            metadata.insert(
+                "content-type".into(),
+                "application/aura-choreography".into(),
+            );
+            metadata.insert(
+                "aura-destination-device-id".into(),
+                manifest.initiator_device.to_string(),
+            );
+            metadata.insert(
+                "aura-source-device-id".into(),
+                manifest.invitee_device.to_string(),
+            );
+            let frame = aura_core::effects::transport::TransportEnvelope {
+                source: manifest.invitee_authority,
+                destination: manifest.subject,
+                context: invitation.context_id,
+                payload: vec![3, 8, 13],
+                metadata,
+                receipt: Some(aura_core::effects::transport::TransportReceipt {
+                    context: invitation.context_id,
+                    src: manifest.invitee_authority,
+                    dst: manifest.subject,
+                    epoch: manifest.final_epoch,
+                    cost: 1,
+                    nonce: 71,
+                    prev: [0; 32],
+                    sig: vec![1],
+                }),
+            };
+            let signed = invitee
+                .threshold_signing()
+                .sign_enrollment_return_envelope_authorization(
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &frame,
+                )
+                .await
+                .expect("actual Bob setup key signs one return VM frame");
+            signed
+                .clone()
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &frame,
+                )
+                .await
+                .expect("exact reverse frame and setup key verify");
+            let mut wrong_direction = frame.clone();
+            wrong_direction.metadata.insert(
+                "aura-destination-device-id".into(),
+                manifest.invitee_device.to_string(),
+            );
+            assert!(signed
+                .clone()
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &wrong_direction,
+                )
+                .await
+                .is_err());
+            let mut foreign_source = frame.clone();
+            foreign_source.source = manifest.subject;
+            foreign_source.receipt.as_mut().unwrap().src = manifest.subject;
+            assert!(signed
+                .clone()
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &foreign_source,
+                )
+                .await
+                .is_err());
+            let mut foreign_source_device = frame.clone();
+            foreign_source_device.metadata.insert(
+                "aura-source-device-id".into(),
+                manifest.initiator_device.to_string(),
+            );
+            assert!(signed
+                .clone()
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &foreign_source_device,
+                )
+                .await
+                .is_err());
+            let mut changed_frame = frame.clone();
+            changed_frame.payload[0] ^= 1;
+            assert!(
+                signed
+                    .clone()
+                    .verify_for_admitted_original(
+                        invitee.runtime().effects().as_ref(),
+                        &verified,
+                        admitted.baseline(),
+                        admitted.local_setup(),
+                        &changed_frame,
+                    )
+                    .await
+                    .is_err(),
+                "setup proof cannot be reused for another payload"
+            );
+            let mut foreign_receiver = frame.clone();
+            foreign_receiver.destination = manifest.invitee_authority;
+            assert!(signed
+                .clone()
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &foreign_receiver,
+                )
+                .await
+                .is_err());
+            let mut foreign_digest = serde_json::to_value(&signed).unwrap();
+            foreign_digest["statement"]["manifest_digest"] = serde_json::json!(vec![0_u8; 32]);
+            let foreign_digest: aura_invitation::enrollment_mailbox::EnrollmentReturnEnvelopeAuthorization =
+                serde_json::from_value(foreign_digest).unwrap();
+            assert!(foreign_digest
+                .verify_for_admitted_original(
+                    invitee.runtime().effects().as_ref(),
+                    &verified,
+                    admitted.baseline(),
+                    admitted.local_setup(),
+                    &frame,
+                )
+                .await
+                .is_err());
+            let forged_location = SecureStorageLocation::new(
+                "issuer_return_mailbox_registration_v1",
+                format!("{}:foreign:{}", manifest.subject, hex::encode(digest)),
+            );
+            issuer
+                .runtime()
+                .effects()
+                .secure_store_immutable(&forged_location, &bytes, &[SecureStorageCapability::Write])
+                .await
+                .expect("test retains a valid proof under a foreign record key");
+            let error = issuer
+                .drain_issuer_return_vm_mailbox()
+                .await
+                .expect_err("a copied registration at a foreign key cannot authorize intake");
+            assert!(
+                format!("{error:?}").contains("registration storage key changed"),
+                "foreign storage key refusal retains its concrete cause: {error:?}"
+            );
+            clock.set_time(manifest.expires_at_ms);
+            assert!(matches!(signed.verify_for_admitted_original(
+                invitee.runtime().effects().as_ref(), &verified,
+                admitted.baseline(), admitted.local_setup(), &frame,
+            ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::OutsideValidity)));
+        });
+    }
+}
 pub(super) fn terminal_failure(
     reason: aura_app::runtime_bridge::CeremonyFailureReason,
 ) -> AgentError {
@@ -1786,6 +2133,346 @@ pub(crate) async fn actual_invalid_control_rejection_for_test(case: &str) -> Age
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn actual_first_enrollment_vm_frame_reaches_verified_invitee_response_boundary() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+            let selected: Arc<dyn aura_core::effects::PhysicalTimeEffects> = clock.clone();
+            let ((issuer, invitee, invitation, _start, _accept, _verified), _original, issuer_entered, issuer_release) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_for_pending_mailbox(
+                    "genuine-first-mailbox-vm", selected,
+                ),
+            ).await;
+            let issuer_effects = issuer.runtime().effects();
+            let invitee_effects = invitee.runtime().effects();
+            let admitted = super::super::enrollment_manifest_admission::load_admitted_baseline(
+                invitee_effects.as_ref(),
+                invitee.authority_id(),
+                &invitation,
+            )
+            .await
+            .expect("actual transferred manifest remains admitted");
+            let broker = crate::runtime::services::bootstrap_broker::LocalBootstrapBrokerService::bind(
+                "127.0.0.1:0", std::time::Duration::from_secs(60), "genuine-first-vm-broker-auth",
+                crate::runtime::services::bootstrap_broker::BootstrapBrokerLanBindPolicy::LoopbackOnly,
+            ).await.expect("actual loopback broker binds")
+                .with_mailbox_time_provider(Arc::new(invitee_effects.time_effects().clone()));
+            let broker_tasks = std::sync::Arc::new(crate::runtime::TaskSupervisor::new());
+            broker.start(&broker_tasks.group("genuine-first-vm-broker"));
+            let broker_config =
+                crate::runtime::services::bootstrap_broker::BootstrapBrokerConfig::default()
+                    .enabled(true)
+                    .with_base_url(broker.public_url())
+                    .with_auth_token("genuine-first-vm-broker-auth");
+            let issuer_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+                issuer.authority_id(),
+                crate::runtime::services::RendezvousManagerConfig::default()
+                    .with_bootstrap_broker(broker_config.clone()),
+                Arc::new(issuer_effects.time_effects().clone()),
+            );
+            let invitee_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+                invitee.authority_id(),
+                crate::runtime::services::RendezvousManagerConfig::default()
+                    .with_bootstrap_broker(broker_config.clone()),
+                Arc::new(invitee_effects.time_effects().clone()),
+            );
+            issuer_effects.attach_rendezvous_manager(issuer_manager);
+            invitee_effects.attach_rendezvous_manager(invitee_manager);
+            assert_eq!(
+                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
+                0,
+                "Bob's actual setup key registers before Alice's first VM send"
+            );
+            let session =
+                aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
+                    &invitation.invitation_id,
+                );
+            assert!(
+                issuer_effects.original_mailbox_issuer(session).is_some(),
+                "actual issuer still owns the original VM mailbox session"
+            );
+            tokio::time::timeout(std::time::Duration::from_secs(20), issuer_entered)
+                .await
+                .expect("original issuer reached its actual first VM execution")
+                .expect("original issuer first-VM gate remained owned");
+            broker.interrupt_next_issuer_return_ack_for_test().await;
+            issuer_release.release();
+            let accepted = async {
+                invitee
+                    .invitations()
+                    .unwrap()
+                    .accept(&invitation.invitation_id)
+                    .await
+            };
+            let mut accepted = Box::pin(accepted);
+            // Preserve Alice's in-flight broker take/ACK across select turns.
+            // Recreating it after every ready Bob poll cancels the network request.
+            let mut issuer_drain = Box::pin(issuer.drain_issuer_return_vm_mailbox());
+            let mut admitted_frames = 0;
+            let mut accepted_completed = false;
+            let ack_failure = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                loop {
+                    tokio::select! {
+                        result = &mut accepted, if !accepted_completed => {
+                            let result = result.expect("Bob's actual signed response was accepted");
+                            assert_eq!(result.new_status, super::super::InvitationStatus::Accepted);
+                            // Bob may finish once the broker has durably enqueued his
+                            // response. Alice's separate take/ACK must still be driven
+                            // and tested; never poll the completed future again.
+                            accepted_completed = true;
+                        },
+                        result = invitee.drain_pending_enrollment_vm_mailbox() => {
+                            admitted_frames += result.expect("Bob's protected mailbox intake");
+                            tokio::task::yield_now().await;
+                        },
+                        result = &mut issuer_drain => {
+                            match result {
+                                Ok(_) => {
+                                    issuer_drain = Box::pin(issuer.drain_issuer_return_vm_mailbox());
+                                    tokio::task::yield_now().await;
+                                }
+                                Err(error) => break error,
+                            }
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("Bob's first response reaches Alice's interrupted broker ACK");
+            assert!(
+                format!("{ack_failure:?}").contains("status: 401"),
+                "first return frame must fail only at injected broker ACK status: {ack_failure:?}"
+            );
+            use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+            let frame_keys = issuer_effects
+                .secure_list_keys(
+                    "issuer_return_mailbox_frame_v1",
+                    &[SecureStorageCapability::List],
+                )
+                .await
+                .expect("Alice's protected return frame inventory");
+            assert_eq!(
+                frame_keys.len(),
+                1,
+                "Alice retained the exact encrypted frame before the interrupted ACK; external intake count={admitted_frames}"
+            );
+            let frame_key = &frame_keys[0];
+            let frame_bytes = issuer_effects
+                .secure_retrieve(
+                    &aura_core::effects::SecureStorageLocation::new(
+                        "issuer_return_mailbox_frame_v1",
+                        frame_key,
+                    ),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("return frame retained before ACK");
+            let leaf_bytes = issuer_effects
+                .secure_retrieve(
+                    &crate::core::agent::issuer_return_mailbox::retirement_leaf_location(frame_key),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("exact frame retirement leaf sealed before ACK");
+            let leaf: crate::core::agent::issuer_return_mailbox::IssuerReturnRetirementLeaf =
+                aura_core::util::serialization::from_slice(&leaf_bytes).unwrap();
+            let manifest = admitted.manifest();
+            let registration_bytes = issuer_effects
+                .secure_retrieve(
+                    &aura_core::effects::SecureStorageLocation::new(
+                        "issuer_return_mailbox_registration_v1",
+                        format!(
+                            "{}:{}:{}",
+                            manifest.subject,
+                            manifest.invitation,
+                            hex::encode(admitted.manifest_digest())
+                        ),
+                    ),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("original return registration retained");
+            let registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                aura_core::util::serialization::from_slice(&registration_bytes).unwrap();
+            let root_bytes = issuer_effects
+                .secure_retrieve(
+                    &crate::core::agent::issuer_return_mailbox::retirement_root_location(
+                        &registration.statement,
+                    ),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("root sealed before broker publication");
+            let root_digest = aura_core::hash::hash(&root_bytes);
+            assert!(leaf.verifies(root_digest, frame_key, &frame_bytes));
+            let mut substituted_frame = frame_bytes.clone();
+            substituted_frame[0] ^= 1;
+            assert!(!leaf.verifies(root_digest, frame_key, &substituted_frame));
+            let credential_location = aura_core::effects::SecureStorageLocation::with_sub_key(
+                "issuer_return_mailbox_credential_v1",
+                manifest.subject.to_string(),
+                format!(
+                    "{}:{}",
+                    manifest.invitation,
+                    hex::encode(admitted.manifest_digest())
+                ),
+            );
+            let credential_bytes = issuer_effects
+                .secure_retrieve(&credential_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("same original issuer retained the return retrieval secret");
+            let credential = std::str::from_utf8(&credential_bytes).unwrap();
+            let held = broker
+                .take_issuer_return_vm_envelopes(
+                    manifest.subject,
+                    manifest.initiator_device,
+                    admitted.manifest_digest(),
+                    credential,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                held.len(),
+                1,
+                "interrupted broker ACK retains the exact authenticated response"
+            );
+            let delivery = held.into_iter().next().unwrap();
+            drop(accepted);
+            drop(issuer_drain);
+            let issuer_config = issuer_effects.config().clone();
+            let issuer_authority = issuer.authority_id();
+            let shutdown = issuer
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await;
+            assert!(
+                shutdown.is_err(),
+                "interrupted original VM retains its supervised cancellation cause"
+            );
+            drop(_original);
+            drop(issuer_effects);
+            drop(issuer);
+            let profile =
+                crate::runtime::builder::TestingOwnedProfileCapability::acquire(&issuer_config)
+                    .expect("interrupted original issuer released its physical profile");
+            let context = aura_core::context::EffectContext::new(
+                issuer_authority,
+                aura_core::ContextId::new_from_entropy([153; 32]),
+                aura_core::effects::ExecutionMode::Testing,
+            );
+            let build = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
+                .with_authority(issuer_authority)
+                .with_config(issuer_config)
+                .with_physical_time_provider(clock.clone())
+                .build(&context);
+            let advance = async {
+                let startup = clock
+                    .observe_next_relative_sleep_of(1_000)
+                    .await
+                    .expect("observe selected physical startup replay");
+                let target = startup.await.expect("selected startup replay admitted");
+                clock.set_time(target.value());
+            };
+            let (reopened_runtime, ()) = tokio::join!(build, advance);
+            let reopened = std::sync::Arc::new(crate::AuraAgent::new(
+                reopened_runtime.expect("same original issuer profile reopened"),
+                issuer_authority,
+            ));
+            let manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+                issuer_authority,
+                crate::runtime::services::RendezvousManagerConfig::default()
+                    .with_bootstrap_broker(broker_config),
+                Arc::new(reopened.runtime().effects().time_effects().clone()),
+            );
+            reopened
+                .runtime()
+                .effects()
+                .attach_rendezvous_manager(manager);
+            assert_eq!(
+                reopened.drain_issuer_return_vm_mailbox().await.unwrap(),
+                0,
+                "same-profile reopen verifies committed encrypted custody without replaying the VM frame"
+            );
+            assert!(
+                broker
+                    .take_issuer_return_vm_envelopes(
+                        manifest.subject,
+                        manifest.initiator_device,
+                        admitted.manifest_digest(),
+                        credential,
+                    )
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "reopen ACK removes the broker copy only after encrypted runtime custody"
+            );
+            let exact =
+                crate::runtime::services::bootstrap_broker::BootstrapIssuerReturnMailboxEnvelope {
+                    manifest_digest: admitted.manifest_digest(),
+                    setup_request: delivery.setup_request,
+                    authorization: delivery.authorization,
+                    envelope: delivery.envelope,
+                };
+            broker
+                .queue_issuer_return_vm_envelope(exact.clone())
+                .await
+                .expect("exact acknowledged response replay is idempotent");
+            assert!(
+                broker
+                    .take_issuer_return_vm_envelopes(
+                        manifest.subject,
+                        manifest.initiator_device,
+                        admitted.manifest_digest(),
+                        credential,
+                    )
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "acknowledged message ID cannot reappear"
+            );
+            let mut wrong_direction = exact.clone();
+            wrong_direction.envelope.source = manifest.subject;
+            assert!(
+                broker
+                    .queue_issuer_return_vm_envelope(wrong_direction)
+                    .await
+                    .is_err(),
+                "setup proof cannot authorize the opposite authority direction"
+            );
+            let mut foreign_device = exact.clone();
+            foreign_device.envelope.metadata.insert(
+                "aura-destination-device-id".into(),
+                manifest.invitee_device.to_string(),
+            );
+            assert!(
+                broker
+                    .queue_issuer_return_vm_envelope(foreign_device)
+                    .await
+                    .is_err(),
+                "setup proof cannot retarget a foreign device"
+            );
+            let mut foreign_setup = exact.clone();
+            foreign_setup.setup_request.proof.signature[0] ^= 1;
+            assert!(
+                broker
+                    .queue_issuer_return_vm_envelope(foreign_setup)
+                    .await
+                    .is_err(),
+                "broker independently rejects altered setup possession"
+            );
+            clock.set_time(manifest.expires_at_ms);
+            assert!(
+                broker.queue_issuer_return_vm_envelope(exact).await.is_err(),
+                "selected physical expiry ends this exact return route"
+            );
+            broker_tasks
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+                .expect("standalone broker owner releases after exact return proof");
+            assert_eq!(admitted.manifest().invitation, invitation.invitation_id);
+        });
+    }
     #[test]
     fn required_vm_stage_keeps_storage_clock_and_codec_categories() {
         use std::error::Error;
@@ -3731,15 +4418,41 @@ mod committed_receipt_tests {
                     )
                     .await
                     .expect("one original held issuer prepares exact public signing intent");
+                eprintln!("quorum fixture: second prepared intent observed");
                 let sibling_bridge = std::sync::Arc::new(
                     crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone()),
                 );
                 assert!(prepared
                     .signing_intent_code
-                    .starts_with("aura-enrollment-signing-intent:v3:"));
+                    .starts_with("aura-enrollment-signing-intent:v4:"));
                 assert!(aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
-                    prepared.signing_intent_code.replacen("aura-enrollment-signing-intent:v3:", "aura-enrollment-signing-intent:v1:", 1),
+                    prepared.signing_intent_code.replacen("aura-enrollment-signing-intent:v4:", "aura-enrollment-signing-intent:v1:", 1),
                 ).is_err(), "historical consent cannot authorize current terminal policy");
+                assert!(aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
+                    prepared.signing_intent_code.replacen("aura-enrollment-signing-intent:v4:", "aura-enrollment-signing-intent:v3:", 1),
+                ).is_err(), "v3 wrapper cannot downgrade the approved fourth domain");
+                {
+                    use base64::Engine;
+                    let encoded = prepared
+                        .signing_intent_code
+                        .strip_prefix("aura-enrollment-signing-intent:v4:")
+                        .expect("current original approval code");
+                    let canonical = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .decode(encoded)
+                        .expect("canonical current approval bytes");
+                    let current: aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent =
+                        aura_core::util::serialization::from_slice(&canonical)
+                            .expect("canonical typed approval shape");
+                    let mut value = serde_json::to_value(&current)
+                        .expect("typed approval has a JSON-compatible test mutation shape");
+                    value["version"] = serde_json::json!(3);
+                    let historical: aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent =
+                        serde_json::from_value(value).expect("historical version field remains parseable");
+                    assert!(
+                        historical.validate().is_err(),
+                        "v3 body cannot authorize the current five-domain approval"
+                    );
+                }
                 let sibling_app = std::sync::Arc::new(async_lock::RwLock::new(
                     aura_app::AppCore::with_runtime(
                         aura_app::AppConfig::default(),
@@ -3757,11 +4470,13 @@ mod committed_receipt_tests {
                     aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::Manifest,
                     aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::PublicTransport,
                     aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::InitialRequest,
+                    aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::IssuerReturnMailbox,
                     aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::NegativeTerminalPolicy,
                 ]);
                 let sibling_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
                     &sibling_app, sibling_intent, sibling_setup,
                 ).await.expect("explicit original active sibling user approval");
+                eprintln!("quorum fixture: sibling independent approval observed");
                 let original_dynamic_owner = sibling_app
                     .read()
                     .await
@@ -3815,12 +4530,50 @@ mod committed_receipt_tests {
                     .approve_device_enrollment_signing(sibling_approval)
                     .await
                     .expect("owned original sibling accepts bounded participant ingress");
+                eprintln!("quorum fixture: sibling participant ingress installed");
+                // The second issuer export itself needs this adopted sibling's
+                // genuine quorum ingress. Start its owned driver before awaiting
+                // export, and keep it alive through the later rotation/acceptance.
+                let (quorum_finished, mut finished_rx) = tokio::sync::watch::channel(false);
+                let quorum_notify = original_transport.inbox_notify(first_manifest.subject);
+                let signing = reopened_invitee.threshold_signing();
+                let issuer_device = issuer.runtime().effects().device_id();
+                let mut quorum_driver = tokio::task::JoinSet::new();
+                quorum_driver.spawn(async move {
+                        loop {
+                            let arrival = quorum_notify.notified();
+                            tokio::pin!(arrival);
+                            arrival.as_mut().enable();
+                            signing.process_device_quorum_inbound().await.unwrap();
+                            for request in signing.pending_signing_requests().await {
+                                assert_eq!(request.requesting_device, issuer_device);
+                                assert!(!second_positive || [
+                                    "signed message (aura.sync.device_epoch_rotation.proposal.v2)",
+                                    "signed message (aura.sync.device_epoch_rotation.enrollment_commit.v2)",
+                                    "account device tree update",
+                                ].contains(&request.operation.as_str()),
+                                    "explicit original enrollment rotation signing consent: {}", request.operation);
+                                signing
+                                    .decide_pending_signing_request(&request.id, true)
+                                    .await
+                                    .unwrap();
+                            }
+                            if *finished_rx.borrow() {
+                                break;
+                            }
+                            tokio::select! {
+                                _ = arrival => {},
+                                changed = finished_rx.changed() => { changed.unwrap(); },
+                            }
+                        }
+                    });
                 let own_intent = aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
                     prepared.signing_intent_code,
                 ).expect("original issuer selects exact prepared public intent");
                 let own_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
                     &issuer_app, own_intent, setup,
                 ).await.expect("original issuer explicit user approval");
+                eprintln!("quorum fixture: issuer original approval observed");
                 if registration_drop {
                     let actual = crate::runtime_bridge::enrollment_quorum::admit_original_runtime_approval_for_test(
                         issuer_bridge.as_ref(), own_approval,
@@ -3914,14 +4667,21 @@ mod committed_receipt_tests {
                         .await
                         .unwrap();
                     let disposal = probe.disposal_observer().unwrap();
+                    eprintln!("quorum fixture: positive issuer resume entered");
                     let start = signing.resume_original_quorum_issuer(actual).await.unwrap();
+                    eprintln!("quorum fixture: positive issuer resume returned");
                     (start, Some(disposal), Some(probe))
                 } else {
                     (
-                        issuer_bridge
-                            .resume_device_enrollment_signing(own_approval)
-                            .await
-                            .expect("genuine approved active 2-of-2 runtime quorum issuance"),
+                        {
+                            eprintln!("quorum fixture: committed issuer resume entered");
+                            let result = issuer_bridge
+                                .resume_device_enrollment_signing(own_approval)
+                                .await
+                                .expect("genuine approved active 2-of-2 runtime quorum issuance");
+                            eprintln!("quorum fixture: committed issuer resume returned");
+                            result
+                        },
                         None,
                         None,
                     )
@@ -3986,9 +4746,125 @@ mod committed_receipt_tests {
                     .import_enrollment_invitation(&second.enrollment_code, selected)
                     .await
                     .unwrap();
+                let return_admissions = super::super::enrollment_manifest_admission::load_recoverable_negative_admissions(
+                    third.runtime().effects().as_ref(),
+                ).await.expect("third device retained independently pinned quorum admission");
+                let return_original = return_admissions
+                    .iter()
+                    .find(|admission| admission.manifest().invitation == second_invitation)
+                    .expect("exact second original quorum admission");
+                use aura_signature::SecurityTranscript;
+                let return_manifest = return_original.manifest();
+                let return_digest = aura_core::hash::hash(
+                    &return_manifest
+                        .transcript_bytes()
+                        .expect("canonical second manifest"),
+                );
+                let return_location = aura_core::effects::SecureStorageLocation::new(
+                    "issuer_return_mailbox_registration_v1",
+                    format!(
+                        "{}:{}:{}",
+                        return_manifest.subject,
+                        return_manifest.invitation,
+                        hex::encode(return_digest)
+                    ),
+                );
+                let return_bytes = issuer_effects
+                    .secure_retrieve(&return_location, &[SecureStorageCapability::Read])
+                    .await
+                    .expect("original approved quorum retained fourth-domain registration");
+                let return_registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                    aura_core::util::serialization::from_slice(&return_bytes)
+                        .expect("canonical original quorum return registration");
+                assert_eq!(
+                    return_registration.statement.manifest_digest(),
+                    return_digest
+                );
+                assert_eq!(return_registration.proof.signer_count, 2);
+                assert_eq!(return_registration.proof.signers, [1, 2]);
+                return_registration
+                    .clone()
+                    .verify_for_admitted_original(
+                        third.runtime().effects().as_ref(),
+                        return_original.baseline(),
+                        return_original.local_setup(),
+                    )
+                    .await
+                    .expect(
+                        "genuine four-domain aggregate verifies against third device admission",
+                    );
+                for (field, replacement) in [
+                    ("invitation", serde_json::json!("foreign-return-invitation")),
+                    ("manifest_digest", serde_json::json!(vec![0_u8; 32])),
+                    (
+                        "issuer_device",
+                        serde_json::json!(aura_core::DeviceId::from_bytes([49; 32])),
+                    ),
+                    (
+                        "invitee_device",
+                        serde_json::json!(aura_core::DeviceId::from_bytes([50; 32])),
+                    ),
+                    ("issuer_policy_index", serde_json::json!(u16::MAX)),
+                    (
+                        "issuer_public_key_package_digest",
+                        serde_json::json!(vec![0_u8; 32]),
+                    ),
+                    (
+                        "expires_at_ms",
+                        serde_json::json!(return_manifest.expires_at_ms - 1),
+                    ),
+                ] {
+                    let mut altered = serde_json::to_value(&return_registration).unwrap();
+                    altered["statement"][field] = replacement;
+                    let altered: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                        serde_json::from_value(altered).unwrap();
+                    assert!(matches!(altered.verify_for_admitted_original(
+                        third.runtime().effects().as_ref(),
+                        return_original.baseline(), return_original.local_setup(),
+                    ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::Binding)),
+                    "foreign {field} cannot select original quorum return route");
+                }
+                let mut false_key = return_registration.clone();
+                false_key.proof.public_key_package[0] ^= 1;
+                assert!(
+                    false_key
+                        .verify_for_admitted_original(
+                            third.runtime().effects().as_ref(),
+                            return_original.baseline(),
+                            return_original.local_setup(),
+                        )
+                        .await
+                        .is_err(),
+                    "foreign group package cannot authorize return route"
+                );
+                let mut false_roster = return_registration.clone();
+                false_roster.proof.signer_count = 1;
+                false_roster.proof.signers = vec![1];
+                assert!(
+                    false_roster
+                        .verify_for_admitted_original(
+                            third.runtime().effects().as_ref(),
+                            return_original.baseline(),
+                            return_original.local_setup(),
+                        )
+                        .await
+                        .is_err(),
+                    "partial claimed roster cannot authorize full-roster registration"
+                );
+                let mut false_signature = return_registration.clone();
+                false_signature.proof.signature[0] ^= 1;
+                assert!(
+                    false_signature
+                        .verify_for_admitted_original(
+                            third.runtime().effects().as_ref(),
+                            return_original.baseline(),
+                            return_original.local_setup(),
+                        )
+                        .await
+                        .is_err(),
+                    "tampered group signature cannot authorize return route"
+                );
                 if second_positive {
-                    let (finished, finished_rx) = tokio::sync::watch::channel(false);
-                    let quorum_notify = original_transport.inbox_notify(first_manifest.subject);
                     let rotation_notify = original_transport.inbox_notify(first_manifest.subject);
                     let signing = reopened_invitee.threshold_signing();
                     if postread_drop {
@@ -4018,34 +4894,6 @@ mod committed_receipt_tests {
                     let rotation =
                         crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone())
                             .original_enrollment_finalizer_service();
-                    let mut quorum_finished = finished_rx.clone();
-                    let quorum_driver = async {
-                        loop {
-                            let arrival = quorum_notify.notified();
-                            tokio::pin!(arrival);
-                            arrival.as_mut().enable();
-                            signing.process_device_quorum_inbound().await.unwrap();
-                            for request in signing.pending_signing_requests().await {
-                                assert_eq!(
-                                    request.requesting_device,
-                                    issuer.runtime().effects().device_id()
-                                );
-                                assert!(["signed message (aura.sync.device_epoch_rotation.proposal.v2)", "signed message (aura.sync.device_epoch_rotation.enrollment_commit.v2)", "account device tree update"].contains(&request.operation.as_str()),
-                                    "explicit original enrollment rotation signing consent: {}", request.operation);
-                                signing
-                                    .decide_pending_signing_request(&request.id, true)
-                                    .await
-                                    .unwrap();
-                            }
-                            if *quorum_finished.borrow() {
-                                break;
-                            }
-                            tokio::select! {
-                                _ = arrival => {},
-                                changed = quorum_finished.changed() => { changed.unwrap(); },
-                            }
-                        }
-                    };
                     let rotation_driver = async {
                         loop {
                             let arrival = rotation_notify.notified();
@@ -4076,7 +4924,6 @@ mod committed_receipt_tests {
                             } else {
                                 postread_test.assert_completed();
                             }
-                            finished.send_replace(true);
                             return;
                         }
                         third.invitations().unwrap().accept(&second_invitation).await
@@ -4093,9 +4940,20 @@ mod committed_receipt_tests {
                             ),
                             "same original issuer acknowledges actual positive cleanup"
                         );
-                        finished.send_replace(true);
                     };
-                    futures::join!(accept, quorum_driver, rotation_driver);
+                    let mut work = Box::pin(async { futures::join!(accept, rotation_driver) });
+                    tokio::select! {
+                        _ = &mut work => {},
+                        result = quorum_driver.join_next() => panic!(
+                            "original sibling quorum ingress ended before acceptance and rotation: {result:?}"
+                        ),
+                    }
+                    quorum_finished.send_replace(true);
+                    quorum_driver
+                        .join_next()
+                        .await
+                        .expect("original sibling quorum ingress task completed")
+                        .expect("original sibling quorum ingress retained its result");
                     if postread_drop {
                         postread_test.assert_completed();
                     }
@@ -4204,43 +5062,25 @@ mod committed_receipt_tests {
                         return;
                     }
                 } else {
-                    // The enrolled sibling supplies actual quorum-signing
-                    // ingress for the signed negative terminal. A declined
-                    // enrollment has no participant acceptance to process.
-                    let (finished, mut finished_rx) = tokio::sync::watch::channel(false);
-                    let peer_notify = original_transport.inbox_notify(first_manifest.subject);
-                    let signing = reopened_invitee.threshold_signing();
-                    let peer_driver = async {
-                        loop {
-                            let arrival = peer_notify.notified();
-                            tokio::pin!(arrival);
-                            arrival.as_mut().enable();
-                            signing.process_device_quorum_inbound().await.unwrap();
-                            for request in signing.pending_signing_requests().await {
-                                assert_eq!(
-                                    request.requesting_device,
-                                    issuer.runtime().effects().device_id()
-                                );
-                                signing
-                                    .decide_pending_signing_request(&request.id, true)
-                                    .await
-                                    .unwrap();
-                            }
-                            if *finished_rx.borrow() {
-                                break;
-                            }
-                            tokio::select! {
-                                _ = arrival => {},
-                                changed = finished_rx.changed() => { changed.unwrap(); },
-                            }
-                        }
-                    };
+                    // The same enrolled sibling that signed the second export
+                    // remains the real quorum ingress for its negative terminal.
                     let decline = async {
                         third.invitations().unwrap().decline(&second_invitation).await.expect(
                             "actual second invitation decline settles its original negative exchange");
-                        finished.send_replace(true);
                     };
-                    futures::join!(decline, peer_driver);
+                    let mut decline = Box::pin(decline);
+                    tokio::select! {
+                        _ = &mut decline => {},
+                        result = quorum_driver.join_next() => panic!(
+                            "original sibling quorum ingress ended before decline: {result:?}"
+                        ),
+                    }
+                    quorum_finished.send_replace(true);
+                    quorum_driver
+                        .join_next()
+                        .await
+                        .expect("original sibling quorum ingress task completed")
+                        .expect("original sibling quorum ingress retained its result");
                 }
                 third
                     .runtime()
@@ -4248,6 +5088,16 @@ mod committed_receipt_tests {
                     .shutdown_gracefully(std::time::Duration::from_secs(5))
                     .await
                     .unwrap();
+                if second_positive && !postread_drop && !cleanup_positive {
+                    original_clock.set_time(return_manifest.expires_at_ms);
+                    assert!(matches!(
+                        return_registration.verify_for_admitted_original(
+                            third.runtime().effects().as_ref(),
+                            return_original.baseline(), return_original.local_setup(),
+                        ).await,
+                        Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::OutsideValidity)
+                    ), "selected physical expiry closes the original quorum return route");
+                }
                 drop(sibling_app);
                 drop(sibling_bridge);
             }

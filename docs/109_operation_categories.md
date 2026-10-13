@@ -715,10 +715,10 @@ is not an alternate enrollment activation path.
 Preparing an enrollment signing intent retains the original issuer allocation
 and establishes neither enrollment success nor local signing consent. Each
 active physical participant independently approves the exact manifest, public
-transport commitment, initial Request and finite negative terminal policy under
-its current authenticated policy. Resuming that allocation may produce a pending
-enrollment code only after the three initiation signatures verify. The policy is
-conditional consent, not a fourth initiation signature. A later Failed control
+transport commitment, initial Request, issuer return mailbox statement and finite
+negative terminal policy under its current authenticated policy. Resuming that
+allocation may produce a pending enrollment code only after the four initiation
+signatures verify. The policy is conditional consent, not a fifth initiation signature. A later Failed control
 also requires the original protected first negative decision and retained
 participant custody. Committed control, durable membership and invitee activation
 retain their separate agreement and evidence requirements.

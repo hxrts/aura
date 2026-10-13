@@ -525,6 +525,7 @@ dependencies = [
  "hxrts-aura-agent",
  "hxrts-aura-amp",
  "hxrts-aura-anti-entropy",
+ "hxrts-aura-app",
  "hxrts-aura-authentication",
  "hxrts-aura-chat",
  "hxrts-aura-consensus",

@@ -485,13 +485,21 @@ into the browser generation supervisor, it runs on every tick in all modes.
 The agent retains registration proof, credential, protected admission and VM
 ingress; the browser reports the first drain failure visibly once per
 generation while the app continues to own the import terminal result. The
-existing harness relay poll remains a separate compatibility path. Require an
+same generation tick separately drives the agent-owned issuer return mailbox
+drain. Its retained original registration, credential, encrypted response
+frame and broker acknowledgment remain agent-owned; the browser supplies no
+route identifiers or credentials and reports the first return-drain failure
+visibly. An exact browser transfer must observe Alice consuming Bob's response
+and the app/host terminal acknowledgment before this upkeep proves completion.
+The existing harness relay poll remains a separate compatibility path. Require an
 actual browser transfer and failure fixture before claiming the authenticated
 mailbox path validated end to end.
 
 Browser harness failures surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__`, `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`, and the page-owned semantic submit publication surface. Those globals are diagnostic-only and do not replace the authoritative `UiSnapshot` and `RenderHeartbeat` payloads. They are the canonical observed source for browser bootstrap and rebinding state. Driver-owned `restart_page_session` is infrastructure recovery only. Semantic command submission and runtime-identity staging must wait on or fail from the page-owned publication contract rather than replaying work through a restarted browser session.
 
-The approved-transfer browser scenario submits through the mounted modal confirm button, then requires the exact `device_enrollment` operation instance to reach `Succeeded`, a matching `device_enrollment_accepted` event from the host's added-device settings projection, and a two-device settings count before restarting Bob. After reopen it checks the projection again. Immediately before restart, the Playwright driver writes a private `*-pre-restart-*.json` artifact with the observed operation instance and state, typed failure (if any), matching host acknowledgment, revision, and filtered console tail. Preserve this artifact when a later restart loses page diagnostics; neither a generic success state nor a modal dismissal proves the enrollment chain.
+The approved-transfer browser scenario submits through the mounted modal confirm button, then requires the exact `device_enrollment` operation instance to reach `Succeeded`, a `device_enrollment_accepted` event from the same browser generation's added-device settings projection, and a two-device settings count before restarting Bob. After reopen it checks the projection again. Immediately before restart, the Playwright driver writes a private `*-pre-restart-*.json` artifact with the observed operation instance and state, typed failure (if any), the two-device host projection witness, revision, and filtered console tail. Preserve this artifact when a later restart loses page diagnostics; neither a generic success state nor a modal dismissal proves the enrollment chain.
+The scenario captures the instance after mounted submission and checks that same instance again immediately before restart. A success on another `device_enrollment` instance cannot satisfy these exact waits.
+For the scenario restart, `restart_actor` passes the captured operation instance to the browser backend. Before it stops the old Playwright process, the driver requires that exact operation to be `Succeeded` and retains the same-generation two-device added-device projection event in a private pre-restart artifact, alongside all observed typed failures. The backend passes only that bounded evidence to the new driver process. A post-restart private artifact is written only after the new page generation observes two devices including that event's device ID; it carries the original instance and host witness beside the reopened device IDs. The scenario report must still prove readiness and the final settings projection.
 
 `submitSemanticCommand` follows that rule directly. After bounded same-page recovery it must fail closed instead of replaying the semantic request through a fresh browser session. The browser publication owner classifies diagnostics by typed publication status, binding mode, and reliability before serializing them to page globals. Compatibility-sensitive waits keep one canonical publication path instead of ad hoc string assembly.
 

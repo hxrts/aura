@@ -10,7 +10,7 @@ use base64::Engine;
 
 use crate::core::AppCore;
 
-const PREFIX: &str = "aura-enrollment-signing-intent:v3:";
+const PREFIX_V4: &str = "aura-enrollment-signing-intent:v4:";
 const MAXIMUM_INTENT_BYTES: usize = 131_072;
 
 /// Identification selected by the original device's explicit local user action.
@@ -20,6 +20,8 @@ pub struct UserTransferredEnrollmentSigningIntent {
     transport: PublicEnrollmentTransportSigningIntent,
     initial_request:
         aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript,
+    issuer_return_mailbox: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement,
+    domains: [aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain; 5],
     negative_terminal_policy:
         aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
     canonical: Vec<u8>,
@@ -45,14 +47,13 @@ impl UserTransferredEnrollmentSigningIntent {
     }
     pub fn domains(
         &self,
-    ) -> [aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain; 4] {
-        use aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain::*;
-        [
-            Manifest,
-            PublicTransport,
-            InitialRequest,
-            NegativeTerminalPolicy,
-        ]
+    ) -> &[aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain] {
+        &self.domains
+    }
+    pub fn issuer_return_mailbox(
+        &self,
+    ) -> &aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement {
+        &self.issuer_return_mailbox
     }
 }
 
@@ -82,6 +83,7 @@ pub struct UserApprovedEnrollmentSigningIntent {
     transport: PublicEnrollmentTransportSigningIntent,
     initial_request:
         aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript,
+    issuer_return_mailbox: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement,
     negative_terminal_policy:
         aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
     canonical: Vec<u8>,
@@ -99,6 +101,11 @@ impl UserApprovedEnrollmentSigningIntent {
         &self,
     ) -> &aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript {
         &self.initial_request
+    }
+    pub fn issuer_return_mailbox(
+        &self,
+    ) -> &aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement {
+        &self.issuer_return_mailbox
     }
     pub fn manifest(&self) -> &EnrollmentTrustManifest {
         &self.manifest
@@ -134,7 +141,7 @@ pub fn select_user_transferred_enrollment_signing_intent(
     code: String,
 ) -> Result<UserTransferredEnrollmentSigningIntent, AuraError> {
     let encoded = code
-        .strip_prefix(PREFIX)
+        .strip_prefix(PREFIX_V4)
         .ok_or_else(|| AuraError::invalid("unsupported enrollment signing intent"))?;
     if encoded.len() > aura_core::envelope::max_base64_encoded_len(MAXIMUM_INTENT_BYTES) {
         return Err(AuraError::invalid(
@@ -163,6 +170,13 @@ pub fn select_user_transferred_enrollment_signing_intent(
     let manifest = intent.manifest().clone();
     let transport = intent.transport().clone();
     let initial_request = intent.initial_request().clone();
+    let issuer_return_mailbox = intent.issuer_return_mailbox().clone();
+    let domains: [aura_invitation::enrollment_signing_intent::EnrollmentSigningDomain; 5] =
+        intent.domains().try_into().map_err(|_| {
+            AuraError::invalid(
+                "enrollment signing intent domain count differs from current version",
+            )
+        })?;
     let negative_terminal_policy = intent.negative_terminal_policy().clone();
     let reencoded = aura_core::util::serialization::to_vec(&intent).map_err(|source| {
         AuraError::Serialization {
@@ -193,6 +207,8 @@ pub fn select_user_transferred_enrollment_signing_intent(
         manifest,
         transport,
         initial_request,
+        issuer_return_mailbox,
+        domains,
         negative_terminal_policy,
         canonical,
     })
@@ -235,6 +251,7 @@ pub async fn approve_user_selected_enrollment_signing_intent(
         manifest: selected.manifest,
         transport: selected.transport,
         initial_request: selected.initial_request,
+        issuer_return_mailbox: selected.issuer_return_mailbox,
         negative_terminal_policy: selected.negative_terminal_policy,
         canonical: selected.canonical,
         setup,

@@ -32,6 +32,8 @@ Shared testing infrastructure providing test fixtures, effect system harnesses, 
   Its sleeps remain pending until an explicit physical observation reaches the
   original target; background services cannot advance the test clock by sleeping.
   Deliberate rollback remains visible to production timeout validation.
+  Native selected-task read faults target the owning Tokio workflow task, so
+  background readers cannot consume its one-shot provider failure.
 - Mock effects behave consistently with production ones.
 - Mock handlers MAY be stateful (using `Arc<Mutex<>>`) for controllable testing.
 - Host-only helpers must be explicit and local; shared or wasm-exercised test surfaces must stay aligned with the same async-trait and boundary contracts as production.

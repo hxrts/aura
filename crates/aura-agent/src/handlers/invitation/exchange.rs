@@ -64,10 +64,7 @@ impl InvitationHandler {
     }
 
     pub(super) fn invitation_session_id(invitation_id: &InvitationId) -> Uuid {
-        let digest = hash(invitation_id.as_str().as_bytes());
-        let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(&digest[..16]);
-        Uuid::from_bytes(bytes)
+        aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(invitation_id)
     }
 
     pub(super) fn is_transport_no_message(err: &ChoreographyError) -> bool {

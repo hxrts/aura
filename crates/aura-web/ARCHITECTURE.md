@@ -252,7 +252,18 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   or scenario value. Drained envelopes reenter the agent's VM inbox; a scope
   read failure is surfaced as an upkeep error. This selector grants neither
   receipt acceptance nor account membership or an outbound broker route; the
-  authenticated broker mailbox protocol remains pending.
+  authenticated broker mailbox is a separate agent-owned path.
+- Each generation tick also drives the agent-owned authenticated pending
+  enrollment mailbox drain in all browser modes. The agent retains protected
+  admission, registration proof, credentials, and VM ingress; the browser owns
+  only bounded upkeep and emits one visible failure notice per generation if
+  that drain fails. Import terminal publication remains with the app owner.
+  The same generation tick separately drives the agent-owned original issuer
+  return mailbox drain. The agent verifies its retained signed registration,
+  exact recipient and durable frame before broker acknowledgment; the browser
+  supplies no route or credential and reports its first failure visibly.
+  Harness relay polling still runs separately until an end-to-end browser
+  transfer validates the authenticated mailbox path.
 - In harness mode, browser background sync must leave an explicit initial
   interactivity window after bootstrap handoff and use a coarser cadence than
   production so upkeep does not starve Playwright page-execution and semantic

@@ -15,6 +15,9 @@ use aura_core::types::identifiers::{AccountId, AuthorityId};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
+pub(crate) mod issuer_return_mailbox;
+pub(crate) mod pending_enrollment_mailbox;
+
 /// Main agent interface - thin facade delegating to runtime
 ///
 /// Services are created on-demand and cached as lightweight wrappers around effects.
@@ -30,6 +33,11 @@ pub struct AuraAgent {
 
     /// Set once the runtime-owned periodic sync task has been started.
     periodic_sync_started: std::sync::atomic::AtomicBool,
+
+    /// Runtime-local deduplication after an encrypted original mailbox frame
+    /// has been admitted to the VM queue. Reopen rebuilds this from custody.
+    pending_mailbox_seen: parking_lot::Mutex<std::collections::HashSet<String>>,
+    issuer_return_seen: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
 impl AuraAgent {
@@ -50,6 +58,8 @@ impl AuraAgent {
             services,
             context,
             periodic_sync_started: std::sync::atomic::AtomicBool::new(false),
+            pending_mailbox_seen: parking_lot::Mutex::new(std::collections::HashSet::new()),
+            issuer_return_seen: parking_lot::Mutex::new(std::collections::HashSet::new()),
         }
     }
 

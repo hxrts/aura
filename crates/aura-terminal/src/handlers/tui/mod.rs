@@ -586,6 +586,8 @@ pub async fn open_production_runtime(
         data_dir: base_path.to_str(),
         requested_device_id: None,
         bind_address: None,
+        relay_address: None,
+        serve_relay: false,
         mode: TuiMode::Production,
     }
     .resolve();

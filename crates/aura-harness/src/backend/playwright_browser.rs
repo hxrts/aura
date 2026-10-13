@@ -270,6 +270,8 @@ pub struct PlaywrightBrowserBackend {
     /// start clears it; a restart keeps the profile, like a native restart
     /// keeps its data directory.
     profile_initialized: bool,
+    /// Safe diagnostic evidence returned by the prior driver before process stop.
+    reopen_enrollment_evidence: Option<Value>,
 }
 
 impl PlaywrightBrowserBackend {
@@ -335,6 +337,7 @@ impl PlaywrightBrowserBackend {
             start_max_attempts,
             start_retry_backoff_ms,
             profile_initialized: false,
+            reopen_enrollment_evidence: None,
         })
     }
 
@@ -370,6 +373,35 @@ impl PlaywrightBrowserBackend {
             ],
             Some(driver_cwd),
         ))
+    }
+
+    pub(super) fn restart_with_evidence(
+        &mut self,
+        expected_operation_instance: Option<&str>,
+    ) -> Result<()> {
+        self.reopen_enrollment_evidence = if let Some(expected) = expected_operation_instance {
+            let instance_id = self.config.id.clone();
+            let result = self.with_session(|session| {
+                session.rpc_call(
+                    "stop",
+                    json!({
+                        "instance_id": instance_id,
+                        "expected_operation_instance": expected,
+                    }),
+                )
+            })?;
+            result
+                .get("enrollment_evidence")
+                .cloned()
+                .filter(|value| !value.is_null())
+        } else {
+            None
+        };
+        if expected_operation_instance.is_some() && self.reopen_enrollment_evidence.is_none() {
+            anyhow::bail!("browser restart did not retain exact enrollment evidence");
+        }
+        self.stop_inner()?;
+        self.start()
     }
 
     fn stop_inner(&mut self) -> Result<()> {
@@ -522,6 +554,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 "artifact_dir": absolutize_path(self.artifact_dir.clone()),
                 "headless": self.headless,
                 "reset_storage": !self.profile_initialized,
+                "previous_enrollment_evidence": self.reopen_enrollment_evidence.clone(),
                 "page_goto_timeout_ms": self.page_goto_timeout_ms,
                 "harness_ready_timeout_ms": self.harness_ready_timeout_ms,
                 "start_max_attempts": self.start_max_attempts,
@@ -562,6 +595,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         self.session = Some(Mutex::new(session));
         self.state = BackendState::Running;
         self.profile_initialized = true;
+        self.reopen_enrollment_evidence = None;
         Ok(())
     }
 

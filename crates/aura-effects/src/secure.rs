@@ -1480,6 +1480,45 @@ impl PlatformSecureStorageHandler {
             other => Self::map_keyring_error(other),
         }
     }
+
+    /// Provider primitive for a future domain-authorized retirement owner.
+    /// Generic `secure_delete` still rejects protected data. The namespace
+    /// lease serializes cooperating Aura writers across profiles and processes.
+    #[allow(dead_code)]
+    async fn retire_protected_exact(
+        &self,
+        location: &SecureStorageLocation,
+        expected_plaintext: &[u8],
+    ) -> Result<bool, SecureStorageError> {
+        let _namespace = self.namespace_owner()?.mutation_guard().await;
+        let entry = self.entry_for_location(location)?;
+        let original = match entry.get_secret() {
+            Ok(bytes) => bytes,
+            Err(keyring::Error::NoEntry) => {
+                self.remove_index_key(location)?;
+                return Ok(false);
+            }
+            Err(source) => return Err(Self::map_keyring_error(source)),
+        };
+        let (plaintext, protected) = self.decode_record(location, &original)?;
+        if !protected || plaintext != expected_plaintext {
+            return Err(SecureStorageError::permission_denied(
+                "protected retirement candidate differs from exact original",
+            ));
+        }
+        if entry.get_secret().map_err(Self::map_keyring_error)? != original {
+            return Err(SecureStorageError::permission_denied(
+                "protected retirement candidate changed before deletion",
+            ));
+        }
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {
+                self.remove_index_key(location)?;
+                Ok(true)
+            }
+            Err(source) => Err(Self::map_keyring_error(source)),
+        }
+    }
 }
 
 #[cfg(any(
@@ -1899,6 +1938,36 @@ impl FilesystemFallbackSecureStorageHandler {
             .strip_prefix(&self.base_path)
             .map(std::path::Path::to_path_buf)
             .map_err(|_| SecureStorageError::invalid("secure path escaped provider"))
+    }
+    /// Provider primitive for a future domain-authorized retirement owner.
+    /// Deliberately private: exact bytes and a profile lock do not prove that
+    /// enrollment has reached a verified terminal or its selected expiry.
+    #[cfg(unix)]
+    #[allow(dead_code)]
+    async fn retire_protected_exact(
+        &self,
+        location: &SecureStorageLocation,
+        expected_plaintext: &[u8],
+    ) -> Result<bool, SecureStorageError> {
+        let _record_owner = self.record_gate.lock().await;
+        let directory = self.owned_directory()?;
+        let path = self.descriptor_path(location)?;
+        let Some(record) = directory.read(&path, true).map_err(|source| {
+            Self::descriptor_error("read protected retirement candidate", source)
+        })?
+        else {
+            return Ok(false);
+        };
+        let (plaintext, protected) =
+            self.decrypt_fallback_record_with_protection(location, &record)?;
+        if !protected || plaintext != expected_plaintext {
+            return Err(SecureStorageError::permission_denied(
+                "protected retirement candidate differs from exact original",
+            ));
+        }
+        directory
+            .remove(&path)
+            .map_err(|source| Self::descriptor_error("retire exact protected value", source))
     }
     #[cfg(unix)]
     fn load_or_create_descriptor_wrapping_key(
@@ -2702,6 +2771,32 @@ impl FilesystemFallbackSecureStorageHandler {
             .map_err(|source| Self::map_atomic_idb_error("CAS durable commit", source))
     }
 
+    /// IndexedDB counterpart of the private exact-retirement primitive. Its
+    /// existing strict transaction compares the encrypted original again before
+    /// deletion, so a concurrent replacement cannot inherit this decision.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(dead_code)]
+    async fn retire_protected_exact(
+        &self,
+        location: &SecureStorageLocation,
+        expected_plaintext: &[u8],
+    ) -> Result<bool, SecureStorageError> {
+        let Some(record) = self.wasm_get_record(location).await? else {
+            return Ok(false);
+        };
+        let (plaintext, protected) = self
+            .wasm_decrypt_record_with_protection(location, &record)
+            .await?;
+        if !protected || plaintext != expected_plaintext {
+            return Err(SecureStorageError::permission_denied(
+                "protected retirement candidate differs from exact original",
+            ));
+        }
+        self.wasm_compare_exchange_record(location, Some(&record), None)
+            .await?;
+        Ok(true)
+    }
+
     #[cfg(target_arch = "wasm32")]
     async fn wasm_get_record(
         &self,
@@ -3202,6 +3297,10 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(unix)]
         {
+            // Immutable publication briefly links the staged inode to its
+            // final name before unlinking the stage. The reader must not
+            // observe that valid in-process nlink=2 publication window.
+            let _record_owner = self.record_gate.lock().await;
             let record = self
                 .owned_directory()?
                 .read(&self.descriptor_path(location)?, true)
@@ -3290,6 +3389,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(unix)]
         {
+            let _record_owner = self.record_gate.lock().await;
             self.owned_directory()?
                 .read(&self.descriptor_path(location)?, true)
                 .map(|value| value.is_some())
@@ -4040,6 +4140,71 @@ mod tests {
 }
 
 #[cfg(all(test, unix))]
+mod protected_retirement_primitive_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn exact_retirement_refuses_wrong_bytes_and_foreign_profile(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let first = tempfile::tempdir()?;
+        let second = tempfile::tempdir()?;
+        let first_handler =
+            FilesystemFallbackSecureStorageHandler::with_base_path(first.path().into());
+        let second_handler =
+            FilesystemFallbackSecureStorageHandler::with_base_path(second.path().into());
+        let location = SecureStorageLocation::new("retirement-test", "exact-record");
+        let write = &[SecureStorageCapability::Write];
+        let read = &[SecureStorageCapability::Read];
+        let delete = &[SecureStorageCapability::Delete];
+        assert_eq!(
+            first_handler
+                .secure_store_immutable(&location, b"original", write)
+                .await?,
+            aura_core::effects::secure::ImmutableSecureStoreOutcome::Created
+        );
+        second_handler
+            .secure_store_immutable(&location, b"foreign profile", write)
+            .await?;
+        assert!(first_handler
+            .secure_delete(&location, delete)
+            .await
+            .is_err());
+        assert!(first_handler
+            .retire_protected_exact(&location, b"substitute")
+            .await
+            .is_err());
+        assert_eq!(
+            first_handler.secure_retrieve(&location, read).await?,
+            b"original"
+        );
+        assert!(second_handler
+            .retire_protected_exact(&location, b"original")
+            .await
+            .is_err());
+        assert_eq!(
+            second_handler.secure_retrieve(&location, read).await?,
+            b"foreign profile"
+        );
+        assert_eq!(
+            first_handler.secure_retrieve(&location, read).await?,
+            b"original"
+        );
+        assert!(
+            first_handler
+                .retire_protected_exact(&location, b"original")
+                .await?
+        );
+        assert!(
+            !first_handler
+                .retire_protected_exact(&location, b"original")
+                .await?
+        );
+        assert!(!first_handler.secure_exists(&location).await?);
+        Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
 mod descriptor_wrapping_key_tests {
     use super::*;
     #[tokio::test]
@@ -4146,6 +4311,79 @@ mod immutable_secure_record_tests {
             reopened.secure_retrieve(&location, &caps).await?,
             b"original"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_secure_read_waits_for_immutable_link_publication_window(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temporary = tempfile::tempdir()?;
+        let owner = std::sync::Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(
+                temporary.path().to_path_buf(),
+            )
+            .acquire_owned_native()?,
+        );
+        let writer = std::sync::Arc::new(
+            ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(owner.clone())?,
+        );
+        let reader = std::sync::Arc::new(
+            ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(owner)?,
+        );
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = writer.as_ref() else {
+            panic!("selected profile backend required");
+        };
+        let ProductionSecureStorageHandler::FilesystemFallback(handler) = owned.backend.as_ref()
+        else {
+            panic!("selected filesystem backend required");
+        };
+        let ProductionSecureStorageHandler::ProfileOwned(reader_owned) = reader.as_ref() else {
+            panic!("second selected profile backend required");
+        };
+        let ProductionSecureStorageHandler::FilesystemFallback(reader_handler) =
+            reader_owned.backend.as_ref()
+        else {
+            panic!("second selected filesystem backend required");
+        };
+        assert!(std::sync::Arc::ptr_eq(
+            &handler.record_gate,
+            &reader_handler.record_gate,
+        ));
+        let location = SecureStorageLocation::new("read_publication_window", "original");
+        let gate = handler.record_gate.lock().await;
+        let directory = handler.owned_directory()?;
+        let path = handler.descriptor_path(&location)?;
+        let ciphertext = handler.encrypt_fallback_record_with_protection(
+            &location,
+            b"original protected bytes",
+            true,
+        )?;
+        let staged = directory.prepare_private(&path, &ciphertext)?;
+        let staged_path = handler
+            .base_path
+            .join(path.with_file_name(staged.initial_stage_name()));
+        std::fs::hard_link(&staged_path, handler.base_path.join(&path))?;
+        assert!(
+            directory.read(&path, true).is_err(),
+            "the unaliased-file guard must still reject the transient second link"
+        );
+        let reading = {
+            let reader = reader.clone();
+            let location = location.clone();
+            tokio::spawn(async move {
+                reader
+                    .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(
+            !reading.is_finished(),
+            "protected read must wait rather than reject a valid nlink=2 publication"
+        );
+        std::fs::remove_file(&staged_path)?;
+        drop(gate);
+        assert_eq!(reading.await??, b"original protected bytes");
         Ok(())
     }
 
@@ -4520,6 +4758,42 @@ mod platform_secure_record_fault_tests {
             // The real profile remains alive through credential cleanup.
             let _ = self.profile.path();
         }
+    }
+
+    #[tokio::test]
+    async fn actual_platform_private_exact_retirement_rejects_wrong_bytes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = PlatformFixture::new()?;
+        let selected = fixture.selected()?;
+        let location = SecureStorageLocation::new("test_actual_platform", "original");
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        fixture
+            .backend
+            .secure_store_immutable(&location, b"original", &caps)
+            .await?;
+        assert!(selected
+            .retire_protected_exact(&location, b"substitute")
+            .await
+            .is_err());
+        assert_eq!(
+            fixture.backend.secure_retrieve(&location, &caps).await?,
+            b"original"
+        );
+        assert!(
+            selected
+                .retire_protected_exact(&location, b"original")
+                .await?
+        );
+        assert!(
+            !selected
+                .retire_protected_exact(&location, b"original")
+                .await?
+        );
+        assert!(!fixture.backend.secure_exists(&location).await?);
+        Ok(())
     }
 
     #[tokio::test]

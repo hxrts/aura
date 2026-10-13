@@ -168,8 +168,9 @@ across terminal and browser surfaces.
 
 An enrollment signing intent is identification data. Receiving, displaying, or
 parsing it does not approve signing. Local consent binds the original runtime and
-exact v3 four-domain intent, including its finite conditional negative terminal
-policy. Historical consent cannot be upgraded to new control authority; the
+exact v4 five-domain intent, including its original issuer return mailbox
+statement and finite conditional negative terminal policy. Historical consent
+cannot be upgraded to new control authority; the
 policy alone cannot establish a negative decision or terminal success. A pending
 code-issuance outcome is distinct from committed enrollment
 and activation, and shared scenarios cannot infer the latter from code export.

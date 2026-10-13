@@ -29,6 +29,80 @@ mod cancellation_custody;
 const DEFERRED_INVITATION_DELIVERY_ATTEMPTS: usize = 12;
 const DEFERRED_INVITATION_DELIVERY_BACKOFF_MS: u64 = 500;
 
+#[cfg(test)]
+type OriginalIssuerBeforeVmGate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
+#[cfg(test)]
+fn original_issuer_before_vm_gates(
+) -> &'static std::sync::Mutex<std::collections::HashMap<AuthorityId, OriginalIssuerBeforeVmGate>> {
+    static GATES: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<AuthorityId, OriginalIssuerBeforeVmGate>>,
+    > = std::sync::OnceLock::new();
+    GATES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(test)]
+pub(crate) struct OriginalIssuerBeforeVmGateGuard {
+    authority: AuthorityId,
+    release: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+#[cfg(test)]
+impl OriginalIssuerBeforeVmGateGuard {
+    pub(crate) fn release(mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for OriginalIssuerBeforeVmGateGuard {
+    fn drop(&mut self) {
+        original_issuer_before_vm_gates()
+            .lock()
+            .expect("issuer VM gate registry")
+            .remove(&self.authority);
+        // Dropping the sender also releases an already waiting finalizer.
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn hold_original_issuer_before_first_vm_for_test(
+    authority: AuthorityId,
+) -> (
+    tokio::sync::oneshot::Receiver<()>,
+    OriginalIssuerBeforeVmGateGuard,
+) {
+    let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+    let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+    let previous = original_issuer_before_vm_gates()
+        .lock()
+        .expect("issuer VM gate registry")
+        .insert(authority, (entered_sender, release_receiver));
+    assert!(previous.is_none(), "original issuer already has a VM gate");
+    (
+        entered_receiver,
+        OriginalIssuerBeforeVmGateGuard {
+            authority,
+            release: Some(release_sender),
+        },
+    )
+}
+
+#[cfg(test)]
+fn take_original_issuer_before_vm_gate_for_test(
+    authority: AuthorityId,
+) -> Option<OriginalIssuerBeforeVmGate> {
+    original_issuer_before_vm_gates()
+        .lock()
+        .expect("issuer VM gate registry")
+        .remove(&authority)
+}
+
 /// A committed original shortcut with a verified native quorum proof over its
 /// final recipient-bound code. Only the issuer method below can construct it.
 pub(crate) struct IssuedOriginalShortcutDelivery {
@@ -1094,8 +1168,16 @@ impl OriginalIssuerTaskCustody {
                         "original issuer control is missing at child admission",
                     )
                 })?);
+                self.effects.retain_original_mailbox_issuer(&issued)?;
                 let destination = Arc::clone(&self.terminal_destination);
                 let execution = async move {
+                    #[cfg(test)]
+                    if let Some((entered, release)) =
+                        take_original_issuer_before_vm_gate_for_test(effects.runtime_authority_id())
+                    {
+                        let _ = entered.send(());
+                        let _ = release.await;
+                    }
                     let result = handler
                         .execute_device_enrollment_initiator_owned(
                             effects,
@@ -3261,6 +3343,7 @@ impl InvitationServiceApi {
             'a,
         >,
         manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+        return_commitment: [u8; 32],
     ) -> impl std::future::Future<
         Output = AgentResult<(
             aura_app::runtime_bridge::EnrollmentManifestTransferCodes,
@@ -3276,6 +3359,7 @@ impl InvitationServiceApi {
             selected_identity,
             final_inventory,
             manifest,
+            return_commitment,
         ))
     }
 
@@ -3292,6 +3376,7 @@ impl InvitationServiceApi {
             '_,
         >,
         manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+        return_commitment: [u8; 32],
     ) -> AgentResult<(
         aura_app::runtime_bridge::EnrollmentManifestTransferCodes,
         IssuedEnrollmentManifestBinding,
@@ -3340,6 +3425,77 @@ impl InvitationServiceApi {
                     aura_invitation::enrollment_manifest::EnrollmentManifestError::RequiredTranscript(e),
                 )
             })?;
+        // The same retained K1 identity selected for the original manifest
+        // signs a distinct return-routing domain before any code is exported.
+        // The native root package, epoch and physical participant came from
+        // final_inventory and selected_identity, never from a peer descriptor.
+        let return_statement = aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement::for_owned_single_signer_manifest(
+            &manifest, return_commitment,
+        ).map_err(|source| AgentError::Aura(aura_core::AuraError::crypto_with_source(
+            "select original K1 return policy", Arc::new(source),
+        )))?;
+        let return_signature =
+            sign_ed25519_transcript(self.effects.as_ref(), &return_statement, &private)
+                .await
+                .map_err(|source| {
+                    AgentError::Aura(aura_core::AuraError::crypto_with_source(
+                        "sign original K1 return transcript",
+                        Arc::new(source),
+                    ))
+                })?;
+        use aura_core::effects::secure::ImmutableSecureStoreOutcome;
+        use aura_core::effects::{
+            CryptoExtendedEffects, SecureStorageCapability, SecureStorageEffects,
+            SecureStorageLocation,
+        };
+        use aura_signature::SecurityTranscript;
+        let policy = manifest
+            .final_inventory()
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::crypto_with_source(
+                    "read original K1 root policy",
+                    Arc::new(source),
+                ))
+            })?
+            .get(usize::from(return_statement.issuer_policy_index()))
+            .cloned()
+            .ok_or_else(|| AgentError::invalid("original K1 root policy absent"))?;
+        let return_bytes = return_statement
+            .required_transcript_bytes()
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::crypto_with_source(
+                    "encode original K1 return transcript",
+                    Arc::new(source),
+                ))
+            })?;
+        if policy.signing_node != aura_core::tree::NodeIndex(0)
+            || policy.mode != aura_core::crypto::single_signer::SigningMode::SingleSigner
+            || policy.epoch != manifest.final_epoch
+            || policy.epoch != selected_identity.epoch()
+            || !self
+                .effects
+                .verify_signature(
+                    &return_bytes,
+                    &return_signature,
+                    &policy.public_key_package,
+                    policy.mode,
+                )
+                .await?
+        {
+            return Err(AgentError::invalid(
+                "original K1 return signature/policy differs from retained identity",
+            ));
+        }
+        let registration =
+            aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration {
+                statement: return_statement.clone(),
+                mode: aura_core::crypto::single_signer::SigningMode::SingleSigner,
+                proof: aura_core::threshold::ThresholdSignature::single_signer(
+                    return_signature,
+                    policy.public_key_package,
+                    policy.epoch,
+                ),
+            };
         #[cfg(test)]
         eprintln!("enrollment manifest export stage: export exact baseline");
         let baseline = self
@@ -3378,6 +3534,43 @@ impl InvitationServiceApi {
                     ),
                 )
             })?;
+        let encoded = aura_core::util::serialization::to_vec(&registration)
+            .map_err(|source| AgentError::Aura(source.into()))?;
+        let location = SecureStorageLocation::new(
+            "issuer_return_mailbox_registration_v1",
+            format!(
+                "{}:{}:{}",
+                manifest.subject,
+                manifest.invitation,
+                hex::encode(return_statement.manifest_digest())
+            ),
+        );
+        match self
+            .effects
+            .secure_store_immutable(
+                &location,
+                &encoded,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                    SecureStorageCapability::Delete,
+                ],
+            )
+            .await?
+        {
+            ImmutableSecureStoreOutcome::Created => {}
+            ImmutableSecureStoreOutcome::AlreadyExists => {
+                let original = self
+                    .effects
+                    .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                    .await?;
+                if original != encoded {
+                    return Err(AgentError::invalid(
+                        "original K1 return registration was already issued differently",
+                    ));
+                }
+            }
+        }
         let manifest_subject = manifest.subject;
         let manifest_device = manifest.initiator_device;
         let digest = checked.manifest_digest();
@@ -4455,6 +4648,7 @@ mod tests {
                     identity,
                     final_inventory,
                     manifest,
+                    [7; 32],
                 )
             },
         );

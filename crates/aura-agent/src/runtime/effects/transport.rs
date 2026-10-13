@@ -641,6 +641,84 @@ async fn send_planned_envelope(
         }
     }
 
+    if is_choreography_envelope(&envelope) {
+        if let (Some(session), Some(manager)) = (
+            envelope
+                .metadata
+                .get("session-id")
+                .and_then(|raw| uuid::Uuid::parse_str(raw).ok()),
+            effects.rendezvous_manager(),
+        ) {
+            if manager.config().bootstrap_broker.enabled {
+                let admissions = crate::handlers::invitation::enrollment_manifest_admission::load_recoverable_negative_admissions(effects)
+                    .await
+                    .map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;
+                for admitted in admissions {
+                    let manifest = admitted.manifest();
+                    if session != aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(&manifest.invitation)
+                        || envelope.source != manifest.invitee_authority
+                        || envelope.destination != manifest.subject
+                        || envelope.metadata.get("aura-source-device-id")
+                            != Some(&manifest.invitee_device.to_string())
+                        || envelope.metadata.get("aura-destination-device-id")
+                            != Some(&manifest.initiator_device.to_string())
+                    {
+                        continue;
+                    }
+                    let signer = effects.original_return_signer().ok_or_else(|| {
+                        TransportError::ProtocolError {
+                            details:
+                                "original enrollment return signer is not retained by this runtime"
+                                    .into(),
+                        }
+                    })?;
+                    let registration = manager
+                        .original_issuer_return_mailbox_registration(
+                            manifest.subject,
+                            manifest.initiator_device,
+                            admitted.manifest_digest(),
+                        )
+                        .await
+                        .map_err(|source| TransportError::ProtocolError {
+                            details: source.to_string(),
+                        })?
+                        .ok_or(TransportError::DestinationUnreachable {
+                            destination: envelope.destination,
+                        })?
+                        .verify_for_admitted_original(
+                            effects,
+                            admitted.baseline(),
+                            admitted.local_setup(),
+                        )
+                        .await
+                        .map_err(|source| TransportError::ProtocolError {
+                            details: source.to_string(),
+                        })?;
+                    let authorization = signer
+                        .sign_envelope(
+                            effects,
+                            &registration,
+                            admitted.baseline(),
+                            admitted.local_setup(),
+                            &envelope,
+                        )
+                        .await
+                        .map_err(|source| TransportError::ProtocolError {
+                            details: source.to_string(),
+                        })?;
+                    manager.send_original_issuer_return_vm_envelope(
+                        crate::runtime::services::bootstrap_broker::BootstrapIssuerReturnMailboxEnvelope {
+                            manifest_digest: admitted.manifest_digest(),
+                            setup_request: admitted.local_setup().public_request(),
+                            authorization,
+                            envelope,
+                        },
+                    ).await.map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;
+                    return Ok(());
+                }
+            }
+        }
+    }
     let destination = envelope.destination;
     let unreachable = || TransportError::DestinationUnreachable { destination };
     // Choreography sessions run in a fresh per-session context that never has

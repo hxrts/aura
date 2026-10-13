@@ -841,6 +841,7 @@ mod tests {
                 operation_id: OperationId::invitation_accept_contact(),
                 state: OperationState::Succeeded,
                 after_instance: None,
+                at_instance: None,
             }),
             &BarrierDeclaration::OperationState {
                 operation_id: OperationId::invitation_accept_contact(),

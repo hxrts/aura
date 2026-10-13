@@ -211,6 +211,17 @@ cargo test -p aura-simulator
 | Guard interpreter not deterministic | DeterministicReplay | `src/effects/guard_interpreter.rs` `test_deterministic_nonce_generation` | Covered |
 | Property monitor misses invariant violation | — | `tests/fault_invariant_monitor.rs` | Covered |
 
+The `enrollment_lifecycle` native integration binary uses the production
+simulation-feature agent adapter for signed setup, transferred verifier pins,
+actual recipient acceptance or rejection, required disposal and same-profile
+reopen. Its public-app success path acknowledges a real nonsecret filesystem
+completion write before one success terminal. The matching refusal points the
+same host handler at a blocked native directory and retains the original storage
+source, one Failed terminal for the submitted instance, and original task
+disposal. Broker prefill coverage proves signed invitation delivery, not the
+pre-adoption VM route. These fixtures do not prove production selected-identity
+persistence, retry/reopen after refusal, or browser host storage behavior.
+
 ## References
 
 - [Theoretical Model](../../docs/002_theoretical_model.md)

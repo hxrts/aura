@@ -1048,6 +1048,7 @@ mod tests {
     use super::*;
     use crate::runtime_bridge::AgentRuntimeBridge;
     use aura_app::runtime_bridge::RuntimeBridge;
+    use std::sync::Arc;
 
     // Real runtime construction uses the same explicit stack budget as the
     // neighboring enrollment integration fixtures; no global environment is needed.
@@ -1125,6 +1126,374 @@ mod tests {
                 effects.secure_retrieve(&key, &read).await.is_err(),
                 "corrupt admission evidence fails closed and is not replaced"
             );
+        }
+    );
+
+    runtime_admission_test!(
+        actual_admitted_setup_signs_exact_pending_mailbox_registration_and_refuses_substitution,
+        {
+            let (_issuer, invitee, invitation, _start, _accept, _verified) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "signed-pending-mailbox-registration",
+                ),
+            )
+            .await;
+            let effects = invitee.runtime().effects();
+            let admitted = load_recoverable_negative_admissions(effects.as_ref())
+                .await
+                .expect("actual protected original admission");
+            assert_eq!(admitted.len(), 1);
+            let original = &admitted[0];
+            assert_eq!(original.manifest().invitation, invitation.invitation_id);
+            let commitment = aura_core::hash::hash(b"independent one-time retrieval credential");
+            let registration = invitee
+                .threshold_signing()
+                .sign_pending_enrollment_mailbox_registration(
+                    original.baseline(),
+                    original.local_setup(),
+                    commitment,
+                )
+                .await
+                .expect("actual provisional setup key signs original route");
+            let selected_now = effects.physical_time().await.unwrap().ts_ms;
+            let verified = registration
+                .clone()
+                .verify_for_admitted_original(
+                    effects.as_ref(),
+                    original.baseline(),
+                    original.local_setup(),
+                    selected_now,
+                )
+                .await
+                .expect("exact signed setup route verifies against original transfer");
+            assert_eq!(verified.statement().invitation(), &invitation.invitation_id);
+            assert_eq!(verified.statement().subject(), original.manifest().subject);
+            assert_eq!(verified.statement().invitee_device(), effects.device_id());
+            for (field, replacement) in [
+                ("invitation", serde_json::json!("foreign-invitation")),
+                ("manifest_digest", serde_json::json!(vec![0_u8; 32])),
+                (
+                    "invitee_device",
+                    serde_json::json!(aura_core::DeviceId::from_bytes([49; 32])),
+                ),
+                (
+                    "expires_at_ms",
+                    serde_json::json!(original.manifest().expires_at_ms - 1),
+                ),
+            ] {
+                let mut altered = serde_json::to_value(&registration).unwrap();
+                altered["statement"][field] = replacement;
+                let altered = serde_json::from_value(altered).unwrap();
+                assert!(
+                    aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration::verify_for_admitted_original(
+                        altered,
+                        effects.as_ref(),
+                        original.baseline(),
+                        original.local_setup(),
+                        selected_now,
+                    )
+                    .await
+                    .is_err(),
+                    "foreign {field} cannot select original mailbox"
+                );
+            }
+            let mut foreign_key = registration.clone();
+            foreign_key.proof.public_key_package = vec![7; 32];
+            assert!(foreign_key
+                .verify_for_admitted_original(
+                    effects.as_ref(),
+                    original.baseline(),
+                    original.local_setup(),
+                    selected_now,
+                )
+                .await
+                .is_err());
+            assert!(registration
+                .verify_for_admitted_original(
+                    effects.as_ref(),
+                    original.baseline(),
+                    original.local_setup(),
+                    original.manifest().expires_at_ms,
+                )
+                .await
+                .is_err());
+        }
+    );
+
+    runtime_admission_test!(
+        authenticated_pending_mailbox_first_frame_retries_interrupted_take_until_receiver_ack,
+        {
+            let (issuer, invitee, invitation, _start, _accept, _verified) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "authenticated-first-mailbox-frame",
+                ),
+            )
+            .await;
+            let issuer_effects = issuer.runtime().effects();
+            let invitee_effects = invitee.runtime().effects();
+            let admitted = load_recoverable_negative_admissions(invitee_effects.as_ref())
+                .await
+                .expect("actual protected original admission");
+            assert_eq!(admitted.len(), 1);
+            let admitted = &admitted[0];
+            let broker = crate::runtime::services::bootstrap_broker::LocalBootstrapBrokerService::bind(
+                "127.0.0.1:0",
+                std::time::Duration::from_secs(60),
+                "first-frame-global-broker-auth",
+                crate::runtime::services::bootstrap_broker::BootstrapBrokerLanBindPolicy::LoopbackOnly,
+            ).await.expect("loopback broker")
+                .with_mailbox_time_provider(Arc::new(invitee_effects.time_effects().clone()));
+            broker.start(
+                &issuer
+                    .runtime()
+                    .tasks()
+                    .group("original-first-mailbox-broker"),
+            );
+            let config =
+                crate::runtime::services::bootstrap_broker::BootstrapBrokerConfig::default()
+                    .enabled(true)
+                    .with_base_url(broker.public_url())
+                    .with_auth_token("first-frame-global-broker-auth");
+            let issuer_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+                issuer.authority_id(),
+                crate::runtime::services::RendezvousManagerConfig::default()
+                    .with_bootstrap_broker(config.clone()),
+                Arc::new(issuer_effects.time_effects().clone()),
+            );
+            let invitee_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+                invitee.authority_id(),
+                crate::runtime::services::RendezvousManagerConfig::default()
+                    .with_bootstrap_broker(config),
+                Arc::new(invitee_effects.time_effects().clone()),
+            );
+            issuer_effects.attach_rendezvous_manager(issuer_manager.clone());
+            invitee_effects.attach_rendezvous_manager(invitee_manager.clone());
+            assert_eq!(
+                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
+                0
+            );
+            let session =
+                aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
+                    &invitation.invitation_id,
+                );
+            let retained = issuer_effects
+                .original_mailbox_issuer(session)
+                .expect("actual original issuer owns the live enrollment session");
+            let registration = issuer_manager
+                .original_pending_mailbox_registration(
+                    admitted.manifest().subject,
+                    admitted.manifest().invitee_device,
+                    admitted.manifest_digest(),
+                )
+                .await
+                .expect("Bob's actual setup-key registration reached broker");
+            let route =
+                super::super::enrollment_trust::verify_original_pending_mailbox_sender_route(
+                    retained.as_ref(),
+                    registration,
+                )
+                .await
+                .expect("Alice independently verifies Bob's pinned setup key");
+            let context = aura_core::ContextId::new_from_entropy([84; 32]);
+            let mut envelope = aura_core::effects::transport::TransportEnvelope {
+                source: issuer.authority_id(),
+                destination: issuer.authority_id(),
+                context,
+                payload: vec![0x44, 0x65, 0x76, 0x69, 0x63, 0x65],
+                metadata: std::collections::HashMap::from([
+                    (
+                        "content-type".into(),
+                        "application/aura-choreography".into(),
+                    ),
+                    ("session-id".into(), session.to_string()),
+                    (
+                        "aura-destination-device-id".into(),
+                        invitee.runtime().device_id().to_string(),
+                    ),
+                    (
+                        "aura-message-id".into(),
+                        uuid::Uuid::from_bytes([17; 16]).to_string(),
+                    ),
+                ]),
+                receipt: None,
+            };
+            envelope.receipt = Some(aura_core::effects::transport::TransportReceipt {
+                context,
+                src: envelope.source,
+                dst: envelope.destination,
+                epoch: 1,
+                cost: 1,
+                nonce: 1,
+                prev: [0; 32],
+                sig: vec![1],
+            });
+            issuer_manager
+                .send_original_pending_mailbox_envelope(
+                    issuer_effects.as_ref(),
+                    &route,
+                    envelope.clone(),
+                )
+                .await
+                .expect("only sealed original issuer route enqueues exact frame");
+            let retained_record = invitee_effects
+                .secure_retrieve(
+                    &crate::core::agent::pending_enrollment_mailbox::retained_location(admitted),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .expect("Bob's scoped credential is encrypted at rest");
+            let credential: crate::core::agent::pending_enrollment_mailbox::RetainedMailboxCredential =
+                aura_core::util::serialization::from_slice(&retained_record).unwrap();
+            assert!(
+                invitee_manager
+                    .take_original_pending_mailbox(
+                        admitted.manifest().subject,
+                        admitted.manifest().invitee_device,
+                        admitted.manifest_digest(),
+                        "foreign-retrieval-credential",
+                    )
+                    .await
+                    .is_err(),
+                "broker rejects a caller without Bob's scoped credential"
+            );
+            let mut foreign_device = envelope.clone();
+            foreign_device.metadata.insert(
+                "aura-destination-device-id".into(),
+                aura_core::DeviceId::from_bytes([99; 32]).to_string(),
+            );
+            assert!(
+                issuer_manager
+                    .send_original_pending_mailbox_envelope(
+                        issuer_effects.as_ref(),
+                        &route,
+                        foreign_device,
+                    )
+                    .await
+                    .is_err(),
+                "verified sender route rejects foreign recipient device"
+            );
+            let first = invitee_manager
+                .take_original_pending_mailbox(
+                    admitted.manifest().subject,
+                    admitted.manifest().invitee_device,
+                    admitted.manifest_digest(),
+                    &credential.credential,
+                )
+                .await
+                .expect("first authenticated take");
+            assert_eq!(first.len(), 1);
+            let retried = invitee_manager
+                .take_original_pending_mailbox(
+                    admitted.manifest().subject,
+                    admitted.manifest().invitee_device,
+                    admitted.manifest_digest(),
+                    &credential.credential,
+                )
+                .await
+                .expect("interrupted take returns the original frame");
+            assert_eq!(retried.len(), 1);
+            assert_eq!(retried[0].message_id, first[0].message_id);
+            assert_eq!(retried[0].envelope.payload, envelope.payload);
+            broker
+                .interrupt_next_pending_enrollment_ack_for_test()
+                .await;
+            assert!(
+                invitee.drain_pending_enrollment_vm_mailbox().await.is_err(),
+                "injected ACK interruption preserves Bob's encrypted frame custody"
+            );
+            let frame_key = crate::core::agent::pending_enrollment_mailbox::frame_location(
+                admitted.manifest_digest(),
+                &first[0].message_id,
+            );
+            assert!(invitee_effects.secure_exists(&frame_key).await.unwrap());
+            assert_eq!(
+                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
+                0,
+                "broker redelivery ACKs exact retained bytes without duplicate runtime intake"
+            );
+            let queued = invitee_effects
+                .take_unclaimed_choreography_envelope_retained(|candidate| {
+                    candidate.metadata.get("aura-message-id")
+                        == envelope.metadata.get("aura-message-id")
+                })
+                .expect("actual Bob runtime owns original frame after broker ACK");
+            assert_eq!(queued.payload, envelope.payload);
+            assert!(
+                invitee_effects
+                    .take_unclaimed_choreography_envelope_retained(|candidate| candidate
+                        .metadata
+                        .get("aura-message-id")
+                        == envelope.metadata.get("aura-message-id"),)
+                    .is_none(),
+                "ambiguous ACK does not duplicate the actual runtime frame"
+            );
+            assert!(
+                invitee_manager
+                    .take_original_pending_mailbox(
+                        admitted.manifest().subject,
+                        admitted.manifest().invitee_device,
+                        admitted.manifest_digest(),
+                        &credential.credential,
+                    )
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "ACK follows actual runtime admission"
+            );
+            let config = invitee_effects.config().clone();
+            let clock = Arc::new(invitee_effects.time_effects().clone());
+            let authority = invitee.authority_id();
+            let device = invitee.runtime().device_id();
+            let message_id = first[0].message_id.clone();
+            let _consumed_before_reopen = queued.consume();
+            if let Err(source) = invitee
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+            {
+                assert!(
+                    matches!(
+                        source,
+                        crate::task_registry::TaskSupervisionError::TaskFailed { .. }
+                    ),
+                    "same-profile shutdown retains concrete required-task failure: {source:?}"
+                );
+            }
+            drop(invitee_effects);
+            drop(invitee);
+            let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+                .expect("same protected Bob profile reopens after process teardown");
+            let context = aura_core::context::EffectContext::new(
+                authority,
+                aura_core::ContextId::new_from_entropy([156; 32]),
+                aura_core::effects::ExecutionMode::Testing,
+            );
+            let reopened_runtime =
+                crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
+                    .with_authority(authority)
+                    .with_config(config)
+                    .with_physical_time_provider(clock)
+                    .build(&context)
+                    .await
+                    .expect("actual Bob runtime reopens encrypted original custody");
+            assert_eq!(reopened_runtime.device_id(), device);
+            let reopened = crate::AuraAgent::new(reopened_runtime, authority);
+            assert_eq!(
+                reopened
+                    .drain_pending_enrollment_vm_mailbox()
+                    .await
+                    .unwrap(),
+                1,
+                "same-profile process restart replays encrypted frame after broker ACK"
+            );
+            let reopened_effects = reopened.runtime().effects();
+            let replayed = reopened_effects
+                .take_unclaimed_choreography_envelope_retained(|candidate| {
+                    candidate.metadata.get("aura-message-id") == Some(&message_id)
+                })
+                .expect("reopened original VM queue owns exact retained frame");
+            assert_eq!(replayed.payload, envelope.payload);
         }
     );
 

@@ -22,6 +22,8 @@ struct State {
     deadlines: tokio::sync::Mutex<BTreeMap<u64, Arc<AtomicUsize>>>,
     deadlines_changed: tokio::sync::Notify,
     observation_override: tokio::sync::Mutex<Option<Result<PhysicalTime, TimeError>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    task_observation_failure: tokio::sync::Mutex<Option<(tokio::task::Id, TimeError)>>,
     sleep_failure: tokio::sync::Mutex<Option<TimeError>>,
     sleep_admission: tokio::sync::Mutex<
         Option<(
@@ -40,6 +42,8 @@ impl ManualPhysicalClock {
                 deadlines: tokio::sync::Mutex::new(BTreeMap::new()),
                 deadlines_changed: tokio::sync::Notify::new(),
                 observation_override: tokio::sync::Mutex::new(None),
+                #[cfg(not(target_arch = "wasm32"))]
+                task_observation_failure: tokio::sync::Mutex::new(None),
                 sleep_failure: tokio::sync::Mutex::new(None),
                 sleep_admission: tokio::sync::Mutex::new(None),
             }),
@@ -48,6 +52,25 @@ impl ManualPhysicalClock {
     /// Fail the next actual provider observation with the supplied typed cause.
     pub async fn fail_next_observation(&self, cause: TimeError) {
         *self.state.observation_override.lock().await = Some(Err(cause));
+    }
+    /// Fail the next read by this exact Tokio task. Background runtime reads
+    /// of the same provider cannot consume the selected workflow fault.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn fail_next_current_task_observation(
+        &self,
+        cause: TimeError,
+    ) -> Result<(), TimeError> {
+        let task = tokio::task::try_id().ok_or_else(|| TimeError::OperationFailed {
+            reason: "selected physical fault requires a Tokio task".into(),
+        })?;
+        let mut slot = self.state.task_observation_failure.lock().await;
+        if slot.is_some() {
+            return Err(TimeError::OperationFailed {
+                reason: "selected physical fault already installed".into(),
+            });
+        }
+        *slot = Some((task, cause));
+        Ok(())
     }
     /// Script one actual physical read without changing independently driven
     /// time or the original endpoints registered by absolute waits.
@@ -180,6 +203,13 @@ impl Drop for RegisteredManualDeadline {
 #[async_trait::async_trait]
 impl PhysicalTimeEffects for ManualPhysicalClock {
     async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(task) = tokio::task::try_id() {
+            let mut selected = self.state.task_observation_failure.lock().await;
+            if selected.as_ref().is_some_and(|(owner, _)| *owner == task) {
+                return Err(selected.take().expect("matched selected fault").1);
+            }
+        }
         if let Some(observation) = self.state.observation_override.lock().await.take() {
             return observation;
         }
@@ -450,6 +480,47 @@ mod tests {
                 .ts_ms,
             100
         );
+    }
+    #[tokio::test]
+    async fn selected_task_observation_fault_survives_other_runtime_readers() {
+        let clock = ManualPhysicalClock::new(100);
+        let selected_clock = clock.clone();
+        let (armed, observed) = tokio::sync::oneshot::channel();
+        let (resume, continued) = tokio::sync::oneshot::channel();
+        let selected = tokio::spawn(async move {
+            selected_clock
+                .fail_next_current_task_observation(TimeError::OperationFailed {
+                    reason: "selected owner read failed".into(),
+                })
+                .await
+                .expect("selected Tokio owner");
+            armed.send(()).expect("driver observes armed fault");
+            continued.await.expect("driver permits selected read");
+            assert!(matches!(
+                selected_clock.physical_time().await,
+                Err(TimeError::OperationFailed { reason }) if reason == "selected owner read failed"
+            ));
+            assert_eq!(
+                selected_clock
+                    .physical_time()
+                    .await
+                    .expect("one-shot fault")
+                    .ts_ms,
+                100
+            );
+        });
+        observed.await.expect("selected task armed fault");
+        let background = clock.clone();
+        assert_eq!(
+            tokio::spawn(async move { background.physical_time().await })
+                .await
+                .expect("background task")
+                .expect("unrelated reader remains healthy")
+                .ts_ms,
+            100
+        );
+        resume.send(()).expect("selected task still owns fault");
+        selected.await.expect("selected owner settled");
     }
     #[tokio::test]
     async fn sleep_requires_explicit_observation_and_keeps_rollback_visible() {

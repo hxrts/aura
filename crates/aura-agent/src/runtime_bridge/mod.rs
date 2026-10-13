@@ -2094,15 +2094,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "LAN descriptor publish after signing-key bootstrap failed; periodic refresh will retry"
             );
             runtime
-                .tasks()
-                .group("runtime_bridge.bootstrap_announcement")
-                .record_subsidiary_failure(
-                    "initial_lan_descriptor",
-                    aura_core::AuraError::Internal {
-                        message: "bounded signing bootstrap LAN announcement failed".into(),
-                        source: Some(Arc::new(source)),
-                    },
-                );
+                .record_lan_descriptor_degradation(source.to_string())
+                .await;
         }
         Ok(public_key_package)
     }
@@ -3802,6 +3795,72 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })?;
         let invitation = service.import_enrollment_and_cache(code, &pin).await?;
         Ok(convert_invitation_to_bridge_info(&invitation))
+    }
+
+    async fn authenticate_enrollment_host_recovery(
+        &self,
+        completion: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
+    ) -> Result<(), RuntimeBridgeError> {
+        let effects = self.agent.runtime().effects();
+        let confirmed =
+            crate::handlers::invitation::enrollment_manifest_admission::load_confirmed_enrollment(
+                effects.as_ref(),
+                completion.original_provisional(),
+                completion.invitation_id(),
+            )
+            .await
+            .map_err(|source| {
+                error_boundary::bridge_runtime_internal(
+                    "Revalidate original enrollment confirmation",
+                    source,
+                )
+            })?;
+        let manifest = confirmed.confirmation().manifest();
+        if self.agent.authority_id() != manifest.subject
+            || effects.device_id() != manifest.invitee_device
+            || completion.subject_authority() != manifest.subject
+            || completion.device_id() != manifest.invitee_device
+            || completion.original_provisional() != manifest.invitee_authority
+            || completion.invitation_id() != &manifest.invitation
+            || completion.ceremony_id() != &manifest.ceremony
+            || completion.pending_epoch() != manifest.pending_epoch
+            || completion.manifest_digest() != confirmed.confirmation().manifest_digest()
+            || completion.setup_digest() != manifest.setup.digest
+        {
+            return Err(error_boundary::bridge_runtime_internal(
+                "Enrollment host recovery binding changed",
+                aura_core::AuraError::permission_denied(
+                    "host recovery differs from original signed enrollment",
+                ),
+            ));
+        }
+        // Check the current protected generation, not merely the historical
+        // signed checkpoint. A later rotation or missing active epoch refuses
+        // recovery rather than authorizing an old host identity projection.
+        let active = effects
+            .secure_retrieve(
+                &SecureStorageLocation::new("epoch_state", manifest.subject.to_string()),
+                &[SecureStorageCapability::Read],
+            )
+            .await
+            .map_err(|source| {
+                error_boundary::bridge_runtime_internal("Read active enrollment epoch", source)
+            })?;
+        let epoch: [u8; 8] = active.as_slice().try_into().map_err(|source| {
+            error_boundary::bridge_runtime_internal("Decode active enrollment epoch", source)
+        })?;
+        let package = effects.public_key_package(&manifest.subject).await;
+        if u64::from_le_bytes(epoch) != manifest.pending_epoch
+            || package.as_deref().map(hash) != Some(manifest.pending_public_key_package_digest)
+        {
+            return Err(error_boundary::bridge_runtime_internal(
+                "Enrollment host recovery active generation changed",
+                aura_core::AuraError::permission_denied(
+                    "active signing generation differs from confirmed enrollment",
+                ),
+            ));
+        }
+        Ok(())
     }
 
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {

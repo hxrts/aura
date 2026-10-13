@@ -778,6 +778,13 @@ impl RuntimeSystem {
             .await
     }
 
+    /// Retain a subsidiary announcement failure in service health.
+    pub(crate) async fn record_lan_descriptor_degradation(&self, reason: String) {
+        self.maintenance_service
+            .record_initial_lan_descriptor_failure(reason)
+            .await;
+    }
+
     /// Create a new runtime system
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)] // Factory retained for future runtime wiring

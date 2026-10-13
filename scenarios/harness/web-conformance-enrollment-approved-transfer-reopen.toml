@@ -203,6 +203,15 @@ name = "bob_enrollment_instance"
 timeout_ms = 3000
 
 [[steps]]
+id = "bob-exact-original-import-succeeded"
+action = "operation_state_is"
+actor = "bob"
+operation_id = "device_enrollment"
+operation_state = "succeeded"
+at_instance = "${bob_enrollment_instance}"
+timeout_ms = 3000
+
+[[steps]]
 id = "bob-host-acknowledged-adopted-device"
 action = "runtime_event_occurred"
 actor = "bob"
@@ -233,9 +242,19 @@ count = 2
 timeout_ms = 30000
 
 [[steps]]
+id = "bob-exact-import-still-succeeded-before-restart"
+action = "operation_state_is"
+actor = "bob"
+operation_id = "device_enrollment"
+operation_state = "succeeded"
+at_instance = "${bob_enrollment_instance}"
+timeout_ms = 3000
+
+[[steps]]
 id = "bob-restart-adopted-browser-profile"
 action = "restart_actor"
 actor = "bob"
+at_instance = "${bob_enrollment_instance}"
 timeout_ms = 60000
 
 [[steps]]

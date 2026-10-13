@@ -1135,10 +1135,20 @@ fn execute_semantic_environment_action(
 ) -> Result<()> {
     match environment {
         EnvironmentAction::LaunchActors => Ok(()),
-        EnvironmentAction::RestartActor { actor } => {
+        EnvironmentAction::RestartActor { actor, at_instance } => {
             let instance_id = actor.0.clone();
+            let expected_operation_instance = at_instance
+                .as_ref()
+                .map(|value| resolve_template(value, context))
+                .transpose()?;
             clear_projection_baseline(context, &instance_id);
-            dispatch(tool_api, ToolRequest::Restart { instance_id })
+            dispatch(
+                tool_api,
+                ToolRequest::Restart {
+                    instance_id,
+                    expected_operation_instance,
+                },
+            )
         }
         EnvironmentAction::KillActor { actor } => {
             let instance_id = actor.0.clone();
@@ -1939,11 +1949,16 @@ fn semantic_expectation_wait_step(
             operation_id,
             state,
             after_instance,
+            at_instance,
         } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.operation_id = Some(operation_id.clone());
             wait_step.operation_state = Some(*state);
             wait_step.operation_after_instance = after_instance
+                .as_ref()
+                .map(|value| resolve_template(value, context))
+                .transpose()?;
+            wait_step.operation_exact_instance = at_instance
                 .as_ref()
                 .map(|value| resolve_template(value, context))
                 .transpose()?;
@@ -3231,6 +3246,13 @@ fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> boo
             return false;
         }
         if step
+            .operation_exact_instance
+            .as_ref()
+            .is_some_and(|exact| observed_operation.instance_id.0 != *exact)
+        {
+            return false;
+        }
+        if step
             .operation_after_instance
             .as_ref()
             .is_some_and(|previous| observed_operation.instance_id.0 == *previous)
@@ -4380,6 +4402,7 @@ mod exact_semantic_list_predicate_tests {
             operation_id: operation_id.clone(),
             state: OperationState::Succeeded,
             after_instance: Some("op-2".into()),
+            at_instance: None,
         });
         let mut observed = snapshot();
         observed
@@ -4396,12 +4419,38 @@ mod exact_semantic_list_predicate_tests {
         assert!(semantic_wait_matches(&wait, &observed));
     }
     #[test]
+    fn operation_wait_requires_exact_captured_instance_after_mounted_submit() {
+        let operation_id = OperationId::device_enrollment();
+        let wait = lowered(Expectation::OperationStateIs {
+            operation_id: operation_id.clone(),
+            state: OperationState::Succeeded,
+            after_instance: None,
+            at_instance: Some("op-submitted".into()),
+        });
+        let mut observed = snapshot();
+        observed
+            .operations
+            .push(aura_app::ui_contract::OperationSnapshot {
+                id: operation_id,
+                instance_id: aura_app::ui_contract::OperationInstanceId("op-other".into()),
+                state: OperationState::Succeeded,
+                failure: None,
+            });
+        assert!(!semantic_wait_matches(&wait, &observed));
+        observed.operations[0].instance_id =
+            aura_app::ui_contract::OperationInstanceId("op-submitted".into());
+        assert!(semantic_wait_matches(&wait, &observed));
+        observed.operations[0].state = OperationState::Failed;
+        assert!(!semantic_wait_matches(&wait, &observed));
+    }
+    #[test]
     fn operation_wait_without_submission_handle_requires_observed_terminal() {
         let operation_id = OperationId::device_enrollment();
         let wait = lowered(Expectation::OperationStateIs {
             operation_id: operation_id.clone(),
             state: OperationState::Succeeded,
             after_instance: None,
+            at_instance: None,
         });
         let context = ScenarioContext::default();
         let mut observed = snapshot();

@@ -90,8 +90,9 @@ use aura_core::{
 };
 use aura_effects::RuntimeCapabilityHandler;
 use aura_invitation::enrollment_mailbox::{
+    EnrollmentReturnEnvelopeAuthorization, EnrollmentReturnEnvelopeStatement,
     PendingEnrollmentMailboxError, PendingEnrollmentMailboxRegistration,
-    PendingEnrollmentMailboxStatement,
+    PendingEnrollmentMailboxStatement, VerifiedIssuerEnrollmentReturnRegistration,
 };
 use aura_invitation::enrollment_setup::{
     DeviceEnrollmentSetupRequest, DeviceEnrollmentSetupStatement, EnrollmentSetupExportError,
@@ -427,6 +428,83 @@ impl Clone for ThresholdSigningService {
     }
 }
 
+/// A runtime-local signer handle for the original pre-adoption return route.
+/// Weak references prevent the effect system from retaining its own runtime.
+pub(crate) trait OriginalEnrollmentReturnSigner: Send + Sync {
+    fn sign_envelope<'a>(
+        &'a self,
+        effects: &'a AuraEffectSystem,
+        registration: &'a VerifiedIssuerEnrollmentReturnRegistration,
+        baseline: &'a aura_invitation::enrollment_manifest::VerifiedEnrollmentBaseline,
+        setup: &'a aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+        envelope: &'a aura_core::effects::transport::TransportEnvelope,
+    ) -> EnrollmentOperationFuture<
+        'a,
+        Result<EnrollmentReturnEnvelopeAuthorization, PendingEnrollmentMailboxSigningError>,
+    >;
+}
+
+pub(crate) struct WeakEnrollmentReturnSigner {
+    effects: std::sync::Weak<AuraEffectSystem>,
+    shared: std::sync::Weak<ThresholdSigningShared>,
+    runtime_capabilities: RuntimeCapabilityHandler,
+}
+
+impl WeakEnrollmentReturnSigner {
+    pub(crate) fn upgrade_for(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Option<ThresholdSigningService> {
+        let owned_effects = self.effects.upgrade()?;
+        if !std::ptr::eq(owned_effects.as_ref(), effects) {
+            return None;
+        }
+        Some(ThresholdSigningService {
+            effects: owned_effects,
+            shared: self.shared.upgrade()?,
+            runtime_capabilities: self.runtime_capabilities.clone(),
+        })
+    }
+}
+
+impl OriginalEnrollmentReturnSigner for WeakEnrollmentReturnSigner {
+    fn sign_envelope<'a>(
+        &'a self,
+        effects: &'a AuraEffectSystem,
+        registration: &'a VerifiedIssuerEnrollmentReturnRegistration,
+        baseline: &'a aura_invitation::enrollment_manifest::VerifiedEnrollmentBaseline,
+        setup: &'a aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+        envelope: &'a aura_core::effects::transport::TransportEnvelope,
+    ) -> EnrollmentOperationFuture<
+        'a,
+        Result<EnrollmentReturnEnvelopeAuthorization, PendingEnrollmentMailboxSigningError>,
+    > {
+        Box::pin(async move {
+            let signer = self
+                .upgrade_for(effects)
+                .ok_or(PendingEnrollmentMailboxSigningError::ForeignSetup)?;
+            signer
+                .sign_enrollment_return_envelope_authorization(
+                    registration,
+                    baseline,
+                    setup,
+                    envelope,
+                )
+                .await
+        })
+    }
+}
+
+impl ThresholdSigningService {
+    pub(crate) fn downgrade_for_original_return(&self) -> WeakEnrollmentReturnSigner {
+        WeakEnrollmentReturnSigner {
+            effects: Arc::downgrade(&self.effects),
+            shared: Arc::downgrade(&self.shared),
+            runtime_capabilities: self.runtime_capabilities.clone(),
+        }
+    }
+}
+
 /// Exact retained pending generation. Only the signing service validates and mints it.
 ///
 /// ```compile_fail
@@ -521,6 +599,65 @@ impl ThresholdSigningService {
             .verify_for_admitted_original(self.effects.as_ref(), baseline, setup, now)
             .await?;
         Ok(registration)
+    }
+
+    /// Authorize one reverse VM frame with Bob's original provisional setup
+    /// key. The independently verified issuer route is required as input;
+    /// the broker receipt alone never authenticates the original enrollment.
+    pub(crate) async fn sign_enrollment_return_envelope_authorization(
+        &self,
+        registration: &VerifiedIssuerEnrollmentReturnRegistration,
+        baseline: &aura_invitation::enrollment_manifest::VerifiedEnrollmentBaseline,
+        setup: &aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+        envelope: &aura_core::effects::transport::TransportEnvelope,
+    ) -> Result<EnrollmentReturnEnvelopeAuthorization, PendingEnrollmentMailboxSigningError> {
+        let _transition = self.shared.transitions.lock().await;
+        let statement = EnrollmentReturnEnvelopeStatement::for_admitted_original(
+            registration,
+            baseline,
+            setup,
+            envelope,
+        )?;
+        let policy = setup.statement();
+        if self.effects.device_id() != policy.device
+            || policy.signing_mode != SigningMode::SingleSigner
+            || policy.threshold != 1
+            || policy.participants != 1
+        {
+            return Err(PendingEnrollmentMailboxSigningError::ForeignSetup);
+        }
+        let guard = self.shared.state.read().await;
+        let state = guard
+            .contexts
+            .get(&policy.authority)
+            .ok_or(PendingEnrollmentMailboxSigningError::MissingContext)?;
+        if state.my_signer_index != Some(1)
+            || state.mode != policy.signing_mode
+            || state.epoch != policy.signing_epoch
+            || state.config.threshold != 1
+            || state.config.total_participants != 1
+            || state.public_key_package != policy.public_key_package
+        {
+            return Err(PendingEnrollmentMailboxSigningError::ForeignSetup);
+        }
+        let now = self.effects.physical_time().await?.ts_ms;
+        if now < policy.issued_at_ms || now >= registration.statement().expires_at_ms() {
+            return Err(PendingEnrollmentMailboxError::OutsideValidity.into());
+        }
+        let message = Self::serialize_signing_context(&statement.signing_context()?, state.epoch)?;
+        let proof = self.sign_solo(&policy.authority, &message, state).await?;
+        let authorization = EnrollmentReturnEnvelopeAuthorization { statement, proof };
+        authorization
+            .clone()
+            .verify_for_admitted_original(
+                self.effects.as_ref(),
+                registration,
+                baseline,
+                setup,
+                envelope,
+            )
+            .await?;
+        Ok(authorization)
     }
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "ThresholdSigningService", receiver_type = ThresholdSigningService, family = "runtime_helper")]
     pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {

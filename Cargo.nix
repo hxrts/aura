@@ -2323,6 +2323,12 @@ with optional architecture-specific hardware acceleration
             rename = "aura-anti-entropy";
           }
           {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            features = [ "signals" ];
+          }
+          {
             name = "hxrts-aura-authentication";
             packageId = "hxrts-aura-authentication";
             rename = "aura-authentication";
@@ -12360,6 +12366,10 @@ library used by the other higher-level Hickory DNS crates.
         ];
         dependencies = [
           {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
             name = "async-trait";
             packageId = "async-trait";
           }
@@ -12646,10 +12656,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "anyhow";
             packageId = "anyhow";
-          }
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
           }
           {
             name = "aura-testkit";
@@ -13164,6 +13170,11 @@ library used by the other higher-level Hickory DNS crates.
             packageId = "hxrts-aura-effects";
             rename = "aura-effects";
             features = [ "test-support" "test-keyring" ];
+          }
+          {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
           }
           {
             name = "proptest";

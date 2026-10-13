@@ -114,6 +114,14 @@ impl RuntimeMaintenanceService {
         }
     }
 
+    /// The post-start descriptor attempt is optional, including when a
+    /// reopened threshold profile has no live quorum signer. Retain the
+    /// failure in service health rather than failing required task custody.
+    pub(crate) async fn record_initial_lan_descriptor_failure(&self, reason: String) {
+        self.record_degraded_reason(format!("initial_lan_descriptor: {reason}"))
+            .await;
+    }
+
     async fn clear_degraded_reason_contains(&self, marker: &str) {
         self.shared
             .degraded_reasons

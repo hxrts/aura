@@ -68,6 +68,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true, features = ["deadlock_detection"] } # debug-build deadlock detector
+async-lock = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
 cfg-if = "1"
@@ -108,7 +109,6 @@ aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", versi
 aura-invitation = { package = "hxrts-aura-invitation", path = "../aura-invitation", version = "=0.2.0", features = ["test-support"] }
 aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
 anyhow = { workspace = true }
-async-lock = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }
 trybuild = { workspace = true }

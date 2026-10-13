@@ -798,6 +798,7 @@ function storeUiState(session, payload, source = "unknown") {
   session.uiStateCacheJson = nextJson;
   session.uiStateCacheGeneration = session.currentUiGeneration ?? 0;
   session.lastUiStateSource = source;
+  maybePersistPostRestartEnrollmentEvidence(session, parsed);
   clearObservationMutationIfSatisfied(session, parsed);
   console.error(
     `[driver] ui_state_store instance=${session.id} source=${source} changed=${changed} next_revision=${uiSnapshotRevision(parsed)} previous_version=${uiObservationVersion(
@@ -1461,12 +1462,227 @@ function runSelfTest() {
       ACTION_SETTLE_EXEMPT_METHODS.has("submit_semantic_command"),
     "successful actions must settle the mutation floor; semantic submit keeps its own publication contract",
   );
+  const restartEvidence = preRestartEvidence(
+    {
+      id: "bob",
+      uiStateVersion: 7,
+      uiStateCache: {
+        revision: { semantic_seq: 12, render_seq: 13 },
+        operations: [{
+          id: "device_enrollment",
+          instance_id: "op-3",
+          state: "failed",
+          failure: { domain: "transport", code: "destination_unreachable" },
+        }],
+        runtime_events: [{
+          id: 9,
+          fact: {
+            kind: "device_enrollment_accepted",
+            device_id: "device-bob",
+            device_name: "BobApp",
+            device_count: 2,
+          },
+        }],
+      },
+      consoleLog: [
+        "[driver] transport failure",
+        "[UI_STATE_JSON]secret-enrollment-code",
+      ],
+    },
+    "fixture_restart",
+  );
+  assert(
+    restartEvidence.operations[0].instance_id === "op-3" &&
+      restartEvidence.operations[0].failure.code === "destination_unreachable" &&
+      restartEvidence.host_acknowledgments[0].device_name === "BobApp" &&
+      restartEvidence.enrollment_witness.operation.instance_id === "op-3" &&
+      restartEvidence.enrollment_witness.operation.failure.code === "destination_unreachable" &&
+      restartEvidence.enrollment_witness.host_acknowledgment.device_id === "device-bob" &&
+      restartEvidence.driver_console_tail.length === 1 &&
+      !JSON.stringify(restartEvidence).includes("secret-enrollment-code") &&
+      String(restartPageSession).includes("persistPreRestartEvidence(session, reason)"),
+    "restart must preserve the exact operation, typed failure, host acknowledgment, and safe driver diagnostics before closing the page",
+  );
+let refusedFailedWitness = false;
+try {
+  preRestartEvidence(
+    { id: "bob", uiStateCache: { operations: restartEvidence.operations,
+      runtime_events: [{ id: 9, fact: { kind: "device_enrollment_accepted",
+        device_id: "device-bob", device_count: 2 } }] } },
+    "fixture_restart", "op-3",
+  );
+} catch {
+  refusedFailedWitness = true;
+}
+assert(refusedFailedWitness, "captured enrollment restart refuses a failed operation");
+const approvedEvidence = preRestartEvidence(
+  { id: "bob", uiStateCache: {
+    operations: [{ ...restartEvidence.enrollment_witness.operation, state: "succeeded" }],
+    runtime_events: [{ id: 9, fact: { kind: "device_enrollment_accepted",
+      device_id: "device-bob", device_count: 2 } }],
+  } },
+  "fixture_restart", "op-3",
+);
+assert(
+  approvedEvidence.expected_operation_instance === "op-3" &&
+    approvedEvidence.enrollment_witness.operation.state === "succeeded",
+  "pre-restart evidence binds exact captured success",
+);
+const reopenedEnrollment = postRestartEnrollmentEvidence(
+  { id: "bob", reopenEnrollmentEvidence: approvedEvidence },
+  {
+    revision: { semantic_seq: 3, render_seq: 4 },
+    readiness: "ready",
+    lists: [{ id: "devices", items: [{ id: "device-alice" }, { id: "device-bob" }] }],
+  },
+);
+assert(
+  reopenedEnrollment?.original_operation_instance === "op-3" &&
+    reopenedEnrollment?.original_operation_state === "succeeded" &&
+    reopenedEnrollment?.original_host_acknowledgment?.device_id === "device-bob" &&
+    reopenedEnrollment?.reopened_devices?.includes("device-bob") &&
+    postRestartEnrollmentEvidence(
+      { id: "bob", reopenEnrollmentEvidence: approvedEvidence },
+      { lists: [{ id: "devices", items: [{ id: "device-alice" }, { id: "device-other" }] }] },
+    ) === null,
+  "post-restart evidence requires the exact acknowledged device in the reopened two-device projection",
+);
+let refusedForeignEvidence = false;
+try {
+  parseStartOptions({ instance_id: "bob", previous_enrollment_evidence: {
+    ...approvedEvidence, expected_operation_instance: "op-foreign",
+  } });
+} catch {
+  refusedForeignEvidence = true;
+}
+assert(refusedForeignEvidence, "new driver rejects foreign captured-instance evidence");
   console.error("[driver] selftest ok");
 }
 
 function consoleTailText(session, lines = 40) {
   const tail = session.consoleLog.slice(-lines);
   return tail.length > 0 ? tail.join("\n") : "none";
+}
+
+function preRestartEvidence(session, reason, expectedOperationInstance = null) {
+  const snapshot = session.uiStateCache ?? {};
+  const operations = (snapshot.operations ?? []).map((operation) => ({
+    id: operation.id,
+    instance_id: operation.instance_id,
+    state: operation.state,
+    failure: operation.failure ?? null,
+  }));
+  const hostAcknowledgments = (snapshot.runtime_events ?? [])
+    .filter((event) => event.fact?.kind === "device_enrollment_accepted")
+    .map((event) => ({
+      event_id: event.id ?? null,
+      device_id: event.fact.device_id ?? null,
+      device_name: event.fact.device_name ?? null,
+      device_count: event.fact.device_count ?? null,
+    }));
+  const operation = operations.find((item) =>
+    item.id === "device_enrollment" &&
+    (expectedOperationInstance === null || item.instance_id === expectedOperationInstance)
+  ) ?? null;
+  const hostAcknowledgment = hostAcknowledgments.find((ack) => ack.device_count === 2) ?? null;
+  if (expectedOperationInstance !== null && (
+    operation?.instance_id !== expectedOperationInstance ||
+    operation?.state !== "succeeded" ||
+    !hostAcknowledgment?.device_id
+  )) {
+    throw new Error("restart refused: exact successful enrollment and host device acknowledgment are absent");
+  }
+  return {
+    instance_id: session.id,
+    reason,
+    expected_operation_instance: expectedOperationInstance,
+    observed_at: nowIso(),
+    ui_state_version: session.uiStateVersion ?? 0,
+    revision: snapshot.revision ?? null,
+    operations,
+    host_acknowledgments: hostAcknowledgments,
+    // Keep the exact observed operation and host witness adjacent in the
+    // private artifact. The scenario separately verifies their ordering.
+    enrollment_witness: {
+      operation,
+      host_acknowledgment: hostAcknowledgment,
+    },
+    // Browser state push lines may contain enrollment codes. Keep bounded
+    // driver diagnostics without copying raw UI payloads into the artifact.
+    driver_console_tail: (session.consoleLog ?? [])
+      .filter(
+        (line) =>
+          line.includes("[driver]") &&
+          !/(text_snippet=|payload=|code=|manifest|verifier)/i.test(line),
+      )
+      .slice(-80),
+  };
+}
+
+function persistPreRestartEvidence(session, reason, expectedOperationInstance = null) {
+  const evidence = preRestartEvidence(session, reason, expectedOperationInstance);
+  if (!session.artifactDir) {
+    return evidence;
+  }
+  ensureDir(session.artifactDir);
+  const artifactPath = path.join(
+    session.artifactDir,
+    `${session.id}-pre-restart-${Date.now()}.json`,
+  );
+  fs.writeFileSync(
+    artifactPath,
+    `${JSON.stringify(evidence, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  console.error(
+    `[driver] pre_restart_evidence instance=${session.id} path=${artifactPath}`,
+  );
+  return evidence;
+}
+
+function postRestartEnrollmentEvidence(session, snapshot) {
+  const prior = session.reopenEnrollmentEvidence;
+  const devices = (snapshot?.lists ?? []).find((list) => list.id === "devices");
+  if (
+    !prior?.enrollment_witness?.operation?.instance_id ||
+    prior.enrollment_witness.operation.state !== "succeeded" ||
+    (prior.expected_operation_instance != null &&
+      prior.enrollment_witness.operation.instance_id !== prior.expected_operation_instance) ||
+    !prior?.enrollment_witness?.host_acknowledgment?.device_id ||
+    devices?.items?.length !== 2 ||
+    !devices.items.some((item) => item.id === prior.enrollment_witness.host_acknowledgment.device_id)
+  ) {
+    return null;
+  }
+  return {
+    instance_id: session.id,
+    observed_at: nowIso(),
+    original_operation_instance: prior.enrollment_witness.operation.instance_id,
+    original_operation_state: prior.enrollment_witness.operation.state,
+    original_host_acknowledgment: prior.enrollment_witness.host_acknowledgment,
+    revision: snapshot.revision ?? null,
+    readiness: snapshot.readiness ?? null,
+    reopened_devices: devices.items.map((item) => item.id),
+  };
+}
+
+function maybePersistPostRestartEnrollmentEvidence(session, snapshot) {
+  const evidence = postRestartEnrollmentEvidence(session, snapshot);
+  if (!evidence || !session.artifactDir) {
+    return;
+  }
+  ensureDir(session.artifactDir);
+  const artifactPath = path.join(
+    session.artifactDir,
+    `${session.id}-post-restart-${Date.now()}.json`,
+  );
+  fs.writeFileSync(artifactPath, `${JSON.stringify(evidence, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  session.reopenEnrollmentEvidence = null;
+  console.error(
+    `[driver] post_restart_evidence instance=${session.id} path=${artifactPath}`,
+  );
 }
 
 async function ensureHarnessWithTimeout(page, timeoutMs) {
@@ -3222,6 +3438,16 @@ function parseStartOptions(params) {
     MAX_TIMEOUT_MS,
   );
   const resetStorage = params?.reset_storage === true;
+  const previousEnrollmentEvidence = params?.previous_enrollment_evidence ?? null;
+  if (previousEnrollmentEvidence !== null && (
+    previousEnrollmentEvidence.instance_id !== instanceId ||
+    !previousEnrollmentEvidence.expected_operation_instance ||
+    previousEnrollmentEvidence.enrollment_witness?.operation?.instance_id !== previousEnrollmentEvidence.expected_operation_instance ||
+    previousEnrollmentEvidence.enrollment_witness?.operation?.state !== "succeeded" ||
+    !previousEnrollmentEvidence.enrollment_witness?.host_acknowledgment?.device_id
+  )) {
+    throw new Error("start_page refused foreign or incomplete enrollment restart evidence");
+  }
   const startupReadiness = normalizeStartupReadiness(params);
 
   return {
@@ -3237,6 +3463,7 @@ function parseStartOptions(params) {
     startMaxAttempts,
     startRetryBackoffMs,
     resetStorage,
+    previousEnrollmentEvidence,
     startupReadiness,
   };
 }
@@ -3314,6 +3541,7 @@ async function startPage(params) {
     startMaxAttempts,
     startRetryBackoffMs,
     resetStorage,
+    previousEnrollmentEvidence,
     startupReadiness,
   } = options;
   const targetUrl = withHarnessHarnessQuery(
@@ -3375,6 +3603,7 @@ async function startPage(params) {
         domState: normalizeDomState({ text: "", ids: [] }),
         uiStateCache: null,
         uiStateCacheJson: null,
+        reopenEnrollmentEvidence: previousEnrollmentEvidence,
         uiStateVersion: 0,
         uiStateWaiters: [],
         requiredUiStateRevision: 0,
@@ -3709,6 +3938,7 @@ async function restartPageSession(
   console.error(
     `[driver] restart_page_session instance=${session.id} reason=${reason} data_dir=${options.dataDir}`,
   );
+  const previousEnrollmentEvidence = persistPreRestartEvidence(session, reason);
   await stop({ instance_id: session.id });
   await startPage({
     instance_id: options.instanceId,
@@ -3727,7 +3957,10 @@ async function restartPageSession(
   console.error(
     `[driver] restart_page_session ready instance=${session.id} reason=${reason}`,
   );
-  return getSession(options.instanceId);
+  const reopened = getSession(options.instanceId);
+  reopened.reopenEnrollmentEvidence = previousEnrollmentEvidence;
+  maybePersistPostRestartEnrollmentEvidence(reopened, reopened.uiStateCache);
+  return reopened;
 }
 
 function getSession(instanceId) {
@@ -5268,6 +5501,17 @@ async function stop(params) {
     return { status: "already_stopped" };
   }
 
+  const expectedOperationInstance = params?.expected_operation_instance ?? null;
+  if (expectedOperationInstance !== null && (
+    typeof expectedOperationInstance !== "string" ||
+    expectedOperationInstance.length === 0
+  )) {
+    throw new Error("stop requires a nonempty expected operation instance");
+  }
+  const enrollmentEvidence = expectedOperationInstance === null
+    ? null
+    : persistPreRestartEvidence(session, "restart_actor", expectedOperationInstance);
+
   try {
     for (const waiter of session.uiStateWaiters ?? []) {
       clearTimeout(waiter.timer);
@@ -5288,6 +5532,7 @@ async function stop(params) {
   return {
     status: "stopped",
     trace_path: session.tracePath,
+    enrollment_evidence: enrollmentEvidence,
   };
 }
 

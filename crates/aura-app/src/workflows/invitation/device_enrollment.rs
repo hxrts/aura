@@ -1439,6 +1439,120 @@ pub fn import_device_enrollment_with_terminal_status(
     )
 }
 
+/// A new app operation may retry only host persistence after the original
+/// terminal Failed. The runtime revalidates both the signed confirmation and
+/// the current active generation; native enrollment is never replayed.
+pub async fn retry_enrollment_host_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    admission: &super::enrollment_import_owner::EnrollmentImportAdmission,
+    recovery: super::enrollment_import_owner::EnrollmentHostRecovery,
+    instance: crate::ui_contract::OperationInstanceId,
+    host: EnrollmentImportHostPolicy,
+) -> crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentImportCompleted> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment(),
+        Some(instance.clone()),
+        SemanticOperationKind::ImportDeviceEnrollmentCode,
+    );
+    let result =
+        retry_enrollment_host_owned(app_core, admission, recovery, instance, host, &owner).await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+#[aura_macros::semantic_owner(
+    owner = "retry_enrollment_host_owned",
+    wrapper = "retry_enrollment_host_with_terminal_status",
+    terminal = "publish_success_with",
+    postcondition = "device_enrollment_imported",
+    proof = crate::workflows::semantic_facts::DeviceEnrollmentImportedProof,
+    authoritative_inputs = "failed_original_recovery,authenticated_current_generation,host_acknowledgment",
+    depends_on = "runtime_verified_enrollment_confirmation,active_signing_generation,host_storage_acknowledgment",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn retry_enrollment_host_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    admission: &super::enrollment_import_owner::EnrollmentImportAdmission,
+    recovery: super::enrollment_import_owner::EnrollmentHostRecovery,
+    instance: crate::ui_contract::OperationInstanceId,
+    host: EnrollmentImportHostPolicy,
+    owner: &SemanticWorkflowOwner<OperationContext<OperationId, OperationInstanceId, TraceContext>>,
+) -> Result<DeviceEnrollmentImportCompleted, AuraError> {
+    let attempted = async {
+        if instance == recovery.failed_instance {
+            return Err(AuraError::invalid(
+                "host recovery requires a new operation instance",
+            ));
+        }
+        let runtime = {
+            let core = app_core.read().await;
+            admission.require_core(&core)?;
+            admission.runtime.clone()
+        };
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let budget = workflow_timeout_budget(&runtime, DEVICE_ENROLLMENT_ACCEPT_TIMEOUT).await?;
+        execute_with_runtime_timeout_budget(&runtime, &budget, || {
+            runtime.authenticate_enrollment_host_recovery(&recovery.completion)
+        })
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Operation(source) => {
+                AuraError::from(crate::workflows::error::runtime_call(
+                    "authenticate enrollment host recovery",
+                    source,
+                ))
+            }
+            TimeoutRunError::Timeout(source) => AuraError::from(source),
+        })?;
+        match host {
+            EnrollmentImportHostPolicy::RuntimeOnly => {
+                return Err(AuraError::invalid(
+                    "host recovery requires a host commit owner",
+                ));
+            }
+            EnrollmentImportHostPolicy::Finalize(callback) => {
+                execute_with_runtime_timeout_budget(&runtime, &budget, || {
+                    callback(&recovery.completion)
+                })
+                .await
+                .map_err(|error| match error {
+                    TimeoutRunError::Operation(source) => source,
+                    TimeoutRunError::Timeout(source) => source.into(),
+                })?;
+            }
+            EnrollmentImportHostPolicy::Prepare(callback) => {
+                aura_core::time::timeout::acknowledge_with_timeout_budget(
+                    &runtime.physical_time_provider(),
+                    &budget,
+                    || async {
+                        Ok::<_, aura_core::TimeoutBudgetError>(callback(&recovery.completion).await)
+                    },
+                    |prepared| prepared.and_then(|commit| commit.commit()),
+                )
+                .await
+                .map_err(AuraError::from)??;
+            }
+        }
+        owner
+            .publish_success_with(issue_device_enrollment_imported_proof(
+                recovery.completion.invitation_id().clone(),
+            ))
+            .await?;
+        Ok(recovery.completion)
+    }
+    .await;
+    match attempted {
+        Ok(completion) => Ok(completion),
+        Err(error) => fail_device_enrollment_accept(owner, error).await,
+    }
+}
+
 pub(super) async fn prepare_device_enrollment_import(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     budget: &aura_core::TimeoutBudget,
@@ -1560,6 +1674,10 @@ pub(super) struct EnrollmentAcceptState<T> {
     pub(super) budget: Option<TimeoutBudget>,
     pub(super) first_failure: Option<AuraError>,
     pub(super) host_acknowledged: bool,
+    /// Native acceptance settled, but the selected host finalization failed.
+    /// This is the only point from which a separately authenticated host
+    /// recovery operation may be issued after the original fails.
+    pub(super) host_finalization_failed: bool,
     defer_terminal: bool,
 }
 impl<T> EnrollmentAcceptState<T> {
@@ -1571,6 +1689,7 @@ impl<T> EnrollmentAcceptState<T> {
             budget: None,
             first_failure: None,
             host_acknowledged: false,
+            host_finalization_failed: false,
             defer_terminal,
         }
     }
@@ -1774,6 +1893,7 @@ pub(super) async fn run_enrollment_accept<T>(
                 };
                 let first_failure = &mut state.first_failure;
                 let host_acknowledged = &mut state.host_acknowledged;
+                let host_finalization_failed = &mut state.host_finalization_failed;
                 let acknowledged = match finalize {
                     EnrollmentHostFinalization::Async(finalize) => {
                         execute_with_runtime_timeout_budget(&runtime, &budget, || async {
@@ -1785,6 +1905,7 @@ pub(super) async fn run_enrollment_accept<T>(
                                 Ok(()) => {}
                                 Err(error) => {
                                     first_failure.get_or_insert_with(|| error.clone());
+                                    *host_finalization_failed = true;
                                 }
                             }
                             result
@@ -1799,6 +1920,7 @@ pub(super) async fn run_enrollment_accept<T>(
                                 let prepared = prepare(completion).await;
                                 if let Err(error) = &prepared {
                                     first_failure.get_or_insert_with(|| error.clone());
+                                    *host_finalization_failed = true;
                                 }
                                 Ok::<_, aura_core::TimeoutBudgetError>(prepared)
                             },
@@ -1823,10 +1945,12 @@ pub(super) async fn run_enrollment_accept<T>(
                         state.host_acknowledged = true;
                     }
                     Err(TimeoutRunError::Operation(error)) => {
-                        return state.fail(owner, error).await
+                        state.host_finalization_failed = true;
+                        return state.fail(owner, error).await;
                     }
                     Err(TimeoutRunError::Timeout(error)) => {
-                        return state.fail(owner, error.into()).await
+                        state.host_finalization_failed = true;
+                        return state.fail(owner, error.into()).await;
                     }
                 }
             }

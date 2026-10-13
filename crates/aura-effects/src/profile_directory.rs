@@ -152,7 +152,12 @@ impl ProfileDirectory {
         {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                "profile value is not an unaliased private regular file",
+                format!(
+                    "profile value is not an unaliased private regular file (regular={}, links={}, mode={:o})",
+                    metadata.is_file(),
+                    metadata.nlink(),
+                    metadata.mode() & 0o777,
+                ),
             ));
         }
         let mut bytes = Vec::new();

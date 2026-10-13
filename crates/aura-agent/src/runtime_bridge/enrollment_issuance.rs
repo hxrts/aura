@@ -1,6 +1,381 @@
 //! Original enrollment preparation remains owned by one runtime task.
 use super::*;
 
+/// Reserve the original issuer's reverse-mailbox credential before asking the
+/// user to approve its public commitment. Retrying the same original manifest
+/// reuses the encrypted immutable secret; it never allocates a fresh route.
+async fn reserve_original_issuer_return_credential(
+    effects: &crate::runtime::AuraEffectSystem,
+    manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+) -> Result<String, aura_core::AuraError> {
+    use aura_core::effects::secure::{
+        ImmutableSecureStoreOutcome, SecureStorageCapability, SecureStorageEffects,
+        SecureStorageLocation,
+    };
+    use aura_signature::SecurityTranscript;
+    let digest = aura_core::hash::hash(&manifest.transcript_bytes().map_err(|source| {
+        aura_core::AuraError::crypto_with_source(
+            "encode original issuer return mailbox manifest",
+            Arc::new(source),
+        )
+    })?);
+    let location = SecureStorageLocation::with_sub_key(
+        "issuer_return_mailbox_credential_v1",
+        manifest.subject.to_string(),
+        format!("{}:{}", manifest.invitation, hex::encode(digest)),
+    );
+    let candidate = effects.random_bytes(32).await;
+    if candidate.len() != 32 {
+        return Err(aura_core::AuraError::invalid(
+            "issuer return credential source returned invalid length",
+        ));
+    }
+    let encoded = hex::encode(candidate);
+    let outcome = effects
+        .secure_store_immutable(
+            &location,
+            encoded.as_bytes(),
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+                SecureStorageCapability::Delete,
+            ],
+        )
+        .await?;
+    let selected = match outcome {
+        ImmutableSecureStoreOutcome::Created => encoded,
+        ImmutableSecureStoreOutcome::AlreadyExists => {
+            let bytes = effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?;
+            String::from_utf8(bytes).map_err(|source| aura_core::AuraError::Serialization {
+                message: "decode retained issuer return mailbox credential".into(),
+                source: Some(Arc::new(source)),
+            })?
+        }
+    };
+    if selected.len() != 64 || hex::decode(&selected).is_err() {
+        return Err(aura_core::AuraError::invalid(
+            "retained issuer return mailbox credential is malformed",
+        ));
+    }
+    Ok(selected)
+}
+
+/// Persist public proof only after the original approved four-domain signer
+/// has completed. No broker publication occurs at this boundary.
+async fn retain_original_issuer_return_registration(
+    effects: &crate::runtime::AuraEffectSystem,
+    manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    statement: &aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement,
+    signature: Vec<u8>,
+) -> Result<(), aura_core::AuraError> {
+    use aura_core::effects::secure::ImmutableSecureStoreOutcome;
+    use aura_core::effects::{
+        CryptoExtendedEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+    use aura_signature::SecurityTranscript;
+    let policy = manifest
+        .final_inventory()
+        .map_err(|source| {
+            aura_core::AuraError::crypto_with_source(
+                "read original issuer return policy",
+                Arc::new(source),
+            )
+        })?
+        .get(usize::from(statement.issuer_policy_index()))
+        .ok_or_else(|| {
+            aura_core::AuraError::permission_denied("original issuer root policy absent")
+        })?;
+    if policy.signing_node != aura_core::tree::NodeIndex(0)
+        || policy.mode != aura_core::effects::crypto::SigningMode::Threshold
+        || policy.threshold < 2
+        || policy.epoch != manifest.final_epoch
+        || aura_core::hash::hash(&policy.public_key_package)
+            != statement.issuer_public_key_package_digest()
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "issuer return policy differs from original root",
+        ));
+    }
+    let bytes = statement.required_transcript_bytes().map_err(|source| {
+        aura_core::AuraError::crypto_with_source(
+            "encode approved issuer return transcript",
+            Arc::new(source),
+        )
+    })?;
+    if !effects
+        .frost_verify(
+            &bytes,
+            &signature,
+            &manifest.initiator_confirmation_verifier,
+        )
+        .await?
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "original issuer return aggregate is invalid",
+        ));
+    }
+    // The approved transcript round requires one commitment and one share
+    // from every retained policy participant before it can aggregate. The
+    // registration metadata names precisely that mandatory full roster.
+    let signer_count = u16::try_from(policy.participants.len()).map_err(|source| {
+        aura_core::AuraError::crypto_with_source("encode original return roster", Arc::new(source))
+    })?;
+    let registration = aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration {
+        statement: statement.clone(),
+        mode: aura_core::effects::crypto::SigningMode::Threshold,
+        proof: aura_core::threshold::ThresholdSignature::new(
+            signature,
+            signer_count,
+            (1..=signer_count).collect(),
+            policy.public_key_package.clone(),
+            policy.epoch,
+        ),
+    };
+    let encoded = aura_core::util::serialization::to_vec(&registration)?;
+    let location = SecureStorageLocation::new(
+        "issuer_return_mailbox_registration_v1",
+        format!(
+            "{}:{}:{}",
+            manifest.subject,
+            manifest.invitation,
+            hex::encode(statement.manifest_digest())
+        ),
+    );
+    match effects
+        .secure_store_immutable(
+            &location,
+            &encoded,
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+                SecureStorageCapability::Delete,
+            ],
+        )
+        .await?
+    {
+        ImmutableSecureStoreOutcome::Created => Ok(()),
+        ImmutableSecureStoreOutcome::AlreadyExists => {
+            let original = effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?;
+            if original == encoded {
+                Ok(())
+            } else {
+                Err(aura_core::AuraError::permission_denied(
+                    "original issuer return registration was already issued differently",
+                ))
+            }
+        }
+    }
+}
+
+/// Publish only the exact proof retained by the original issuance owner.
+/// An ambiguous broker failure leaves the immutable registration and secret
+/// in protected storage for the same operation; no new route is generated.
+async fn publish_original_issuer_return_mailbox(
+    effects: &crate::runtime::AuraEffectSystem,
+    issued: &crate::handlers::invitation_service::IssuedEnrollmentManifestBinding,
+    credential: &str,
+) -> Result<(), aura_core::AuraError> {
+    use aura_core::effects::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+    let Some(manager) = effects.rendezvous_manager() else {
+        return Ok(());
+    };
+    if !manager.config().bootstrap_broker.enabled {
+        return Ok(());
+    }
+    issued.require_effects(effects).map_err(|source| {
+        aura_core::AuraError::crypto_with_source(
+            "issuer return manifest belongs to another runtime",
+            Arc::new(source),
+        )
+    })?;
+    let manifest = issued.manifest();
+    let location = SecureStorageLocation::new(
+        "issuer_return_mailbox_registration_v1",
+        format!(
+            "{}:{}:{}",
+            manifest.subject,
+            manifest.invitation,
+            hex::encode(issued.digest())
+        ),
+    );
+    let bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await?;
+    let registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+        aura_core::util::serialization::from_slice(&bytes)?;
+    let statement = &registration.statement;
+    if statement.invitation() != &manifest.invitation
+        || statement.manifest_digest() != issued.digest()
+        || statement.setup_digest() != manifest.setup.digest
+        || statement.subject() != manifest.subject
+        || statement.provisional() != manifest.invitee_authority
+        || statement.issuer_device() != manifest.initiator_device
+        || statement.invitee_device() != manifest.invitee_device
+        || statement.expires_at_ms() != manifest.expires_at_ms
+        || statement.retrieval_credential_commitment()
+            != aura_core::hash::hash(credential.as_bytes())
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "retained issuer return registration differs from original manifest",
+        ));
+    }
+    manager
+        .register_original_issuer_return_mailbox(
+            crate::runtime::services::bootstrap_broker::BootstrapIssuerReturnMailboxRegistration {
+                registration,
+                retrieval_credential: credential.to_owned(),
+            },
+        )
+        .await
+        .map_err(|source| {
+            aura_core::AuraError::crypto_with_source(
+                "publish original issuer return mailbox",
+                Arc::new(source),
+            )
+        })
+}
+
+async fn retain_original_issuer_return_setup(
+    effects: &crate::runtime::AuraEffectSystem,
+    issued: &crate::handlers::invitation_service::IssuedEnrollmentManifestBinding,
+    setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+) -> Result<(), aura_core::AuraError> {
+    use aura_core::effects::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+    issued.require_effects(effects).map_err(|source| {
+        aura_core::AuraError::crypto_with_source(
+            "foreign issued enrollment manifest",
+            Arc::new(source),
+        )
+    })?;
+    let manifest = issued.manifest();
+    if setup.digest() != manifest.setup.digest
+        || setup.statement().authority != manifest.invitee_authority
+        || setup.statement().device != manifest.invitee_device
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "selected return setup differs from original issued manifest",
+        ));
+    }
+    let code = setup.transfer_code().map_err(|source| {
+        aura_core::AuraError::crypto_with_source("encode selected return setup", Arc::new(source))
+    })?;
+    let location = SecureStorageLocation::with_sub_key(
+        "issuer_return_mailbox_setup_v1",
+        manifest.subject.to_string(),
+        format!("{}:{}", manifest.invitation, hex::encode(issued.digest())),
+    );
+    effects
+        .secure_store_immutable(
+            &location,
+            code.as_bytes(),
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+            ],
+        )
+        .await?;
+    let original = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await?;
+    if original != code.as_bytes() {
+        return Err(aura_core::AuraError::permission_denied(
+            "retained return setup differs from original selection",
+        ));
+    }
+    Ok(())
+}
+
+/// Seal the exact original return records before exposing the broker route.
+/// The inventory is immutable evidence for a later profile-owned retirement
+/// decision; it grants no deletion capability to this runtime caller.
+async fn retain_original_issuer_return_retirement_root(
+    effects: &crate::runtime::AuraEffectSystem,
+    issued: &crate::handlers::invitation_service::IssuedEnrollmentManifestBinding,
+    credential: &str,
+    setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+) -> Result<(), aura_core::AuraError> {
+    use aura_core::effects::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+    issued.require_effects(effects).map_err(|source| {
+        aura_core::AuraError::crypto_with_source(
+            "foreign issued enrollment retirement inventory",
+            Arc::new(source),
+        )
+    })?;
+    let manifest = issued.manifest();
+    let registration_location = SecureStorageLocation::new(
+        "issuer_return_mailbox_registration_v1",
+        format!(
+            "{}:{}:{}",
+            manifest.subject,
+            manifest.invitation,
+            hex::encode(issued.digest())
+        ),
+    );
+    let registration_bytes = effects
+        .secure_retrieve(&registration_location, &[SecureStorageCapability::Read])
+        .await?;
+    let registration: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+        aura_core::util::serialization::from_slice(&registration_bytes)?;
+    let statement = &registration.statement;
+    if statement.invitation() != &manifest.invitation
+        || statement.manifest_digest() != issued.digest()
+        || statement.setup_digest() != manifest.setup.digest
+        || statement.subject() != manifest.subject
+        || statement.provisional() != manifest.invitee_authority
+        || statement.issuer_device() != manifest.initiator_device
+        || statement.invitee_device() != manifest.invitee_device
+        || statement.expires_at_ms() != manifest.expires_at_ms
+        || statement.retrieval_credential_commitment()
+            != aura_core::hash::hash(credential.as_bytes())
+    {
+        return Err(aura_core::AuraError::permission_denied(
+            "retirement inventory differs from original issued return registration",
+        ));
+    }
+    let credential_location = SecureStorageLocation::with_sub_key(
+        "issuer_return_mailbox_credential_v1",
+        manifest.subject.to_string(),
+        format!("{}:{}", manifest.invitation, hex::encode(issued.digest())),
+    );
+    let credential_bytes = effects
+        .secure_retrieve(&credential_location, &[SecureStorageCapability::Read])
+        .await?;
+    let setup_location = SecureStorageLocation::with_sub_key(
+        "issuer_return_mailbox_setup_v1",
+        manifest.subject.to_string(),
+        format!("{}:{}", manifest.invitation, hex::encode(issued.digest())),
+    );
+    let setup_bytes = effects
+        .secure_retrieve(&setup_location, &[SecureStorageCapability::Read])
+        .await?;
+    let selected_setup = setup.transfer_code().map_err(|source| {
+        aura_core::AuraError::crypto_with_source("encode selected return setup", Arc::new(source))
+    })?;
+    if credential_bytes != credential.as_bytes() || setup_bytes != selected_setup.as_bytes() {
+        return Err(aura_core::AuraError::permission_denied(
+            "retirement inventory differs from retained return secret or setup",
+        ));
+    }
+    crate::core::agent::issuer_return_mailbox::retain_original_return_retirement_root(
+        effects,
+        statement,
+        &registration_bytes,
+        &credential_bytes,
+        &setup_bytes,
+    )
+    .await
+}
+
 /// Move-owned continuation issued only by the original enrollment construction.
 /// Observed DeviceEnrollmentStart data cannot reconstruct this capability.
 pub(crate) struct OriginalIssuedEnrollmentContinuation {
@@ -1047,6 +1422,12 @@ impl AgentRuntimeBridge {
         };
         #[cfg(test)]
         eprintln!("enrollment initiation stage: export original manifest");
+        let issuer_return_credential = reserve_original_issuer_return_credential(
+            effects.as_ref(), &manifest,
+        ).await.map_err(|source| IssueError::at(Stage::InvitationExport, source))?;
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: original return credential reserved");
+        let return_commitment = aura_core::hash::hash(issuer_return_credential.as_bytes());
         let mut quorum_transport = None;
         let (manifest_transfer, issued_manifest) = if requires_user_approval {
             let (preview, public_intent, frozen_metadata) = invitation_service
@@ -1070,23 +1451,35 @@ impl AgentRuntimeBridge {
                     },
                 )
                 .map_err(|source| IssueError::at(Stage::InvitationExport, source))?;
+            #[cfg(test)]
+            eprintln!("enrollment initiation stage: original transport preview ready");
             let window = original_window.child();
             let approval = Arc::new(preparation
                 .require_original_user_approval(
                     effects.clone(),
                     &manifest,
                     &public_intent,
+                    return_commitment,
                     &setup,
                     window,
                 )
                 .await
                 .map_err(|source| IssueError::at(Stage::InvitationExport, source))?);
-            let [manifest_signature, transport_signature, request_signature] = self
+            #[cfg(test)]
+            eprintln!("enrollment initiation stage: original ready published and approval received");
+            let [manifest_signature, transport_signature, request_signature, return_signature] = self
                 .agent
                 .threshold_signing()
                 .sign_original_approved_enrollment_domains(Arc::clone(&approval), Arc::clone(final_inventory), window, issuer_signing)
                 .await
                 .map_err(|source| IssueError::at(Stage::InvitationExport, source))?;
+            let return_statement = approval.issuer_return_mailbox();
+            if return_statement.retrieval_credential_commitment() != return_commitment {
+                return Err(IssueError::InvalidPolicy);
+            }
+            retain_original_issuer_return_registration(
+                effects.as_ref(), &manifest, return_statement, return_signature,
+            ).await.map_err(|source| IssueError::at(Stage::InvitationExport, source))?;
             quorum_transport = Some((preview, public_intent, frozen_metadata, transport_signature));
             let exported = invitation_service
                 .export_quorum_enrollment_manifest(
@@ -1116,6 +1509,7 @@ impl AgentRuntimeBridge {
                     identity_context.as_ref().ok_or(IssueError::InvalidPolicy)?,
                     final_inventory,
                     manifest,
+                    return_commitment,
                 )
                 .await
                 .map_err(|e| IssueError::at(Stage::InvitationExport, e))?
@@ -1128,6 +1522,24 @@ impl AgentRuntimeBridge {
         )
         .await
         .map_err(|e| IssueError::at(Stage::SetupVerifierRetention, e))?;
+        retain_original_issuer_return_setup(effects.as_ref(), &issued_manifest, &setup)
+            .await
+            .map_err(|source| IssueError::at(Stage::SetupVerifierRetention, source))?;
+        retain_original_issuer_return_retirement_root(
+            effects.as_ref(),
+            &issued_manifest,
+            &issuer_return_credential,
+            &setup,
+        )
+        .await
+        .map_err(|source| IssueError::at(Stage::SetupVerifierRetention, source))?;
+        publish_original_issuer_return_mailbox(
+            effects.as_ref(),
+            &issued_manifest,
+            &issuer_return_credential,
+        )
+        .await
+        .map_err(|source| IssueError::at(Stage::InvitationExport, source))?;
         #[cfg(test)]
         eprintln!("enrollment initiation stage: create original enrollment invitation");
         let invitation = invitation_service

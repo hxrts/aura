@@ -142,6 +142,7 @@ fn tool_api_primitives_control_local_pty_instance() {
 
     match tool_api.handle_request(ToolRequest::Restart {
         instance_id: "alice".to_string(),
+        expected_operation_instance: None,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("restart failed: {message}"),

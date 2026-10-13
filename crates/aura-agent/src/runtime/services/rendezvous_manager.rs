@@ -1510,6 +1510,261 @@ impl RendezvousManager {
             .map_err(RendezvousManagerError::BootstrapBroker)
     }
 
+    pub(crate) async fn register_original_issuer_return_mailbox(
+        &self,
+        payload: super::bootstrap_broker::BootstrapIssuerReturnMailboxRegistration,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "return enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .register_issuer_return_mailbox(payload)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return enrollment broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return enrollment broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::register_remote_issuer_return_mailbox(base, auth, &payload)
+            .await
+            .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn original_issuer_return_mailbox_registration(
+        &self,
+        subject: AuthorityId,
+        issuer_device: DeviceId,
+        digest: [u8; 32],
+    ) -> Result<
+        Option<aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration>,
+        RendezvousManagerError,
+    > {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "return enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .issuer_return_mailbox_registration(subject, issuer_device, digest)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::fetch_remote_issuer_return_mailbox_registration(
+            base,
+            auth,
+            subject,
+            issuer_device,
+            digest,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn send_original_issuer_return_vm_envelope(
+        &self,
+        payload: super::bootstrap_broker::BootstrapIssuerReturnMailboxEnvelope,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "return enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .queue_issuer_return_vm_envelope(payload)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::send_remote_issuer_return_vm_envelope(base, auth, &payload)
+            .await
+            .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn take_original_issuer_return_vm_envelopes(
+        &self,
+        subject: AuthorityId,
+        issuer_device: DeviceId,
+        digest: [u8; 32],
+        credential: &str,
+    ) -> Result<Vec<super::bootstrap_broker::IssuerReturnMailboxDelivery>, RendezvousManagerError>
+    {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "return enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .take_issuer_return_vm_envelopes(subject, issuer_device, digest, credential)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::take_remote_issuer_return_vm_envelopes(
+            base,
+            auth,
+            subject,
+            issuer_device,
+            digest,
+            credential,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn acknowledge_original_issuer_return_vm_envelope(
+        &self,
+        subject: AuthorityId,
+        issuer_device: DeviceId,
+        digest: [u8; 32],
+        credential: &str,
+        message_id: &str,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "return enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .acknowledge_issuer_return_vm_envelope(
+                    subject,
+                    issuer_device,
+                    digest,
+                    credential,
+                    message_id,
+                )
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "return broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::acknowledge_remote_issuer_return_vm_envelope(
+            base,
+            auth,
+            subject,
+            issuer_device,
+            digest,
+            credential,
+            message_id,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
     pub async fn register_bootstrap_candidate(
         &self,
         device_id: aura_core::DeviceId,

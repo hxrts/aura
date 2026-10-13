@@ -81,19 +81,20 @@ impl RuntimeSystem {
         let effects = self.effect_system.clone();
         let tasks = context.tasks().group("runtime_startup_maintenance");
         let attempt = async move {
-            execute_with_timeout_budget(effects.as_ref(), &window, || {
+            if let Err(source) = execute_with_timeout_budget(effects.as_ref(), &window, || {
                 maintenance.publish_initial_lan_descriptor()
             })
             .await
-            .map_err(|source| aura_core::AuraError::Internal {
-                message: "subsidiary initial LAN descriptor publication failed".into(),
-                source: Some(Arc::new(
-                    crate::runtime::services::traits::service_window_failure(
-                        "runtime_startup_maintenance",
-                        source,
-                    ),
-                )),
-            })
+            {
+                // A threshold profile can reopen without its peer signer.
+                // Descriptor publication is subsidiary; health retains the
+                // actual error while required task shutdown stays clean.
+                maintenance
+                    .record_initial_lan_descriptor_failure(source.to_string())
+                    .await;
+                tracing::warn!(error = %source, "Initial LAN descriptor publication degraded");
+            }
+            Ok::<(), aura_core::AuraError>(())
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {

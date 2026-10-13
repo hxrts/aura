@@ -413,6 +413,7 @@ pub enum ToolRequest {
     },
     Restart {
         instance_id: String,
+        expected_operation_instance: Option<String>,
     },
     Kill {
         instance_id: String,
@@ -881,13 +882,17 @@ impl ToolApi {
                         diagnostic_toast: toast,
                     })
                 }),
-            ToolRequest::Restart { instance_id } => {
-                self.coordinator.restart(&instance_id).map(|_| {
+            ToolRequest::Restart {
+                instance_id,
+                expected_operation_instance,
+            } => self
+                .coordinator
+                .restart(&instance_id, expected_operation_instance.as_deref())
+                .map(|_| {
                     ToolPayload::Status(ToolStatusPayload {
                         status: ToolStatus::Restarted,
                     })
-                })
-            }
+                }),
             ToolRequest::Kill { instance_id } => self.coordinator.kill(&instance_id).map(|_| {
                 ToolPayload::Status(ToolStatusPayload {
                     status: ToolStatus::Killed,

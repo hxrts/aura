@@ -679,14 +679,18 @@ Possession of retained dealer shares does not authorize a runtime to manufacture
 
 ### Explicit enrollment transcript quorum
 
-Enrollment signing intent version 3 declares four ordered domains: the exact
-trust manifest, public version 4 invitation transport, initial version 2
-enrollment Request control transcript, and finite negative terminal policy.
+Current enrollment signing intent version 4 declares five ordered domains: the
+exact trust manifest, public version 4 invitation transport, initial version 2
+enrollment Request control transcript, original issuer return mailbox statement,
+and finite negative terminal policy. The first four are initiation signature
+domains. The return statement binds the approved manifest and a public
+retrieval-credential commitment; the credential remains in issuer custody.
 Initial Request fields derive from that manifest and its transcript digest.
 The version 1 policy binds the same manifest digest and exactly Rejected,
 Cancelled, TimedOut, ChoreographyFailed, RuntimeFailed and Superseded. Public
-validation checks exact version, domain order, manifest, transport and initial
-Request binding; historical or substituted declarations cannot gain consent.
+validation checks exact version, domain order, manifest, transport, initial
+Request and return-mailbox binding; unsupported or substituted declarations
+cannot gain consent.
 
 The policy is conditional consent, not an initiation signature or evidence that
 an outcome occurred. Only the original runtime owner may combine its actual

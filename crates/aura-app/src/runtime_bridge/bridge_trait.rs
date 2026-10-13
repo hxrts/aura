@@ -940,6 +940,19 @@ pub trait RuntimeBridge: Send + Sync {
         Err(aura_invitation::enrollment_manifest::EnrollmentManifestError::Unavailable)
     }
 
+    /// Reauthenticate the original signed enrollment and the currently active
+    /// generation before an app-owned host retry may use its retained completion.
+    /// A completion's locator fields alone never authorize a host write.
+    async fn authenticate_enrollment_host_recovery(
+        &self,
+        _completion: &crate::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
+    ) -> Result<(), RuntimeBridgeError> {
+        Err(RuntimeBridgeError::with_source(
+            IntentError::internal_error("enrollment host recovery unavailable"),
+            aura_invitation::enrollment_manifest::EnrollmentManifestError::Unavailable,
+        ))
+    }
+
     /// Get IDs of peers with pending invitations, distinguishing runtime
     /// unavailability from a real empty invited set.
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError>;

@@ -527,10 +527,14 @@ Regression coverage must exercise actual storage production and observe the orig
 
 Shared workflows select a versioned transfer intent and issue a move-only
 `UserApprovedEnrollmentSigningIntent` only for explicit local approval through
-its original runtime bridge. Transfer prefix `aura-enrollment-signing-intent:v3:`
-identifies the canonical v3 declaration. Selection requires exact canonical
+its original runtime bridge. Current issuance uses transfer prefix
+`aura-enrollment-signing-intent:v4:` and a canonical five-domain declaration.
+Selection requires exact canonical
 reencoding and carries the manifest, public v4 invitation transport, initial
-Request and finite negative terminal policy unchanged into local approval.
+Request, original issuer return mailbox statement and finite negative terminal
+policy unchanged into local approval. The mailbox statement binds the original
+issuer retrieval-credential commitment, not the credential. Earlier signing
+intent versions cannot authorize this five-domain approval.
 The policy is conditional consent, not terminal decision evidence. The runtime
 independently validates current active membership, native policy and local share
 custody. Public bytes,

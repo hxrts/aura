@@ -8,8 +8,9 @@ use aura_app::AppCore;
 use aura_ui::UiController;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::browser_promises::{browser_sleep_ms, fetch_text_with_timeout};
@@ -130,9 +131,8 @@ async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, Web
     }
     let mut drained = 0_usize;
     for (authority, device) in mailboxes {
-        drained = drained.saturating_add(
-            drain_harness_transport_mailbox_for(agent, authority, device).await?,
-        );
+        drained = drained
+            .saturating_add(drain_harness_transport_mailbox_for(agent, authority, device).await?);
     }
     Ok(drained)
 }
@@ -497,6 +497,9 @@ fn spawn_generation_maintenance_supervisor(
     } else {
         0
     };
+    let broker_failure_reported = Rc::new(Cell::new(false));
+    let return_failure_reported = Rc::new(Cell::new(false));
+    let broker_tick_controller = controller.clone();
     let mut tick_count: u64 = 0;
     spawn_browser_maintenance_loop(
         owner,
@@ -510,11 +513,49 @@ fn spawn_generation_maintenance_supervisor(
             tick_count = tick_count.saturating_add(1);
             let tick_app_core = tick_app_core.clone();
             let agent = agent.clone();
+            let tick_controller = broker_tick_controller.clone();
+            let broker_failure_reported = broker_failure_reported.clone();
+            let return_failure_reported = return_failure_reported.clone();
             let run_background_sync = account_ready
                 && tick_count >= background_sync_start_delay_ticks
                 && tick_count % background_sync_interval_ticks == 0;
             async move {
                 if let Some(agent) = agent.clone() {
+                    // The runtime owns authenticated enrollment mailbox
+                    // registration, credentials, and VM admission. Browser
+                    // upkeep only drives that owner once per generation tick.
+                    if let Err(source) = agent.drain_pending_enrollment_vm_mailbox().await {
+                        if !broker_failure_reported.replace(true) {
+                            let error = WebUiError::operation(
+                                WebUiOperation::BackgroundSync,
+                                "WEB_ENROLLMENT_MAILBOX_DRAIN_FAILED",
+                                "authenticated enrollment mailbox upkeep failed",
+                            )
+                            .with_source(source);
+                            log_web_error("error", &error);
+                            tick_controller.runtime_error_toast(
+                                "Enrollment transport is unavailable; import is still pending",
+                            );
+                        }
+                    }
+                    // This is issuer-side mailbox upkeep, separate from the
+                    // invitee pending-mailbox drain. The agent alone verifies
+                    // original return registration, durable frame custody and
+                    // broker ACK before its VM can consume a response.
+                    if let Err(source) = agent.drain_issuer_return_vm_mailbox().await {
+                        if !return_failure_reported.replace(true) {
+                            let error = WebUiError::operation(
+                                WebUiOperation::BackgroundSync,
+                                "WEB_ENROLLMENT_RETURN_MAILBOX_DRAIN_FAILED",
+                                "authenticated enrollment return mailbox upkeep failed",
+                            )
+                            .with_source(source);
+                            log_web_error("error", &error);
+                            tick_controller.runtime_error_toast(
+                                "Enrollment response transport is unavailable; enrollment is still pending",
+                            );
+                        }
+                    }
                     if browser_harness_mode {
                         run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;
                     }

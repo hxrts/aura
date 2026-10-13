@@ -905,7 +905,7 @@ impl InvitationDeviceEnrollmentHandler {
             }
         }
         .map_err(AgentError::from)?;
-        match terminal {
+        let outcome = match terminal {
             enrollment_vm_admission::VerifiedEnrollmentTerminal::Committed(confirmed) => {
                 super::enrollment_manifest_admission::retain_verified_confirmation(
                     effects.as_ref(),
@@ -914,7 +914,7 @@ impl InvitationDeviceEnrollmentHandler {
                 )
                 .await
                 .map_err(AgentError::EnrollmentManifest)?;
-                Ok(None)
+                None
             }
             enrollment_vm_admission::VerifiedEnrollmentTerminal::Failed(failed) => {
                 let retained = super::enrollment_manifest_admission::retain_verified_failure(
@@ -924,9 +924,13 @@ impl InvitationDeviceEnrollmentHandler {
                 )
                 .await
                 .map_err(AgentError::EnrollmentManifest)?;
-                Ok(Some(retained.evidence().reason()))
+                Some(retained.evidence().reason())
             }
-        }
+        };
+        crate::core::agent::pending_enrollment_mailbox::verify_retained_mailbox_frames_after_terminal(
+            effects.as_ref(), admitted.as_ref(),
+        ).await?;
+        Ok(outcome)
     }
 
     async fn run_device_enrollment_invitee_window(

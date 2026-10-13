@@ -102,12 +102,17 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   fresh-instance condition before an available matching submission handle is
   checked for exact instance/state. Browser approval activates the mounted
   `modal_confirm_button` through the semantic control contract.
+  A mounted control may not return a submission handle to the harness, so an
+  explicit captured-instance predicate binds its later success and pre-restart
+  state to the same observed operation instance.
 - Browser enrollment conformance requires the accepted-device runtime fact and
   two-device host projection before restarting the original receiver. The
-  driver writes a bounded pre-restart artifact with the observed operation
-  instance, state, typed failure, host acknowledgment, and safe console
-  diagnostics before closing that page; the reopened profile must retain the
-  two-device projection.
+  driver requires the captured instance to be `Succeeded`, then writes a
+  bounded pre-restart artifact with that operation, typed failures, host
+  added-device projection event, and safe console diagnostics before closing the old
+  process. The browser backend carries that evidence into the new driver. A
+  separate post-restart private artifact requires that event's device ID
+  in the newly observed two-device list.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
 - Shared scenario inventory discipline: `scenarios/harness_inventory.toml` is semantic-only for shared flows. The remaining compatibility-step IR is justified only by `tests/phases/phase3_state_machine.rs` plus executor-internal metadata/wait shaping, and must not expand back into authoritative scenario coverage.
 - AMP transition shared scenarios observe reducer-derived transition facts

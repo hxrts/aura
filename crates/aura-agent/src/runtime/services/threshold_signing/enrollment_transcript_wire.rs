@@ -84,9 +84,19 @@ impl ValidatedLocalEnrollmentSigningMaterial {
                     Arc::new(source),
                 )
             })?;
+        let return_message = approval
+            .issuer_return_mailbox()
+            .required_transcript_bytes()
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "retain approved issuer return mailbox packet domain",
+                    Arc::new(source),
+                )
+            })?;
         if packet.transcript_digest != aura_core::hash::hash(&manifest_message)
             && packet.transcript_digest != aura_core::hash::hash(&transport_message)
             && packet.transcript_digest != aura_core::hash::hash(&request_message)
+            && packet.transcript_digest != aura_core::hash::hash(&return_message)
         {
             return Err(AuraError::permission_denied(
                 "packet requests an unapproved transcript domain",
@@ -141,6 +151,15 @@ impl ValidatedLocalEnrollmentSigningMaterial {
                 .map_err(|source| {
                     AuraError::crypto_with_source(
                         "admit explicitly approved initial request",
+                        Arc::new(source),
+                    )
+                })?,
+            approval
+                .issuer_return_mailbox()
+                .required_transcript_bytes()
+                .map_err(|source| {
+                    AuraError::crypto_with_source(
+                        "admit explicitly approved issuer return mailbox",
                         Arc::new(source),
                     )
                 })?,

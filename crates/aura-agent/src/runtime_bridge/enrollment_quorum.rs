@@ -143,6 +143,7 @@ impl OriginalIssuerPreparation {
         effects: Arc<AuraEffectSystem>,
         manifest: &EnrollmentTrustManifest,
         public_transport: &aura_invitation::shareable::PublicEnrollmentTransportSigningIntent,
+        return_credential_commitment: [u8; 32],
         setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
         window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
     ) -> Result<RuntimeApprovedEnrollmentSigningIntent, AuraError> {
@@ -155,11 +156,12 @@ impl OriginalIssuerPreparation {
         let intent = aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent::new(
             manifest.clone(),
             public_transport.clone(),
+            return_credential_commitment,
         )?;
         let canonical = aura_core::util::serialization::to_vec(&intent)?;
         let intent_digest = aura_core::hash::hash(&canonical);
         let code = format!(
-            "aura-enrollment-signing-intent:v3:{}",
+            "aura-enrollment-signing-intent:v4:{}",
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&canonical)
         );
         let observed = aura_app::runtime_bridge::PreparedDeviceEnrollmentSigning {
@@ -180,6 +182,8 @@ impl OriginalIssuerPreparation {
                         AuraError::invalid("original preparation registration is absent")
                     })?
                     .bind_original_approval(&effects, &manifest.ceremony, intent_digest)?;
+                #[cfg(test)]
+                eprintln!("enrollment initiation stage: original approval registration bound");
                 self.ready
                     .lock()
                     .take()
@@ -190,6 +194,8 @@ impl OriginalIssuerPreparation {
                     .map_err(|_| {
                         AuraError::invalid("original prepared issuer observation was cancelled")
                     })?;
+                #[cfg(test)]
+                eprintln!("enrollment initiation stage: original prepared-ready published");
                 let approved = approved.await.map_err(|source| {
                     AuraError::crypto_with_source(
                         "original prepared issuer approval ingress ended",
@@ -221,6 +227,7 @@ pub(crate) struct RuntimeApprovedEnrollmentSigningIntent {
     transport: aura_invitation::shareable::PublicEnrollmentTransportSigningIntent,
     initial_request:
         aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript,
+    issuer_return_mailbox: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement,
     negative_terminal_policy:
         aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalPolicy,
     canonical_intent_digest: [u8; 32],
@@ -243,6 +250,11 @@ impl RuntimeApprovedEnrollmentSigningIntent {
         &self,
     ) -> &aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript {
         &self.initial_request
+    }
+    pub(crate) fn issuer_return_mailbox(
+        &self,
+    ) -> &aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnStatement {
+        &self.issuer_return_mailbox
     }
     pub(crate) fn negative_terminal_policy(
         &self,
@@ -276,6 +288,9 @@ pub(super) fn admit_original_runtime_approval(
     let intent = aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent::new(
         approval.manifest().clone(),
         approval.transport().clone(),
+        approval
+            .issuer_return_mailbox()
+            .retrieval_credential_commitment(),
     )?;
     let canonical = aura_core::util::serialization::to_vec(&intent).map_err(|source| {
         AuraError::Serialization {
@@ -293,6 +308,7 @@ pub(super) fn admit_original_runtime_approval(
         manifest: approval.manifest().clone(),
         transport: approval.transport().clone(),
         initial_request: approval.initial_request().clone(),
+        issuer_return_mailbox: approval.issuer_return_mailbox().clone(),
         negative_terminal_policy: approval.negative_terminal_policy().clone(),
         canonical_intent_digest: aura_core::hash::hash(&canonical),
         setup: approval.setup().clone(),

@@ -78,7 +78,7 @@ impl ScenarioAction {
     #[must_use]
     pub fn referenced_actor_ids(&self) -> Vec<&ActorId> {
         match self {
-            Self::Environment(EnvironmentAction::RestartActor { actor })
+            Self::Environment(EnvironmentAction::RestartActor { actor, .. })
             | Self::Environment(EnvironmentAction::KillActor { actor })
             | Self::Environment(EnvironmentAction::FaultDelay { actor, .. })
             | Self::Environment(EnvironmentAction::FaultLoss { actor, .. })
@@ -151,6 +151,7 @@ pub enum Expectation {
         operation_id: OperationId,
         state: OperationState,
         after_instance: Option<String>,
+        at_instance: Option<String>,
     },
     ParityWithActor {
         actor: ActorId,
@@ -189,6 +190,7 @@ pub struct SemanticScenarioFileStep {
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
     pub after_instance: Option<String>,
+    pub at_instance: Option<String>,
     pub peer_actor: Option<ActorId>,
     pub setup_code: Option<String>,
     #[serde(default)]
@@ -299,6 +301,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::RestartActor => {
                 ScenarioAction::Environment(EnvironmentAction::RestartActor {
                     actor: required(value.actor, "actor", value.action)?,
+                    at_instance: value.at_instance,
                 })
             }
             SemanticActionKind::KillActor => {
@@ -573,6 +576,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     operation_id: required(value.operation_id, "operation_id", value.action)?,
                     state: required(value.operation_state, "operation_state", value.action)?,
                     after_instance: value.after_instance,
+                    at_instance: value.at_instance,
                 })
             }
             SemanticActionKind::ParityWithActor => {

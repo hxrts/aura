@@ -116,18 +116,30 @@ registered by the issuer under the retained original enrollment control and
 approved native threshold policy. Its signing transcript belongs to the
 original user-approved initiation batch; later generic signing cannot create
 the route. Its signed registration binds the original
-invitation and manifest digest, session, subject, issuer and invitee devices,
+invitation, manifest and original setup digests, session, subject, issuer and invitee devices,
 direction, and expiry. The invitee may send a response only after checking
 that registration against its independently retained enrollment baseline and
 proving possession of its admitted setup key. Neither a self-certified
 descriptor nor a signature copied from the manifest can establish the reverse
 route.
+The return registration uses the v2 signed transcript; old v1 records cannot
+authorize a route after the setup-digest binding was added.
 
 For quorum issuance the verifier uses the authenticated native root signing
 node (`NodeIndex(0)`), requires its original threshold of at least two, and
 matches its group verifier to the separately pinned initiator confirmation
 verifier in the transferred manifest. Another active inventory key, even one
 listing the issuer device, cannot register the return route.
+For an original K1 issuance, the same retained physical SingleSigner root
+selected for the signed manifest signs a distinct return transcript before
+the enrollment code is exported. Its package and epoch must match the
+independently pinned root and initiator confirmation verifier. The registration
+records the signing mode; K1 and quorum proofs cannot substitute for one
+another. Both modes check expiry through the selected physical-time provider.
+Each Bob-to-Alice VM envelope has a separate setup-key authorization over its
+exact message ID and serialized envelope digest, bound to the verified issuer
+return registration and original session. The broker cannot promote this
+authorization to membership or treat a first-frame proof as a reverse route.
 
 Broker enqueue, take, and acknowledgment use separate scoped credentials.
 The broker enforces the signed scope, bounded capacity, and expiry using its

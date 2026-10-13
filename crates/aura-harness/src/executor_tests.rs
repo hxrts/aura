@@ -18,6 +18,64 @@ use aura_app::ui_contract::{
 };
 use serde_json::json;
 
+#[test]
+fn browser_enrollment_requires_mounted_submission_and_host_ack_before_reopen() {
+    let source = include_str!(
+        "../../../scenarios/harness/web-conformance-enrollment-approved-transfer-reopen.toml"
+    );
+    let scenario: toml::Value = toml::from_str(source).expect("valid browser enrollment scenario");
+    let steps = scenario["steps"].as_array().expect("scenario steps");
+    let position = |id: &str| {
+        steps
+            .iter()
+            .position(|step| step["id"].as_str() == Some(id))
+            .unwrap_or_else(|| panic!("missing browser enrollment step {id}"))
+    };
+    let submit = position("bob-approve-import");
+    assert_eq!(steps[submit]["action"].as_str(), Some("activate"));
+    assert_eq!(
+        steps[submit]["control_id"].as_str(),
+        Some("modal_confirm_button")
+    );
+    let complete = position("bob-original-import-succeeded");
+    let instance = position("bob-capture-original-enrollment-instance");
+    let exact = position("bob-exact-original-import-succeeded");
+    let host_ack = position("bob-host-acknowledged-adopted-device");
+    let persisted = position("bob-host-devices-persisted-before-restart");
+    let exact_before_restart = position("bob-exact-import-still-succeeded-before-restart");
+    let reopen = position("bob-restart-adopted-browser-profile");
+    assert!(submit < complete && complete < instance && instance < exact && exact < host_ack);
+    assert!(
+        host_ack < persisted && persisted < exact_before_restart && exact_before_restart < reopen
+    );
+    for step in [exact, exact_before_restart] {
+        assert_eq!(steps[step]["action"].as_str(), Some("operation_state_is"));
+        assert_eq!(
+            steps[step]["operation_id"].as_str(),
+            Some("device_enrollment")
+        );
+        assert_eq!(steps[step]["operation_state"].as_str(), Some("succeeded"));
+        assert_eq!(
+            steps[step]["at_instance"].as_str(),
+            Some("${bob_enrollment_instance}")
+        );
+    }
+    assert_eq!(
+        steps[host_ack]["action"].as_str(),
+        Some("runtime_event_occurred")
+    );
+    assert_eq!(
+        steps[host_ack]["runtime_event_kind"].as_str(),
+        Some("device_enrollment_accepted")
+    );
+    assert_eq!(steps[host_ack]["value"].as_str(), Some("BobApp"));
+    assert_eq!(steps[persisted]["count"].as_integer(), Some(2));
+    assert_eq!(
+        steps[reopen]["at_instance"].as_str(),
+        Some("${bob_enrollment_instance}")
+    );
+}
+
 #[allow(clippy::disallowed_methods)]
 fn unique_test_dir(label: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -143,6 +201,7 @@ fn shared_semantic_lane_allows_observation_and_semantic_adjacent_requests() {
         },
         ToolRequest::Restart {
             instance_id: "alice".to_string(),
+            expected_operation_instance: None,
         },
     ] {
         assert!(

@@ -71,6 +71,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 | protocol/session handlers and core builder/config modules | `MoveOwned` | Session transfer, delegation, and typed orchestration boundaries. |
 | guard-owned verified remote-ingress boundary re-export | `MoveOwned`, capability-gated | Carries checked evidence before decoded peer data can flow into mutation APIs. |
 | long-lived coordinators such as `transport_coordinator` and peer-connection retry actors | `ActorOwned` | Justified orchestration coordinators only; not the default model for protocol logic. |
+| `handlers/peer_path_state.rs` relay-first path policy | `Pure` | Value-in/value-out state machine over `PeerConnectionActor`; the runtime (`aura-agent` service registry) owns instances and supplies time. |
 | guard-chain and effect integration surfaces | capability-gated orchestration | Capability, flow, and journal coupling remain explicit on send paths. |
 | observed-only surfaces | none local | Observation belongs in higher layers consuming protocol outputs. |
 
@@ -103,6 +104,7 @@ just check-arch
 | CRDT causal ordering violated | `src/effects/crdt/delivery.rs` (inline) | Covered |
 | Intent state lattice ordering incorrect | `src/state/intent_state.rs` (inline, 7 tests) | Covered |
 | Peer connection retry budget wrong | `src/handlers/peer_connection.rs` (inline) | Covered |
+| Relay-first selection, promotion, degradation or generation reset wrong | `src/handlers/peer_path_state.rs` (inline) | Covered |
 | Admission capability validation fails | `src/admission.rs` (inline) | Covered |
 | Decoded peer data is treated as verified ingress | `aura-guards/src/ingress.rs` (inline) | Initial typestate coverage |
 

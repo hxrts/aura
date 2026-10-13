@@ -246,11 +246,17 @@ pub use runtime::{
 pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
 
 // Rendezvous service types
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    feature = "simulation",
+    feature = "choreo-backend-telltale-machine"
+))]
+pub use runtime::services::bootstrap_broker::LocalBootstrapBrokerService;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::bootstrap_broker::{
     endpoint_is_loopback as bootstrap_broker_endpoint_is_loopback,
     fetch_remote_candidates as fetch_bootstrap_broker_candidates, BootstrapBrokerCandidateRecord,
-    BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy,
+    BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy, BootstrapBrokerRegistration,
 };
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
@@ -304,6 +310,12 @@ pub use runtime::EffectSystemFactory;
 
 #[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
 pub use runtime::simulation_factory::rekey_simulated_channel;
+
+#[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
+pub use runtime::simulation_factory::enrollment::{
+    EnrollmentLifecycleFailure, EnrollmentParticipantProfile, ReopenedEnrollment,
+    SimulatedEnrollment, StoppedEnrollmentProfiles,
+};
 
 // Re-export core types for convenience (authority-first)
 #[cfg(feature = "choreo-backend-telltale-machine")]
