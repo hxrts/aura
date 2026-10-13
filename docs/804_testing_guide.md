@@ -1322,6 +1322,15 @@ target-specific compatibility. Regenerate the tracked `Cargo.nix` after changing
 these dependencies, commit it together with `Cargo.lock`, and run
 `just ci-security-audit`; `just ci-cargo-nix-check` fails when the two drift.
 
+Network events are scenario steps when a lab is provisioned:
+`network_link_down` / `network_link_up` (actor), `network_flush_nat` (`value` =
+router), `network_set_firewall` (`value` = router, `name` = firewall preset) and
+`network_set_link_condition` (actor, `value` = link condition preset). They are
+environment actions of the shared scenario contract, apply through the lab
+backend, and are recorded in `events.json` and the lab timeline; without a lab
+the step fails rather than being skipped. `holepunch-relay-first.toml` and its
+corporate variant use them after the contact link.
+
 Lab artifacts land under the run directory: `network_lab_runtime.json` (device,
 namespace and address per authority), `network-lab-artifacts/` with the
 patchbay run directory copy, one `<device>.pcap` per device captured by

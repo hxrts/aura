@@ -227,6 +227,7 @@ impl NetworkLabBackend for PatchbayBackend {
                         AuthorityNetworkContext {
                             authority_id: authority.authority_id.clone(),
                             device_name: authority.device_name.clone(),
+                            gateway_router: authority.gateway_router.clone(),
                             namespace: device.ns().to_string(),
                             bind_address: authority.bind_address.clone(),
                             rendezvous_endpoints: Vec::new(),

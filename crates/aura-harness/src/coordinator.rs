@@ -80,6 +80,8 @@ pub struct HarnessCoordinator {
     instance_bind_addresses: HashMap<String, String>,
     /// Network namespace each instance was launched in; bind probes run there.
     instance_namespaces: HashMap<String, InstanceNamespace>,
+    /// Lab authority each instance plays, for network event scenario steps.
+    instance_lab_authorities: HashMap<String, String>,
     instance_data_dirs: HashMap<String, PathBuf>,
     instance_transient_dirs: HashMap<String, PathBuf>,
     runtime_substrate: RuntimeSubstrate,
@@ -139,6 +141,7 @@ impl HarnessCoordinator {
         let mut instance_modes = HashMap::new();
         let mut instance_bind_addresses = HashMap::new();
         let mut instance_namespaces = HashMap::new();
+        let mut instance_lab_authorities = HashMap::new();
         let mut instance_data_dirs = HashMap::new();
         let mut instance_transient_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
@@ -176,6 +179,7 @@ impl HarnessCoordinator {
                 ),
                 (None, _) => InstanceNamespace::host(),
             };
+            let lab_authority = instance.lab_authority.clone();
             let instance_mode = instance.mode.clone();
             let instance_bind_address = instance.bind_address.clone();
             let instance_data_dir = absolutize_path(instance.data_dir.clone());
@@ -212,6 +216,9 @@ impl HarnessCoordinator {
             instance_modes.insert(id.clone(), instance_mode);
             instance_bind_addresses.insert(id.clone(), instance_bind_address);
             instance_namespaces.insert(id.clone(), namespace);
+            if let Some(authority) = lab_authority {
+                instance_lab_authorities.insert(id.clone(), authority);
+            }
             instance_data_dirs.insert(id.clone(), instance_data_dir);
             instance_transient_dirs.insert(id.clone(), instance_transient_dir);
             backends.insert(id, backend);
@@ -262,6 +269,7 @@ impl HarnessCoordinator {
             instance_modes,
             instance_bind_addresses,
             instance_namespaces,
+            instance_lab_authorities,
             instance_data_dirs,
             instance_transient_dirs,
             runtime_substrate: config.run.runtime_substrate,
@@ -589,6 +597,28 @@ impl HarnessCoordinator {
 
     pub fn runtime_substrate(&self) -> RuntimeSubstrate {
         self.runtime_substrate
+    }
+
+    /// Lab authority the instance plays, when the run maps it into a lab.
+    pub fn lab_authority(&self, instance_id: &str) -> Option<&str> {
+        self.instance_lab_authorities
+            .get(instance_id)
+            .map(String::as_str)
+    }
+
+    /// Record an applied network event in the run event stream so it appears
+    /// in `events.json` next to the scenario steps.
+    pub fn record_network_receipt(&mut self, receipt: &crate::network_lab::RawEventReceipt) {
+        self.events.push(
+            "network",
+            &receipt.event_type,
+            None,
+            event_details!({
+                "applied_at_ms" => receipt.applied_at_ms,
+                "affected_authorities" => receipt.affected_authorities.clone(),
+                "details" => receipt.details.to_string()
+            }),
+        );
     }
 
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> Result<()> {

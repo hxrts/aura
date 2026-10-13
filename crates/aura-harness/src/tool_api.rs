@@ -456,6 +456,10 @@ pub struct ToolApi {
     coordinator: HarnessCoordinator,
     action_log: Vec<ToolActionRecord>,
     negotiated_version: String,
+    /// The run's network lab while scenarios execute, so network events can be
+    /// scenario steps. Declared after `coordinator` so instances drop before
+    /// their namespaces; `take_network_lab` hands it back for `finish`.
+    network_lab: Option<crate::network_lab::ProvisionedLab>,
 }
 
 impl ToolApi {
@@ -464,7 +468,106 @@ impl ToolApi {
             coordinator,
             action_log: Vec::new(),
             negotiated_version: TOOL_API_DEFAULT_VERSION.to_string(),
+            network_lab: None,
         }
+    }
+
+    /// Give scenario steps access to the provisioned lab for this run.
+    pub fn attach_network_lab(&mut self, lab: crate::network_lab::ProvisionedLab) {
+        self.network_lab = Some(lab);
+    }
+
+    /// Hand the lab back once instances are stopped so the caller can finish it.
+    pub fn take_network_lab(&mut self) -> Option<crate::network_lab::ProvisionedLab> {
+        self.network_lab.take()
+    }
+
+    fn network_lab_mut(&mut self) -> anyhow::Result<&mut crate::network_lab::ProvisionedLab> {
+        self.network_lab.as_mut().ok_or_else(|| {
+            anyhow::anyhow!(
+                "network event requires a provisioned network lab (set run.network_topology and run with --network-backend patchbay)"
+            )
+        })
+    }
+
+    fn lab_authority_for(&self, actor: &str) -> anyhow::Result<String> {
+        self.coordinator
+            .lab_authority(actor)
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("actor {actor} has no lab_authority in the run config"))
+    }
+
+    fn apply_network_event(
+        &mut self,
+        event: crate::network_lab::NetworkEvent,
+    ) -> anyhow::Result<crate::network_lab::RawEventReceipt> {
+        let receipt = self.network_lab_mut()?.apply_event(event)?;
+        self.coordinator.record_network_receipt(&receipt);
+        Ok(receipt)
+    }
+
+    /// Take the actor's device uplink down (`up == false`) or back up.
+    pub fn apply_network_link(
+        &mut self,
+        actor: &str,
+        up: bool,
+    ) -> anyhow::Result<crate::network_lab::RawEventReceipt> {
+        let authority_id = self.lab_authority_for(actor)?;
+        let iface = crate::network_lab::DEVICE_UPLINK_IFACE.to_string();
+        let event = if up {
+            crate::network_lab::NetworkEvent::LinkUp {
+                authority_id,
+                iface,
+            }
+        } else {
+            crate::network_lab::NetworkEvent::LinkDown {
+                authority_id,
+                iface,
+            }
+        };
+        self.apply_network_event(event)
+    }
+
+    pub fn apply_network_flush_nat(
+        &mut self,
+        router: &str,
+    ) -> anyhow::Result<crate::network_lab::RawEventReceipt> {
+        self.apply_network_event(crate::network_lab::NetworkEvent::FlushNat {
+            router: router.to_string(),
+        })
+    }
+
+    pub fn apply_network_firewall(
+        &mut self,
+        router: &str,
+        preset: &str,
+    ) -> anyhow::Result<crate::network_lab::RawEventReceipt> {
+        let preset: crate::network_lab::FirewallPreset =
+            parse_preset_token(preset, "firewall preset")?;
+        self.apply_network_event(crate::network_lab::NetworkEvent::SetFirewall {
+            router: router.to_string(),
+            preset,
+        })
+    }
+
+    /// Apply a link condition preset to the actor's device uplink.
+    pub fn apply_network_link_condition(
+        &mut self,
+        actor: &str,
+        condition: &str,
+    ) -> anyhow::Result<crate::network_lab::RawEventReceipt> {
+        let authority_id = self.lab_authority_for(actor)?;
+        let condition: crate::network_lab::LinkConditionPreset =
+            parse_preset_token(condition, "link condition preset")?;
+        let (left_node, right_node) = {
+            let context = self.network_lab_mut()?.authority_context(&authority_id)?;
+            (context.device_name.clone(), context.gateway_router.clone())
+        };
+        self.apply_network_event(crate::network_lab::NetworkEvent::SetLinkCondition {
+            left_node,
+            right_node,
+            condition,
+        })
     }
 
     pub fn start_all(&mut self) -> anyhow::Result<()> {
@@ -822,6 +925,16 @@ impl ToolApi {
     pub fn supported_versions() -> &'static [&'static str] {
         &TOOL_API_VERSIONS
     }
+}
+
+/// Parse a scenario token (`home`, `wifi_bursty`, …) as one of the network lab
+/// preset enums, which all serialize in snake case.
+fn parse_preset_token<T: serde::de::DeserializeOwned>(
+    token: &str,
+    what: &str,
+) -> anyhow::Result<T> {
+    serde_json::from_value(serde_json::Value::String(token.to_string()))
+        .map_err(|error| anyhow::anyhow!("invalid {what} '{token}': {error}"))
 }
 
 #[cfg(test)]

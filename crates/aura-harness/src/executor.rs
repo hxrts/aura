@@ -1125,6 +1125,21 @@ fn execute_semantic_environment_action(
             let _decision = fault_rng.range_u64(0, 2);
             tool_api.apply_fault_tunnel_drop(&instance_id)
         }
+        EnvironmentAction::NetworkLinkDown { actor } => {
+            tool_api.apply_network_link(&actor.0, false).map(drop)
+        }
+        EnvironmentAction::NetworkLinkUp { actor } => {
+            tool_api.apply_network_link(&actor.0, true).map(drop)
+        }
+        EnvironmentAction::NetworkFlushNat { router } => {
+            tool_api.apply_network_flush_nat(router).map(drop)
+        }
+        EnvironmentAction::NetworkSetFirewall { router, preset } => {
+            tool_api.apply_network_firewall(router, preset).map(drop)
+        }
+        EnvironmentAction::NetworkSetLinkCondition { actor, condition } => tool_api
+            .apply_network_link_condition(&actor.0, condition)
+            .map(drop),
     }
 }
 
@@ -2050,6 +2065,21 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             aura_app::scenario_contract::EnvironmentAction::FaultLoss { .. } => "fault_loss",
             aura_app::scenario_contract::EnvironmentAction::FaultTunnelDrop { .. } => {
                 "fault_tunnel_drop"
+            }
+            aura_app::scenario_contract::EnvironmentAction::NetworkLinkDown { .. } => {
+                "network_link_down"
+            }
+            aura_app::scenario_contract::EnvironmentAction::NetworkLinkUp { .. } => {
+                "network_link_up"
+            }
+            aura_app::scenario_contract::EnvironmentAction::NetworkFlushNat { .. } => {
+                "network_flush_nat"
+            }
+            aura_app::scenario_contract::EnvironmentAction::NetworkSetFirewall { .. } => {
+                "network_set_firewall"
+            }
+            aura_app::scenario_contract::EnvironmentAction::NetworkSetLinkCondition { .. } => {
+                "network_set_link_condition"
             }
         },
         SemanticAction::Intent(intent) => match intent {

@@ -1,0 +1,59 @@
+schema_version = 1
+
+# Three real TUI instances inside patchbay namespaces: a public relay and two
+# alice behind a home NAT and bob behind a symmetric corporate NAT (topologies/relay-first-corporate.toml).
+# Run on Linux with AURA_HARNESS_AURA_BIN pointing at an aura binary built with
+# aura-effects/test-keyring (one platform keyring lease per host otherwise):
+#   aura-harness run --config configs/harness/patchbay-double-nat.toml #     --scenario scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml #     --network-backend patchbay
+[run]
+name = "patchbay-corporate"
+pty_rows = 40
+pty_cols = 120
+seed = 4242
+artifact_dir = "artifacts/harness/patchbay-corporate"
+network_topology = "topologies/relay-first-corporate.toml"
+
+[[instances]]
+id = "relay"
+mode = "local"
+lab_authority = "relay"
+data_dir = "artifacts/harness/state/patchbay-double-nat/relay"
+device_id = "relay-dev-01"
+bind_address = "0.0.0.0:41000"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433
+
+[[instances]]
+id = "alice"
+mode = "local"
+lab_authority = "alice"
+data_dir = "artifacts/harness/state/patchbay-double-nat/alice"
+device_id = "alice-dev-01"
+bind_address = "0.0.0.0:41001"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433
+
+[[instances]]
+id = "bob"
+mode = "local"
+lab_authority = "bob"
+data_dir = "artifacts/harness/state/patchbay-double-nat/bob"
+device_id = "bob-dev-01"
+bind_address = "0.0.0.0:41002"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433

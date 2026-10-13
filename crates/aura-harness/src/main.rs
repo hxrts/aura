@@ -238,13 +238,13 @@ fn run(args: RunArgs) -> Result<()> {
         None => None,
     };
 
-    let run_result = run_with_artifacts(
+    let (run_result, network_lab) = run_with_artifacts(
         &config,
         &artifact_bundle,
         &summary,
         &preflight_report,
         &backend_preflight,
-        network_lab.as_ref(),
+        network_lab,
         scenario_config.as_ref(),
     );
     // The coordinator and every instance are gone by now, on both paths, so
@@ -285,16 +285,47 @@ fn run_with_artifacts(
     summary: &aura_harness::tool_api::StartupSummary,
     preflight_report: &PreflightReport,
     backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
-    network_lab: Option<&ProvisionedLab>,
+    network_lab: Option<ProvisionedLab>,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
+) -> (Result<()>, Option<ProvisionedLab>) {
+    // The tool API owns the lab while scenarios run so network events can be
+    // scenario steps; it is handed back here for teardown on every path.
+    let coordinator =
+        match HarnessCoordinator::from_run_config_with_lab(config, network_lab.as_ref()) {
+            Ok(coordinator) => coordinator,
+            Err(error) => return (Err(error), network_lab),
+        };
+    let mut tool_api = ToolApi::new(coordinator);
+    if let Some(lab) = network_lab {
+        tool_api.attach_network_lab(lab);
+    }
+    let result = run_with_tool_api(
+        config,
+        artifact_bundle,
+        summary,
+        preflight_report,
+        backend_preflight,
+        scenario_config,
+        &mut tool_api,
+    );
+    let lab = tool_api.take_network_lab();
+    (result, lab)
+}
+
+fn run_with_tool_api(
+    config: &aura_harness::config::RunConfig,
+    artifact_bundle: &ArtifactBundle,
+    summary: &aura_harness::tool_api::StartupSummary,
+    preflight_report: &PreflightReport,
+    backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
+    scenario_config: Option<&aura_harness::config::ScenarioConfig>,
+    tool_api: &mut ToolApi,
 ) -> Result<()> {
     let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
     let seed_bundle = build_seed_bundle(config);
     let mut resource_guard = ResourceGuard::from_run_config(config);
     resource_guard.sample("run_start");
 
-    let coordinator = HarnessCoordinator::from_run_config_with_lab(config, network_lab)?;
-    let mut tool_api = ToolApi::new(coordinator);
     if verbose_steps {
         eprintln!("[harness] startup phase=start_all begin");
     }
@@ -330,11 +361,10 @@ fn run_with_artifacts(
     }
 
     let scenario_report = if let Some(scenario) = scenario_config {
-        match execute_with_run_budgets(config, scenario, &mut tool_api) {
+        match execute_with_run_budgets(config, scenario, tool_api) {
             Ok(report) => Some(report),
             Err(error) => {
-                let diagnostics =
-                    collect_failure_diagnostics(config, &mut tool_api, &error.to_string());
+                let diagnostics = collect_failure_diagnostics(config, tool_api, &error.to_string());
                 artifact_bundle.write_json("failure_diagnostics.json", &diagnostics)?;
                 if let Some(step_id) = diagnostics
                     .get("failing_step")

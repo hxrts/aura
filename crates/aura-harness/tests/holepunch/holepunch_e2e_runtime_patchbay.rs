@@ -6,7 +6,9 @@
 //! This replaces a bare-socket UDP punch through a toy reflector, which proved
 //! nothing about Aura. The harness binary provisions
 //! `configs/harness/topologies/single-home-lan.toml`, forks one TUI per device
-//! namespace and runs the contact phases of scenario 13 between them.
+//! namespace, runs the contact phases of scenario 13 between them, then applies
+//! network events (NAT flush, link toggle, degraded link) as scenario steps and
+//! checks both instances stay ready.
 //!
 //! Requires `AURA_HARNESS_AURA_BIN` to point at an `aura` built with
 //! `aura-effects/test-keyring` (a production build holds one platform keyring
@@ -68,7 +70,7 @@ fn real_instances_link_contacts_over_the_lab_network() -> Result<()> {
             "--config",
             "configs/harness/patchbay-lan.toml",
             "--scenario",
-            "scenarios/harness/holepunch-lan-contact-link.toml",
+            "scenarios/harness/holepunch-lan-network-events.toml",
             "--network-backend",
             "patchbay",
         ])

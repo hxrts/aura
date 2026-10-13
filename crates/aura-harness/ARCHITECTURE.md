@@ -232,6 +232,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - The network lab has two backends, `mock` and native `patchbay` (Linux). The retired `patchbay-vm` mode must not come back as a shell-out to patchbay's sim runner; a lab backend launches real Aura instances inside its namespaces or it is not a backend.
 - `ProvisionedLab` owns the lab for the whole run: provisioned in `main` before the coordinator exists, torn down by `finish` after the coordinator is dropped, so namespaces outlive every child. `InstanceNamespace::run_sync` is the only way a child enters a lab namespace (patchbay namespaces are anonymous fds). Packet captures started at provisioning are stopped by `finish` before the lab drops; a capture left running would keep its namespace alive.
 - The backend timeline is built from patchbay's flushed `events.jsonl` plus harness receipts after teardown; anything collected while the lab is alive is provisional and marked so.
+- `ToolApi` owns the `ProvisionedLab` while scenarios run so the `network_*` environment actions can apply lab events; `main` takes it back after the coordinator is dropped and finishes it. Network event scenario steps resolve actors to lab authorities through the coordinator, never by device name.
 - Matrix-run temp cleanup stays the default, but diagnostics may retain the per-run temp and transient roots by setting `AURA_HARNESS_KEEP_TMP=1`; this changes artifact retention only and must not change scenario semantics.
 
 ## Testing

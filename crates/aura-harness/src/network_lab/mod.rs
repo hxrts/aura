@@ -179,6 +179,9 @@ impl LinkConditionPreset {
 pub struct AuthorityNetworkContext {
     pub authority_id: String,
     pub device_name: String,
+    /// Router the device uplinks to; the other end of its only link.
+    #[serde(default)]
+    pub gateway_router: String,
     pub namespace: String,
     pub bind_address: String,
     #[serde(default)]
@@ -772,6 +775,7 @@ impl NetworkLabBackend for MockNetworkLabBackend {
                 AuthorityNetworkContext {
                     authority_id: authority.authority_id.clone(),
                     device_name: authority.device_name.clone(),
+                    gateway_router: authority.gateway_router.clone(),
                     namespace: format!("mock:{}", authority.device_name),
                     bind_address: authority.bind_address.clone(),
                     rendezvous_endpoints: Vec::new(),
