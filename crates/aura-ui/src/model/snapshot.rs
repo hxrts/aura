@@ -14,29 +14,33 @@ impl UiModel {
         let mut lists = Vec::new();
         let mut selections = Vec::new();
 
-        let navigation_items = [
-            ScreenId::Neighborhood,
-            ScreenId::Chat,
-            ScreenId::Contacts,
-            ScreenId::Notifications,
-            ScreenId::Settings,
-        ]
-        .into_iter()
-        .map(|screen| ListItemSnapshot {
-            id: screen.help_label().to_ascii_lowercase(),
-            selected: self.screen == screen,
-            confirmation: ConfirmationState::Confirmed,
-            is_current: false,
-        })
-        .collect::<Vec<_>>();
-        lists.push(ListSnapshot {
-            id: ListId::Navigation,
-            items: navigation_items,
-        });
-        selections.push(SelectionSnapshot {
-            list: ListId::Navigation,
-            item_id: self.screen.help_label().to_ascii_lowercase(),
-        });
+        // Onboarding renders outside the app shell, which owns Navigation.
+        // Export its list and selection only when that shell can mount.
+        if self.account_ready() {
+            let navigation_items = [
+                ScreenId::Neighborhood,
+                ScreenId::Chat,
+                ScreenId::Contacts,
+                ScreenId::Notifications,
+                ScreenId::Settings,
+            ]
+            .into_iter()
+            .map(|item| ListItemSnapshot {
+                id: item.help_label().to_ascii_lowercase(),
+                selected: self.screen == item,
+                confirmation: ConfirmationState::Confirmed,
+                is_current: false,
+            })
+            .collect::<Vec<_>>();
+            lists.push(ListSnapshot {
+                id: ListId::Navigation,
+                items: navigation_items,
+            });
+            selections.push(SelectionSnapshot {
+                list: ListId::Navigation,
+                item_id: self.screen.help_label().to_ascii_lowercase(),
+            });
+        }
 
         let channel_items = self
             .channels
@@ -181,15 +185,11 @@ impl UiModel {
         } else if let Some(open_modal) = open_modal {
             Some(ControlId::Modal(open_modal))
         } else if self.account_ready() {
-            Some(ControlId::Screen(Self::canonical_ready_screen(self.screen)))
+            Some(ControlId::Screen(self.screen))
         } else {
             Some(ControlId::OnboardingRoot)
         };
-        let screen = if self.account_ready() {
-            Self::canonical_ready_screen(self.screen)
-        } else {
-            ScreenId::Onboarding
-        };
+        let screen = self.screen;
 
         UiSnapshot {
             screen,
@@ -503,6 +503,158 @@ mod notification_snapshot_tests {
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("snapshot must stay valid: {error}"));
+    }
+}
+
+#[cfg(test)]
+mod onboarding_navigation_snapshot_tests {
+    use super::*;
+
+    fn mounted_ui_root() -> dioxus::prelude::Element {
+        use dioxus::prelude::*;
+        let controller = use_context::<Arc<UiController>>();
+        rsx! { crate::AuraUiRoot { controller } }
+    }
+
+    #[test]
+    fn onboarding_exports_no_navigation_selection_until_account_is_ready() {
+        let mut model = UiModel::new("authority-test".to_string());
+        model.set_account_setup_state(false, "", None);
+        model.set_screen(ScreenId::Onboarding);
+
+        let onboarding = model.semantic_snapshot();
+        assert_eq!(onboarding.screen, ScreenId::Onboarding);
+        assert!(onboarding
+            .lists
+            .iter()
+            .all(|list| list.id != ListId::Navigation));
+        assert!(onboarding
+            .selections
+            .iter()
+            .all(|selection| selection.list != ListId::Navigation));
+        onboarding
+            .validate_invariants()
+            .expect("valid onboarding projection");
+
+        model.set_account_setup_state(true, "", None);
+        model.set_screen(ScreenId::Chat);
+        let ready = model.semantic_snapshot();
+        let navigation = ready
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Navigation)
+            .expect("ready shell has navigation");
+        let selected = navigation
+            .items
+            .iter()
+            .find(|item| item.selected)
+            .expect("ready navigation has selected row");
+        assert_eq!(
+            selected.id,
+            ScreenId::Chat.help_label().to_ascii_lowercase()
+        );
+        assert_eq!(
+            ready.selected_item_id(ListId::Navigation),
+            Some(selected.id.as_str())
+        );
+        ready.validate_invariants().expect("valid ready projection");
+
+        model.set_account_setup_state(false, "", None);
+        assert_eq!(model.screen, ScreenId::Onboarding);
+        let signed_out = model.semantic_snapshot();
+        assert_eq!(signed_out.screen, model.screen);
+        assert!(signed_out.selected_item_id(ListId::Navigation).is_none());
+        signed_out
+            .validate_invariants()
+            .expect("valid onboarding after ready Chat");
+
+        model.set_account_setup_state(true, "", None);
+        assert_eq!(model.screen, ScreenId::Neighborhood);
+        let re_ready = model.semantic_snapshot();
+        assert_eq!(re_ready.screen, model.screen);
+        assert_eq!(
+            re_ready.selected_item_id(ListId::Navigation),
+            Some(
+                ScreenId::Neighborhood
+                    .help_label()
+                    .to_ascii_lowercase()
+                    .as_str()
+            )
+        );
+        re_ready
+            .validate_invariants()
+            .expect("valid ready navigation after onboarding");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn mounted_onboarding_and_ready_navigation_publish_valid_projections() {
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::new(aura_app::AppConfig::default()).expect("fixture app"),
+        ));
+        aura_app::AppCore::init_signals_with_hooks(&app)
+            .await
+            .expect("fixture signals");
+        let controller = Arc::new(UiController::new(
+            app,
+            Arc::new(crate::MemoryClipboard::default()),
+        ));
+        let published = Arc::new(std::sync::Mutex::new(Vec::<UiSnapshot>::new()));
+        controller.set_ui_snapshot_sink(Arc::new({
+            let published = published.clone();
+            move |snapshot| published.lock().expect("snapshot sink").push(snapshot)
+        }));
+        controller.set_account_setup_state(false, "", None);
+        controller.set_screen(ScreenId::Onboarding);
+        published.lock().expect("snapshot sink").clear();
+
+        let mut dom = dioxus::dioxus_core::VirtualDom::new(mounted_ui_root);
+        dom.provide_root_context(controller.clone());
+        dom.rebuild_in_place();
+        dom.render_immediate_to_vec();
+        let onboarding = published
+            .lock()
+            .expect("snapshot sink")
+            .last()
+            .cloned()
+            .expect("mounted onboarding publication");
+        assert_eq!(onboarding.screen, ScreenId::Onboarding);
+        assert!(onboarding.selected_item_id(ListId::Navigation).is_none());
+        onboarding
+            .validate_invariants()
+            .expect("mounted onboarding valid");
+
+        published.lock().expect("snapshot sink").clear();
+        controller.set_account_setup_state(true, "", None);
+        controller.set_screen(ScreenId::Chat);
+        dom.render_immediate_to_vec();
+        let ready = published
+            .lock()
+            .expect("snapshot sink")
+            .last()
+            .cloned()
+            .expect("mounted ready publication");
+        assert_eq!(ready.screen, ScreenId::Chat);
+        assert_eq!(
+            ready.selected_item_id(ListId::Navigation),
+            Some(ScreenId::Chat.help_label().to_ascii_lowercase().as_str())
+        );
+        ready.validate_invariants().expect("mounted ready valid");
+
+        published.lock().expect("snapshot sink").clear();
+        controller.set_account_setup_state(false, "", None);
+        dom.render_immediate_to_vec();
+        let signed_out = published
+            .lock()
+            .expect("snapshot sink")
+            .last()
+            .cloned()
+            .expect("mounted onboarding after ready Chat");
+        assert_eq!(signed_out.screen, ScreenId::Onboarding);
+        assert!(signed_out.selected_item_id(ListId::Navigation).is_none());
+        signed_out
+            .validate_invariants()
+            .expect("mounted signed-out projection valid");
     }
 }
 

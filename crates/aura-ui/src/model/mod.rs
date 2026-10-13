@@ -196,8 +196,8 @@ impl Default for DemoState {
 #[derive(Debug, Clone)]
 pub struct UiModel {
     pub semantic_revision: ProjectionRevision,
-    pub account_setup: AccountSetupState,
-    pub screen: ScreenId,
+    pub(crate) account_setup: AccountSetupState,
+    pub(crate) screen: ScreenId,
     pub settings_section: SettingsSection,
     pub channels: Vec<ChannelRow>,
     pub contacts: Vec<ContactRow>,
@@ -348,6 +348,20 @@ impl UiModel {
         self.account_setup.error.as_deref()
     }
 
+    pub fn set_account_setup_state(
+        &mut self,
+        ready: bool,
+        name: impl Into<String>,
+        error: Option<String>,
+    ) {
+        self.account_setup.ready = ready;
+        self.account_setup.name = name.into();
+        self.account_setup.error = error;
+        if !ready || self.screen == ScreenId::Onboarding {
+            self.set_screen(self.screen);
+        }
+    }
+
     pub fn selected_channel_id(&self) -> Option<&str> {
         self.selected_channel.as_deref()
     }
@@ -363,7 +377,7 @@ impl UiModel {
         let screen = if self.account_setup.ready {
             Self::canonical_ready_screen(screen)
         } else {
-            screen
+            ScreenId::Onboarding
         };
         self.screen = screen;
         // Screen changes should always exit chat insert mode so global actions
@@ -1444,12 +1458,7 @@ impl UiController {
         account_setup_error: Option<String>,
     ) {
         let mut model = write_model(&self.model);
-        model.account_setup.ready = account_ready;
-        if account_ready && model.screen == ScreenId::Onboarding {
-            model.set_screen(ScreenId::Neighborhood);
-        }
-        model.account_setup.name = account_setup_name.into();
-        model.account_setup.error = account_setup_error;
+        model.set_account_setup_state(account_ready, account_setup_name, account_setup_error);
         let snapshot = model.semantic_snapshot();
         drop(model);
         self.publish_ui_snapshot(snapshot);
@@ -1458,9 +1467,7 @@ impl UiController {
 
     pub fn finalize_account_setup(&self, screen: ScreenId) {
         let mut model = write_model(&self.model);
-        model.account_setup.ready = true;
-        model.account_setup.name.clear();
-        model.account_setup.error = None;
+        model.set_account_setup_state(true, "", None);
         model.set_screen(screen);
         let snapshot = model.semantic_snapshot();
         drop(model);

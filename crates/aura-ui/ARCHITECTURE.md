@@ -71,6 +71,13 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - `UiController` exports the app snapshot's `projection_source_revisions` with `UiSnapshot`. Those source graph revisions describe the observed entity values and remain separate from the UI semantic/render `revision`; the UI must not mint or advance source revisions locally.
 - Onboarding must publish through the same semantic snapshot path as every other screen.
+- An unready onboarding model exports no Navigation list or selection, and the
+  mounted shared shell omits `NavRoot`; its tabs have no onboarding row. A ready
+  model canonicalizes an onboarding screen request to Neighborhood and exports
+  the selected row for its actual ready screen. `UiModel` normalizes readiness
+  and screen together at mutation time; snapshot export reads that actual screen
+  without substituting another selection. Snapshot validation remains strict
+  across both states.
 - Mounted runtime subscriptions form one component-owned group per runtime generation, with one observer per distinct required signal. The group reports typed attachment and stream health; a failed attach or closed stream cannot leave the group apparently ready.
 - Unmount and generation change cancel the entire subscription group, including refresh work, before replacement observers attach. Subscription tasks cannot retain the group owner through their own captures.
 - Attachment and recovery resnapshot current signal state after the receiver is live. Lag may skip intermediate values, so observed projections must converge from a newer current snapshot.
@@ -156,6 +163,7 @@ just ci-observed-layer-boundaries
 | What breaks if wrong | Invariant | Test location | Status |
 |---------------------|-----------|--------------|--------|
 | Snapshot missing runtime events | UiSnapshotReflectsSemanticState | `semantic_snapshot_includes_runtime_events` | Covered |
+| Onboarding navigation has a selection without a real row | UiSnapshotReflectsSemanticState | `onboarding_navigation_snapshot_tests` direct model and mounted `AuraUiRoot` transitions | Covered |
 | Restarted operation reuses stale id | UiSnapshotReflectsSemanticState | `restarting_operation_generates_new_operation_instance_id` | Covered |
 | Shared frontend task owner stops reporting live after shutdown/drop | Ownership inventory | `task_owner::tests` | Covered |
 | Shared flow shapes diverge per frontend | SharedFlowShapesAreUniform | `just ci-shared-flow-policy` | Covered |

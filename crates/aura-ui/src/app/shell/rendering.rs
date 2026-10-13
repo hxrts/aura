@@ -160,6 +160,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         notifications_runtime,
     );
     let shell_header_exit_input_controller = controller.clone();
+    let nav_brand_controller = controller.clone();
     let shell_footer_exit_input_controller = controller.clone();
     let keydown_runtime_snapshot = shell_state.runtime.neighborhood.clone();
     let keydown_chat_runtime = shell_state.runtime.chat.clone();
@@ -317,7 +318,8 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     render_tick.set(render_tick() + 1);
                 }
             },
-            nav {
+            if model.account_ready() {
+                nav {
                 id: ControlId::NavRoot
                     .web_dom_id()
                     .required_dom_id("NavRoot must define a web DOM id"),
@@ -342,7 +344,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             class: "inline-flex h-8 items-center justify-center whitespace-nowrap px-6 text-xs font-sans font-bold uppercase leading-none tracking-[0.12em] text-foreground cursor-pointer hover:text-muted-foreground transition-colors",
                             onclick: {
                                 move |_| {
-                                    controller.set_screen(ScreenId::Neighborhood);
+                                    nav_brand_controller.set_screen(ScreenId::Neighborhood);
                                     render_tick.set(render_tick() + 1);
                                 }
                             },
@@ -382,6 +384,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             }
                         }
                     }
+                }
                 }
             }
             div {
