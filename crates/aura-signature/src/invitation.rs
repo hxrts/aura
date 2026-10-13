@@ -1,9 +1,12 @@
 //! Shareable invitation wire format and verified import provenance.
 
-use crate::{verify_ed25519_transcript, SecurityTranscript};
+use crate::{
+    verify_ed25519_transcript, verify_threshold_signing_context_transcript, SecurityTranscript,
+};
 use aura_core::effects::crypto::CryptoEffects;
 use aura_core::hash::hash;
 use aura_core::invitation::{Invitation, InvitationStatus, InvitationType};
+use aura_core::threshold::SigningContext;
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId, InvitationId};
 use std::sync::Arc;
 
@@ -117,6 +120,10 @@ struct ShareableInvitationCodeEnvelope {
     payload: ShareableInvitation,
     #[serde(default)]
     transport: ShareableInvitationTransportMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recipient: Option<AuthorityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recipient_device: Option<DeviceId>,
     proof: Option<ShareableInvitationSenderProof>,
 }
 
@@ -282,6 +289,8 @@ impl ShareableInvitation {
         Ok(self)
     }
     pub const CURRENT_VERSION: u8 = 2;
+    pub const CONTACT_GUARDIAN_QUORUM_VERSION: u8 = 3;
+    pub const CONTACT_GUARDIAN_QUORUM_SCHEME: &'static str = "frost-invitation-code-v3";
     pub const PREFIX: &'static str = "aura";
     pub const MAX_JSON_BYTES: usize = aura_core::envelope::MAX_PAYLOAD_BYTES;
     pub const MAX_PAYLOAD_BASE64_CHARS: usize =
@@ -314,6 +323,8 @@ impl ShareableInvitation {
         let json = serde_json::to_vec(&ShareableInvitationCodeEnvelope {
             payload: self.clone(),
             transport: ShareableInvitationTransportMetadata::default(),
+            recipient: None,
+            recipient_device: None,
             proof: None,
         })
         .map_err(|source| {
@@ -338,12 +349,17 @@ impl ShareableInvitation {
     ) -> Result<String, ShareableInvitationError> {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
+        if self.version == Self::CONTACT_GUARDIAN_QUORUM_VERSION {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
         self.validate_size_limits()?;
-        validate_sender_proof_shape(&proof)?;
+        validate_sender_proof_shape(&proof, self.version)?;
         validate_transport_metadata(&transport)?;
         let envelope = ShareableInvitationCodeEnvelope {
             payload: self.clone(),
             transport,
+            recipient: None,
+            recipient_device: None,
             proof: Some(proof),
         };
         let json = serde_json::to_vec(&envelope).map_err(|source| {
@@ -352,6 +368,73 @@ impl ShareableInvitation {
         ensure_len("json", json.len(), Self::MAX_JSON_BYTES)?;
         let b64 = URL_SAFE_NO_PAD.encode(&json);
         Ok(format!("{}:v{}:{}", Self::PREFIX, self.version, b64))
+    }
+
+    /// Encode a recipient-bound Contact/Guardian code after native quorum signing.
+    /// The caller must retain the checked policy and signer custody; this wire
+    /// constructor only checks that the proof and payload agree in shape.
+    pub fn to_quorum_signed_code(
+        &self,
+        recipient: AuthorityId,
+        recipient_device: DeviceId,
+        proof: ShareableInvitationSenderProof,
+        transport: ShareableInvitationTransportMetadata,
+    ) -> Result<String, ShareableInvitationError> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        if self.version != Self::CONTACT_GUARDIAN_QUORUM_VERSION
+            || recipient == self.sender_id
+            || !matches!(
+                self.invitation_type,
+                InvitationType::Contact { .. } | InvitationType::Guardian { .. }
+            )
+        {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+        self.validate_size_limits()?;
+        validate_sender_proof_shape(&proof, self.version)?;
+        validate_transport_metadata(&transport)?;
+        if proof.sender_device_id != transport.sender_device_id {
+            return Err(ShareableInvitationError::InvalidSenderProof);
+        }
+        let envelope = ShareableInvitationCodeEnvelope {
+            payload: self.clone(),
+            transport,
+            recipient: Some(recipient),
+            recipient_device: Some(recipient_device),
+            proof: Some(proof),
+        };
+        let json = serde_json::to_vec(&envelope)
+            .map_err(|source| ShareableInvitationError::SerializationFailed(Arc::new(source)))?;
+        ensure_len("json", json.len(), Self::MAX_JSON_BYTES)?;
+        Ok(format!(
+            "{}:v{}:{}",
+            Self::PREFIX,
+            self.version,
+            URL_SAFE_NO_PAD.encode(json)
+        ))
+    }
+
+    pub fn quorum_signing_context(
+        &self,
+        recipient: AuthorityId,
+        recipient_device: DeviceId,
+        transport: &ShareableInvitationTransportMetadata,
+    ) -> Result<SigningContext, ShareableInvitationError> {
+        if self.version != Self::CONTACT_GUARDIAN_QUORUM_VERSION {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+        SigningContext::invitation_code(
+            self.sender_id,
+            self.invitation_id.clone(),
+            recipient,
+            recipient_device,
+            self.context_id,
+            self.invitation_type.clone(),
+            self.expires_at,
+            self.message.clone(),
+            transport.clone(),
+        )
+        .ok_or(ShareableInvitationError::InvalidFormat)
     }
 
     pub fn from_code(code: &str) -> Result<Self, ShareableInvitationError> {
@@ -368,6 +451,21 @@ impl ShareableInvitation {
         code: &str,
     ) -> Result<ShareableInvitationTransportMetadata, ShareableInvitationError> {
         Ok(Self::from_code_with_proof_and_transport(code)?.2)
+    }
+
+    /// Exact external broker recipient device for a v3 code. This is untrusted
+    /// until `ValidatedImportedInvitation::verify_code` succeeds.
+    pub fn recipient_device_from_code(
+        code: &str,
+    ) -> Result<Option<DeviceId>, ShareableInvitationError> {
+        Ok(Self::decode_code(code)?.4)
+    }
+
+    /// Exact external authority destination carried in a v3 quorum code.
+    pub fn quorum_recipient_from_code(
+        code: &str,
+    ) -> Result<Option<AuthorityId>, ShareableInvitationError> {
+        Ok(Self::decode_code(code)?.3)
     }
 
     pub fn signing_transcript(&self) -> ShareableInvitationTranscript<'_> {
@@ -403,6 +501,22 @@ impl ShareableInvitation {
         ),
         ShareableInvitationError,
     > {
+        let (invitation, proof, transport, _, _) = Self::decode_code(code)?;
+        Ok((invitation, proof, transport))
+    }
+
+    fn decode_code(
+        code: &str,
+    ) -> Result<
+        (
+            Self,
+            Option<ShareableInvitationSenderProof>,
+            ShareableInvitationTransportMetadata,
+            Option<AuthorityId>,
+            Option<DeviceId>,
+        ),
+        ShareableInvitationError,
+    > {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let parts = Self::parse_code_parts(code)?;
@@ -418,7 +532,10 @@ impl ShareableInvitation {
             .parse()
             .map_err(|_| ShareableInvitationError::InvalidFormat)?;
 
-        if version != Self::CURRENT_VERSION && version != Self::ENROLLMENT_QUORUM_VERSION {
+        if version != Self::CURRENT_VERSION
+            && version != Self::CONTACT_GUARDIAN_QUORUM_VERSION
+            && version != Self::ENROLLMENT_QUORUM_VERSION
+        {
             return Err(ShareableInvitationError::UnsupportedVersion(version));
         }
 
@@ -444,6 +561,8 @@ impl ShareableInvitation {
             payload: invitation,
             proof,
             transport,
+            recipient,
+            recipient_device,
         } = envelope;
         invitation.validate_size_limits()?;
         if invitation.version == Self::ENROLLMENT_QUORUM_VERSION
@@ -459,15 +578,51 @@ impl ShareableInvitation {
                 invitation.version,
             ));
         }
+        if version == Self::CONTACT_GUARDIAN_QUORUM_VERSION {
+            if recipient.is_none_or(|recipient| recipient == invitation.sender_id)
+                || recipient_device.is_none()
+                || !matches!(
+                    invitation.invitation_type,
+                    InvitationType::Contact { .. } | InvitationType::Guardian { .. }
+                )
+            {
+                return Err(ShareableInvitationError::InvalidFormat);
+            }
+        } else if recipient.is_some() || recipient_device.is_some() {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
         validate_transport_metadata(&transport)?;
+        if version == Self::CONTACT_GUARDIAN_QUORUM_VERSION {
+            if let Some(segment) = parts.sender_hint {
+                let bytes = decode_sender_hint_segment(segment)?;
+                if bytes != transport.sender_hint.as_deref().unwrap_or("").as_bytes() {
+                    return Err(ShareableInvitationError::InvalidFormat);
+                }
+            }
+            if let Some(segment) = parts.sender_device_id {
+                let bytes = decode_sender_device_id_segment(segment)?;
+                let expected = transport
+                    .sender_device_id
+                    .ok_or(ShareableInvitationError::InvalidFormat)?
+                    .to_string();
+                if bytes != expected.as_bytes() {
+                    return Err(ShareableInvitationError::InvalidFormat);
+                }
+            }
+        }
         #[cfg(not(any(test, feature = "test-support")))]
         if proof.is_none() {
             return Err(ShareableInvitationError::MissingSenderProof);
         }
         if let Some(proof) = &proof {
-            validate_sender_proof_shape(proof)?;
+            validate_sender_proof_shape(proof, invitation.version)?;
+            if version == Self::CONTACT_GUARDIAN_QUORUM_VERSION
+                && proof.sender_device_id != transport.sender_device_id
+            {
+                return Err(ShareableInvitationError::InvalidSenderProof);
+            }
         }
-        Ok((invitation, proof, transport))
+        Ok((invitation, proof, transport, recipient, recipient_device))
     }
 
     pub fn sender_addr_from_code(code: &str) -> Option<String> {
@@ -534,7 +689,11 @@ impl ShareableInvitation {
         ) {
             Self::ENROLLMENT_QUORUM_VERSION
         } else {
-            Self::CURRENT_VERSION
+            if self.version == Self::CONTACT_GUARDIAN_QUORUM_VERSION {
+                Self::CONTACT_GUARDIAN_QUORUM_VERSION
+            } else {
+                Self::CURRENT_VERSION
+            }
         };
         if self.version != expected_version {
             return Err(ShareableInvitationError::UnsupportedVersion(self.version));
@@ -584,8 +743,17 @@ impl ShareableInvitation {
 
 fn validate_sender_proof_shape(
     proof: &ShareableInvitationSenderProof,
+    version: u8,
 ) -> Result<(), ShareableInvitationError> {
-    if proof.scheme != ShareableInvitation::SENDER_PROOF_SCHEME {
+    let expected_scheme = if version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION {
+        if proof.key_epoch.is_none() || proof.sender_device_id.is_none() {
+            return Err(ShareableInvitationError::InvalidSenderProof);
+        }
+        ShareableInvitation::CONTACT_GUARDIAN_QUORUM_SCHEME
+    } else {
+        ShareableInvitation::SENDER_PROOF_SCHEME
+    };
+    if proof.scheme != expected_scheme {
         return Err(ShareableInvitationError::InvalidSenderProof);
     }
     if proof.public_key.len() != ShareableInvitation::SENDER_PROOF_PUBLIC_KEY_BYTES {
@@ -730,20 +898,82 @@ impl ValidatedImportedInvitation {
         default_context_id: ContextId,
         now_ms: u64,
     ) -> Result<Self, ImportedInvitationVerificationError> {
-        let (shareable, proof, transport) =
-            ShareableInvitation::from_code_with_proof_and_transport(code)?;
+        Self::verify_code_with_device(crypto, code, own_id, None, default_context_id, now_ms).await
+    }
+
+    /// The runtime-owned import entry point for recipient/device-bound codes.
+    pub async fn verify_code_for_device<E: CryptoEffects + Send + Sync + ?Sized>(
+        crypto: &E,
+        code: &str,
+        own_id: AuthorityId,
+        own_device: DeviceId,
+        default_context_id: ContextId,
+        now_ms: u64,
+    ) -> Result<Self, ImportedInvitationVerificationError> {
+        Self::verify_code_with_device(
+            crypto,
+            code,
+            own_id,
+            Some(own_device),
+            default_context_id,
+            now_ms,
+        )
+        .await
+    }
+
+    async fn verify_code_with_device<E: CryptoEffects + Send + Sync + ?Sized>(
+        crypto: &E,
+        code: &str,
+        own_id: AuthorityId,
+        own_device: Option<DeviceId>,
+        default_context_id: ContextId,
+        now_ms: u64,
+    ) -> Result<Self, ImportedInvitationVerificationError> {
+        let (shareable, proof, transport, recipient, recipient_device) =
+            ShareableInvitation::decode_code(code)?;
         let proof = proof.ok_or(ShareableInvitationError::MissingSenderProof)?;
         // This checks code integrity against the key carried in the code.
         // Known-sender identity trust is resolved separately by the importer.
         let self_certified_sender_key = proof.public_key.as_slice();
-        let verified = verify_ed25519_transcript(
-            crypto,
-            &shareable.signing_transcript_with_transport(&transport),
-            &proof.signature,
-            self_certified_sender_key,
-        )
-        .await
-        .map_err(ImportedInvitationVerificationError::Verification)?;
+        let verified = if shareable.version == ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION
+        {
+            let recipient = recipient.ok_or(ShareableInvitationError::InvalidFormat)?;
+            if recipient != own_id {
+                return Err(ShareableInvitationError::InvalidSenderProof.into());
+            }
+            if recipient_device != own_device {
+                return Err(ShareableInvitationError::InvalidSenderProof.into());
+            }
+            let context = shareable.quorum_signing_context(
+                recipient,
+                recipient_device.ok_or(ShareableInvitationError::InvalidFormat)?,
+                &transport,
+            )?;
+            verify_threshold_signing_context_transcript(
+                crypto,
+                &context,
+                proof
+                    .key_epoch
+                    .ok_or(ShareableInvitationError::InvalidSenderProof)?,
+                &proof.signature,
+                self_certified_sender_key,
+            )
+            .await
+            .map_err(|source| {
+                ImportedInvitationVerificationError::Code(ShareableInvitationError::ParsingFailed(
+                    Arc::new(source),
+                ))
+            })?
+        } else {
+            verify_ed25519_transcript(
+                crypto,
+                &shareable.signing_transcript_with_transport(&transport),
+                &proof.signature,
+                self_certified_sender_key,
+            )
+            .await
+            .map_err(ImportedInvitationVerificationError::Verification)?
+        };
         if !verified {
             return Err(ShareableInvitationError::InvalidSenderProof.into());
         }

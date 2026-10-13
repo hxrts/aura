@@ -2,9 +2,11 @@
 //!
 //! Defines what is being signed and the approval context.
 
+use crate::invitation::{InvitationType, ShareableInvitationTransportMetadata};
 use crate::tree::{TreeCommitment, TreeOp};
 use crate::types::Epoch;
 use crate::{AuthorityId, DeviceId};
+use crate::{ContextId, InvitationId};
 use serde::{Deserialize, Serialize};
 
 /// Context for a threshold signing operation.
@@ -31,6 +33,18 @@ pub struct SigningContext {
 /// what is being signed for verification and audit purposes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SignableOperation {
+    /// Exact public Contact/Guardian code approved by the issuer's device quorum.
+    /// The recipient is explicit even though older shareable codes are transferable.
+    InvitationCode {
+        invitation_id: InvitationId,
+        recipient: AuthorityId,
+        recipient_device: DeviceId,
+        context_id: Option<ContextId>,
+        invitation_type: InvitationType,
+        expires_at: Option<u64>,
+        message: Option<String>,
+        transport: ShareableInvitationTransportMetadata,
+    },
     /// Tree operation (commitment tree update)
     ///
     /// Used for: adding devices, changing policies, key rotation
@@ -145,6 +159,48 @@ pub enum ApprovalContext {
 }
 
 impl SigningContext {
+    /// Bind a final Contact/Guardian code and its intended recipient to an
+    /// independently approved device-quorum operation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn invitation_code(
+        authority: AuthorityId,
+        invitation_id: InvitationId,
+        recipient: AuthorityId,
+        recipient_device: DeviceId,
+        context_id: Option<ContextId>,
+        invitation_type: InvitationType,
+        expires_at: Option<u64>,
+        message: Option<String>,
+        transport: ShareableInvitationTransportMetadata,
+    ) -> Option<Self> {
+        if authority == recipient
+            || !matches!(
+                invitation_type,
+                InvitationType::Contact { .. } | InvitationType::Guardian { .. }
+            )
+            || transport.sender_device_id.is_none()
+        {
+            return None;
+        }
+        Some(Self {
+            authority,
+            operation: SignableOperation::InvitationCode {
+                invitation_id,
+                recipient,
+                recipient_device,
+                context_id,
+                invitation_type,
+                expires_at,
+                message,
+                transport,
+            },
+            approval_context: ApprovalContext::ElevatedOperation {
+                operation_type: "shareable_invitation_code".to_owned(),
+                value_context: Some(format!("recipient {recipient}")),
+            },
+        })
+    }
+
     /// Create a context for a personal tree operation
     pub fn self_tree_op(authority: AuthorityId, op: TreeOp) -> Self {
         Self {

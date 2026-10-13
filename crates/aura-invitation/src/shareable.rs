@@ -66,6 +66,89 @@ mod current_codec_tests {
     use super::*;
 
     #[test]
+    fn quorum_contact_code_binds_external_route_and_rejects_transport_suffix_tampering() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let issuer = AuthorityId::new_from_entropy([201; 32]);
+        let recipient = AuthorityId::new_from_entropy([202; 32]);
+        let recipient_device = DeviceId::new_from_entropy([203; 32]);
+        let sender_device = DeviceId::new_from_entropy([204; 32]);
+        let invitation = ShareableInvitation {
+            version: ShareableInvitation::CONTACT_GUARDIAN_QUORUM_VERSION,
+            invitation_id: InvitationId::new("quorum-route-binding"),
+            sender_id: issuer,
+            context_id: Some(ContextId::new_from_entropy([205; 32])),
+            invitation_type: InvitationType::Contact { nickname: None },
+            expires_at: Some(4000),
+            message: None,
+        };
+        let transport = ShareableInvitationTransportMetadata {
+            sender_hint: Some("wss://issuer.example".into()),
+            sender_device_id: Some(sender_device),
+        };
+        let proof = ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::CONTACT_GUARDIAN_QUORUM_SCHEME.into(),
+            public_key: vec![1; 32],
+            signature: vec![2; 64],
+            sender_device_id: Some(sender_device),
+            key_epoch: Some(7),
+        };
+        let code = invitation
+            .to_quorum_signed_code(recipient, recipient_device, proof, transport.clone())
+            .unwrap();
+        assert_eq!(
+            ShareableInvitation::quorum_recipient_from_code(&code).unwrap(),
+            Some(recipient)
+        );
+        assert_eq!(
+            ShareableInvitation::recipient_device_from_code(&code).unwrap(),
+            Some(recipient_device)
+        );
+        let context = invitation
+            .quorum_signing_context(recipient, recipient_device, &transport)
+            .unwrap();
+        let signed =
+            aura_signature::threshold_signing_context_transcript_bytes(&context, 7).unwrap();
+        let other_route = invitation
+            .quorum_signing_context(recipient, DeviceId::new_from_entropy([206; 32]), &transport)
+            .unwrap();
+        assert_ne!(
+            signed,
+            aura_signature::threshold_signing_context_transcript_bytes(&other_route, 7).unwrap()
+        );
+        let other_recipient = invitation
+            .quorum_signing_context(
+                AuthorityId::new_from_entropy([207; 32]),
+                recipient_device,
+                &transport,
+            )
+            .unwrap();
+        assert_ne!(
+            signed,
+            aura_signature::threshold_signing_context_transcript_bytes(&other_recipient, 7)
+                .unwrap()
+        );
+        let mut other_transport = transport.clone();
+        other_transport.sender_hint = Some("wss://attacker.example".into());
+        let other_hint = invitation
+            .quorum_signing_context(recipient, recipient_device, &other_transport)
+            .unwrap();
+        assert_ne!(
+            signed,
+            aura_signature::threshold_signing_context_transcript_bytes(&other_hint, 7).unwrap()
+        );
+        assert_ne!(
+            signed,
+            aura_signature::threshold_signing_context_transcript_bytes(&context, 8).unwrap()
+        );
+        let forged_suffix = format!(
+            "{code}:{}:{}",
+            URL_SAFE_NO_PAD.encode("wss://attacker.example"),
+            URL_SAFE_NO_PAD.encode(sender_device.to_string())
+        );
+        assert!(ShareableInvitation::from_code(&forged_suffix).is_err());
+    }
+
+    #[test]
     fn obsolete_contact_version_is_refused_before_payload_decode() {
         assert!(matches!(
             ShareableInvitation::from_code("aura:v1:e30"),
