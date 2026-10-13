@@ -5,6 +5,11 @@ aura_receipt_update() (
   # of the build owner's signal/cleanup traps; atomic rename alone would lose
   # concurrent phase and cleanup updates.
   local temporary='' write_lock="${AURA_BUILD_RECEIPT}.write-lock" holder attempt acquired=0
+  cleanup_writer() {
+    [[ -z "$temporary" ]] || rm -f "$temporary"
+    rm -f "$write_lock/pid"
+    rmdir "$write_lock" 2>/dev/null || true
+  }
   for attempt in $(seq 1 200); do
     [[ ! -L "$write_lock" ]] || { echo 'build-receipt: writer lock is a symlink' >&2; return 79; }
     if mkdir "$write_lock" 2>/dev/null; then acquired=1; break; fi
@@ -18,15 +23,25 @@ aura_receipt_update() (
     sleep 0.05
   done
   if (( acquired == 0 )); then echo 'build-receipt: receipt writer lock remained busy' >&2; return 79; fi
-  trap '[[ -z "$temporary" ]] || rm -f "$temporary"; rm -f "$write_lock/pid"; rmdir "$write_lock" 2>/dev/null || true' EXIT
+  # Bash skips a subshell EXIT trap when this function is called by an outer
+  # EXIT trap (the build and prune finalizers both do that). Keep the trap for
+  # abnormal exit, but release the writer explicitly on ordinary completion.
+  trap cleanup_writer EXIT
   printf '%s\n' "${BASHPID:-$$}" > "$write_lock/pid"
-  temporary="$(mktemp "${AURA_BUILD_RECEIPT}.XXXXXX")" || return
-  if jq "$@" "$AURA_BUILD_RECEIPT" > "$temporary"; then
-    mv "$temporary" "$AURA_BUILD_RECEIPT"
-  else
-    rm -f "$temporary"
+  if ! temporary="$(mktemp "${AURA_BUILD_RECEIPT}.XXXXXX")"; then
+    cleanup_writer
+    trap - EXIT
     return 1
   fi
+  local status=0
+  if jq "$@" "$AURA_BUILD_RECEIPT" > "$temporary"; then
+    mv "$temporary" "$AURA_BUILD_RECEIPT" || status=$?
+  else
+    status=1
+  fi
+  cleanup_writer
+  trap - EXIT
+  return "$status"
 )
 
 aura_receipt_cargo_metadata() {

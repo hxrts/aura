@@ -47,7 +47,8 @@ for script in browser-smoke web-matrix; do
   bash "$fixture/scripts/ci/$script.sh" 'argument with spaces' > "$fixture/admitted.log" 2>&1 || status=$?
   [[ $status == 37 && $(cat "$fixture/npm-owned") == owned ]]
   [[ $(cat "$fixture/target/aura-web-tools-ci/sentinel") == retained ]]
-  mapfile -d '' -t argv < "$fixture/admission-argv"
+  argv=()
+  while IFS= read -r -d '' arg; do argv+=("$arg"); done < "$fixture/admission-argv"
   [[ ${#argv[@]} == 6 && ${argv[5]} == 'argument with spaces' ]]
   status=0
   bash "$fixture/checkout-alias/scripts/ci/$script.sh" 'argument with spaces' > "$fixture/alias.log" 2>&1 || status=$?

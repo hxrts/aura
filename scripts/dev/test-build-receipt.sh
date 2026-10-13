@@ -6,7 +6,7 @@ phase_pid=''
 writer_pids=()
 cleanup_fixture() {
   local writer child
-  for writer in "${writer_pids[@]}"; do
+  for writer in "${writer_pids[@]+"${writer_pids[@]}"}"; do
     for child in $(ps -axo pid=,ppid= | awk -v parent="$writer" '$2==parent {print $1}'); do
       kill -TERM "$child" 2>/dev/null || true
     done
@@ -236,4 +236,19 @@ rmdir "${AURA_BUILD_RECEIPT}.write-lock"
 aura_receipt_finish 37
 jq -e '.final_exit_status==37 and .current_phase=="finished" and .finished_utc!=null' "$AURA_BUILD_RECEIPT" >/dev/null
 if phase compile -- sh -c 'exit 0'; then echo 'finished receipt was reused' >&2; exit 1; fi
+# The guarded prune and build finalizers write from EXIT traps. Bash does not
+# execute the writer subshell's EXIT trap in that context, so its normal path
+# must explicitly release the lock before the next finalizer update.
+aura_receipt_init "$fixture" nested-exit sh -c 'exit 79'
+status=0
+bash -c '
+  set -euo pipefail
+  source "$1/scripts/dev/build-receipt.sh"
+  trap '\''aura_receipt_record_cleanup "$2" guarded-lane debug-incremental removed success 0 1 0 null null; aura_receipt_finish 79'\'' EXIT
+  exit 79
+' bash "$repo_root" "$fixture" || status=$?
+[[ "$status" == 79 ]]
+jq -e '.cleanup_events|length==1' "$AURA_BUILD_RECEIPT" >/dev/null
+jq -e '.final_exit_status==79 and .current_phase=="finished" and .finished_utc!=null' "$AURA_BUILD_RECEIPT" >/dev/null
+[[ ! -d "${AURA_BUILD_RECEIPT}.write-lock" ]]
 echo 'build receipts: source fingerprint, unknown metadata, exact inventories, command failures and separate disposal passed'

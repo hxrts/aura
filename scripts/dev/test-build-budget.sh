@@ -335,7 +335,10 @@ expect_status 1 run_budget -- sh -c 'touch "$FREE_FILE.build-ran"'
 [[ ! -e "$FREE_FILE.build-ran" ]]
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '(.cleanup_events[0] | .stage=="pre-admission" and .operation=="guarded-lane" and .lane=="wasm-debug" and .outcome=="removed") and
-  any(.cleanup_events[1:][]; .stage=="pre-admission" and .operation=="sweep" and .outcome=="completed")' "$receipt" >/dev/null
+  any(.cleanup_events[1:][]; .stage=="pre-admission" and .operation=="sweep" and .outcome=="completed") and
+  .final_exit_status==1 and .current_phase=="finished" and .finished_utc!=null and
+  .command_exit_status==null and .child==null' "$receipt" >/dev/null
+[[ ! -d "${receipt}.write-lock" ]]
 
 # Explicit incremental opt-in and loaded incremental files forbid preferential
 # reclamation; existing scoped guards remain authoritative.
@@ -460,6 +463,10 @@ printf '%s\n' $((6 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$holde
 expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
 [[ ! -e "$FREE_FILE.build-ran" ]]
 rg -q 'other admitted builds' "$test_root/output"
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==1 and .current_phase=="finished" and
+  .finished_utc!=null and .command_exit_status==null and .child==null' "$receipt" >/dev/null
+[[ ! -d "${receipt}.write-lock" ]]
 kill "$holder_pid"; wait "$holder_pid" 2>/dev/null || true
 expect_status 0 run_budget --no-prune -- sh -c 'ls "$AURA_BUILD_SHARED_DIR/reservations" > "$FREE_FILE.during"'
 [[ "$(wc -l < "$FREE_FILE.during")" -eq 1 ]] # Only this build's own reservation.
