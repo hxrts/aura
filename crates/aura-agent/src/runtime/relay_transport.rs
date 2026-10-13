@@ -106,20 +106,27 @@ fn control_frame(
     }
 }
 
-/// Bound `f` by `timeout` on the runtime's physical clock.
-async fn relay_timeout<F, Fut, T>(timeout: Duration, what: &str, f: F) -> Result<T, String>
+/// Bound `f` by `timeout` on the runtime's selected physical clock. The relay
+/// session owns these deadlines: a connect or acknowledgment that outlives its
+/// budget fails the attempt, and the session loop's bounded backoff decides
+/// when to try again.
+async fn relay_timeout<F, Fut, T>(
+    time: &(impl PhysicalTimeEffects + ?Sized),
+    timeout: Duration,
+    what: &str,
+    f: F,
+) -> Result<T, String>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, String>>,
 {
-    let time = aura_effects::time::PhysicalTimeHandler::new();
     let started_at = time
         .physical_time()
         .await
         .map_err(|error| format!("{what}: clock unavailable: {error}"))?;
     let budget = aura_core::TimeoutBudget::from_start_and_timeout(&started_at, timeout)
         .map_err(|error| format!("{what}: {error}"))?;
-    aura_core::execute_with_timeout_budget(&time, &budget, f)
+    aura_core::execute_with_timeout_budget(time, &budget, f)
         .await
         .map_err(|error| match error {
             aura_core::TimeoutRunError::Timeout(_) => format!("{what} timed out"),
@@ -199,12 +206,25 @@ struct RegisteredSession {
     generation: u64,
 }
 
-/// Relay-side registry of connected peers and the forwarding decision.
+#[allow(dead_code)] // Declaration-layer ingress inventory; connection tasks call methods directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RelayForwarderCommand {
+    Register,
+    Unregister,
+    Forward,
+}
+
+/// Relay-side registry of connected peers and the forwarding decision. The
+/// relay node's LAN connection tasks are its only callers; each registration
+/// is owned by the connection task that created it and removed when that task
+/// ends.
 #[derive(Default)]
-#[aura_macros::actor_root(
+#[aura_macros::actor_owned(
     owner = "relay_forwarder",
     domain = "relay_transport",
-    supervision = "relay_forwarder_task_root",
+    gate = "relay_forwarder_command_ingress",
+    command = RelayForwarderCommand,
+    capacity = 64,
     category = "actor_owned"
 )]
 pub struct RelayForwarderActor {
@@ -539,11 +559,16 @@ impl RelaySessionService {
             .relay_addr
             .parse()
             .map_err(|error| format!("invalid relay address '{}': {error}", self.relay_addr))?;
-        let mut stream = relay_timeout(RELAY_CONNECT_TIMEOUT, "relay connect", || async {
-            TcpStream::connect(socket_addr)
-                .await
-                .map_err(|error| format!("relay connect failed: {error}"))
-        })
+        let mut stream = relay_timeout(
+            self.effects.time_effects(),
+            RELAY_CONNECT_TIMEOUT,
+            "relay connect",
+            || async {
+                TcpStream::connect(socket_addr)
+                    .await
+                    .map_err(|error| format!("relay connect failed: {error}"))
+            },
+        )
         .await?;
         let register = control_frame(
             self.authority_id,
@@ -552,9 +577,12 @@ impl RelaySessionService {
             RELAY_OP_REGISTER,
         );
         write_frame(&mut stream, &register).await?;
-        let ack = relay_timeout(RELAY_CONNECT_TIMEOUT, "relay registration ack", || {
-            read_frame(&mut stream)
-        })
+        let ack = relay_timeout(
+            self.effects.time_effects(),
+            RELAY_CONNECT_TIMEOUT,
+            "relay registration ack",
+            || read_frame(&mut stream),
+        )
         .await?
         .ok_or_else(|| "relay closed before acknowledging registration".to_string())?;
         if !is_relay_control(&ack) || relay_op(&ack) != Some(RELAY_OP_REGISTERED) {

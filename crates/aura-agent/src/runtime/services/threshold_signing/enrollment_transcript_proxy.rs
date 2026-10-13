@@ -143,6 +143,15 @@ impl OriginalEnrollmentTranscriptProxy {
                         Arc::new(source),
                     )
                 })?,
+            approval
+                .issuer_return_mailbox()
+                .required_transcript_bytes()
+                .map_err(|source| {
+                    AuraError::crypto_with_source(
+                        "retain approved proxy issuer return mailbox",
+                        Arc::new(source),
+                    )
+                })?,
         ];
         if index != self.index {
             return Err(reject(

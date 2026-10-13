@@ -84,17 +84,34 @@ future budget. The simulator's required AMP lifecycle replay runs on the
 default test stack and exercises this facade through real channel invitations.
 
 Relay transport (`runtime/relay_transport.rs`, `docs/113_rendezvous.md` §3.3)
-has two actor-owned roots. `RelaySessionService` is the runtime service a peer
-with `network.relay_address` runs: one owned task keeps the registered TCP
-session to the relay, feeds forwarded frames into the ordinary inbox through
-the LAN ingress handler, re-registers with bounded backoff, and advances the
-service registry's network generation on every re-established session.
-`RelayForwarderActor` is attached to the effect system when `network.serve_relay`
-is set; the LAN connection task hands it registration connections and the
-frames addressed to other authorities. Relay-first path selection is the
-registry's `PeerPathState` per `(context, peer)`: transport sends and channel
-preparation both go through it, so the `SelectedPeerPath` observation is what
-the runtime actually dialed. No other module may pick an establish path.
+declares two `ActorOwned` roots and one `Pure` policy.
+
+- `RelaySessionService` (`ActorOwned`, `#[actor_root]`) is the runtime service
+  a peer with `network.relay_address` runs. Its one supervised task owns the
+  registered TCP session: it registers, keeps the session alive, feeds forwarded
+  frames into the ordinary inbox through the LAN ingress handler, and
+  re-registers with bounded backoff (`BackoffWindow`, 1 s to 30 s). It owns
+  every deadline on that path on the runtime's selected clock: connect and
+  acknowledgment budgets (5 s), the keepalive interval (15 s) and the missing
+  acknowledgment that ends a session. The session is best-effort for the
+  runtime (no parity-critical operation waits on it); its terminal consequence
+  is the next reconnect attempt, and stopping the service cancels the task
+  group. Each re-established session advances the service registry's network
+  generation, the only mutation it performs outside its own state.
+- `RelayForwarderActor` (`ActorOwned`, `#[actor_owned]` with the
+  `RelayForwarderCommand` ingress inventory) is attached to the effect system
+  only when `network.serve_relay` is set. The LAN connection task that accepts
+  a registration owns that registration for the life of its connection and is
+  the only caller that registers, unregisters or forwards. Frames are opaque to
+  it; a full session queue drops the frame and counts it.
+- `aura_protocol::handlers::PeerPathState` (`Pure`) is the relay-first,
+  direct-upgrade policy per `(context, peer)`; the service registry owns the
+  instances behind its typed ingress (`SelectPeerPath`, `PlanPeerSend`,
+  `RecordPeerPathOutcome`, `BumpNetworkGeneration`). Transport sends and
+  channel preparation both go through it, so the `SelectedPeerPath`
+  observation is what the runtime actually dialed. Direct probes are bounded
+  per generation (3 attempts, 500 ms to 30 s backoff) and a probe is a 1 s
+  connect on the transport's clock. No other module may pick an establish path.
 
 - `core/`: Public API (`AgentBuilder`, `AuraAgent`, `AuthorityContext`).
 - `builder/`: Platform-specific preset builders (CLI, iOS, Android, Web).
@@ -145,6 +162,17 @@ decision; pending state has no timeout category. The caller retains its original
 effect-backed budget. These frames authorize no global transport identity.
 Successful quorum enrollment, revocation continuity, cross-process profile
 ownership and complete native/browser restart coverage remain required.
+
+The simulation-feature `runtime/simulation_factory/enrollment.rs` adapter retains
+the original issuer continuation, explicit participant profiles, selected clock
+and startup budget while exercising signed setup export, transferred pins, native
+admission, required disposal and same-profile reopen. Its ten
+`enrollment_lifecycle` tests cover accept, reject, confirmed reopen, failure
+settlement, the Pending/commit cleanup race, broker invitation prefill, and
+public-app host success and real filesystem refusal. The refusal retains the
+original storage source and one Failed terminal for the submitted instance.
+These in-process observations do not establish production selected-identity
+persistence or browser transport delivery.
 
 ## Invariants
 
@@ -663,6 +691,9 @@ Ownership categories follow [docs/122_ownership_model.md](../../docs/122_ownersh
 - `ActorOwned`
   - `runtime/services/sync_manager.rs` via `SyncServiceManager`
   - `runtime/services/rendezvous_manager.rs` via `RendezvousManager`
+  - `runtime/relay_transport.rs` via `RelaySessionService` (peer side) and
+    `RelayForwarderActor` (relay side); peer path state in
+    `runtime/services/service_registry.rs`
   - service-local supervision rooted in `task_registry.rs`
 - `MoveOwned`
   - `handlers/invitation.rs` via private-field, nonclone
@@ -1994,7 +2025,8 @@ allocation or replace required service cleanup custody.
 
 Runtime-private bounded quorum registry owns actual prepared issuer and remote
 participant task groups. Original app approval binds the canonical manifest,
-public v3 invitation transport and exact initial Request; ingress metadata never
+public v4 invitation transport, exact initial Request and issuer return mailbox
+statement under the v4 five-domain declaration; ingress metadata never
 approves a participant. Native material admission retains current generation/tree
 custody and reads only the local physical share. Packet proofs use current ordered
 public verifying shares independently of historical leaf identities.

@@ -8,6 +8,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod mailbox;
+#[cfg(not(target_arch = "wasm32"))]
+use aura_core::effects::time::PhysicalTimeEffects;
+#[cfg(not(target_arch = "wasm32"))]
+use mailbox::{PendingEnrollmentMailboxes, PendingMailboxKey};
+
 #[cfg(test)]
 use aura_core::invitation::InvitationPurpose;
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
@@ -28,10 +35,13 @@ const DEFAULT_LOOPBACK_BIND_ADDR: &str = "127.0.0.1:0";
 #[cfg(not(target_arch = "wasm32"))]
 const AUTHORIZATION_HEADER: &str = "authorization";
 const INVITATION_RETRIEVAL_HEADER: &str = "x-aura-invitation-retrieval-token";
+const ENROLLMENT_MAILBOX_RETRIEVAL_HEADER: &str = "x-aura-enrollment-mailbox-retrieval-token";
 #[cfg(not(target_arch = "wasm32"))]
 const BEARER_PREFIX: &str = "Bearer ";
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_BOOTSTRAP_BODY_BYTES: usize = 16 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_ENROLLMENT_MAILBOX_BODY_BYTES: usize = 1_500_000;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_BOOTSTRAP_CANDIDATES: usize = 256;
 #[cfg(not(target_arch = "wasm32"))]
@@ -179,6 +189,36 @@ pub struct BootstrapBrokerCandidateRecord {
     pub discovered_at_ms: u64,
 }
 
+/// Untrusted wire registration plus Bob's scoped retrieval credential. The
+/// broker stores only its hash; Alice verifies the signature with the retained
+/// original setup verifier before any VM frame is published.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootstrapPendingEnrollmentMailboxRegistration {
+    pub registration: aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration,
+    pub retrieval_credential: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootstrapPendingEnrollmentMailboxEnvelope {
+    pub manifest_digest: [u8; 32],
+    pub envelope: aura_core::effects::transport::TransportEnvelope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PendingMailboxDelivery {
+    pub(crate) message_id: String,
+    pub(crate) envelope: aura_core::effects::transport::TransportEnvelope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BootstrapPendingEnrollmentMailboxAck {
+    message_id: String,
+}
+
 impl BootstrapBrokerCandidateRecord {
     pub fn authority_id(&self) -> Option<AuthorityId> {
         AuthorityId::from_str(&self.authority_id).ok()
@@ -188,28 +228,42 @@ impl BootstrapBrokerCandidateRecord {
 pub use aura_core::invitation::BootstrapBrokerInvitation;
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
 struct BootstrapBrokerState {
     candidates: HashMap<String, BootstrapBrokerCandidateRecord>,
     invitations: HashMap<(String, DeviceId), Vec<BootstrapBrokerInvitation>>,
     invitation_credentials: HashMap<(String, DeviceId), String>,
+    pending_enrollment_mailboxes: PendingEnrollmentMailboxes,
     started_at: Instant,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Debug for BootstrapBrokerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BootstrapBrokerState")
+            .field("pending_mailboxes", &self.pending_enrollment_mailboxes)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl BootstrapBrokerState {
+    #[cfg(test)]
     fn new() -> Self {
+        Self::with_retention(Duration::from_secs(120))
+    }
+
+    fn with_retention(retention: Duration) -> Self {
         Self {
             candidates: HashMap::new(),
             invitations: HashMap::new(),
             invitation_credentials: HashMap::new(),
+            pending_enrollment_mailboxes: PendingEnrollmentMailboxes::new(retention),
             started_at: Instant::now(),
         }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
 #[aura_macros::actor_root(
     owner = "bootstrap_broker_service",
     domain = "bootstrap_discovery",
@@ -224,10 +278,24 @@ pub struct LocalBootstrapBrokerService {
     shared: Arc<RwLock<BootstrapBrokerState>>,
     limits: BootstrapBrokerLimits,
     connection_permits: Arc<Semaphore>,
+    mailbox_time: Option<Arc<dyn PhysicalTimeEffects>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Debug for LocalBootstrapBrokerService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalBootstrapBrokerService")
+            .field("public_url", &self.public_url)
+            .field("mailbox_time_selected", &self.mailbox_time.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl LocalBootstrapBrokerService {
+    async fn mailbox_now_ms(&self) -> Result<u64, String> {
+        selected_mailbox_now_ms(self.mailbox_time.as_deref()).await
+    }
     pub async fn bind(
         bind_addr: &str,
         registration_ttl: Duration,
@@ -274,10 +342,20 @@ impl LocalBootstrapBrokerService {
             public_url,
             registration_ttl,
             auth_token,
-            shared: Arc::new(RwLock::new(BootstrapBrokerState::new())),
+            shared: Arc::new(RwLock::new(BootstrapBrokerState::with_retention(
+                registration_ttl,
+            ))),
             limits,
             connection_permits: Arc::new(Semaphore::new(limits.max_connections)),
+            mailbox_time: None,
         })
+    }
+
+    /// Bind mailbox expiry to the selected runtime provider. Ordinary broker
+    /// discovery can run without it, but mailbox endpoints fail closed.
+    pub fn with_mailbox_time_provider(mut self, provider: Arc<dyn PhysicalTimeEffects>) -> Self {
+        self.mailbox_time = Some(provider);
+        self
     }
 
     pub fn public_url(&self) -> &str {
@@ -318,9 +396,122 @@ impl LocalBootstrapBrokerService {
         take_invitations(&self.shared, authority_id, device_id, retrieval_token).await
     }
 
+    pub(crate) async fn register_pending_enrollment_mailbox(
+        &self,
+        registration: BootstrapPendingEnrollmentMailboxRegistration,
+    ) -> Result<(), String> {
+        if constant_time_eq_str(&registration.retrieval_credential, &self.auth_token) {
+            return Err("pending mailbox credential must be scoped independently".into());
+        }
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .register(
+                registration.registration,
+                &registration.retrieval_credential,
+                now_ms,
+            )
+            .map_err(str::to_string)
+    }
+
+    pub(crate) async fn pending_enrollment_mailbox_registration(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        manifest_digest: [u8; 32],
+    ) -> Result<
+        Option<aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration>,
+        String,
+    > {
+        let now_ms = self.mailbox_now_ms().await?;
+        Ok(self
+            .shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .registration(
+                PendingMailboxKey::new(subject, device, manifest_digest),
+                now_ms,
+            ))
+    }
+
+    pub(crate) async fn queue_pending_enrollment_vm_envelope(
+        &self,
+        manifest_digest: [u8; 32],
+        envelope: aura_core::effects::transport::TransportEnvelope,
+    ) -> Result<(), String> {
+        let device = envelope
+            .metadata
+            .get("aura-destination-device-id")
+            .and_then(|value| DeviceId::from_str(value).ok())
+            .ok_or("pending enrollment VM envelope has no exact device")?;
+        let key = PendingMailboxKey::new(envelope.destination, device, manifest_digest);
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .enqueue(key, envelope, now_ms)
+            .map_err(str::to_string)
+    }
+
+    pub(crate) async fn take_pending_enrollment_vm_envelopes(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        manifest_digest: [u8; 32],
+        credential: &str,
+    ) -> Result<Vec<PendingMailboxDelivery>, String> {
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .take(
+                PendingMailboxKey::new(subject, device, manifest_digest),
+                credential,
+                now_ms,
+            )
+            .map_err(str::to_string)
+    }
+
+    pub(crate) async fn acknowledge_pending_enrollment_vm_envelope(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        manifest_digest: [u8; 32],
+        credential: &str,
+        message_id: &str,
+    ) -> Result<(), String> {
+        let now_ms = self.mailbox_now_ms().await?;
+        self.shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .acknowledge(
+                PendingMailboxKey::new(subject, device, manifest_digest),
+                credential,
+                message_id,
+                now_ms,
+            )
+            .map_err(str::to_string)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn interrupt_next_pending_enrollment_ack_for_test(&self) {
+        self.shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .fail_next_ack_for_test();
+    }
+
     pub fn start(&self, tasks: &TaskGroup) {
         let listener = self.listener.clone();
         let shared = self.shared.clone();
+        let mailbox_time = self.mailbox_time.clone();
         let registration_ttl = self.registration_ttl;
         let auth_token = self.auth_token.clone();
         let limits = self.limits;
@@ -348,6 +539,7 @@ impl LocalBootstrapBrokerService {
                         continue;
                     };
                     let shared = shared.clone();
+                    let mailbox_time = mailbox_time.clone();
                     let auth_token = auth_token.clone();
                     let connection_tasks = connection_tasks.clone();
                     let _conn_handle =
@@ -356,6 +548,7 @@ impl LocalBootstrapBrokerService {
                             handle_http_connection(
                                 stream,
                                 shared,
+                                mailbox_time,
                                 registration_ttl,
                                 auth_token,
                                 limits.request_read_timeout,
@@ -520,9 +713,22 @@ fn constant_time_eq_str(candidate: &str, expected: &str) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+async fn selected_mailbox_now_ms(
+    provider: Option<&dyn PhysicalTimeEffects>,
+) -> Result<u64, String> {
+    provider
+        .ok_or_else(|| "pending mailbox selected physical-time provider is absent".to_string())?
+        .physical_time()
+        .await
+        .map(|time| time.ts_ms)
+        .map_err(|source| format!("pending mailbox selected physical-time read failed: {source}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_http_connection(
     mut stream: TcpStream,
     shared: Arc<RwLock<BootstrapBrokerState>>,
+    mailbox_time: Option<Arc<dyn PhysicalTimeEffects>>,
     registration_ttl: Duration,
     auth_token: String,
     request_read_timeout: Duration,
@@ -540,6 +746,24 @@ async fn handle_http_connection(
             return;
         }
     };
+
+    macro_rules! mailbox_now {
+        () => {
+            match selected_mailbox_now_ms(mailbox_time.as_deref()).await {
+                Ok(now_ms) => now_ms,
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        503,
+                        "text/plain; charset=utf-8",
+                        b"pending mailbox selected physical-time provider unavailable",
+                    )
+                    .await;
+                    return;
+                }
+            }
+        };
+    }
 
     match (request.method.as_str(), request.path.as_str()) {
         ("OPTIONS", _) => {
@@ -687,6 +911,239 @@ async fn handle_http_connection(
                 }
             }
         }
+        ("POST", "/v2/bootstrap/enrollment-mailbox/register") => {
+            let payload: BootstrapPendingEnrollmentMailboxRegistration =
+                match serde_json::from_slice(&request.body) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        let _ = write_http_response(
+                            &mut stream,
+                            400,
+                            "text/plain; charset=utf-8",
+                            b"invalid pending enrollment mailbox registration",
+                        )
+                        .await;
+                        return;
+                    }
+                };
+            if constant_time_eq_str(&payload.retrieval_credential, &auth_token) {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"pending mailbox credential must be scoped independently",
+                )
+                .await;
+                return;
+            }
+            let now_ms = mailbox_now!();
+            let result = shared.write().await.pending_enrollment_mailboxes.register(
+                payload.registration,
+                &payload.retrieval_credential,
+                now_ms,
+            );
+            let (status, body) = match result {
+                Ok(()) => (204, ""),
+                Err(reason) => (429, reason),
+            };
+            let _ = write_http_response(
+                &mut stream,
+                status,
+                "text/plain; charset=utf-8",
+                body.as_bytes(),
+            )
+            .await;
+        }
+        ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/register/") => {
+            let Some(key) = pending_enrollment_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-mailbox/register/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid pending enrollment mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let found = shared
+                .write()
+                .await
+                .pending_enrollment_mailboxes
+                .registration(key, now_ms);
+            match serde_json::to_vec(&found) {
+                Ok(body) => {
+                    let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
+                }
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        500,
+                        "text/plain; charset=utf-8",
+                        b"pending enrollment mailbox registration encoding failed",
+                    )
+                    .await;
+                }
+            }
+        }
+        ("POST", "/v2/bootstrap/enrollment-mailbox/envelopes") => {
+            let payload: BootstrapPendingEnrollmentMailboxEnvelope =
+                match serde_json::from_slice(&request.body) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        let _ = write_http_response(
+                            &mut stream,
+                            400,
+                            "text/plain; charset=utf-8",
+                            b"invalid pending enrollment VM envelope",
+                        )
+                        .await;
+                        return;
+                    }
+                };
+            let device = payload
+                .envelope
+                .metadata
+                .get("aura-destination-device-id")
+                .and_then(|value| DeviceId::from_str(value).ok());
+            let Some(device) = device else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"pending enrollment VM envelope has no exact device",
+                )
+                .await;
+                return;
+            };
+            let key = PendingMailboxKey::new(
+                payload.envelope.destination,
+                device,
+                payload.manifest_digest,
+            );
+            let now_ms = mailbox_now!();
+            let result = shared.write().await.pending_enrollment_mailboxes.enqueue(
+                key,
+                payload.envelope,
+                now_ms,
+            );
+            let (status, body) = match result {
+                Ok(()) => (204, ""),
+                Err(reason) => (429, reason),
+            };
+            let _ = write_http_response(
+                &mut stream,
+                status,
+                "text/plain; charset=utf-8",
+                body.as_bytes(),
+            )
+            .await;
+        }
+        ("POST", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/ack/") => {
+            let Some(key) = pending_enrollment_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-mailbox/ack/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid pending enrollment mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let Some(credential) = request_header(&request, ENROLLMENT_MAILBOX_RETRIEVAL_HEADER)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    401,
+                    "text/plain; charset=utf-8",
+                    b"missing pending enrollment mailbox retrieval credential",
+                )
+                .await;
+                return;
+            };
+            let Ok(ack) =
+                serde_json::from_slice::<BootstrapPendingEnrollmentMailboxAck>(&request.body)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid pending enrollment mailbox acknowledgment",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let result = shared
+                .write()
+                .await
+                .pending_enrollment_mailboxes
+                .acknowledge(key, credential, &ack.message_id, now_ms);
+            let status = if result.is_ok() { 204 } else { 401 };
+            let _ =
+                write_http_response(&mut stream, status, "text/plain; charset=utf-8", b"").await;
+        }
+        ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/envelopes/") => {
+            let Some(key) = pending_enrollment_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-mailbox/envelopes/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid pending enrollment mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let Some(credential) = request_header(&request, ENROLLMENT_MAILBOX_RETRIEVAL_HEADER)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    401,
+                    "text/plain; charset=utf-8",
+                    b"missing pending enrollment mailbox retrieval credential",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let result = shared
+                .write()
+                .await
+                .pending_enrollment_mailboxes
+                .take(key, credential, now_ms);
+            match result {
+                Ok(envelopes) => match serde_json::to_vec(&envelopes) {
+                    Ok(body) => {
+                        let _ =
+                            write_http_response(&mut stream, 200, "application/json", &body).await;
+                    }
+                    Err(_) => {
+                        let _ = write_http_response(
+                            &mut stream,
+                            500,
+                            "text/plain; charset=utf-8",
+                            b"pending enrollment mailbox encoding failed",
+                        )
+                        .await;
+                    }
+                },
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        401,
+                        "text/plain; charset=utf-8",
+                        b"pending enrollment mailbox retrieval refused",
+                    )
+                    .await;
+                }
+            }
+        }
         _ => {
             let _ =
                 write_http_response(&mut stream, 404, "text/plain; charset=utf-8", b"not found")
@@ -711,6 +1168,23 @@ fn invitation_request_recipient(path_tail: &str) -> Option<(&str, DeviceId)> {
     let (authority, device) = path_tail.split_once('/')?;
     AuthorityId::from_str(authority).ok()?;
     Some((authority, DeviceId::from_str(device).ok()?))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn pending_enrollment_mailbox_key(path_tail: &str) -> Option<PendingMailboxKey> {
+    if path_tail.contains('?') {
+        return None;
+    }
+    let mut parts = path_tail.split('/');
+    let subject = AuthorityId::from_str(parts.next()?).ok()?;
+    let device = DeviceId::from_str(parts.next()?).ok()?;
+    let digest_bytes = hex::decode(parts.next()?).ok()?;
+    if parts.next().is_some() || digest_bytes.len() != 32 {
+        return None;
+    }
+    let mut digest = [0; 32];
+    digest.copy_from_slice(&digest_bytes);
+    Some(PendingMailboxKey::new(subject, device, digest))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -776,12 +1250,17 @@ async fn read_http_request(
                 .flatten()
         })
         .unwrap_or(0);
-    if content_length > MAX_BOOTSTRAP_BODY_BYTES {
+    let body_limit = if method == "POST" && path == "/v2/bootstrap/enrollment-mailbox/envelopes" {
+        MAX_ENROLLMENT_MAILBOX_BODY_BYTES
+    } else {
+        MAX_BOOTSTRAP_BODY_BYTES
+    };
+    if content_length > body_limit {
         return Err("request body exceeds bootstrap broker limit".to_string());
     }
 
     let mut body = buffer[header_end..].to_vec();
-    if body.len() > MAX_BOOTSTRAP_BODY_BYTES {
+    if body.len() > body_limit {
         return Err("request body exceeds bootstrap broker limit".to_string());
     }
     while body.len() < content_length {
@@ -793,7 +1272,7 @@ async fn read_http_request(
             return Err("request body truncated".to_string());
         }
         body.extend_from_slice(&scratch[..read]);
-        if body.len() > MAX_BOOTSTRAP_BODY_BYTES {
+        if body.len() > body_limit {
             return Err("request body exceeds bootstrap broker limit".to_string());
         }
     }
@@ -822,10 +1301,11 @@ async fn write_http_response(
         404 => "Not Found",
         429 => "Too Many Requests",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     };
     let headers = format!(
-        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, {INVITATION_RETRIEVAL_HEADER}\r\n\r\n",
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, {INVITATION_RETRIEVAL_HEADER}, {ENROLLMENT_MAILBOX_RETRIEVAL_HEADER}\r\n\r\n",
         body.len()
     );
     stream.write_all(headers.as_bytes()).await?;
@@ -856,6 +1336,20 @@ pub fn invitations_endpoint(base_url: &str, authority_id: &str, device_id: Devic
         normalize_base_url(base_url),
         authority_id,
         device_id
+    )
+}
+
+pub fn pending_enrollment_mailbox_endpoint(
+    base_url: &str,
+    resource: &str,
+    subject: AuthorityId,
+    device: DeviceId,
+    manifest_digest: [u8; 32],
+) -> String {
+    format!(
+        "{}/v2/bootstrap/enrollment-mailbox/{resource}/{subject}/{device}/{}",
+        normalize_base_url(base_url),
+        hex::encode(manifest_digest)
     )
 }
 
@@ -1092,6 +1586,122 @@ pub async fn take_remote_invitations(
     )
     .await?;
     serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
+}
+
+pub(crate) async fn register_remote_pending_enrollment_mailbox(
+    base_url: &str,
+    auth_token: &str,
+    registration: &BootstrapPendingEnrollmentMailboxRegistration,
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(registration).map_err(aura_core::AuraError::from)?;
+    send_http_request(
+        "POST",
+        &format!(
+            "{}/v2/bootstrap/enrollment-mailbox/register",
+            normalize_base_url(base_url)
+        ),
+        auth_token,
+        &[],
+        Some(&body),
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn fetch_remote_pending_enrollment_mailbox_registration(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    device: DeviceId,
+    manifest_digest: [u8; 32],
+) -> Result<
+    Option<aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration>,
+    aura_core::AuraError,
+> {
+    let body = send_http_request(
+        "GET",
+        &pending_enrollment_mailbox_endpoint(
+            base_url,
+            "register",
+            subject,
+            device,
+            manifest_digest,
+        ),
+        auth_token,
+        &[],
+        None,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
+}
+
+pub(crate) async fn send_remote_pending_enrollment_vm_envelope(
+    base_url: &str,
+    auth_token: &str,
+    payload: &BootstrapPendingEnrollmentMailboxEnvelope,
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(payload).map_err(aura_core::AuraError::from)?;
+    send_http_request(
+        "POST",
+        &format!(
+            "{}/v2/bootstrap/enrollment-mailbox/envelopes",
+            normalize_base_url(base_url)
+        ),
+        auth_token,
+        &[],
+        Some(&body),
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn take_remote_pending_enrollment_vm_envelopes(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    device: DeviceId,
+    manifest_digest: [u8; 32],
+    retrieval_credential: &str,
+) -> Result<Vec<PendingMailboxDelivery>, aura_core::AuraError> {
+    let body = send_http_request(
+        "GET",
+        &pending_enrollment_mailbox_endpoint(
+            base_url,
+            "envelopes",
+            subject,
+            device,
+            manifest_digest,
+        ),
+        auth_token,
+        &[(ENROLLMENT_MAILBOX_RETRIEVAL_HEADER, retrieval_credential)],
+        None,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
+}
+
+pub(crate) async fn acknowledge_remote_pending_enrollment_vm_envelope(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    device: DeviceId,
+    manifest_digest: [u8; 32],
+    retrieval_credential: &str,
+    message_id: &str,
+) -> Result<(), aura_core::AuraError> {
+    let body = serde_json::to_vec(&BootstrapPendingEnrollmentMailboxAck {
+        message_id: message_id.to_owned(),
+    })
+    .map_err(aura_core::AuraError::from)?;
+    send_http_request(
+        "POST",
+        &pending_enrollment_mailbox_endpoint(base_url, "ack", subject, device, manifest_digest),
+        auth_token,
+        &[(ENROLLMENT_MAILBOX_RETRIEVAL_HEADER, retrieval_credential)],
+        Some(&body),
+    )
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

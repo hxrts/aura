@@ -345,3 +345,6 @@ mod tests {
         assert!(result.is_ok());
     }
 }
+
+#[cfg(feature = "simulation")]
+pub mod enrollment;

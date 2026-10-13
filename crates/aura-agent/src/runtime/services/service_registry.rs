@@ -6,10 +6,10 @@
 //! must not be treated as replicated truth.
 
 use super::invariant::InvariantViolation;
-use super::peer_path_state::{PeerPathState, SendPlan};
 use super::state::with_state_mut_validated;
 use aura_core::service::{EstablishPath, Route, SelectedPeerPath, SelectionState, ServiceFamily};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_protocol::handlers::{PeerPathState, SendPlan};
 use aura_rendezvous::{DescriptorValidity, RendezvousDescriptor};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,6 +28,10 @@ enum ServiceRegistryCommand {
     InvalidateScopeEpoch,
     CleanupExpiredDescriptors,
     ClearScope,
+    SelectPeerPath,
+    PlanPeerSend,
+    RecordPeerPathOutcome,
+    BumpNetworkGeneration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

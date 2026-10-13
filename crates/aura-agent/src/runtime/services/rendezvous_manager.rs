@@ -204,6 +204,8 @@ pub enum RendezvousManagerError {
     LanDiscoveryUnavailable,
     #[error("bootstrap broker operation failed: {0}")]
     BootstrapBroker(#[source] AuraError),
+    #[error("pending original enrollment mailbox registration is not yet available")]
+    PendingMailboxRegistrationUnavailable,
 }
 
 struct RendezvousState {
@@ -1206,7 +1208,8 @@ impl RendezvousManager {
             self.config.bootstrap_broker.lan_bind_policy,
         )
         .await
-        .map_err(|error| ServiceError::startup_failed(self.name(), error))?;
+        .map_err(|error| ServiceError::startup_failed(self.name(), error))?
+        .with_mailbox_time_provider(self.time.clone());
         broker.start(&tasks);
         let broker = Arc::new(broker);
         self.command_handle()
@@ -1241,6 +1244,270 @@ impl RendezvousManager {
             .await
             .ok()
             .and_then(|snapshot| snapshot.bootstrap_broker)
+    }
+
+    pub(crate) async fn original_pending_mailbox_registration(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        digest: [u8; 32],
+    ) -> Result<
+        aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration,
+        RendezvousManagerError,
+    > {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "pending enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .pending_enrollment_mailbox_registration(subject, device, digest)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                })?
+                .ok_or(RendezvousManagerError::PendingMailboxRegistrationUnavailable);
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::fetch_remote_pending_enrollment_mailbox_registration(
+            base, auth, subject, device, digest,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)?
+        .ok_or(RendezvousManagerError::PendingMailboxRegistrationUnavailable)
+    }
+
+    pub(crate) async fn register_original_pending_mailbox(
+        &self,
+        registration: super::bootstrap_broker::BootstrapPendingEnrollmentMailboxRegistration,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "pending enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .register_pending_enrollment_mailbox(registration)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::register_remote_pending_enrollment_mailbox(
+            base,
+            auth,
+            &registration,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn take_original_pending_mailbox(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        digest: [u8; 32],
+        credential: &str,
+    ) -> Result<Vec<super::bootstrap_broker::PendingMailboxDelivery>, RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Ok(Vec::new());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .take_pending_enrollment_vm_envelopes(subject, device, digest, credential)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::take_remote_pending_enrollment_vm_envelopes(
+            base, auth, subject, device, digest, credential,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn acknowledge_original_pending_mailbox(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        digest: [u8; 32],
+        credential: &str,
+        message_id: &str,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "pending enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .acknowledge_pending_enrollment_vm_envelope(
+                    subject, device, digest, credential, message_id,
+                )
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker authorization is absent",
+                ))
+            })?;
+        super::bootstrap_broker::acknowledge_remote_pending_enrollment_vm_envelope(
+            base, auth, subject, device, digest, credential, message_id,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
+    }
+
+    pub(crate) async fn send_original_pending_mailbox_envelope(
+        &self,
+        effects: &crate::runtime::AuraEffectSystem,
+        route: &crate::handlers::invitation::enrollment_trust::OriginalPendingMailboxSenderRoute,
+        envelope: aura_core::effects::transport::TransportEnvelope,
+    ) -> Result<(), RendezvousManagerError> {
+        route.require_effects(effects).map_err(|error| {
+            RendezvousManagerError::BootstrapBroker(AuraError::invalid(error.to_string()))
+        })?;
+        let statement = route.statement();
+        let now = self
+            .time
+            .physical_time()
+            .await
+            .map_err(|source| RendezvousManagerError::BootstrapBroker(AuraError::from(source)))?
+            .ts_ms;
+        if now >= statement.expires_at_ms()
+            || envelope.source != statement.subject()
+            || envelope.destination != statement.subject()
+            || envelope.metadata.get("aura-destination-device-id") != Some(&statement.invitee_device().to_string())
+            || !envelope.metadata.get("session-id").and_then(|id| uuid::Uuid::parse_str(id).ok())
+                .is_some_and(|id| aura_invitation::enrollment_mailbox_session::is_original_enrollment_mailbox_session(statement.invitation(), &statement.manifest_digest(), id))
+        {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid("original pending enrollment mailbox route changed or expired")));
+        }
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                "pending enrollment broker is disabled",
+            )));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return broker
+                .queue_pending_enrollment_vm_envelope(statement.manifest_digest(), envelope)
+                .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                });
+        }
+        let base = self
+            .config
+            .bootstrap_broker
+            .base_url
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker endpoint is absent",
+                ))
+            })?;
+        let auth = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                RendezvousManagerError::BootstrapBroker(AuraError::invalid(
+                    "pending enrollment broker authorization is absent",
+                ))
+            })?;
+        let payload = super::bootstrap_broker::BootstrapPendingEnrollmentMailboxEnvelope {
+            manifest_digest: statement.manifest_digest(),
+            envelope,
+        };
+        super::bootstrap_broker::send_remote_pending_enrollment_vm_envelope(base, auth, &payload)
+            .await
+            .map_err(RendezvousManagerError::BootstrapBroker)
     }
 
     pub async fn register_bootstrap_candidate(

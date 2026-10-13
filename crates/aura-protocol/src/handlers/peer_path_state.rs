@@ -4,17 +4,17 @@
 //! soon as a relay path is advertised, probe direct candidates in bounded
 //! background attempts, promote to direct when a probe succeeds, and fall back
 //! to the relay when a direct send fails. The typed retry state lives in
-//! `aura_protocol::handlers::PeerConnectionActor`; this module drives it from
-//! the runtime's actual sends and exposes the result as a `SelectedPeerPath`
-//! observation. It is pure state: the service registry owns one instance per
-//! `(context, peer)` and the transport effect asks it what to dial.
+//! `PeerConnectionActor`; this pure state machine drives it from the runtime's
+//! actual sends and exposes the result as a `SelectedPeerPath` observation.
+//! The agent's service registry owns one instance per `(context, peer)` and
+//! its transport effect asks it what to dial.
 
-use aura_core::service::{EstablishPath, PeerPathKind, SelectedPeerPath};
-use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_protocol::handlers::{
+use super::peer_connection::{
     CandidateGeneration, Degraded, Direct, NetworkGeneration, PeerConnection, PeerConnectionActor,
     RelayOnly, Upgrading,
 };
+use aura_core::service::{EstablishPath, PeerPathKind, SelectedPeerPath};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 

@@ -101,6 +101,45 @@ separate fixed shortcut endpoint, then delivers it through the broker. The
 enrollment code is not replayed as the shortcut, and broker delivery does not
 turn enrollment-start success into invitation acceptance.
 
+#### Pending device-enrollment VM transport
+
+Before adoption, an invitee still runs under its provisional authority while
+the enrollment VM addresses both roles under the issuer's subject authority.
+The broker may carry these VM envelopes without promoting a bootstrap
+candidate to an ordinary rendezvous peer. Each direction needs its own
+authenticated mailbox scope; possession of a broker bearer credential alone
+does not authorize an enrollment route.
+
+The invitee's first-frame mailbox registration is authorized by the verified
+original setup key and exact admitted manifest. The reverse mailbox is
+registered by the issuer under the retained original enrollment control and
+approved native threshold policy. Its signing transcript belongs to the
+original user-approved initiation batch; later generic signing cannot create
+the route. Its signed registration binds the original
+invitation and manifest digest, session, subject, issuer and invitee devices,
+direction, and expiry. The invitee may send a response only after checking
+that registration against its independently retained enrollment baseline and
+proving possession of its admitted setup key. Neither a self-certified
+descriptor nor a signature copied from the manifest can establish the reverse
+route.
+
+For quorum issuance the verifier uses the authenticated native root signing
+node (`NodeIndex(0)`), requires its original threshold of at least two, and
+matches its group verifier to the separately pinned initiator confirmation
+verifier in the transferred manifest. Another active inventory key, even one
+listing the issuer device, cannot register the return route.
+
+Broker enqueue, take, and acknowledgment use separate scoped credentials.
+The broker enforces the signed scope, bounded capacity, and expiry using its
+selected physical-time provider. A recipient durably retains an exact
+message-ID/envelope record under the protected enrollment admission before
+acknowledging delivery, deduplicates redelivery, and replays that record on
+same-profile reopen. VM ingress remains responsible for final session,
+role, message, and cryptographic verification. Terminal acknowledgment or
+verified failure retires the scoped mailbox and replay record; an ambiguous
+send or take cannot issue a new enrollment operation or discard the original
+frame.
+
 Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton bootstrap registry. Runtime code may combine remembered direct contacts, neighborhood discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood re-entry hints, but it does not own final route choice or a global bootstrap cache.
 
 Operationally, browser and native first-run startup may become bootstrap-visible only after the first native account runtime exists and begins hosting the broker automatically. For example, in a TUI plus Web startup, the user may create the web account first and the TUI account second. Once the TUI runtime is live, both instances should surface one another as bootstrap candidates without extra user setup steps.

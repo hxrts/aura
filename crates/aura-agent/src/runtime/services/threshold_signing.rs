@@ -4652,7 +4652,7 @@ pub(super) struct ApprovedLocalEnrollmentTranscript<'tree> {
     index: u16,
     threshold: u16,
     public_package: Vec<u8>,
-    domains: [ApprovedEnrollmentTranscriptDomain; 3],
+    domains: [ApprovedEnrollmentTranscriptDomain; 4],
     approved_intent_digest: [u8; 32],
     local_share: &'tree [u8],
     /// Original sealed participant-local window; no peer clock is accepted.
@@ -4666,7 +4666,7 @@ struct ApprovedEnrollmentTranscriptDomain {
 }
 
 /// Minted only from the independently retained native policy and explicit
-/// canonical three-domain approval. It contains public material exclusively.
+/// canonical four-signature-domain approval. It contains public material exclusively.
 pub(super) struct ApprovedEnrollmentTranscriptRound<'window> {
     effects: Arc<AuraEffectSystem>,
     original_window: &'window crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
@@ -4684,7 +4684,7 @@ impl ValidatedLocalEnrollmentSigningMaterial {
         &self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
         original_window: &'window crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
-    ) -> Result<[ApprovedEnrollmentTranscriptRound<'window>; 3], AuraError> {
+    ) -> Result<[ApprovedEnrollmentTranscriptRound<'window>; 4], AuraError> {
         use aura_signature::SecurityTranscript;
         self.custody
             .require_manifest(self.effects.as_ref(), approval.manifest())?;
@@ -4749,6 +4749,15 @@ impl ValidatedLocalEnrollmentSigningMaterial {
                         Arc::new(source),
                     )
                 })?,
+            approval
+                .issuer_return_mailbox()
+                .required_transcript_bytes()
+                .map_err(|source| {
+                    AuraError::crypto_with_source(
+                        "encode approved issuer return mailbox",
+                        Arc::new(source),
+                    )
+                })?,
         ];
         Ok(messages.map(|message| ApprovedEnrollmentTranscriptRound {
             effects: self.effects.clone(),
@@ -4773,7 +4782,7 @@ impl ValidatedLocalEnrollmentSigningMaterial {
     ) {
         original_participant_actor(self.device, self.index)
     }
-    /// Exactly the three approved domains; no caller-provided signing message is accepted.
+    /// Exactly the four approved signature domains; no caller-provided message is accepted.
     pub(super) fn approved_local_transcript<'grant>(
         &'grant self,
         approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
@@ -4830,6 +4839,15 @@ impl ValidatedLocalEnrollmentSigningMaterial {
                     Arc::new(source),
                 )
             })?;
+        let return_message = approval
+            .issuer_return_mailbox()
+            .required_transcript_bytes()
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "encode explicitly approved issuer return mailbox",
+                    Arc::new(source),
+                )
+            })?;
         // Ceremony/invitation/domain make the immutable approval allocation
         // stable on restart. This is a session binding, not a remote deadline.
         let session_bytes = aura_core::util::serialization::to_vec(&(
@@ -4871,6 +4889,19 @@ impl ValidatedLocalEnrollmentSigningMaterial {
             approval.manifest().subject.to_string(),
             hex::encode(request_digest),
         );
+        let return_digest = aura_core::hash::hash(&aura_core::util::serialization::to_vec(&(
+            "aura.enrollment.issuer-return-mailbox-approval-retirement.v1",
+            approval.manifest().subject,
+            &approval.manifest().ceremony,
+            &approval.manifest().invitation,
+            aura_core::hash::hash(&return_message),
+            approval.canonical_intent_digest(),
+        ))?);
+        let return_location = SecureStorageLocation::with_sub_key(
+            "enrollment_signing_approval_retirement",
+            approval.manifest().subject.to_string(),
+            hex::encode(return_digest),
+        );
         let grant = ApprovedLocalEnrollmentTranscript {
             custody: &self.custody,
             effects: self.effects.clone(),
@@ -4893,6 +4924,11 @@ impl ValidatedLocalEnrollmentSigningMaterial {
                     message: request_message,
                     retirement_location: request_location,
                     approval_digest: request_digest,
+                },
+                ApprovedEnrollmentTranscriptDomain {
+                    message: return_message,
+                    retirement_location: return_location,
+                    approval_digest: return_digest,
                 },
             ],
             approved_intent_digest: approval.canonical_intent_digest(),
@@ -5106,7 +5142,7 @@ impl ThresholdSigningService {
         >,
         window: &crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
         retained: &mut Option<Arc<tokio::sync::Mutex<OriginalIssuerTranscriptSigningCustody>>>,
-    ) -> Result<[Vec<u8>; 3], AuraError> {
+    ) -> Result<[Vec<u8>; 4], AuraError> {
         window
             .execute(self.effects.as_ref(), || async {
                 if retained.is_none() {
@@ -5128,7 +5164,7 @@ impl ThresholdSigningService {
                 let material = retained.material.as_ref().ok_or_else(|| {
                     AuraError::invalid("original issuer initial material already transferred")
                 })?;
-                let [manifest_round, transport_round, request_round] =
+                let [manifest_round, transport_round, request_round, return_round] =
                     material.approved_rounds(&approval, window)?;
                 if retained.local_actor.is_none() {
                     let (local_ingress, local_actor) =
@@ -5178,7 +5214,10 @@ impl ThresholdSigningService {
                     let request = request_round
                         .sign(approval.initial_request(), ingresses)
                         .await?;
-                    Ok::<_, AuraError>([manifest, transport, request])
+                    let return_mailbox = return_round
+                        .sign(approval.issuer_return_mailbox(), ingresses)
+                        .await?;
+                    Ok::<_, AuraError>([manifest, transport, request, return_mailbox])
                 };
                 let (_, _, signatures) = tokio::try_join!(
                     local_participant,

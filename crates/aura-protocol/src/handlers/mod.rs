@@ -317,9 +317,14 @@ pub mod timeout_coordinator;
 pub use timeout_coordinator::TimeoutCoordinator;
 
 pub mod peer_connection;
+pub mod peer_path_state;
 pub use peer_connection::{
     AttemptBudget, BackoffWindow, CandidateGeneration, Degraded, Direct, NetworkGeneration,
     PeerConnection, PeerConnectionActor, RelayOnly, Upgrading,
+};
+pub use peer_path_state::{
+    PeerPathState, SendPlan, DIRECT_UPGRADE_BASE_BACKOFF, DIRECT_UPGRADE_MAX_ATTEMPTS,
+    DIRECT_UPGRADE_MAX_BACKOFF,
 };
 
 pub mod transport_coordinator;

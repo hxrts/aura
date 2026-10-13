@@ -30,7 +30,6 @@ pub mod logical_clock_manager;
 pub mod maintenance_service;
 pub mod move_manager;
 pub mod path_manager;
-pub mod peer_path_state;
 pub mod reactive_pipeline_service;
 pub mod receipt_manager;
 pub mod reconfiguration_manager;

@@ -225,13 +225,13 @@ pub(super) fn remote_public_ingress(
 }
 
 // Private, move-only proof from the actual native participant. Its bytes are
-// observations; only this producer's Created/readback and all-three-share path
+// observations; only this producer's Created/readback and all-four-share path
 // can issue the owner. It cannot be decoded, cloned, or built by a consumer.
 pub(in crate::runtime::services) struct OriginalParticipantCompletion {
     effects: Arc<crate::runtime::AuraEffectSystem>,
     device: DeviceId,
     approved_intent_digest: [u8; 32],
-    retirement_readbacks: [Vec<u8>; 3],
+    retirement_readbacks: [Vec<u8>; 4],
 }
 impl OriginalParticipantCompletion {
     pub(in crate::runtime::services) fn require_original(
@@ -370,7 +370,7 @@ impl OriginalEnrollmentTranscriptActor {
                 .original_window
                 .execute(effects.as_ref(), || async {
                     let native_outcome = async {
-                        let mut retirement_readbacks = Vec::with_capacity(3);
+                        let mut retirement_readbacks = Vec::with_capacity(4);
                         for domain in &approval.domains {
                             // A consumed approval is durably recorded before nonce creation. A
                             // restart cannot generate another nonce under the same approval.

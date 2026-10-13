@@ -480,6 +480,15 @@ validation. The scope is a mailbox selector, not receipt acceptance,
 membership, or outbound broker routing authority. An authenticated broker
 mailbox protocol still needs separate implementation and end-to-end evidence.
 
+Once the agent-owned authenticated pending-enrollment mailbox drain is wired
+into the browser generation supervisor, it runs on every tick in all modes.
+The agent retains registration proof, credential, protected admission and VM
+ingress; the browser reports the first drain failure visibly once per
+generation while the app continues to own the import terminal result. The
+existing harness relay poll remains a separate compatibility path. Require an
+actual browser transfer and failure fixture before claiming the authenticated
+mailbox path validated end to end.
+
 Browser harness failures surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__`, `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`, and the page-owned semantic submit publication surface. Those globals are diagnostic-only and do not replace the authoritative `UiSnapshot` and `RenderHeartbeat` payloads. They are the canonical observed source for browser bootstrap and rebinding state. Driver-owned `restart_page_session` is infrastructure recovery only. Semantic command submission and runtime-identity staging must wait on or fail from the page-owned publication contract rather than replaying work through a restarted browser session.
 
 The approved-transfer browser scenario submits through the mounted modal confirm button, then requires the exact `device_enrollment` operation instance to reach `Succeeded`, a matching `device_enrollment_accepted` event from the host's added-device settings projection, and a two-device settings count before restarting Bob. After reopen it checks the projection again. Immediately before restart, the Playwright driver writes a private `*-pre-restart-*.json` artifact with the observed operation instance and state, typed failure (if any), matching host acknowledgment, revision, and filtered console tail. Preserve this artifact when a later restart loses page diagnostics; neither a generic success state nor a modal dismissal proves the enrollment chain.
@@ -1250,11 +1259,12 @@ soft target (`AURA_BUILD_TARGET_CAP_GIB`, default 10 GiB), and admits a
 build only if the volume keeps `AURA_BUILD_MIN_FREE_GIB` (default 15) free
 after the reservations of other admitted builds and the incoming build's
 estimated growth. `AURA_BUILD_RESERVE_GIB` (default 4) GiB is the fallback
-without prior measurements. With same-lane structured receipts, admission uses
-the largest observed growth plus 1 GiB for sampling margin; older TSV peaks
-for the same profile and target triple provide migration data. Each admitted
-build holds that amount under `~/.cache/aura-build/reservations` until it exits.
-The admission lock is held only while checking and reserving,
+without prior measurements. Admission uses the greater of same-lane receipt
+growth and recent TSV growth for the same profile and target triple, plus 1 GiB
+for sampling margin. A failed build that stopped before linking therefore cannot
+replace stronger completed-build evidence. Each admitted build holds that amount
+under `~/.cache/aura-build/reservations` until it exits. The admission lock is
+held only while checking and reserving,
 and only builders of the same checkout block its sweeps, so two worktrees can
 build at once.
 

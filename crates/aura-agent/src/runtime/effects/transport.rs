@@ -604,6 +604,43 @@ async fn send_planned_envelope(
         return send_envelope_tcp(&addr, &envelope).await;
     }
 
+    if is_choreography_envelope(&envelope) {
+        if let Some(session) = envelope
+            .metadata
+            .get("session-id")
+            .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
+        {
+            if let (Some(retained), Some(manager)) = (
+                effects.original_mailbox_issuer(session),
+                effects.rendezvous_manager(),
+            ) {
+                retained.require_runtime_owner(effects).map_err(|source| {
+                    TransportError::ProtocolError {
+                        details: source.to_string(),
+                    }
+                })?;
+                let manifest = retained.manifest();
+                let registration = manager.original_pending_mailbox_registration(
+                    manifest.subject, manifest.invitee_device, retained.digest(),
+                ).await.map_err(|source| match source {
+                    crate::runtime::services::rendezvous_manager::RendezvousManagerError::PendingMailboxRegistrationUnavailable =>
+                        TransportError::DestinationUnreachable { destination: envelope.destination },
+                    other => TransportError::ProtocolError { details: other.to_string() },
+                })?;
+                let route = crate::handlers::invitation::enrollment_trust::verify_original_pending_mailbox_sender_route(
+                    retained.as_ref(), registration,
+                ).await.map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;
+                manager
+                    .send_original_pending_mailbox_envelope(effects, &route, envelope)
+                    .await
+                    .map_err(|source| TransportError::ProtocolError {
+                        details: source.to_string(),
+                    })?;
+                return Ok(());
+            }
+        }
+    }
+
     let destination = envelope.destination;
     let unreachable = || TransportError::DestinationUnreachable { destination };
     // Choreography sessions run in a fresh per-session context that never has

@@ -406,6 +406,16 @@ pub struct AuraEffectSystem {
     /// Rendezvous manager (optional, for address resolution)
     rendezvous_manager: parking_lot::RwLock<Option<RendezvousManager>>,
 
+    /// Only a live original issuer owner may authorize pre-adoption mailbox routing.
+    original_mailbox_issuers: parking_lot::RwLock<
+        std::collections::HashMap<
+            uuid::Uuid,
+            std::sync::Weak<
+                crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+            >,
+        >,
+    >,
+
     /// Move manager (optional, for bounded movement planning and replay windows).
     move_manager: parking_lot::RwLock<Option<MoveManager>>,
 
@@ -1396,6 +1406,7 @@ impl AuraEffectSystem {
             #[cfg(not(target_arch = "wasm32"))]
             relay_forwarder: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
+            original_mailbox_issuers: parking_lot::RwLock::new(std::collections::HashMap::new()),
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             receipt_signing_key,
@@ -2148,6 +2159,49 @@ impl AuraEffectSystem {
 
     pub fn rendezvous_manager(&self) -> Option<RendezvousManager> {
         self.rendezvous_manager.read().clone()
+    }
+
+    pub(crate) fn retain_original_mailbox_issuer(
+        &self,
+        owner: &Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+    ) -> Result<(), aura_core::AuraError> {
+        owner.require_runtime_owner(self)?;
+        let manifest = owner.manifest();
+        let request = aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
+            &manifest.invitation,
+        );
+        let notice =
+            aura_invitation::enrollment_mailbox_session::original_terminal_notice_session_id(
+                &manifest.invitation,
+                &owner.digest(),
+            );
+        let mut routes = self.original_mailbox_issuers.write();
+        for session in [request, notice] {
+            if routes
+                .get(&session)
+                .and_then(std::sync::Weak::upgrade)
+                .is_some()
+            {
+                return Err(aura_core::AuraError::invalid(
+                    "original mailbox session already has a live issuer",
+                ));
+            }
+        }
+        let weak = Arc::downgrade(owner);
+        routes.insert(request, weak.clone());
+        routes.insert(notice, weak);
+        Ok(())
+    }
+
+    pub(crate) fn original_mailbox_issuer(
+        &self,
+        session: uuid::Uuid,
+    ) -> Option<Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>>
+    {
+        self.original_mailbox_issuers
+            .read()
+            .get(&session)
+            .and_then(std::sync::Weak::upgrade)
     }
 
     pub fn attach_move_manager(&self, manager: MoveManager) {
