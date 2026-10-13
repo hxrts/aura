@@ -513,6 +513,12 @@ printf 'start\tfinish\tother-native\tunlabelled\t%s\tunlabelled\t8\t15\t5\t20971
 expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 3145728'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==3145728' "$receipt" >/dev/null
+mkdir -p "$project/artifacts/disk-budget/receipts/run.failed-before-link"
+printf '{"root":"%s","lane":"test","command_exit_status":101,"disk":{"measured_growth_kib":31748}}\n' \
+  "$project" > "$project/artifacts/disk-budget/receipts/run.failed-before-link/receipt.json"
+expect_status 0 run_budget --no-prune -- sh -c 'test "$(cat "$AURA_BUILD_SHARED_DIR/reservations/$PPID")" = 3145728'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.incoming_reservation_kib==3145728' "$receipt" >/dev/null
 
 # Task 198: a gate runs under one budgeted hold; a nested budgeted call for
 # the same checkout runs its command inside that hold (no second lock).

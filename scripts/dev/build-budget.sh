@@ -123,9 +123,10 @@ estimate_incoming_growth() {
       "$receipt" 2>/dev/null)" || continue
     (( measured > largest )) && largest="$measured"
   done
-  # Older runs recorded the same peaks only in builds.tsv. Match the native or
-  # wasm profile and target triple, then use recent samples as migration data.
-  if (( largest < 0 )) && [[ -f "$legacy_log" && ! -L "$legacy_log" ]]; then
+  # Older runs recorded the same peaks only in builds.tsv. A same-lane command
+  # that failed before linking measured only its partial growth, so it cannot
+  # displace a larger recent profile/target peak from a completed run.
+  if [[ -f "$legacy_log" && ! -L "$legacy_log" ]]; then
     measured="$(awk -F '\t' -v profile="$profile" -v triple="$target_triple" '
       NR>1 && $4==profile && $5==triple && $12~/^[0-9]+$/ && $13~/^[0-9]+$/ &&
       $14~/^[0-9]+$/ && $15~/^[0-9]+$/ {
@@ -134,7 +135,9 @@ estimate_incoming_growth() {
         if (growth<0) growth=0
         print growth
       }' "$legacy_log" | tail -8 | sort -nr | head -1)"
-    [[ "$measured" =~ ^[0-9]+$ ]] && largest="$measured"
+    if [[ "$measured" =~ ^[0-9]+$ ]] && (( measured > largest )); then
+      largest="$measured"
+    fi
   fi
   if (( largest >= 0 )); then
     # One GiB covers sparse peak sampling and gives even a zero-growth command
