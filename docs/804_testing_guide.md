@@ -1090,6 +1090,13 @@ run. This provisions transport only. The ordinary `drv.sh req`/`lib.sh`
 semantic path still places transferred codes in arguments or retained REPL
 output, so it must not be used for the paired enrollment transfer. A private
 request/response channel with redacted receipts is required before execution.
+Each invitation credential is registered by its own receiver and used only to
+drain that receiver's broker invitation queue; the sender needs the shared
+broker bearer, not the recipient's invitation credential. The signed pending
+enrollment mailbox uses its separate scoped credential and verifier checks.
+`drv.sh start` renders `__HOST_ADDR__` into a token-specific owner-only copy
+under the LAN run directory; that copy and the REPL output remain sensitive
+run state and cannot serve as redacted enrollment evidence.
 
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 

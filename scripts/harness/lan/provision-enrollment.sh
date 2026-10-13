@@ -21,6 +21,9 @@ port=${AURA_E2E_ENROLLMENT_BROKER_PORT:-43190}
 }
 broker_url="http://$AURA_E2E_HOST_ADDR:$port"
 root="$AURA_E2E_ROOT/.tmp/e2e/enrollment-provision-$token"
+[[ ! -L "$AURA_E2E_ROOT/.tmp" && ! -L "$AURA_E2E_ROOT/.tmp/e2e" ]] || {
+  echo 'enrollment provision parent is a symlink' >&2; exit 1;
+}
 [[ ! -e "$root" && ! -L "$root" ]] || {
   echo 'enrollment provision already exists; use a fresh token' >&2; exit 1;
 }
@@ -67,7 +70,7 @@ remote_relative=".tmp/e2e/enrollment-provision-$token/host-b.toml"
 printf -v remote_root '%q' "$AURA_E2E_REMOTE_ROOT"
 printf -v remote_dir '%q' ".tmp/e2e/enrollment-provision-$token"
 ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-  "cd $remote_root && umask 077 && mkdir -m 700 -p $remote_dir && cat > $remote_dir/host-b.toml && chmod 600 $remote_dir/host-b.toml" \
+  "cd $remote_root && umask 077 && test ! -L .tmp && test ! -L .tmp/e2e && mkdir -p .tmp/e2e && test ! -e $remote_dir && test ! -L $remote_dir && mkdir -m 700 $remote_dir && cat > $remote_dir/host-b.toml && chmod 600 $remote_dir/host-b.toml" \
   < "$root/host-b.toml"
 printf 'AURA_E2E_LOCAL_CONFIG=%s\nAURA_E2E_REMOTE_CONFIG=%s\n' \
   "$root/host-a.toml" "$remote_relative"

@@ -188,18 +188,12 @@ retention_root_for_config() {
 case "${1:-}" in
 start)
   [ -n "${2:-}" ] || { echo "usage: $0 start <config>" >&2; exit 2; }
+  # Generated broker configs and REPL responses may contain private transfer
+  # material. New run files must never inherit a world-readable shell umask.
+  umask 077
   # Never overwrite FIFO/evidence under an active or unidentified old owner.
   if [[ -f "$PIDF" || -f "$IDENTITY" ]]; then
     echo 'existing LAN driver identity; stop/inspect it before starting a new run' >&2; exit 1;
-  fi
-  require_no_owned_harness
-  mkdir -p "$D"
-  # Configs name this host's LAN address as __HOST_ADDR__; render a copy.
-  if grep -q __HOST_ADDR__ "$2"; then
-    [ -n "$AURA_E2E_HOST_ADDR" ] || { echo "set AURA_E2E_HOST_ADDR to this host's LAN address" >&2; exit 2; }
-    rendered="$D/$(basename "$2")"
-    sed "s/__HOST_ADDR__/$AURA_E2E_HOST_ADDR/g" "$2" > "$rendered"
-    set -- "$1" "$rendered"
   fi
   [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
     echo 'LAN run token must be lowercase letters, digits and hyphens' >&2; exit 2;
@@ -207,6 +201,21 @@ start)
   (( ${#AURA_E2E_RUN_TOKEN} >= 16 )) || {
     echo 'LAN run token must be at least 16 bytes for the native harness' >&2; exit 2;
   }
+  require_no_owned_harness
+  [[ ! -L "$D" ]] || { echo 'LAN run directory is a symlink' >&2; exit 1; }
+  mkdir -p "$D"
+  [[ -O "$D" ]] || { echo 'LAN run directory is not owned by this user' >&2; exit 1; }
+  # Configs name this host's LAN address as __HOST_ADDR__; render a copy.
+  if grep -q __HOST_ADDR__ "$2"; then
+    [ -n "$AURA_E2E_HOST_ADDR" ] || { echo "set AURA_E2E_HOST_ADDR to this host's LAN address" >&2; exit 2; }
+    rendered="$D/$(basename "$2").$AURA_E2E_RUN_TOKEN"
+    [[ ! -e "$rendered" && ! -L "$rendered" ]] || {
+      echo 'rendered LAN config already exists; use a fresh run token' >&2; exit 1;
+    }
+    sed "s/__HOST_ADDR__/$AURA_E2E_HOST_ADDR/g" "$2" > "$rendered"
+    chmod 600 "$rendered"
+    set -- "$1" "$rendered"
+  fi
   runs_root="$(retention_root_for_config "$2")"
   run_bundle="$runs_root/$AURA_E2E_RUN_TOKEN"
   [[ ! -e "$run_bundle" && ! -L "$run_bundle" ]] || {
