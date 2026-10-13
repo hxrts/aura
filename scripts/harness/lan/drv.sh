@@ -299,6 +299,11 @@ req-private)
   }
   exec "$AURA_E2E_TOOL_REPL" --private-request-socket "$PRIVATE_SOCKET"
   ;;
+inspect-enrollment-manifest)
+  # The signed code arrives only on stdin; stdout contains its nonsecret
+  # selector and never the code or embedded verifier material.
+  exec "$AURA_E2E_TOOL_REPL" --inspect-enrollment-manifest
+  ;;
 stop)
   stop_owned_run
   ;;
@@ -312,5 +317,5 @@ finalize)
   stop_owned_run "$2"
   finish_owned_run "$3" "$2"
   ;;
-*) echo "usage: $0 start <config>|req <json> [timeout]|req-private|stop|finish success|failed|finalize <token> success|failed" >&2; exit 2;;
+*) echo "usage: $0 start <config>|req <json> [timeout]|req-private|inspect-enrollment-manifest|stop|finish success|failed|finalize <token> success|failed" >&2; exit 2;;
 esac

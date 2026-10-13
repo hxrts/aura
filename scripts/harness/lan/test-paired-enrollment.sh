@@ -15,8 +15,11 @@ export AURA_E2E_HOST_ADDR=192.0.2.10 AURA_E2E_BOOTSTRAP=paired-enrollment
 export AURA_E2E_DRV="$fixture/bin/driver" FIXTURE_LOG="$fixture/requests"
 export AURA_E2E_AURA_BIN="$fixture/bin/aura" AURA_E2E_TOOL_REPL="$fixture/bin/tool_repl"
 export AURA_E2E_WEB_INDEX="$fixture/web-index.html"
+export AURA_E2E_LOCAL_CONFIG="$fixture/broker.toml"
+printf '  "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=%064d",\n' 0 > "$AURA_E2E_LOCAL_CONFIG"
+chmod 600 "$AURA_E2E_LOCAL_CONFIG"
 export FIXTURE_COMMIT=$(git -C "$here/../../.." rev-parse HEAD)
-printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"%s","network_delivery_asserted":false}\n' \
+printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"%s","network_delivery_asserted":false,"planned_process_identity":{"local":{"host":"fixture-local"},"remote":{"host":"fixture-remote"}},"broker":{"endpoint":"http://192.0.2.10:43190","policy":"development_only_lan_http"}}\n' \
   "$FIXTURE_COMMIT" "$FIXTURE_COMMIT" "$AURA_E2E_RUN_TOKEN" > \
   "$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
 cat > "$fixture/bin/git" <<'GIT'
@@ -37,6 +40,11 @@ exec "$AURA_E2E_DRV" req-private
 SSH
 cat > "$fixture/bin/driver" <<'DRIVER'
 #!/usr/bin/env bash
+if [[ "$1" == inspect-enrollment-manifest ]]; then
+  jq -e '.manifest_code=="signed-manifest-secret"' >/dev/null || exit 1
+  echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+  exit 0
+fi
 [[ "$1" == req-private ]] || exit 2
 IFS= read -r request
 printf '%s\n' "$request" >> "$FIXTURE_LOG"
@@ -87,21 +95,34 @@ case "$instance:$method:$intent" in
   *) echo '{"status":"error","message":"unexpected fixture request"}' ;;
 esac
 DRIVER
-chmod +x "$fixture/bin/ssh" "$fixture/bin/driver" "$fixture/bin/git"
+cat > "$fixture/bin/curl" <<'CURL'
+#!/usr/bin/env bash
+[[ "$*" == *'--config -'* ]] || exit 2
+config=$(cat)
+[[ "$config" == *'Authorization: Bearer 0000000000000000000000000000000000000000000000000000000000000000'* ]] || exit 2
+[[ "$config" == *'/ack-witness/authority-11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'* ]] || exit 2
+case "${FIXTURE_CASE:-}" in
+  no_network_ack) echo '[]';;
+  wrong_network_digest) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
+  *) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
+esac
+CURL
+chmod +x "$fixture/bin/ssh" "$fixture/bin/driver" "$fixture/bin/git" "$fixture/bin/curl"
 export FIXTURE_RESTARTED="$fixture/restarted"
 PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/stdout" 2> "$fixture/stderr"
 manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
-jq -e '.assertions.exact_operation_and_host_ack and .assertions.same_device_after_reopen and .transport.network_delivery_asserted==false' "$manifest" >/dev/null
+jq -e '.assertions.exact_operation_and_host_ack and .assertions.same_device_after_reopen and .transport.network_delivery_asserted==true and .evidence.network_delivery.message_id=="33333333-3333-3333-3333-333333333333"' "$manifest" >/dev/null
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
   ! rg -Fq "$secret" "$fixture/stdout" "$fixture/stderr" "$AURA_E2E_RUN_DIR"
   rg -Fq "$secret" "$FIXTURE_LOG"
 done
-for failure in missing_ack wrong_authority wrong_reopen_device; do
+for failure in missing_ack wrong_authority wrong_reopen_device no_network_ack wrong_network_digest; do
   rm -f "$FIXTURE_RESTARTED"
   bad_dir="$fixture/$failure"
   mkdir -m 700 "$bad_dir"
   printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$bad_dir/repl.identity.json"
   if FIXTURE_CASE="$failure" AURA_E2E_RUN_DIR="$bad_dir" PATH="$fixture/bin:$PATH" \
+      AURA_E2E_NETWORK_WITNESS_TIMEOUT=1 \
       bash "$here/paired-enrollment.sh" > "$fixture/$failure.stdout" 2> "$fixture/$failure.stderr"; then
     echo "paired fixture accepted $failure" >&2; exit 1
   fi

@@ -79,8 +79,13 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   development-only broker before either owner starts; the result records
   actual process identity and receipts. Native restart retains the original
   operation through the private receipt because only browser restart accepts
-  an expected operation instance. Network delivery remains unverified until
-  separately asserted across the two hosts.
+  an expected operation instance. The pinned native manifest inspector reads
+  the issuer's code on stdin and emits only the manifest/device selector;
+  decoding does not verify or authorize it. After the explicit recipient
+  import, the checklist requires the broker's authenticated exact-message
+  ACK, which follows the original receiver's verified immutable retention,
+  before accepting terminal success. The redacted result binds that ACK to
+  distinct host/process identities and the signed-manifest selector.
 
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;

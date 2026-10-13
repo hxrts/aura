@@ -17,6 +17,8 @@ use aura_harness::load_and_validate_run_config;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::execute_with_run_budgets;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
+use aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest;
+use aura_signature::SecurityTranscript;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -34,6 +36,10 @@ struct Cli {
     /// Send one stdin request to an existing owner's private socket.
     #[arg(long, conflicts_with = "config")]
     private_request_socket: Option<PathBuf>,
+    /// Decode only the nonsecret selector of an issuer-produced signed manifest
+    /// supplied on stdin. This does not verify or promote the manifest.
+    #[arg(long, conflicts_with_all = ["config", "private_request_socket"])]
+    inspect_enrollment_manifest: bool,
     /// Optional compatibility scenario TOML to execute before entering interactive mode.
     #[arg(long)]
     prelude: Option<PathBuf>,
@@ -65,6 +71,27 @@ struct ReplResponseEnvelope {
     id: Option<serde_json::Value>,
     #[serde(flatten)]
     response: ToolResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct EnrollmentManifestSelector {
+    subject: String,
+    device: String,
+    manifest_digest: String,
+}
+
+fn enrollment_manifest_selector(code: &str) -> Result<EnrollmentManifestSelector> {
+    let signed =
+        SignedEnrollmentTrustManifest::decode(code).context("invalid signed manifest shape")?;
+    let transcript = signed
+        .manifest
+        .transcript_bytes()
+        .context("invalid manifest transcript")?;
+    Ok(EnrollmentManifestSelector {
+        subject: signed.manifest.subject.to_string(),
+        device: signed.manifest.invitee_device.to_string(),
+        manifest_digest: hex::encode(aura_core::hash::hash(&transcript)),
+    })
 }
 
 enum IncomingRequest {
@@ -137,6 +164,9 @@ fn validate_private_socket_path(path: &PathBuf) -> Result<()> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.inspect_enrollment_manifest {
+        return inspect_enrollment_manifest();
+    }
     if let Some(path) = &cli.private_request_socket {
         return private_client(path);
     }
@@ -344,9 +374,115 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn inspect_enrollment_manifest() -> Result<()> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Input {
+        manifest_code: String,
+    }
+    let mut request = String::new();
+    io::stdin()
+        .lock()
+        .take(1_500_001)
+        .read_to_string(&mut request)?;
+    anyhow::ensure!(
+        request.len() <= 1_500_000,
+        "manifest selector request exceeds limit"
+    );
+    let input: Input =
+        serde_json::from_str(&request).context("invalid manifest selector request")?;
+    let selector = enrollment_manifest_selector(&input.manifest_code)?;
+    serde_json::to_writer(io::stdout().lock(), &selector)?;
+    println!();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use aura_core::crypto::single_signer::{SigningMode, SingleSignerPublicKeyPackage};
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::threshold::{AgreementMode, ParticipantIdentity};
+    use aura_core::tree::NodeIndex;
+    use aura_core::{AuthorityId, CeremonyId, DeviceId, InvitationId};
+    use aura_effects::crypto::RealCryptoHandler;
+    use aura_invitation::enrollment_manifest::{EnrollmentParentVerifier, EnrollmentTrustManifest};
+    use aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding;
+
+    #[tokio::test]
+    async fn signed_manifest_inspector_binds_exact_subject_device_and_transcript_digest() {
+        let crypto = RealCryptoHandler::for_simulation_seed([71; 32]);
+        let (private, public) = crypto.ed25519_generate_keypair().await.unwrap();
+        let initiator = DeviceId::new_from_entropy([72; 32]);
+        let invitee = DeviceId::new_from_entropy([73; 32]);
+        let package = SingleSignerPublicKeyPackage::try_new(public.clone())
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        let parent = EnrollmentParentVerifier {
+            epoch: 0,
+            commitment: [74; 32],
+            signing_node: NodeIndex(0),
+            mode: SigningMode::SingleSigner,
+            threshold: 1,
+            participants: vec![ParticipantIdentity::device(initiator)],
+            public_key_package: package.clone(),
+            agreement: AgreementMode::ConsensusFinalized,
+        };
+        let manifest = EnrollmentTrustManifest {
+            version: EnrollmentTrustManifest::CURRENT_VERSION,
+            subject: AuthorityId::new_from_entropy([75; 32]),
+            initiator_device: initiator,
+            invitee_authority: AuthorityId::new_from_entropy([76; 32]),
+            invitee_device: invitee,
+            setup: DeviceEnrollmentSetupBinding {
+                nonce: [77; 32],
+                digest: [78; 32],
+            },
+            invitation: InvitationId::new("inspector-invitation"),
+            ceremony: CeremonyId::new("inspector-ceremony"),
+            expires_at_ms: 200,
+            baseline_digest: [79; 32],
+            baseline_count: 1,
+            starting_epoch: 0,
+            starting_commitment: [74; 32],
+            parents: vec![parent],
+            final_inventory: vec![EnrollmentParentVerifier {
+                epoch: 1,
+                commitment: [80; 32],
+                signing_node: NodeIndex(0),
+                mode: SigningMode::SingleSigner,
+                threshold: 1,
+                participants: vec![ParticipantIdentity::device(initiator)],
+                public_key_package: package,
+                agreement: AgreementMode::ConsensusFinalized,
+            }],
+            final_epoch: 1,
+            final_commitment: [80; 32],
+            pending_epoch: 2,
+            pending_share_digest: [81; 32],
+            pending_public_key_package_digest: [82; 32],
+            pending_threshold_config_digest: aura_core::Hash32::new([83; 32]),
+            initiator_confirmation_verifier: public.clone(),
+        };
+        let expected_digest =
+            hex::encode(aura_core::hash::hash(&manifest.transcript_bytes().unwrap()));
+        let signature = aura_signature::sign_ed25519_transcript(&crypto, &manifest, &private)
+            .await
+            .unwrap();
+        let code = SignedEnrollmentTrustManifest {
+            manifest: manifest.clone(),
+            signature,
+        }
+        .encode()
+        .unwrap();
+        let selector = enrollment_manifest_selector(&code).unwrap();
+        assert_eq!(selector.subject, manifest.subject.to_string());
+        assert_eq!(selector.device, invitee.to_string());
+        assert_eq!(selector.manifest_digest, expected_digest);
+        assert!(enrollment_manifest_selector("aura-enrollment-manifest:v3:malformed").is_err());
+    }
 
     #[test]
     fn private_response_never_reaches_public_repl_output() {

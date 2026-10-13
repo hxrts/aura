@@ -15,7 +15,9 @@ preflight="$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-prefligh
 commit=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
 jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" '
   .phase=="preflight" and .commit.local==$commit and .commit.remote==$commit and
-  .run_token==$token and .network_delivery_asserted==false' "$preflight" >/dev/null || {
+  .run_token==$token and .network_delivery_asserted==false and
+  .planned_process_identity.local.host != .planned_process_identity.remote.host and
+  .broker.policy=="development_only_lan_http"' "$preflight" >/dev/null || {
   echo 'paired enrollment requires its fixed-commit preflight manifest' >&2; exit 1;
 }
 
@@ -108,6 +110,21 @@ private_wait alex-tui issued '
     (.fact.manifest_transfer.initiator_verifier_code|type=="string" and length>0))' "$issue_operation"
 issued_event=$PRIVATE_RESPONSE
 
+# This selector is computed from the issuer's exact signed transfer by Aura's
+# native codec and transcript. Decoding does not replace Barbara's verifier.
+manifest_selector=$(jq -ce '[.payload.event.snapshot.runtime_events[]? |
+  select(.fact.kind=="device_enrollment_code_ready")]|last|.fact.manifest_transfer|
+  {manifest_code}' <<< "$issued_event" | "$AURA_E2E_DRV" inspect-enrollment-manifest) || {
+  echo 'issuer manifest selector inspection failed' >&2; exit 1;
+}
+subject=$(jq -er '.subject' <<< "$manifest_selector")
+device=$(jq -er '.device' <<< "$manifest_selector")
+digest=$(jq -er '.manifest_digest' <<< "$manifest_selector")
+[[ "$subject" =~ ^authority-[0-9a-f-]{36}$ && "$device" =~ ^[0-9a-f-]{36}$ &&
+   "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+  echo 'issuer manifest selector has invalid shape' >&2; exit 1;
+}
+
 # A first delivery must not silently approve the new authority on Barbara.
 private_request barbara-tui ui_state before-approval '{"method":"ui_state","params":{}}'
 jq -e '[.payload.operations[]?|select(.id=="device_enrollment")]|length==0' \
@@ -126,6 +143,44 @@ unset setup_response issue_request issued_event import_request
 import_operation=$(jq -er '.payload.handle.ui_operation | select(.id=="device_enrollment") | .instance_id' \
   <<< "$PRIVATE_RESPONSE") || exit 1
 [[ "$import_operation" =~ ^tui-op-device_enrollment-[0-9]{1,20}$ ]] || exit 1
+
+# The original receiver obtains the mailbox credential during import. Its ACK
+# follows verified immutable retention and local queueing, independently of
+# any later UI terminal state. Query the broker by the exact issuer selector.
+broker_url=$(jq -er '.broker.endpoint | select(test("^http://[0-9.]+:[0-9]+$"))' "$preflight")
+local_config=${AURA_E2E_LOCAL_CONFIG:-}
+[[ -f "$local_config" && ! -L "$local_config" && -O "$local_config" ]] || exit 1
+config_mode=$(stat -c '%a' "$local_config" 2>/dev/null || stat -f '%Lp' "$local_config")
+[[ "$config_mode" == 600 ]] || exit 1
+broker_token=$(sed -n 's/^[[:space:]]*"AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=\([0-9a-f]*\)",/\1/p' "$local_config" | sort -u)
+[[ "$broker_token" =~ ^[0-9a-f]{64}$ ]] || { echo 'broker credential shape differs' >&2; exit 1; }
+witness_url="$broker_url/v2/bootstrap/enrollment-mailbox/ack-witness/$subject/$device/$digest"
+network_witness=''
+witness_timeout=${AURA_E2E_NETWORK_WITNESS_TIMEOUT:-240}
+[[ "$witness_timeout" =~ ^[1-9][0-9]{0,2}$ && "$witness_timeout" -le 240 ]] || exit 2
+deadline=$((SECONDS + witness_timeout))
+while (( SECONDS < deadline )); do
+  # curl reads its authorization header on stdin. No bearer enters argv, URL,
+  # retained logs, or the redacted result.
+  witness_response=$(printf 'url = "%s"\nheader = "Authorization: Bearer %s"\n' \
+    "$witness_url" "$broker_token" | curl --silent --show-error --fail --max-time 5 --config -) || {
+    echo 'broker ACK witness request failed' >&2; exit 1;
+  }
+  network_witness=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" '
+    select(type=="array" and length==1) | .[0] |
+    select(.subject==$subject and .device==$device and .manifest_digest==$digest and
+      .stage=="receiver_acknowledged_retained_frame" and
+      (.message_id|type=="string" and test("^[0-9a-f-]{36}$")) and
+      (.envelope_digest|type=="string" and test("^[0-9a-f]{64}$"))) |
+    {subject,device,manifest_digest,message_id,envelope_digest,stage}' \
+    <<< "$witness_response") || network_witness=''
+  [[ -z "$network_witness" ]] || break
+  sleep 1
+done
+unset broker_token witness_response
+[[ -n "$network_witness" ]] || {
+  echo 'exact original receiver ACK witness is absent or mismatched' >&2; exit 1;
+}
 
 private_wait barbara-tui accepted '
   .payload.event.snapshot as $s |
@@ -184,6 +239,7 @@ jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" \
   --arg preflight "$preflight" \
   --argjson local_identity "$local_identity" --argjson remote_identity "$remote_identity" \
   --arg issued "$issue_operation" --arg accepted "$import_operation" \
+  --argjson network_witness "$network_witness" \
   --arg accepted_receipt "$accepted_receipt" --arg reopened_receipt "$reopened_receipt" '
   {schema:1,phase:"result",commit:$commit,run_token:$token,preflight_manifest:$preflight,
    process_identity:{local:$local_identity,remote:$remote_identity},
@@ -192,11 +248,11 @@ jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" \
      "same_device_after_reopen"],
    actors:{issuer:"alex-tui",recipient:"barbara-tui"},
    operation_instances:{issue:$issued,approval:$accepted},
-   evidence:{accepted:$accepted_receipt,reopened:$reopened_receipt},
+   evidence:{network_delivery:$network_witness,accepted:$accepted_receipt,reopened:$reopened_receipt},
    assertions:{independent_accounts_before_issue:true,explicit_approval:true,
      exact_operation_and_host_ack:true,same_authority_after_reopen:true,
      same_device_after_reopen:true,two_devices_after_reopen:true},
-   transport:{broker_policy:"development_only_lan_http",network_delivery_asserted:false}}' > "$manifest_tmp"
+   transport:{broker_policy:"development_only_lan_http",network_delivery_asserted:true}}' > "$manifest_tmp"
 chmod 600 "$manifest_tmp"
 ln "$manifest_tmp" "$manifest"
 rm -f "$manifest_tmp"

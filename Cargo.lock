@@ -463,6 +463,8 @@ dependencies = [
  "hxrts-aura-app",
  "hxrts-aura-core",
  "hxrts-aura-effects",
+ "hxrts-aura-invitation",
+ "hxrts-aura-signature",
  "nix 0.26.4",
  "patchbay",
  "portable-pty",

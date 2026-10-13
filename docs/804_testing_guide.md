@@ -1063,10 +1063,12 @@ the original secret values in the owning process or a private transfer channel.
 The paired enrollment inventory must prove, in order: a provisional device on
 one host exports its actual signed setup; the other host's issuer consumes that
 exact external setup and emits the original enrollment code, signed manifest
-and independently transferred verifier; the first authenticated enrollment
-envelope reaches the original receiver across host/process boundaries; the
-recipient has no import operation before explicit approval; approval submits
-one exact `device_enrollment` instance; that instance reaches typed success
+and independently transferred verifier while the recipient has no import
+operation; explicit approval submits one exact `device_enrollment` instance
+and gives the receiver its scoped mailbox credential; the first authenticated
+envelope reaches the original receiver across host/process boundaries, and
+broker ACK of the exact signed-manifest/device/message receipt proves verified
+receiver retention before terminal success is accepted; that instance reaches typed success
 only after the recipient's actual host acknowledgment; the adopted authority
 and two devices persist through same-profile restart; and both hosts release
 their owned tasks at batch finalization. A matching authority ID, operation ID
@@ -1125,8 +1127,14 @@ and the original operation/host/reopen receipts without any transferred secret.
 Native `restart` does not accept a browser evidence handle; the checklist keeps
 that exact operation in its pre-restart receipt and verifies fresh readiness,
 authority and devices after restart, without assuming a fixed screen.
-`network_delivery_asserted` remains false until independent paired-host
-transport evidence proves the original authenticated envelope crossed the LAN.
+The checklist decodes only the nonsecret selector from the issuer's exact
+signed manifest through the pinned native codec on stdin. After import
+submission, it requires one bearer-authenticated broker ACK for that manifest,
+device and guarded message ID; the ACK is issued after the original receiver
+verifies and immutably retains the frame. It records the redacted ACK with
+the distinct host/process identities and sets `network_delivery_asserted`
+only for that complete run. The signed manifest decode is a selector, not a
+replacement for the receiver's independently retained verifier.
 
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
