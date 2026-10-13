@@ -67,6 +67,8 @@ const FALLBACK_RECORD_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V1";
 #[cfg(not(target_arch = "wasm32"))]
 const FALLBACK_PROTECTED_RECORD_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V2";
 #[cfg(not(target_arch = "wasm32"))]
+const FALLBACK_RETIREMENT_BIRTH_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V3";
+#[cfg(not(target_arch = "wasm32"))]
 const FALLBACK_NONCE_LEN: usize = 12;
 #[cfg(not(target_arch = "wasm32"))]
 const FALLBACK_WRAPPING_KEY_FILENAME: &str = ".filesystem-fallback-wrap-key";
@@ -1969,6 +1971,85 @@ impl FilesystemFallbackSecureStorageHandler {
             .remove(&path)
             .map_err(|source| Self::descriptor_error("retire exact protected value", source))
     }
+
+    /// Publish an original retirement birth and value as one authenticated
+    /// protected record. A legacy value has no descriptor and is never upgraded
+    /// into retirement authority by a later caller.
+    #[cfg(unix)]
+    #[allow(dead_code)] // The L6 verified issuer callsite follows in a separate slice.
+    async fn publish_retirement_birth(
+        &self,
+        descriptor: &retirement_birth::ProtectedBirthDescriptor,
+        plaintext: &[u8],
+    ) -> Result<bool, SecureStorageError> {
+        let location = &descriptor.location;
+        let profile = self.base_path.parent().ok_or_else(|| {
+            SecureStorageError::permission_denied("retirement birth has no selected profile")
+        })?;
+        use std::os::unix::ffi::OsStrExt;
+        if descriptor.profile_digest != aura_core::hash::hash(profile.as_os_str().as_bytes()) {
+            return Err(SecureStorageError::permission_denied(
+                "retirement birth belongs to another selected profile",
+            ));
+        }
+        let _record_owner = self.record_gate.lock().await;
+        let directory = self.owned_directory()?;
+        let path = self.descriptor_path(location)?;
+        if let Some(existing) = directory
+            .read(&path, true)
+            .map_err(|source| Self::descriptor_error("read original retirement birth", source))?
+        {
+            let (original_bytes, immutable, original_descriptor) =
+                self.decrypt_fallback_record_with_birth(location, &existing)?;
+            if !immutable {
+                return Err(SecureStorageError::permission_denied(
+                    "mutable record cannot acquire protected retirement birth",
+                ));
+            }
+            retirement_birth::admit_replay(
+                descriptor,
+                plaintext,
+                original_descriptor
+                    .as_ref()
+                    .map(|binding| (binding, original_bytes.as_slice())),
+                original_descriptor.is_none(),
+            )?;
+            let prepared = directory
+                .prepare_private(&path, &existing)
+                .map_err(|source| {
+                    Self::descriptor_error(
+                        "prepare original retirement birth acknowledgment",
+                        source,
+                    )
+                })?;
+            prepared.publish(false).map_err(|source| {
+                Self::descriptor_error("publish original retirement birth acknowledgment", source)
+            })?;
+            prepared.acknowledge().map_err(|source| {
+                Self::descriptor_error("acknowledge original retirement birth", source)
+            })?;
+            return Ok(false);
+        }
+        retirement_birth::admit_replay(descriptor, plaintext, None, false)?;
+        let record =
+            self.encrypt_fallback_retirement_birth_record(location, descriptor, plaintext)?;
+        let prepared = directory
+            .prepare_private(&path, &record)
+            .map_err(|source| {
+                Self::descriptor_error("prepare protected retirement birth", source)
+            })?;
+        if !prepared.publish(true).map_err(|source| {
+            Self::descriptor_error("publish protected retirement birth", source)
+        })? {
+            return Err(SecureStorageError::permission_denied(
+                "retirement birth collided with another original publication",
+            ));
+        }
+        prepared.acknowledge().map_err(|source| {
+            Self::descriptor_error("acknowledge protected retirement birth", source)
+        })?;
+        Ok(true)
+    }
     #[cfg(unix)]
     fn load_or_create_descriptor_wrapping_key(
         directory: &crate::profile_directory::ProfileDirectory,
@@ -2181,6 +2262,59 @@ impl FilesystemFallbackSecureStorageHandler {
         Ok(record)
     }
 
+    /// One encrypted publication binds retirement metadata to its original
+    /// protected value. The caller cannot append a descriptor to a legacy
+    /// immutable record after publication.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(dead_code)] // The verified issuer owner is not wired to this private writer yet.
+    fn encrypt_fallback_retirement_birth_record(
+        &self,
+        location: &SecureStorageLocation,
+        descriptor: &retirement_birth::ProtectedBirthDescriptor,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, SecureStorageError> {
+        if descriptor.location != *location || descriptor.signed_statement.is_empty() {
+            return Err(SecureStorageError::permission_denied(
+                "retirement birth lacks original location or signed statement",
+            ));
+        }
+        let payload = retirement_birth::encode_payload(descriptor, plaintext)?;
+        let mut aad = location.full_path().into_bytes();
+        aad.extend_from_slice(FALLBACK_RETIREMENT_BIRTH_MAGIC);
+        let cipher = ChaCha20Poly1305::new((&self.wrapping_key).into());
+        let mut nonce = [0u8; FALLBACK_NONCE_LEN];
+        use rand::RngCore;
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut nonce)
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "retirement birth nonce entropy failed",
+                    std::sync::Arc::new(source),
+                )
+            })?;
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: &payload,
+                    aad: &aad,
+                },
+            )
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "retirement birth encryption failed",
+                    std::sync::Arc::new(source),
+                )
+            })?;
+        let mut record = Vec::with_capacity(
+            FALLBACK_RETIREMENT_BIRTH_MAGIC.len() + FALLBACK_NONCE_LEN + ciphertext.len(),
+        );
+        record.extend_from_slice(FALLBACK_RETIREMENT_BIRTH_MAGIC);
+        record.extend_from_slice(&nonce);
+        record.extend_from_slice(&ciphertext);
+        Ok(record)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn decrypt_fallback_record(
         &self,
@@ -2197,8 +2331,31 @@ impl FilesystemFallbackSecureStorageHandler {
         location: &SecureStorageLocation,
         record: &[u8],
     ) -> Result<(Vec<u8>, bool), SecureStorageError> {
+        let (plaintext, immutable, _) =
+            self.decrypt_fallback_record_with_birth(location, record)?;
+        Ok((plaintext, immutable))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn decrypt_fallback_record_with_birth(
+        &self,
+        location: &SecureStorageLocation,
+        record: &[u8],
+    ) -> Result<
+        (
+            Vec<u8>,
+            bool,
+            Option<retirement_birth::ProtectedBirthDescriptor>,
+        ),
+        SecureStorageError,
+    > {
         let mut aad = location.full_path().into_bytes();
-        let (nonce_start, immutable) = if record.starts_with(FALLBACK_PROTECTED_RECORD_MAGIC) {
+        let (nonce_start, immutable, birth) = if record.starts_with(FALLBACK_RETIREMENT_BIRTH_MAGIC)
+        {
+            let header_len = FALLBACK_RETIREMENT_BIRTH_MAGIC.len();
+            aad.extend_from_slice(&record[..header_len]);
+            (header_len, true, true)
+        } else if record.starts_with(FALLBACK_PROTECTED_RECORD_MAGIC) {
             let flag = *record
                 .get(FALLBACK_PROTECTED_RECORD_MAGIC.len())
                 .ok_or_else(|| {
@@ -2211,9 +2368,9 @@ impl FilesystemFallbackSecureStorageHandler {
             }
             let header_len = FALLBACK_PROTECTED_RECORD_MAGIC.len() + 1;
             aad.extend_from_slice(&record[..header_len]);
-            (header_len, flag == 1)
+            (header_len, flag == 1, false)
         } else if record.starts_with(FALLBACK_RECORD_MAGIC) {
-            (FALLBACK_RECORD_MAGIC.len(), false)
+            (FALLBACK_RECORD_MAGIC.len(), false, false)
         } else {
             return Err(SecureStorageError::storage(
                 "filesystem fallback secure record is not encrypted",
@@ -2238,7 +2395,12 @@ impl FilesystemFallbackSecureStorageHandler {
                 message: "secure record authentication failed".into(),
                 source: Some(std::sync::Arc::new(source)),
             })?;
-        Ok((plaintext, immutable))
+        if birth {
+            let (descriptor, ordinary) = retirement_birth::decode_payload(location, &plaintext)?;
+            Ok((ordinary, immutable, Some(descriptor)))
+        } else {
+            Ok((plaintext, immutable, None))
+        }
     }
 
     fn current_time_ms(&self) -> Result<u64, SecureStorageError> {
@@ -4144,6 +4306,92 @@ mod protected_retirement_primitive_tests {
     use super::*;
 
     #[tokio::test]
+    async fn original_retirement_birth_is_one_protected_record_and_legacy_cannot_upgrade(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let handler = FilesystemFallbackSecureStorageHandler::with_base_path(profile.path().into());
+        let location = SecureStorageLocation::new("retirement-birth", "original");
+        let descriptor = retirement_birth::ProtectedBirthDescriptor {
+            profile_digest: {
+                use std::os::unix::ffi::OsStrExt;
+                aura_core::hash::hash(
+                    std::fs::canonicalize(profile.path())?
+                        .as_os_str()
+                        .as_bytes(),
+                )
+            },
+            location: location.clone(),
+            signed_statement: b"original signed statement".to_vec(),
+            expiry: aura_core::time::PhysicalTime::exact(500),
+        };
+        let mut foreign = descriptor.clone();
+        foreign.profile_digest = [7; 32];
+        assert!(handler
+            .publish_retirement_birth(&foreign, b"original bytes")
+            .await
+            .is_err());
+        assert!(
+            handler
+                .publish_retirement_birth(&descriptor, b"original bytes")
+                .await?
+        );
+        assert_eq!(
+            handler
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?,
+            b"original bytes"
+        );
+        assert!(
+            !handler
+                .publish_retirement_birth(&descriptor, b"original bytes")
+                .await?
+        );
+        assert!(handler
+            .publish_retirement_birth(&foreign, b"original bytes")
+            .await
+            .is_err());
+        assert!(handler
+            .publish_retirement_birth(&descriptor, b"replacement")
+            .await
+            .is_err());
+        let reopened =
+            FilesystemFallbackSecureStorageHandler::with_base_path(profile.path().into());
+        assert_eq!(
+            reopened
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?,
+            b"original bytes"
+        );
+        assert!(
+            !reopened
+                .publish_retirement_birth(&descriptor, b"original bytes")
+                .await?
+        );
+        assert!(handler
+            .secure_delete(&location, &[SecureStorageCapability::Delete])
+            .await
+            .is_err());
+
+        let legacy = SecureStorageLocation::new("retirement-birth", "legacy");
+        handler
+            .secure_store_immutable(&legacy, b"legacy bytes", &[SecureStorageCapability::Write])
+            .await?;
+        let mut late = descriptor.clone();
+        late.location = legacy.clone();
+        assert!(handler
+            .publish_retirement_birth(&late, b"legacy bytes")
+            .await
+            .is_err());
+        assert_eq!(
+            handler
+                .secure_retrieve(&legacy, &[SecureStorageCapability::Read])
+                .await?,
+            b"legacy bytes"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn exact_retirement_refuses_wrong_bytes_and_foreign_profile(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let first = tempfile::tempdir()?;
@@ -4979,6 +5227,8 @@ mod platform_secure_record_fault_tests {
 mod allocation_lifetime;
 #[cfg(target_arch = "wasm32")]
 mod browser_allocation_lifetime;
+#[cfg(not(target_arch = "wasm32"))]
+mod retirement_birth;
 #[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]
 mod test_keyring;
 #[cfg(unix)]

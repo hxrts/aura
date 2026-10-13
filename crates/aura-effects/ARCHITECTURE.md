@@ -240,6 +240,12 @@ The browser adapter makes the comparison and deletion within one strict
 IndexedDB transaction. A changed, absent, or unauthenticated record fails
 closed. This primitive supplies storage atomicity to a separate authorized
 lifetime owner; it is not a public `secure_delete` escape or retirement grant.
+The private native `retirement_birth` codec binds the descriptor and ordinary
+payload in one authenticated protected record. Interrupted replay requires the
+same profile, location, signed statement, expiry and exact payload; a legacy
+protected record cannot gain a descriptor later. This writer remains private:
+the authenticated signed proof issuer and original selected physical provider
+must be wired before any protected enrollment record can be physically retired.
 The platform keyring adapter reports this operation unsupported until it has
 an equivalent exact-record transactional contract.
 
