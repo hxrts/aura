@@ -14,6 +14,7 @@ export FREE_FILE="$test_root/free_kib"
 export SIZE_FILE="$test_root/size_kib"
 export CALLS_FILE="$test_root/calls"
 export ACTIVE_FILE="$test_root/active"
+export ZOMBIE_PID_FILE="$test_root/zombie-pid"
 export FAIL_SWEEP_FILE="$test_root/fail-sweep"
 export PROTECTED_FILE="$test_root/protected-release"
 export PROTECTED_WEB_FILE="$test_root/protected-web"
@@ -82,6 +83,11 @@ fi
 EOF
 cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == -p && "${3:-}" == -o && "${4:-}" == stat= &&
+  -f "$ZOMBIE_PID_FILE" && "${2:-}" == "$(cat "$ZOMBIE_PID_FILE")" ]]; then
+  printf 'Z\n'
+  exit 0
+fi
 [[ ! -f "$ACTIVE_FILE" ]] || printf '999 %s --out-dir %s/target/debug/deps\n' "$(cat "$ACTIVE_FILE")" "${ACTIVE_ROOT:-$PROJECT_ROOT}"
 EOF
 cat > "$fakebin/lsof" <<'EOF'
@@ -116,7 +122,7 @@ reset_case() {
   printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
   printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
   : > "$CALLS_FILE"
-  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$PREVIEW_INCOMING_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE" "$EVICT_ON_SWEEP_FILE"
+  rm -f "$ACTIVE_FILE" "$ZOMBIE_PID_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$PREVIEW_INCOMING_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE" "$EVICT_ON_SWEEP_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
   rm -f "$project/target/debug/deps/reusable.rlib"
   rmdir "$project/target/debug/deps" "$project/target/debug" 2>/dev/null || true
@@ -154,6 +160,26 @@ jq -e '.final_exit_status==0 and .command_exit_status==0 and .current_phase=="fi
 command_log="$(jq -r '.artifacts.command_log' "$receipt")"
 [[ -f "$command_log" && "$(find "$command_log" -perm 0600 -print)" == "$command_log" ]]
 jq -e --arg receipt "$receipt" '.receipt==$receipt and .exit_status==0' \
+  "$(dirname "$receipt")/completion.json" >/dev/null
+
+# `kill -0` can still see an exited, unreaped child. Simulate that state and
+# require a terminal failure receipt and notification before the timeout.
+reset_case
+kill() {
+  if [[ "${1:-}" == -0 && -f "$ZOMBIE_PID_FILE" && "${2:-}" == "$(cat "$ZOMBIE_PID_FILE")" ]]; then
+    return 0
+  fi
+  builtin kill "$@"
+}
+export -f kill
+expect_status 37 timeout 15s bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane test --no-prune -- sh -c 'printf "%s\n" "$$" > "$ZOMBIE_PID_FILE"; exit 37'
+unset -f kill
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==37 and .command_exit_status==37 and
+  .current_phase=="finished" and .phases[0].phase=="command" and
+  .phases[0].exit_status==37 and .notification!=null' "$receipt" >/dev/null
+jq -e --arg receipt "$receipt" '.receipt==$receipt and .exit_status==37' \
   "$(dirname "$receipt")/completion.json" >/dev/null
 
 # Failure details stay in a protected artifact; the compact receipt and

@@ -470,6 +470,15 @@ stop_owned_group() {
   done
   kill -KILL -- "-$pid" 2>/dev/null || true
 }
+# A completed direct child can remain visible as an unreaped zombie until
+# `wait` collects it. `kill -0` alone therefore cannot be the polling exit
+# condition: it would defer both the command result and terminal notification.
+child_running() {
+  local state
+  state="$(ps -p "$1" -o stat= 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ "$state" != Z* && "$state" != X* ]] || return 1
+  kill -0 "$1" 2>/dev/null
+}
 cleanup() {
   local exit_status=$?
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
@@ -566,7 +575,7 @@ lowest_free="$pre_free"
 peak_target="$pre_target"
 poll_count=0
 status=0
-while kill -0 "$child_pid" 2>/dev/null; do
+while child_running "$child_pid"; do
   sleep "$poll_seconds"
   poll_count=$((poll_count + 1))
   now_free="$(free_kib)"
