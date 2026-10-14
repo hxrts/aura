@@ -282,6 +282,8 @@ fn verify_birth<'a>(
             | DECISION_COMPLETE
             | TOMBSTONE_PENDING
             | TOMBSTONE_ACK_ERASURE_PENDING
+            | ERASURE_PENDING
+            | ERASURE_COMPLETE
     ) || root.id != birth.root
         || root.birth_id != birth.allocation
     {
@@ -291,6 +293,9 @@ fn verify_birth<'a>(
     }
     if verify_inventory(owned, &root)?.is_none() {
         return Err(invalid("platform live inventory is missing"));
+    }
+    if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
+        return Err(invalid("platform live read denied by original erasure"));
     }
     let (bytes, intent) = read_intent(selected, &root)?;
     if read_entry(selected, RECORD_USER)?.as_deref() != Some(bytes.as_slice()) {
@@ -439,6 +444,8 @@ async fn recover_one_inner(
             | DECISION_COMPLETE
             | TOMBSTONE_PENDING
             | TOMBSTONE_ACK_ERASURE_PENDING
+            | ERASURE_PENDING
+            | ERASURE_COMPLETE
     ) {
         return Err(invalid("platform allocation birth has not started"));
     }
@@ -452,6 +459,26 @@ async fn recover_one_inner(
                 "platform birth reconciliation lacks original root owner",
             ));
         }
+    }
+    if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
+        if verify_inventory(owned, &root)?.is_none() {
+            return Err(invalid("erased platform birth inventory is missing"));
+        }
+        decision::recover_erasure(owned, selected, &mut root)?;
+        if original_root.is_some() {
+            return Err(invalid(
+                "erased platform birth cannot reuse empty-root owner",
+            ));
+        }
+        owner
+            .lifetime_root_claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| invalid("platform lifetime root already transferred"))?;
+        return Ok(PlatformBirthAdmission {
+            root: root.id,
+            allocation: root.birth_id,
+            _owner: owner.clone(),
+        });
     }
     let (bytes, _intent) = read_intent(selected, &root)?;
     match verify_inventory(owned, &root)? {

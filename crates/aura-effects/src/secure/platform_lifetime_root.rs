@@ -29,6 +29,8 @@ const DECISION_PENDING: u8 = 4;
 const DECISION_COMPLETE: u8 = 5;
 const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
+const ERASURE_PENDING: u8 = 8;
+const ERASURE_COMPLETE: u8 = 9;
 const PLAINTEXT_LEN: usize = 1 + 32 * 6;
 const MAX_FILE_LEN: usize = 256;
 
@@ -132,6 +134,8 @@ impl RootRecord {
                     | DECISION_COMPLETE
                     | TOMBSTONE_PENDING
                     | TOMBSTONE_ACK_ERASURE_PENDING
+                    | ERASURE_PENDING
+                    | ERASURE_COMPLETE
             )
             || (matches!(plain[0], PENDING | COMPLETE)
                 && (plain[97..129] != [0; 32]
@@ -147,6 +151,8 @@ impl RootRecord {
                     | DECISION_COMPLETE
                     | TOMBSTONE_PENDING
                     | TOMBSTONE_ACK_ERASURE_PENDING
+                    | ERASURE_PENDING
+                    | ERASURE_COMPLETE
             ) && (plain[97..129] == [0; 32]
                 || plain[129..161] == [0; 32]
                 || plain[161..193] == [0; 32]))

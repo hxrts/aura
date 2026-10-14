@@ -1,0 +1,333 @@
+//! Private selected-provider deletion of the original birth credentials.
+//! The authenticated root, decision and tombstone remain as recovery evidence.
+//! Completion promises only the selected provider's local delete/readback result.
+
+use super::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopAfter {
+    Never,
+    RootIntent,
+    RecordDelete,
+    IntentDelete,
+}
+
+fn original_or_absent(
+    selected: &PlatformSecureStorageHandler,
+    root: &RootRecord,
+    user: &str,
+) -> Result<bool, AuraError> {
+    match read_entry(selected, user)? {
+        Some(bytes) if aura_core::hash::hash(&bytes) == root.intent_digest => Ok(true),
+        Some(_) => Err(invalid(
+            "platform erasure found different original credential",
+        )),
+        None if root.phase == ERASURE_PENDING || root.phase == ERASURE_COMPLETE => Ok(false),
+        None => Err(invalid("platform erasure original credential is missing")),
+    }
+}
+
+fn delete_and_readback(
+    selected: &PlatformSecureStorageHandler,
+    user: &str,
+) -> Result<(), AuraError> {
+    let entry = selected.entry_for_user(user)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(source) => return Err(PlatformSecureStorageHandler::map_keyring_error(source)),
+    }
+    if read_entry(selected, user)?.is_some() {
+        return Err(invalid(
+            "platform erasure credential delete was not acknowledged",
+        ));
+    }
+    Ok(())
+}
+
+fn finish_original(
+    selected: &PlatformSecureStorageHandler,
+    root: &mut RootRecord,
+    stop: StopAfter,
+) -> Result<(), AuraError> {
+    // Validate both survivors before mutating either. A missing survivor is
+    // explained only by the authenticated erasure-pending root transition.
+    let record_present = original_or_absent(selected, root, RECORD_USER)?;
+    let intent_present = original_or_absent(selected, root, INTENT_USER)?;
+    if root.phase == ERASURE_COMPLETE {
+        if record_present || intent_present {
+            return Err(invalid("completed platform erasure credential reappeared"));
+        }
+        return Ok(());
+    }
+    if record_present {
+        delete_and_readback(selected, RECORD_USER)?;
+    }
+    if stop == StopAfter::RecordDelete {
+        return Err(interrupted());
+    }
+    if intent_present {
+        delete_and_readback(selected, INTENT_USER)?;
+    }
+    if stop == StopAfter::IntentDelete {
+        return Err(interrupted());
+    }
+    root.phase = ERASURE_COMPLETE;
+    write_keyring(selected, root)
+}
+
+pub(super) fn recover(
+    _owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    root: &mut RootRecord,
+) -> Result<(), AuraError> {
+    if !matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
+        return Err(invalid("platform erasure lacks authenticated root intent"));
+    }
+    finish_original(selected, root, StopAfter::Never)
+}
+
+/// Transition from acknowledged negative denial to local credential erasure.
+/// No caller supplies record addresses or replacement bytes.
+#[allow(dead_code)]
+pub(super) async fn erase_original(
+    owned: &ProfileOwnedSecureStorage,
+    birth: &PlatformBirthAdmission,
+) -> Result<(), AuraError> {
+    erase_inner(owned, birth, StopAfter::Never).await
+}
+
+async fn erase_inner(
+    owned: &ProfileOwnedSecureStorage,
+    birth: &PlatformBirthAdmission,
+    stop: StopAfter,
+) -> Result<(), AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    if !Arc::ptr_eq(&birth._owner, &owned._owner) {
+        return Err(invalid("platform erasure belongs to another profile owner"));
+    }
+    let mut root = read_root(owned, selected)?;
+    if root.id != birth.root || root.birth_id != birth.allocation {
+        return Err(invalid("platform erasure differs from original allocation"));
+    }
+    if verify_inventory(owned, &root)?.is_none() {
+        return Err(invalid("platform erasure original inventory is missing"));
+    }
+    super::super::validate_recovery(owned, selected, &root)?;
+    if root.phase == TOMBSTONE_ACK_ERASURE_PENDING {
+        // The original birth record must still be complete before an intent
+        // authorizes deletion of either credential.
+        let (bytes, _) = read_intent(selected, &root)?;
+        if read_entry(selected, RECORD_USER)?.as_deref() != Some(bytes.as_slice()) {
+            return Err(invalid(
+                "platform erasure original record is missing or different",
+            ));
+        }
+        root.phase = ERASURE_PENDING;
+        write_keyring(selected, &root)?;
+        if stop == StopAfter::RootIntent {
+            return Err(interrupted());
+        }
+    } else if !matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
+        return Err(invalid(
+            "platform erasure requires acknowledged negative denial",
+        ));
+    }
+    finish_original(selected, &mut root, stop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::secure::platform_lifetime_root::tests::Fixture;
+    type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    async fn denied_birth(
+        owned: &ProfileOwnedSecureStorage,
+    ) -> Result<PlatformBirthAdmission, AuraError> {
+        let empty = admit_empty_root(owned).await?;
+        let birth = allocate_one(owned, &empty, b"scope", b"secret").await?;
+        decide(owned, &birth, false, b"refusal").await?;
+        acknowledge_negative_denial(owned, &birth, b"refusal").await?;
+        Ok(birth)
+    }
+
+    #[tokio::test]
+    async fn selected_provider_erases_original_credentials_and_reopens() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let birth = denied_birth(owned).await?;
+        erase_original(owned, &birth).await?;
+        erase_original(owned, &birth).await?;
+        let (selected, _) = selected_owner(owned)?;
+        assert_eq!(read_root(owned, selected)?.phase, ERASURE_COMPLETE);
+        assert!(read_entry(selected, INTENT_USER)?.is_none());
+        assert!(read_entry(selected, RECORD_USER)?.is_none());
+        assert!(matches!(
+            read_live_secret(owned, &birth).await,
+            Err(AuraError::Invalid { message, .. }) if message == "platform live read denied by original erasure"
+        ));
+        drop(birth);
+        drop(first);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let birth = recover_one(owned).await?;
+        assert!(matches!(
+            read_live_secret(owned, &birth).await,
+            Err(AuraError::Invalid { message, .. }) if message == "platform live read denied by original erasure"
+        ));
+        let (selected, _) = selected_owner(owned)?;
+        assert_eq!(read_root(owned, selected)?.phase, ERASURE_COMPLETE);
+        assert!(read_entry(selected, INTENT_USER)?.is_none());
+        assert!(read_entry(selected, RECORD_USER)?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn every_erasure_interruption_replays_original_only() -> TestResult {
+        for stop in [
+            StopAfter::RootIntent,
+            StopAfter::RecordDelete,
+            StopAfter::IntentDelete,
+        ] {
+            let fixture = Fixture::new()?;
+            let first = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+                unreachable!()
+            };
+            let birth = denied_birth(owned).await?;
+            assert!(erase_inner(owned, &birth, stop).await.is_err());
+            assert!(read_live_secret(owned, &birth).await.is_err());
+            drop(birth);
+            drop(first);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let birth = recover_one(owned).await?;
+            let (selected, _) = selected_owner(owned)?;
+            assert_eq!(read_root(owned, selected)?.phase, ERASURE_COMPLETE);
+            assert!(read_entry(selected, INTENT_USER)?.is_none());
+            assert!(read_entry(selected, RECORD_USER)?.is_none());
+            assert!(read_live_secret(owned, &birth).await.is_err());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn foreign_and_wrong_surviving_credentials_refuse_without_deletion() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let birth = denied_birth(owned).await?;
+        let foreign = tempfile::tempdir()?;
+        let foreign_selected = crate::secure::platform_lifetime_root::tests::selected(
+            foreign.path(),
+            &fixture.service,
+        )?;
+        let ProductionSecureStorageHandler::ProfileOwned(foreign_owned) = &foreign_selected else {
+            unreachable!()
+        };
+        assert!(erase_original(foreign_owned, &birth).await.is_err());
+        let (selected, _) = selected_owner(owned)?;
+        write_exact(selected, RECORD_USER, b"wrong record")?;
+        assert!(erase_original(owned, &birth).await.is_err());
+        assert_eq!(
+            read_root(owned, selected)?.phase,
+            TOMBSTONE_ACK_ERASURE_PENDING
+        );
+        assert_eq!(
+            read_entry(selected, RECORD_USER)?.as_deref(),
+            Some(b"wrong record".as_slice())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_tombstone_and_completed_reappearance_refuse() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let birth = denied_birth(owned).await?;
+        let (selected, _) = selected_owner(owned)?;
+        selected
+            .entry_for_user(TOMBSTONE_USER)?
+            .delete_credential()?;
+        assert!(erase_original(owned, &birth).await.is_err());
+        assert_eq!(
+            read_root(owned, selected)?.phase,
+            TOMBSTONE_ACK_ERASURE_PENDING
+        );
+        drop(birth);
+        drop(first);
+
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let birth = denied_birth(owned).await?;
+        erase_original(owned, &birth).await?;
+        let (selected, _) = selected_owner(owned)?;
+        write_exact(selected, RECORD_USER, b"reappeared")?;
+        assert!(erase_original(owned, &birth).await.is_err());
+        drop(birth);
+        drop(first);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert!(recover_one(owned).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pending_wrong_survivor_refuses_before_another_delete() -> TestResult {
+        for stop in [StopAfter::RootIntent, StopAfter::RecordDelete] {
+            let fixture = Fixture::new()?;
+            let first = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+                unreachable!()
+            };
+            let birth = denied_birth(owned).await?;
+            assert!(erase_inner(owned, &birth, stop).await.is_err());
+            let (selected, _) = selected_owner(owned)?;
+            let wrong_user = if stop == StopAfter::RootIntent {
+                RECORD_USER
+            } else {
+                INTENT_USER
+            };
+            write_exact(selected, wrong_user, b"different surviving bytes")?;
+            let other_user = if stop == StopAfter::RootIntent {
+                INTENT_USER
+            } else {
+                RECORD_USER
+            };
+            let before = read_entry(selected, other_user)?;
+            drop(birth);
+            drop(first);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            assert!(recover_one(owned).await.is_err());
+            let (selected, _) = selected_owner(owned)?;
+            assert_eq!(read_root(owned, selected)?.phase, ERASURE_PENDING);
+            assert_eq!(read_entry(selected, other_user)?, before);
+            assert_eq!(
+                read_entry(selected, wrong_user)?.as_deref(),
+                Some(b"different surviving bytes".as_slice())
+            );
+        }
+        Ok(())
+    }
+}

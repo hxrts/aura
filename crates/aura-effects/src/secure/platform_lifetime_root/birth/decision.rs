@@ -172,7 +172,9 @@ fn read_record(
             DECISION_PENDING
             | DECISION_COMPLETE
             | TOMBSTONE_PENDING
-            | TOMBSTONE_ACK_ERASURE_PENDING,
+            | TOMBSTONE_ACK_ERASURE_PENDING
+            | ERASURE_PENDING
+            | ERASURE_COMPLETE,
             Some(bytes),
         ) => {
             if aura_core::hash::hash(&bytes) != root.decision_digest {
@@ -188,7 +190,9 @@ fn read_record(
             DECISION_PENDING
             | DECISION_COMPLETE
             | TOMBSTONE_PENDING
-            | TOMBSTONE_ACK_ERASURE_PENDING,
+            | TOMBSTONE_ACK_ERASURE_PENDING
+            | ERASURE_PENDING
+            | ERASURE_COMPLETE,
             None,
         ) => Err(invalid("platform decision original intent is missing")),
         _ => Err(invalid("platform decision root phase is invalid")),
@@ -206,7 +210,11 @@ pub(super) fn validate_recovery(
         let marker = marker_state(owned, &record)?;
         if matches!(
             root.phase,
-            DECISION_COMPLETE | TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+            DECISION_COMPLETE
+                | TOMBSTONE_PENDING
+                | TOMBSTONE_ACK_ERASURE_PENDING
+                | ERASURE_PENDING
+                | ERASURE_COMPLETE
         ) && !marker
         {
             return Err(invalid("completed platform decision marker is missing"));
@@ -221,6 +229,15 @@ pub(super) fn validate_recovery(
         return Err(invalid("platform decision marker lacks original intent"));
     }
     negative_denial::validate_recovery(owned, selected, root)
+}
+
+pub(super) fn recover_erasure(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    root: &mut RootRecord,
+) -> Result<(), AuraError> {
+    validate_recovery(owned, selected, root)?;
+    negative_denial::recover_erasure(owned, selected, root)
 }
 
 fn finish_original(
@@ -575,7 +592,11 @@ pub(super) fn require_live_read(
         let marker = marker_state(owned, &record)?;
         if matches!(
             root.phase,
-            DECISION_COMPLETE | TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+            DECISION_COMPLETE
+                | TOMBSTONE_PENDING
+                | TOMBSTONE_ACK_ERASURE_PENDING
+                | ERASURE_PENDING
+                | ERASURE_COMPLETE
         ) && !marker
         {
             return Err(invalid("completed platform decision marker is missing"));

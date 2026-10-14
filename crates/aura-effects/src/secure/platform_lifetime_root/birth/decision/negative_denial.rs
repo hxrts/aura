@@ -10,6 +10,7 @@ const TOMBSTONE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-TOMBSTONE-V1";
 const MARKER_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-TOMBSTONE-MARKER-V1";
 const NONCE_DOMAIN: &[u8] = b"aura/platform-lifetime/tombstone-nonce/v1";
 const MAX_MARKER_LEN: usize = 256;
+mod erasure;
 
 fn sealed_tombstone(
     selected: &PlatformSecureStorageHandler,
@@ -101,7 +102,7 @@ pub(super) fn validate_recovery(
 ) -> Result<(), AuraError> {
     if !matches!(
         root.phase,
-        TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+        TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING | ERASURE_PENDING | ERASURE_COMPLETE
     ) {
         if read_entry(selected, TOMBSTONE_USER)?.is_some()
             || owned
@@ -128,10 +129,18 @@ pub(super) fn validate_recovery(
         None if root.phase == TOMBSTONE_PENDING => {}
         _ => return Err(invalid("platform denial tombstone is missing or different")),
     }
-    if !marker_state(owned, root, &expected)? && root.phase == TOMBSTONE_ACK_ERASURE_PENDING {
+    if !marker_state(owned, root, &expected)? && root.phase != TOMBSTONE_PENDING {
         return Err(invalid("acknowledged platform denial marker is missing"));
     }
     Ok(())
+}
+
+pub(super) fn recover_erasure(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    root: &mut RootRecord,
+) -> Result<(), AuraError> {
+    erasure::recover(owned, selected, root)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
