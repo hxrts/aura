@@ -8,13 +8,13 @@
 
 use async_trait::async_trait;
 use aura_core::crypto::{ed25519_verifying_key, Ed25519SigningKey};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::effects::{
     SecureGeneratedKey, SecureStorageCapability, SecureStorageEffects, SecureStorageError,
     SecureStorageLocation,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::AuraError;
-use cfg_if::cfg_if;
 #[cfg(not(target_arch = "wasm32"))]
 use chacha20poly1305::{
     aead::{Aead, Payload},
@@ -53,14 +53,6 @@ use web_sys::{AesGcmParams, CryptoKey, SubtleCrypto};
     target_os = "openbsd"
 ))]
 const PLATFORM_KEYRING_SERVICE: &str = "hxrts.aura.secure-storage";
-
-cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-        use js_sys::Date;
-    } else {
-        use std::time::{SystemTime, UNIX_EPOCH};
-    }
-}
 
 #[cfg(not(target_arch = "wasm32"))]
 const FALLBACK_RECORD_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V1";
@@ -368,18 +360,52 @@ fn publish_private_file_immutable_at(
     Ok(outcome)
 }
 
-#[allow(clippy::disallowed_methods)] // Effect implementation reads wall clock directly.
-fn current_time_ms() -> Result<u64, SecureStorageError> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        Ok(Date::now() as u64)
+/// The secure writer reads the same selected physical provider as its runtime.
+/// Clones retain this slot; a simulation builder may select its clock before
+/// exposing the assembled runtime to callers.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+struct SelectedSecureClock(Arc<std::sync::RwLock<Arc<dyn PhysicalTimeEffects>>>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Debug for SelectedSecureClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SelectedSecureClock(..)")
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Ok(SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| SecureStorageError::storage(e.to_string()))?
-            .as_millis() as u64)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for SelectedSecureClock {
+    fn default() -> Self {
+        Self(Arc::new(std::sync::RwLock::new(Arc::new(
+            crate::time::PhysicalTimeHandler::new(),
+        ))))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SelectedSecureClock {
+    fn select(&self, provider: Arc<dyn PhysicalTimeEffects>) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = provider;
+    }
+
+    async fn now_ms(&self) -> Result<u64, SecureStorageError> {
+        let provider = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        provider
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .map_err(|source| SecureStorageError::Storage {
+                message: "selected secure-storage physical time failed".into(),
+                source: Some(Arc::new(source)),
+            })
     }
 }
 
@@ -507,6 +533,7 @@ async fn verify_authenticated_access_token(
     token: &[u8],
     requested_location: &SecureStorageLocation,
     used_tokens: &Mutex<HashSet<[u8; 32]>>,
+    selected_clock: &SelectedSecureClock,
 ) -> Result<Vec<SecureStorageCapability>, SecureStorageError> {
     let token_id = aura_core::hash::hash(token);
     let envelope: SecureAccessTokenEnvelope = serde_json::from_slice(token)
@@ -538,7 +565,7 @@ async fn verify_authenticated_access_token(
             "secure access token is not bound to the requested access",
         ));
     }
-    if current_time_ms()? > claims.expires_at_ms {
+    if selected_clock.now_ms().await? > claims.expires_at_ms {
         return Err(SecureStorageError::permission_denied(
             "secure access token expired",
         ));
@@ -611,6 +638,26 @@ pub enum ProductionSecureStorageHandler {
 }
 
 impl ProductionSecureStorageHandler {
+    /// Bind secure token expiry and attestation to the runtime's selected
+    /// physical provider before that runtime is exposed to callers.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn select_physical_time_provider(&self, provider: Arc<dyn PhysicalTimeEffects>) {
+        match self {
+            Self::ProfileOwned(owned) => owned.backend.select_physical_time_provider(provider),
+            #[cfg(any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "openbsd"
+            ))]
+            Self::Platform(handler) => handler.selected_clock.select(provider),
+            Self::FilesystemFallback(handler) => handler.selected_clock.select(provider),
+            Self::UnavailablePlatform { .. } => {}
+        }
+    }
+
     /// Arbitrary core effect guards cannot authorize this actual writer.
     /// ```compile_fail
     /// use aura_core::effects::profile_storage::ProfileStorageLease;
@@ -796,6 +843,7 @@ impl ProductionSecureStorageHandler {
             base_path: physical.join(crate::profile_storage::SECURE_PROVIDER_DIRECTORY),
             wrapping_key,
             token_key: generate_secret_key(),
+            selected_clock: SelectedSecureClock::default(),
             filesystem_error: None,
             directory: Some(directory),
             record_gate: owner.secure_record_gate.clone(),
@@ -1163,6 +1211,7 @@ pub struct PlatformSecureStorageHandler {
     service: String,
     platform_config: String,
     token_key: [u8; 32],
+    selected_clock: SelectedSecureClock,
     used_tokens: Mutex<HashSet<[u8; 32]>>,
 }
 
@@ -1348,6 +1397,7 @@ impl PlatformSecureStorageHandler {
             service: PLATFORM_KEYRING_SERVICE.to_string(),
             platform_config: "platform-keyring".to_string(),
             token_key: generate_secret_key(),
+            selected_clock: SelectedSecureClock::default(),
             used_tokens: Mutex::new(HashSet::new()),
         }
     }
@@ -1735,6 +1785,7 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
             token,
             location,
             &self.used_tokens,
+            &self.selected_clock,
         )
         .await?;
         self.secure_retrieve(location, &capabilities).await
@@ -1750,7 +1801,7 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
 
         let attestation = Attestation {
             platform: &self.platform_config,
-            issued_at_ms: current_time_ms()?,
+            issued_at_ms: self.selected_clock.now_ms().await?,
             capabilities: self.get_secure_storage_capabilities(),
         };
 
@@ -1786,6 +1837,8 @@ pub struct FilesystemFallbackSecureStorageHandler {
     wrapping_key: [u8; 32],
     #[cfg(not(target_arch = "wasm32"))]
     token_key: [u8; 32],
+    #[cfg(not(target_arch = "wasm32"))]
+    selected_clock: SelectedSecureClock,
     #[cfg(not(target_arch = "wasm32"))]
     filesystem_error: Option<SecureStorageError>,
     #[cfg(unix)]
@@ -1896,6 +1949,8 @@ impl FilesystemFallbackSecureStorageHandler {
             wrapping_key,
             #[cfg(not(target_arch = "wasm32"))]
             token_key,
+            #[cfg(not(target_arch = "wasm32"))]
+            selected_clock: SelectedSecureClock::default(),
             #[cfg(not(target_arch = "wasm32"))]
             filesystem_error,
             #[cfg(unix)]
@@ -2401,10 +2456,6 @@ impl FilesystemFallbackSecureStorageHandler {
         } else {
             Ok((plaintext, immutable, None))
         }
-    }
-
-    fn current_time_ms(&self) -> Result<u64, SecureStorageError> {
-        current_time_ms()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -3688,6 +3739,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 token,
                 location,
                 &self.used_tokens,
+                &self.selected_clock,
             )
             .await?;
             self.secure_retrieve(location, &capabilities).await
@@ -3702,7 +3754,14 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
             capabilities: Vec<String>,
         }
 
-        let issued_at_ms = self.current_time_ms()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let issued_at_ms = self.selected_clock.now_ms().await?;
+        #[cfg(target_arch = "wasm32")]
+        let issued_at_ms = crate::time::PhysicalTimeHandler::new()
+            .physical_time()
+            .await
+            .map_err(|source| SecureStorageError::storage(source.to_string()))?
+            .ts_ms;
 
         let attestation = Attestation {
             platform: &self.platform_config,
@@ -4132,7 +4191,7 @@ mod tests {
                 &location,
                 &[SecureStorageCapability::Read],
                 &aura_core::time::PhysicalTime {
-                    ts_ms: current_time_ms().unwrap() + 60_000,
+                    ts_ms: handler.selected_clock.now_ms().await.unwrap() + 60_000,
                     uncertainty: None,
                 },
             )
@@ -4204,13 +4263,72 @@ mod tests {
             &handler.platform_config,
             &location,
             &[SecureStorageCapability::Write],
-            current_time_ms().unwrap() + 60_000,
+            handler.selected_clock.now_ms().await.unwrap() + 60_000,
         )
         .unwrap();
         assert!(handler
             .secure_access_with_token(&wrong_capability, &location)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn secure_token_and_attestation_use_selected_physical_provider() {
+        struct SelectedClock(std::sync::atomic::AtomicU64);
+        #[async_trait::async_trait]
+        impl aura_core::effects::PhysicalTimeEffects for SelectedClock {
+            async fn physical_time(
+                &self,
+            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+                Ok(aura_core::time::PhysicalTime {
+                    ts_ms: self.0.load(std::sync::atomic::Ordering::SeqCst),
+                    uncertainty: None,
+                })
+            }
+
+            async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::TimeError> {
+                Ok(())
+            }
+        }
+
+        let temp = tempdir().expect("tempdir");
+        let handler = ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+            temp.path().to_path_buf(),
+        );
+        let clock = Arc::new(SelectedClock(std::sync::atomic::AtomicU64::new(1_000)));
+        handler.select_physical_time_provider(clock.clone());
+        let location = SecureStorageLocation::new("selected-token-time", "one");
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        handler
+            .secure_store(&location, b"secret", &caps)
+            .await
+            .unwrap();
+        let token = handler
+            .secure_create_time_bound_token(
+                &location,
+                &[SecureStorageCapability::Read],
+                &aura_core::time::PhysicalTime {
+                    ts_ms: 1_100,
+                    uncertainty: None,
+                },
+            )
+            .await
+            .unwrap();
+        let attestation: serde_json::Value =
+            serde_json::from_slice(&handler.get_device_attestation().await.unwrap()).unwrap();
+        assert_eq!(attestation["issued_at_ms"], 1_000);
+        clock.0.store(1_101, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(
+            handler.secure_access_with_token(&token, &location).await,
+            Err(SecureStorageError::PermissionDenied { .. })
+        ));
+        let attestation: serde_json::Value =
+            serde_json::from_slice(&handler.get_device_attestation().await.unwrap()).unwrap();
+        assert_eq!(attestation["issued_at_ms"], 1_101);
     }
 
     #[tokio::test]

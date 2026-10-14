@@ -4,6 +4,8 @@
 
 Production-grade stateless effect handlers implementing infrastructure effect traits. Delegates to OS services for crypto, storage, networking, and time.
 
+Native secure token expiry and device attestation read the retained selected `PhysicalTimeEffects` provider. Runtime clock selection updates the same secure writer before the assembled runtime is exposed; provider failures remain typed and do not silently select a second wall clock.
+
 Encrypted storage initializes a new master key only for an empty ordinary record
 namespace. A populated profile requires its original secure key, including when
 another first-use wrapper has just published it. Missing or corrupt key material

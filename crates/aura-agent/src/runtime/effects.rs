@@ -3496,6 +3496,10 @@ impl AuraEffectSystem {
         mut self,
         provider: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
     ) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.crypto
+            .secure_storage()
+            .select_physical_time_provider(provider.clone());
         self.time_handler = EnhancedTimeHandler::with_provider(provider);
         self
     }
@@ -4477,6 +4481,36 @@ mod tests {
             effect_system.crypto.secure_storage().as_ref(),
             ProductionSecureStorageHandler::FilesystemFallback(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn selected_runtime_clock_reaches_original_secure_writer() {
+        use aura_core::effects::SecureStorageEffects;
+
+        let authority = AuthorityId::new_from_entropy([0xAA; 32]);
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("selected-clock"),
+                secure_storage_backend: SecureStorageBackend::FilesystemFallback,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let selected = aura_testkit::time::ManualPhysicalClock::new(2_000);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(&config, authority)
+            .expect("simulation runtime")
+            .with_physical_time_provider(Arc::new(selected.clone()));
+        let writer = effects.crypto.secure_storage();
+        let attestation: serde_json::Value =
+            serde_json::from_slice(&writer.get_device_attestation().await.expect("attestation"))
+                .expect("typed attestation");
+        assert_eq!(attestation["issued_at_ms"], 2_000);
+        selected.advance(125);
+        let attestation: serde_json::Value =
+            serde_json::from_slice(&writer.get_device_attestation().await.expect("attestation"))
+                .expect("typed attestation");
+        assert_eq!(attestation["issued_at_ms"], 2_125);
     }
 
     #[test]
