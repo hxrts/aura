@@ -650,10 +650,25 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 };
 
                 if let Some(runtime) = runtime {
-                    let _ = runtime_workflows::run_harness_runtime_maintenance_pass(
-                        &app_core, &runtime,
-                    )
-                    .await;
+                    if let Err(error) =
+                        runtime_workflows::run_harness_runtime_maintenance_pass(&app_core, &runtime)
+                            .await
+                    {
+                        // Keep upkeep failures visible without writing the
+                        // transport's source text into a harness log.
+                        let error_kind = match error {
+                            aura_core::AuraError::Invalid { .. } => "invalid",
+                            aura_core::AuraError::NotFound { .. } => "not_found",
+                            aura_core::AuraError::PermissionDenied { .. } => "permission_denied",
+                            aura_core::AuraError::Crypto { .. } => "crypto",
+                            aura_core::AuraError::Network { .. } => "network",
+                            aura_core::AuraError::Serialization { .. } => "serialization",
+                            aura_core::AuraError::Storage { .. } => "storage",
+                            aura_core::AuraError::Internal { .. } => "internal",
+                            aura_core::AuraError::Terminal(_) => "terminal",
+                        };
+                        tracing::warn!(error_kind, "harness runtime maintenance failed");
+                    }
                 }
 
                 effect_sleep(tokio::time::Duration::from_secs(1)).await;

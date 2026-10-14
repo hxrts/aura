@@ -566,12 +566,24 @@ fn harness_sync_backoff_ms() -> u64 {
 /// the concrete AuraAgent services.
 pub struct AgentRuntimeBridge {
     agent: Arc<AuraAgent>,
+    #[cfg(test)]
+    fail_sync_for_test: bool,
 }
 
 impl AgentRuntimeBridge {
     /// Create a new runtime bridge from an AuraAgent
     pub fn new(agent: Arc<AuraAgent>) -> Self {
-        Self { agent }
+        Self {
+            agent,
+            #[cfg(test)]
+            fail_sync_for_test: false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_sync_failure_for_test(mut self) -> Self {
+        self.fail_sync_for_test = true;
+        self
     }
 
     pub(super) async fn seed_sync_peers_from_rendezvous(&self) {

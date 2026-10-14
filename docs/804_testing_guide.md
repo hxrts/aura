@@ -296,6 +296,14 @@ belongs to a separate bounded postterminal followup. Exercise these boundaries
 with a frozen injected clock, explicit provider completion, and an exhausted
 original endpoint rather than elapsed sleeps.
 
+The native harness maintenance scheduler runs one bounded authenticated
+ceremony-mailbox pass before sibling sync convergence. A sync error or timeout
+still fails that maintenance pass, but cannot starve original enrollment
+receiver registration or broker acknowledgment. Required operation convergence
+continues to fail closed on sync errors. Verify the scheduler with a genuine
+signed first envelope, exact broker acknowledgment, and an injected sync fault;
+direct calls to the agent mailbox drain alone do not prove scheduler progress.
+
 Clipboard copy affordances in TUI modals follow the same rule. Copy buttons and local clipboard helpers are convenience-only observed behavior, not shared semantic evidence. Headless CI and rustdoc builds must not rely on the host system clipboard being available. When a test or harness run needs to assert copied content, use `AURA_CLIPBOARD_MODE=file_only` together with `AURA_CLIPBOARD_FILE` and treat that capture file as diagnostic output rather than as proof of semantic success.
 
 If a migrated parity-critical flow needs both actor and move semantics, the split must stay explicit. The actor owns mutable lifecycle state. Move-owned handles and tokens define which caller may advance or transfer it. If that split is not explicit, the flow is not considered correct by construction.

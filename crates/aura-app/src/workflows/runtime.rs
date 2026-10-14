@@ -577,6 +577,25 @@ pub async fn run_harness_runtime_maintenance_pass(
         })?;
     let budget = workflow_timeout_budget(runtime, Duration::from_millis(timeout_ms)).await?;
     execute_with_runtime_timeout_budget(runtime, &budget, || async {
+        // Authenticated mailbox upkeep is independent of sibling sync. A
+        // failed sync must remain a typed failure of this pass, but must not
+        // prevent the original enrollment receiver from registering or ACKing
+        // a frame that has already crossed the broker boundary.
+        timeout_runtime_call_with_budget(
+            runtime,
+            &budget,
+            "harness_runtime_maintenance",
+            "process_enrollment_mailboxes_before_sync",
+            Duration::from_millis(step_ms),
+            || runtime.process_ceremony_messages(),
+        )
+        .await?
+        .map_err(|error| {
+            AuraError::from(super::error::runtime_call(
+                "process enrollment mailboxes before sync",
+                error,
+            ))
+        })?;
         for round in 0..rounds {
             converge_runtime_cycle(runtime, &budget, Duration::from_millis(step_ms)).await?;
             if round + 1 < rounds && backoff_ms > 0 {

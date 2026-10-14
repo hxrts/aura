@@ -474,6 +474,12 @@ bounded windows. Channel acceptance requires actual AMP state under its retained
 authoritative channel reference before materialization and readiness publication;
 a matching raw context lookup cannot substitute for that state.
 
+Native harness maintenance schedules a bounded ceremony mailbox pass before
+sibling sync convergence. A sync fault cannot suppress original enrollment
+receiver registration or broker acknowledgment, and the same sync fault still
+ends the pass with its typed cause. Required operation convergence keeps its
+sync-before-ceremony, fail-closed order.
+
 ### Required refresh attachment health
 
 One hook group owns its attached signal streams, bounded first failure, and shared cancellation. Required signal receipt or interval failure cancels the entire group and returns the original native error to the fallible runtime spawner. A failed signal-driven refresh belongs to that update only: the listener retains it as a typed per-update failure (`AppCore::refresh_hook_update_failures`, stage `Refresh`, original cause) and keeps serving later updates, which re-read current state. `AppCore::refresh_hook_failure` exposes the typed stage and original cause of a terminal failure even without tracing. Failed groups are inactive; explicit reattachment replaces attachment health but does not clear the runtime supervisor's retained failure. Cancellation alone remains successful task completion.

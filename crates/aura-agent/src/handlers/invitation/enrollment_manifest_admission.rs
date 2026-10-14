@@ -1268,12 +1268,23 @@ mod tests {
             );
             issuer_effects.attach_rendezvous_manager(issuer_manager.clone());
             invitee_effects.attach_rendezvous_manager(invitee_manager.clone());
-            let invitee_bridge = AgentRuntimeBridge::new(invitee.clone());
-            invitee_bridge
-                .process_ceremony_messages()
+            let invitee_bridge: Arc<dyn aura_app::runtime_bridge::RuntimeBridge> =
+                Arc::new(AgentRuntimeBridge::new(invitee.clone()).with_sync_failure_for_test());
+            let app = Arc::new(async_lock::RwLock::new(
+                aura_app::AppCore::with_runtime(
+                    aura_app::AppConfig::default(),
+                    invitee_bridge.clone(),
+                )
+                .expect("actual Bob app owns its runtime"),
+            ));
+            let sync_error =
+                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                    &app,
+                    &invitee_bridge,
+                )
                 .await
-                .expect("ordinary native ceremony maintenance registers Bob's pending mailbox");
-            drop(invitee_bridge);
+                .expect_err("required sibling sync failure remains observable");
+            assert!(sync_error.to_string().contains("converge sync"));
             let session =
                 aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
                     &invitation.invitation_id,
@@ -1400,10 +1411,12 @@ mod tests {
                 .interrupt_next_pending_enrollment_ack_for_test()
                 .await;
             assert!(
-                AgentRuntimeBridge::new(invitee.clone())
-                    .process_ceremony_messages()
-                    .await
-                    .is_err(),
+                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                    &app,
+                    &invitee_bridge,
+                )
+                .await
+                .is_err(),
                 "injected ACK interruption preserves Bob's encrypted frame custody"
             );
             let frame_key = crate::core::agent::pending_enrollment_mailbox::frame_location(
@@ -1411,13 +1424,14 @@ mod tests {
                 &first[0].message_id,
             );
             assert!(invitee_effects.secure_exists(&frame_key).await.unwrap());
-            assert!(
-                AgentRuntimeBridge::new(invitee.clone())
-                    .process_ceremony_messages()
-                    .await
-                    .is_ok(),
-                "ordinary runtime upkeep ACKs exact retained bytes without duplicate runtime intake"
-            );
+            let sync_error =
+                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                    &app,
+                    &invitee_bridge,
+                )
+                .await
+                .expect_err("required sibling sync failure remains observable after mailbox ACK");
+            assert!(sync_error.to_string().contains("converge sync"));
             let queued = invitee_effects
                 .take_unclaimed_choreography_envelope_retained(|candidate| {
                     candidate.metadata.get("aura-message-id")
@@ -1467,6 +1481,8 @@ mod tests {
                     "same-profile shutdown retains concrete required-task failure: {source:?}"
                 );
             }
+            drop(app);
+            drop(invitee_bridge);
             drop(invitee_effects);
             drop(invitee);
             let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)

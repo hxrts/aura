@@ -114,6 +114,10 @@ pub(super) async fn get_sync_peers(
 )]
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY;
+    #[cfg(test)]
+    if bridge.fail_sync_for_test {
+        return Err(IntentError::no_agent("test sync service unavailable"));
+    }
     // Relational-context sync rides the authority transport, not the sync service.
     sync_relational_contexts(bridge, bridge.agent.runtime().sync()).await;
     let sync = require_sync_service(bridge)?;

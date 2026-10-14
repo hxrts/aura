@@ -192,6 +192,11 @@ Reference: [docs/122_ownership_model.md](../../docs/122_ownership_model.md)
 
 For shared semantic flows, `aura-terminal` uses `Observed` for render state, projections, snapshots, and user-visible progress. Narrow `ActorOwned` ingress is permitted only for the TUI command/update loop (a long-lived mutable async frontend loop). The frontend must not own terminal semantic truth for parity-critical operations; frontend-local submission ownership must hand off before the first awaited app/runtime workflow step per docs/122 section 16.
 
+The harness TUI schedules the app-owned runtime maintenance pass while idle.
+It reports a failed pass by typed error category without logging transport
+source text; the app retains the concrete error, and the agent owns enrollment
+mailbox registration, verification, and broker acknowledgment.
+
 ### Inventory
 
 | Path | Category | Authoritative owner | May mutate | Observe only |
