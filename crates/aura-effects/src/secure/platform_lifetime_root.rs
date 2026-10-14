@@ -1,6 +1,6 @@
-//! First production platform-lifetime dependency: selected empty-root admission.
-//! This does not issue allocation, decision or retirement custody. L6 continues
-//! to reject platform lifetime selection until those transactions are complete.
+//! Selected platform lifetime root and private birth transaction dependencies.
+//! Neither issues decision or retirement custody. L6 continues to reject
+//! platform lifetime selection until the complete provider is validated.
 use super::{
     PlatformSecureStorageHandler, ProductionSecureStorageHandler, ProfileOwnedSecureStorage,
 };
@@ -15,13 +15,17 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
+mod birth;
+
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V1";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V2";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
-const PLAINTEXT_LEN: usize = 1 + 32 + 32 + 32;
+const BIRTH_PENDING: u8 = 2;
+const BIRTH_COMPLETE: u8 = 3;
+const PLAINTEXT_LEN: usize = 1 + 32 * 5;
 const MAX_FILE_LEN: usize = 256;
 
 struct RootRecord {
@@ -29,6 +33,8 @@ struct RootRecord {
     id: [u8; 32],
     profile: [u8; 32],
     service: [u8; 32],
+    birth_id: [u8; 32],
+    intent_digest: [u8; 32],
 }
 
 fn invalid(message: &'static str) -> AuraError {
@@ -64,6 +70,8 @@ impl RootRecord {
         plain.extend_from_slice(&self.id);
         plain.extend_from_slice(&self.profile);
         plain.extend_from_slice(&self.service);
+        plain.extend_from_slice(&self.birth_id);
+        plain.extend_from_slice(&self.intent_digest);
         let ciphertext = ChaCha20Poly1305::new((&key).into())
             .encrypt(
                 Nonce::from_slice(&nonce),
@@ -107,7 +115,16 @@ impl RootRecord {
                     Arc::new(source),
                 )
             })?;
-        if plain.len() != PLAINTEXT_LEN || !matches!(plain[0], PENDING | COMPLETE) {
+        if plain.len() != PLAINTEXT_LEN
+            || !matches!(
+                plain[0],
+                PENDING | COMPLETE | BIRTH_PENDING | BIRTH_COMPLETE
+            )
+            || (matches!(plain[0], PENDING | COMPLETE)
+                && (plain[97..129] != [0; 32] || plain[129..161] != [0; 32]))
+            || (matches!(plain[0], BIRTH_PENDING | BIRTH_COMPLETE)
+                && (plain[97..129] == [0; 32] || plain[129..161] == [0; 32]))
+        {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
         Ok(Self {
@@ -115,6 +132,10 @@ impl RootRecord {
             id: plain[1..33].try_into().expect("bounded root id"),
             profile: plain[33..65].try_into().expect("bounded profile binding"),
             service: plain[65..97].try_into().expect("bounded service binding"),
+            birth_id: plain[97..129].try_into().expect("bounded birth identity"),
+            intent_digest: plain[129..161]
+                .try_into()
+                .expect("bounded birth intent digest"),
         })
     }
 }
@@ -144,6 +165,8 @@ fn write_keyring(
 #[allow(dead_code)]
 pub(super) struct EmptyPlatformLifetimeRootAdmission {
     _id: [u8; 32],
+    _owner: Arc<crate::profile_storage::OwnedProfileLease>,
+    birth_handed_out: std::sync::atomic::AtomicBool,
 }
 
 /// Admit/recover only the original empty root. The keyring Pending record is
@@ -199,6 +222,8 @@ pub(super) async fn admit_empty_root(
                 id,
                 profile,
                 service,
+                birth_id: [0; 32],
+                intent_digest: [0; 32],
             };
             write_keyring(selected, &record)?;
             record
@@ -213,6 +238,11 @@ pub(super) async fn admit_empty_root(
     if record.profile != profile || record.service != service {
         return Err(invalid(
             "selected platform lifetime root belongs to another owner",
+        ));
+    }
+    if !matches!(record.phase, PENDING | COMPLETE) {
+        return Err(invalid(
+            "selected platform root already has allocation birth",
         ));
     }
     let expected = record.file_marker();
@@ -252,7 +282,11 @@ pub(super) async fn admit_empty_root(
         .lifetime_root_claimed
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .map_err(|_| invalid("selected platform lifetime root already transferred"))?;
-    Ok(EmptyPlatformLifetimeRootAdmission { _id: record.id })
+    Ok(EmptyPlatformLifetimeRootAdmission {
+        _id: record.id,
+        _owner: owner.clone(),
+        birth_handed_out: std::sync::atomic::AtomicBool::new(false),
+    })
 }
 
 #[cfg(test)]
@@ -260,7 +294,10 @@ mod tests {
     use super::*;
     type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-    fn selected(path: &Path, service: &str) -> Result<ProductionSecureStorageHandler, AuraError> {
+    pub(super) fn selected(
+        path: &Path,
+        service: &str,
+    ) -> Result<ProductionSecureStorageHandler, AuraError> {
         let owner = Arc::new(
             crate::profile_storage::FilesystemProfileStorageHandler::new(path.to_path_buf())
                 .acquire_owned_native()
@@ -279,12 +316,12 @@ mod tests {
             })
     }
 
-    struct Fixture {
-        profile: tempfile::TempDir,
-        service: String,
+    pub(super) struct Fixture {
+        pub(super) profile: tempfile::TempDir,
+        pub(super) service: String,
     }
     impl Fixture {
-        fn new() -> TestResult<Self> {
+        pub(super) fn new() -> TestResult<Self> {
             let profile = tempfile::tempdir()?;
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(profile.path(), std::fs::Permissions::from_mode(0o700))?;
@@ -296,7 +333,7 @@ mod tests {
             );
             Ok(Self { profile, service })
         }
-        fn selected(&self) -> Result<ProductionSecureStorageHandler, AuraError> {
+        pub(super) fn selected(&self) -> Result<ProductionSecureStorageHandler, AuraError> {
             selected(self.profile.path(), &self.service)
         }
     }
@@ -306,6 +343,8 @@ mod tests {
                 KEYRING_USER,
                 PlatformSecureStorageHandler::RECORD_KEY_USER,
                 PlatformSecureStorageHandler::RECORD_INVENTORY_USER,
+                birth::INTENT_USER,
+                birth::RECORD_USER,
             ] {
                 if let Ok(entry) = keyring::Entry::new(&self.service, user) {
                     let _ = entry.delete_credential();
@@ -327,6 +366,7 @@ mod tests {
             "one root per original owner"
         );
         let original_id = original._id;
+        drop(original);
         drop(first);
         let reopened = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
@@ -351,6 +391,8 @@ mod tests {
             id: [73; 32],
             profile: aura_core::hash::hash(owned._owner.profile_identity().as_bytes()),
             service: aura_core::hash::hash(platform.service.as_bytes()),
+            birth_id: [0; 32],
+            intent_digest: [0; 32],
         };
         {
             let _guard = platform.namespace_owner()?.mutation_guard().await;
