@@ -5345,6 +5345,17 @@ mod platform_secure_record_fault_tests {
 mod allocation_lifetime;
 #[cfg(target_arch = "wasm32")]
 mod browser_allocation_lifetime;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    )
+))]
+mod platform_lifetime_root;
 #[cfg(not(target_arch = "wasm32"))]
 mod retirement_birth;
 #[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]

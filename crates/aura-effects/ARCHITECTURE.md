@@ -189,6 +189,8 @@ secret. This local lease and inventory grant no enrollment or peer authority.
 
 Native platform keyring entries share namespaces across filesystem profiles. Owned Unix production construction additionally retains one service-wide descriptor lease under a fixed OS-user-bound namespace. The original selected profile lease caches that exact service lease across sanctioned runtime reassembly; unrelated profiles cannot simultaneously write the shared service. Raw platform adapters reject IO before this private custody is attached. The existing keyring service and key addresses remain unchanged. Configured platform records are not silently replaced by fresh filesystem state. Native filesystem fallback remains subject to its existing explicit test/harness construction policy; this incremental owner patch does not declare that fallback a platform credential store. Atomic multi-record profile handoff and live two-tab/process restart scenarios remain separate required integration gates.
 
+The native selected platform adapter has a private empty lifetime-root admission dependency. Under the original profile and namespace leases, it records a versioned authenticated pending root in the selected keyring, publishes an exact profile marker through the retained directory descriptor, and acknowledges completion in the keyring. Reopening can finish a pending publication; a completed root with a missing or different marker and a foreign profile are refused. This admission grants no allocation, decision, retirement, or issuer authority. It is not wired into L6 lifetime selection until the remaining provider transactions are implemented and tested.
+
 ### Filesystem replacement durability
 
 `StorageCoreEffects::store` publishes complete sibling staging files using an
