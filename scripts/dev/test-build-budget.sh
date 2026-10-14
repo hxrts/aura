@@ -563,6 +563,28 @@ expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==6291456 and .disk.measured_growth_kib==0' "$receipt" >/dev/null
 
+# Measured 11.3 GiB growth plus two active 9/10 GiB worktrees cannot fit a
+# nominal 35 GiB free volume while preserving the 15 GiB floor. The command
+# must not start or evict either hot worktree just to satisfy admission.
+reset_case
+printf '%s\n' $((35 * 1024 * 1024)) > "$FREE_FILE"
+mkdir -p "$project/artifacts/disk-budget/receipts/run.hot" "$AURA_BUILD_SHARED_DIR/reservations"
+printf '{"root":"%s","lane":"test","command_exit_status":0,"disk":{"measured_growth_kib":11848909}}\n' \
+  "$project" > "$project/artifacts/disk-budget/receipts/run.hot/receipt.json"
+sleep 30 & hot_a=$!
+sleep 30 & hot_b=$!
+printf '%s\n' $((9 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$hot_a"
+printf '%s\n' $((10 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$hot_b"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.hot-ran"'
+[[ ! -e "$FREE_FILE.hot-ran" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.refusal.reason=="insufficient-headroom" and
+  .admission.refusal.other_reservations_kib==19922944 and
+  .admission.refusal.incoming_reservation_kib>=11848909 and
+  .final_exit_status==1' "$receipt" >/dev/null
+kill "$hot_a" "$hot_b"
+wait "$hot_a" "$hot_b" 2>/dev/null || true
+
 reset_case
 mkdir -p "$project/artifacts/disk-budget/receipts/run.foreign" "$project/artifacts/disk-budget/receipts/run.bad"
 printf '{"root":"%s","lane":"foreign","command_exit_status":0,"disk":{"measured_growth_kib":10485760}}\n' \

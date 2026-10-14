@@ -357,13 +357,21 @@ prune_safe_lanes() {
       local -a owner_args=()
       [[ "$candidate_root" != "$root" ]] || owner_args=(--lock-owned-by "$$")
       prune_status=0
-      bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$candidate_root" \
-        --lane "$candidate" --apply "${owner_args[@]+"${owner_args[@]}"}" || prune_status=$?
+      if [[ -n "${AURA_COLD_CACHE_STORE:-}" ]]; then
+        bash "$repo_root/scripts/dev/cold-cache-store.sh" --export --root "$candidate_root" \
+          --lane "$candidate" "${owner_args[@]+"${owner_args[@]}"}" || prune_status=$?
+      else
+        bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$candidate_root" \
+          --lane "$candidate" --apply "${owner_args[@]+"${owner_args[@]}"}" || prune_status=$?
+      fi
       if [[ "$candidate_root" != "$root" ]]; then
+        cleanup_operation=guarded-sibling-lane
+        [[ -z "${AURA_COLD_CACHE_STORE:-}" ]] || cleanup_operation=cold-sibling-lane
         aura_receipt_update --arg worktree "$candidate_root" --arg lane "$candidate" \
+          --arg operation "$cleanup_operation" \
           --argjson status "$prune_status" --arg measured "$size" \
           --argjson free "$(free_kib)" \
-          '.cleanup_events += [{stage:"admission",operation:"guarded-sibling-lane",
+          '.cleanup_events += [{stage:"admission",operation:$operation,
             worktree:$worktree,lane:$lane,exit_status:$status,
             outcome:(if $status==0 then "completed" else "refused" end),
             measured_candidate_kib:($measured|tonumber),free_after_kib:$free}]'
