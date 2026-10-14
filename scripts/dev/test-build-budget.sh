@@ -162,6 +162,23 @@ command_log="$(jq -r '.artifacts.command_log' "$receipt")"
 jq -e --arg receipt "$receipt" '.receipt==$receipt and .exit_status==0' \
   "$(dirname "$receipt")/completion.json" >/dev/null
 
+# The pre-commit hook invokes the wrapper with the host Bash (3.2 on macOS).
+# Verify the child really runs and its output is flushed before completion.
+reset_case
+host_bash=/bin/bash
+[[ -x "$host_bash" ]] || host_bash="$(command -v bash)"
+expect_status 37 "$host_bash" "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane test --no-prune -- sh -c 'touch "$PROJECT_ROOT/host-command-ran"; printf "host-child-marker\n"; exit 37'
+[[ -f "$project/host-command-ran" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+command_log="$(jq -r '.artifacts.command_log' "$receipt")"
+[[ -f "$command_log" && "$(find "$command_log" -perm 0600 -print)" == "$command_log" ]]
+rg -q '^host-child-marker$' "$command_log"
+jq -e '.command_exit_status==37 and .final_exit_status==37 and
+  .current_phase=="finished" and .phases[0].exit_status==37' "$receipt" >/dev/null
+jq -e --arg receipt "$receipt" '.receipt==$receipt and .exit_status==37' \
+  "$(dirname "$receipt")/completion.json" >/dev/null
+
 # `kill -0` can still see an exited, unreaped child. Simulate that state and
 # require a terminal failure receipt and notification before the timeout.
 reset_case

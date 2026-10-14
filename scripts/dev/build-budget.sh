@@ -458,8 +458,9 @@ release_checkout_lock() {
 }
 acquire_checkout_lock
 child_pid=''
-command_log_fd=''
+command_log_open=0
 command_tee_pid=''
+command_fifo=''
 stop_owned_group() {
   local pid="$1" attempt
   [[ -n "$pid" ]] || return 0
@@ -480,19 +481,23 @@ child_running() {
   kill -0 "$1" 2>/dev/null
 }
 cleanup() {
-  local exit_status=$?
+  local exit_status=$? pipe_was_open=$command_log_open
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
     stop_owned_group "$child_pid"
     wait "$child_pid" 2>/dev/null || true
   fi
-  if [[ -n "$command_log_fd" ]]; then
-    exec {command_log_fd}>&-
-    command_log_fd=''
+  if (( command_log_open )); then
+    exec 9>&-
+    command_log_open=0
   fi
   if [[ -n "$command_tee_pid" ]]; then
+    if (( ! pipe_was_open )); then
+      kill "$command_tee_pid" 2>/dev/null || true
+    fi
     wait "$command_tee_pid" 2>/dev/null || true
     command_tee_pid=''
   fi
+  [[ -z "$command_fifo" ]] || rm -f "$command_fifo"
   aura_receipt_update --argjson status "$exit_status" \
     --arg finished "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     'if .command_phase!=null and .command_phase.finished_utc==null then
@@ -563,9 +568,13 @@ aura_receipt_update --arg started "$started" \
     finished_utc:null,exit_status:null}'
 export AURA_BUILD_CLEANUP_STAGE=command
 set -m # Give the background build its own process group for bounded shutdown.
-exec {command_log_fd}> >(tee -a "$AURA_BUILD_COMMAND_LOG")
+command_fifo="${AURA_BUILD_RECEIPT%/*}/command.pipe"
+mkfifo "$command_fifo"
+tee -a "$AURA_BUILD_COMMAND_LOG" < "$command_fifo" &
 command_tee_pid=$!
-(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") >&"$command_log_fd" 2>&1 &
+exec 9> "$command_fifo"
+command_log_open=1
+(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") >&9 2>&1 &
 child_pid=$!
 set +m
 aura_receipt_update --argjson pid "$child_pid" \
@@ -594,11 +603,13 @@ done
 if wait "$child_pid"; then :; else child_status=$?; (( status == 0 )) && status="$child_status"; fi
 stop_owned_group "$child_pid" # Reap any build-owned background descendants.
 child_pid=''
-exec {command_log_fd}>&-
-command_log_fd=''
+exec 9>&-
+command_log_open=0
 tee_status=0
 wait "$command_tee_pid" || tee_status=$?
 command_tee_pid=''
+rm -f "$command_fifo"
+command_fifo=''
 (( tee_status == 0 || status != 0 )) || status=77
 aura_receipt_update --argjson status "$status" --arg finished "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   '.command_exit_status=$status | .current_phase="cache-cleanup" |
