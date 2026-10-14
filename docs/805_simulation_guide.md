@@ -550,6 +550,57 @@ Phase 0 hardening uses three simulator workflows as CI gates.
 
 For production-flow regression, record the seed, selected physical-time inputs, original operation and owner, broker stage transitions, injected fault, and typed outcome. Recreate the original profile and replay those inputs through the real runtime and app owners. A scenario-counter checkpoint alone is not an upgrade or durable-state migration test.
 
+The `simulator-checkpoint` Cargo feature exposes native test infrastructure;
+it is not a terminal, web, RPC, or production feature. To inspect the current
+owner-level checkpoint contract, run the exact `hxrts-aura-effects` tests:
+
+```bash
+scripts/dev/run-exact-fixtures.sh --root "$PWD" --lane debug \
+  --package hxrts-aura-effects --lib --features simulator-checkpoint \
+  --expected-count 2 \
+  --name profile_checkpoint::tests::quiescent_filesystem_checkpoint_resets_authenticated_ordinary_branch_record \
+  --name profile_checkpoint::tests::quiescent_filesystem_checkpoint_refuses_unauthenticated_ordinary_branch_record
+```
+
+The native setup owner `SimulatedEnrollment::prepare_quiescent_native_signing_profiles`
+assembles each original agent with the selected `PhysicalTimeEffects` provider,
+obtains a one-use proof of the **runtime-selected** `ProfileOwned(FilesystemFallback)`
+handler, and acknowledges both shutdowns before returning. A configuration
+default or an existing fallback key does not prove this selection. Consume each
+proof with `QuiescentFilesystemProfileCheckpoint::capture`, using the same
+canonical original profile path, a private 0700 artifact directory outside
+that profile, and a new artifact filename. Capture creates the file at 0600
+and refuses an existing name. Bind capture to the source revision and participant.
+Keep the artifact in private test storage; the wrapping key stays under the
+original profile owner. Neither is a portable credential export. A branch must
+reacquire that original path exclusively and call `restore(...).await` with the exact revision and
+participant before constructing fresh agent, app, and broker owners. Restore
+authenticates the artifact and complete file inventory before mutation, then
+uses an incomplete-restore marker so interrupted reset blocks ordinary profile
+acquisition. It refuses foreign, plaintext, and undecryptable branch files.
+
+The simulator fixture can inject a `SimulatorNonceRetirementLedger` into the
+normal threshold-signing owner through `NativeEnrollmentFixture::prepare_with_nonce_retirement`.
+Keep that ledger outside the checkpoint and share it across sequential branches;
+it rejects reuse of the same actual FROST commitment for one signer and epoch.
+The current 1-of-1 signed-enrollment fixture uses its normal single-signer path,
+so it does not prove a FROST retirement or deterministic nonce-counter replay.
+No branch may manufacture an approval signature. Record the seed, original
+operation and owners, selected clock inputs and deadlines, broker stage IDs,
+named fault, typed outcome, and exact original-message ACK in a private receipt.
+
+**Current limit:** the genuine signed enrollment branch creates a protected
+allocation-lifetime record in a reserved secure-provider namespace. The generic
+filesystem checkpoint intentionally refuses to remove it, so a complete
+three-branch signed restore is not yet established. That reset requires the
+original allocation-lifetime owner to authenticate and retire its own branch
+state. Do not delete or copy it through ordinary storage or secure-location
+APIs. Post-issuance owners, nonempty broker queues, live capabilities, OS
+keyrings, browser storage, independent processes, and two-host delivery are
+outside this checkpoint contract. A test-keyring service adapter exists for
+separate simulator infrastructure, but it does not substitute for this
+fixture's actual filesystem selection or prove production platform custody.
+
 ### Scenario Contract Workflow
 
 Conformance CI includes scenario contracts for consensus, sync, recovery, and reconfiguration. Each bundle is validated over a seed corpus. Validation checks terminal status (`AllDone`), required labels observed in trace, and minimum observable event count.
