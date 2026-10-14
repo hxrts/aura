@@ -1078,8 +1078,11 @@ the original secret values in the owning process or a private transfer channel.
 For a local process-boundary diagnostic, run
 `scripts/harness/lan/single-host-enrollment.sh <fresh-token> <clean-peer-checkout>`
 with two clean same-commit checkouts and identical prebuilt native binaries.
-The runner provisions an authenticated loopback broker and distinct profile
-ports, then uses the paired private checklist. Its `single-host-result.json`
+The runner derives native-only `alex-tui` and `barbara-tui` configs from the
+LAN templates, omitting browser and second-device instances. It provisions an
+authenticated loopback broker and distinct profile ports, then uses the paired
+private checklist. The final two-host LAN templates retain their browser
+instances. Its `single-host-result.json`
 retains exact operation, broker ACK, host acknowledgment, and reopen evidence;
 private per-step receipts retain typed failures, and `single-host-disposal.json`
 records each owner's shutdown.

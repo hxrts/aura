@@ -42,40 +42,9 @@ for path in "$local_provision" "$peer_provision"; do
 done
 auth=$(openssl rand -hex 32)
 [[ "$auth" =~ ^[0-9a-f]{64}$ ]] || exit 1
-render() { # template, output, role
-  local template=$1 output=$2 role=$3 line instance='' invitation
-  invitation=''
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == '[[instances]]' ]]; then
-      instance=''
-      invitation=$(openssl rand -hex 32)
-    elif [[ "$line" =~ ^id[[:space:]]*=[[:space:]]*\"([^\"]+)\"$ ]]; then
-      instance=${BASH_REMATCH[1]}
-    fi
-    line=${line//__HOST_ADDR__/127.0.0.1}
-    if [[ "$role" == peer ]]; then
-      line=${line//:43101/:43201}
-      line=${line//:43102/:43202}
-      line=${line//:53101/:53201}
-      line=${line//port = 19433/port = 19434}
-    fi
-    printf '%s\n' "$line" >> "$output"
-    if [[ "$line" == '[run]' ]]; then printf 'fixed_ports = true\n' >> "$output"; fi
-    if [[ "$line" =~ ^[[:space:]]*env[[:space:]]*=[[:space:]]*\[$ ]]; then
-      [[ -n "$instance" && "$invitation" =~ ^[0-9a-f]{64}$ ]] || return 1
-      printf '  "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=%s",\n' "$auth" >> "$output"
-      printf '  "AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN=%s",\n' "$invitation" >> "$output"
-      if [[ "$role" == local && "$instance" == alex-tui ]]; then
-        printf '  "AURA_BOOTSTRAP_BROKER_BIND=127.0.0.1:43190",\n' >> "$output"
-      else
-        printf '  "AURA_BOOTSTRAP_BROKER_URL=http://127.0.0.1:43190",\n' >> "$output"
-      fi
-    fi
-  done < "$template"
-  chmod 600 "$output"
-}
-render "$root/configs/harness/lan-host-a.toml" "$local_provision/host-a.toml" local
-render "$peer/configs/harness/lan-host-b.toml" "$peer_provision/host-b.toml" peer
+source "$here/render-single-host-config.sh"
+render_single_host_config "$root/configs/harness/lan-host-a.toml" "$local_provision/host-a.toml" local "$auth"
+render_single_host_config "$peer/configs/harness/lan-host-b.toml" "$peer_provision/host-b.toml" peer "$auth"
 unset auth
 preflight="$root/.tmp/lan-checklist-$token/paired-preflight.json"
 mkdir -m 700 "$(dirname "$preflight")"
