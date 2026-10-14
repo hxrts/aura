@@ -8,6 +8,7 @@ use zeroize::Zeroizing;
 
 pub(super) const INTENT_USER: &str = "allocation-lifetime-birth-intent:v1";
 pub(super) const RECORD_USER: &str = "allocation-lifetime-birth-record:v1";
+mod decision;
 const INVENTORY_FILE: &str = "platform_lifetime/inventory.v1";
 const INVENTORY_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-INVENTORY-V1";
 const INTENT_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-BIRTH-V1";
@@ -265,6 +266,37 @@ pub(super) struct PlatformBirthAdmission {
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
 
+fn verify_birth<'a>(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    birth: &PlatformBirthAdmission,
+) -> Result<(RootRecord, BirthIntent), AuraError> {
+    if !Arc::ptr_eq(&birth._owner, &owned._owner) {
+        return Err(invalid("platform birth belongs to another profile owner"));
+    }
+    let root = read_root(owned, selected)?;
+    if !matches!(
+        root.phase,
+        BIRTH_COMPLETE | DECISION_PENDING | DECISION_COMPLETE
+    ) || root.id != birth.root
+        || root.birth_id != birth.allocation
+    {
+        return Err(invalid(
+            "platform birth owner differs from original allocation",
+        ));
+    }
+    if verify_inventory(owned, &root)?.is_none() {
+        return Err(invalid("platform live inventory is missing"));
+    }
+    let (bytes, intent) = read_intent(selected, &root)?;
+    if read_entry(selected, RECORD_USER)?.as_deref() != Some(bytes.as_slice()) {
+        return Err(invalid(
+            "platform live credential differs from original birth",
+        ));
+    }
+    Ok((root, intent))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StopAfter {
     Never,
@@ -395,7 +427,10 @@ async fn recover_one_inner(
     let (selected, owner) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
     let mut root = read_root(owned, selected)?;
-    if !matches!(root.phase, BIRTH_PENDING | BIRTH_COMPLETE) {
+    if !matches!(
+        root.phase,
+        BIRTH_PENDING | BIRTH_COMPLETE | DECISION_PENDING | DECISION_COMPLETE
+    ) {
         return Err(invalid("platform allocation birth has not started"));
     }
     if let Some(original) = original_root {
@@ -424,6 +459,7 @@ async fn recover_one_inner(
         root.phase = BIRTH_COMPLETE;
         write_keyring(selected, &root)?;
     }
+    decision::validate_recovery(owned, selected, &root)?;
     if original_root.is_none() {
         owner
             .lifetime_root_claimed
@@ -448,27 +484,9 @@ pub(super) async fn read_live_secret(
     birth: &PlatformBirthAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {
     let (selected, _) = selected_owner(owned)?;
-    if !Arc::ptr_eq(&birth._owner, &owned._owner) {
-        return Err(invalid(
-            "platform birth read belongs to another profile owner",
-        ));
-    }
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let root = read_root(owned, selected)?;
-    if root.phase != BIRTH_COMPLETE || root.id != birth.root || root.birth_id != birth.allocation {
-        return Err(invalid(
-            "platform birth owner differs from original allocation",
-        ));
-    }
-    if verify_inventory(owned, &root)?.is_none() {
-        return Err(invalid("platform live inventory is missing"));
-    }
-    let (bytes, intent) = read_intent(selected, &root)?;
-    if read_entry(selected, RECORD_USER)?.as_deref() != Some(bytes.as_slice()) {
-        return Err(invalid(
-            "platform live credential differs from original birth",
-        ));
-    }
+    let (root, intent) = verify_birth(owned, selected, birth)?;
+    decision::require_live_read(owned, selected, &root)?;
     Ok(intent.secret)
 }
 

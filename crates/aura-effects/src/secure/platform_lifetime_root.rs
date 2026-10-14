@@ -19,13 +19,15 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V2";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V3";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
 const BIRTH_PENDING: u8 = 2;
 const BIRTH_COMPLETE: u8 = 3;
-const PLAINTEXT_LEN: usize = 1 + 32 * 5;
+const DECISION_PENDING: u8 = 4;
+const DECISION_COMPLETE: u8 = 5;
+const PLAINTEXT_LEN: usize = 1 + 32 * 6;
 const MAX_FILE_LEN: usize = 256;
 
 struct RootRecord {
@@ -35,6 +37,7 @@ struct RootRecord {
     service: [u8; 32],
     birth_id: [u8; 32],
     intent_digest: [u8; 32],
+    decision_digest: [u8; 32],
 }
 
 fn invalid(message: &'static str) -> AuraError {
@@ -72,6 +75,7 @@ impl RootRecord {
         plain.extend_from_slice(&self.service);
         plain.extend_from_slice(&self.birth_id);
         plain.extend_from_slice(&self.intent_digest);
+        plain.extend_from_slice(&self.decision_digest);
         let ciphertext = ChaCha20Poly1305::new((&key).into())
             .encrypt(
                 Nonce::from_slice(&nonce),
@@ -118,12 +122,25 @@ impl RootRecord {
         if plain.len() != PLAINTEXT_LEN
             || !matches!(
                 plain[0],
-                PENDING | COMPLETE | BIRTH_PENDING | BIRTH_COMPLETE
+                PENDING
+                    | COMPLETE
+                    | BIRTH_PENDING
+                    | BIRTH_COMPLETE
+                    | DECISION_PENDING
+                    | DECISION_COMPLETE
             )
             || (matches!(plain[0], PENDING | COMPLETE)
-                && (plain[97..129] != [0; 32] || plain[129..161] != [0; 32]))
+                && (plain[97..129] != [0; 32]
+                    || plain[129..161] != [0; 32]
+                    || plain[161..193] != [0; 32]))
             || (matches!(plain[0], BIRTH_PENDING | BIRTH_COMPLETE)
-                && (plain[97..129] == [0; 32] || plain[129..161] == [0; 32]))
+                && (plain[97..129] == [0; 32]
+                    || plain[129..161] == [0; 32]
+                    || plain[161..193] != [0; 32]))
+            || (matches!(plain[0], DECISION_PENDING | DECISION_COMPLETE)
+                && (plain[97..129] == [0; 32]
+                    || plain[129..161] == [0; 32]
+                    || plain[161..193] == [0; 32]))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -136,6 +153,9 @@ impl RootRecord {
             intent_digest: plain[129..161]
                 .try_into()
                 .expect("bounded birth intent digest"),
+            decision_digest: plain[161..193]
+                .try_into()
+                .expect("bounded decision intent digest"),
         })
     }
 }
@@ -224,6 +244,7 @@ pub(super) async fn admit_empty_root(
                 service,
                 birth_id: [0; 32],
                 intent_digest: [0; 32],
+                decision_digest: [0; 32],
             };
             write_keyring(selected, &record)?;
             record
@@ -393,6 +414,7 @@ mod tests {
             service: aura_core::hash::hash(platform.service.as_bytes()),
             birth_id: [0; 32],
             intent_digest: [0; 32],
+            decision_digest: [0; 32],
         };
         {
             let _guard = platform.namespace_owner()?.mutation_guard().await;
