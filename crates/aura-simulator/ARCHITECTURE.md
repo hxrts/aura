@@ -214,12 +214,15 @@ cargo test -p aura-simulator
 The `enrollment_lifecycle` native integration binary uses the production
 simulation-feature agent adapter for signed setup, transferred verifier pins,
 actual recipient acceptance or rejection, required disposal and same-profile
-reopen. Its public-app success path acknowledges a real nonsecret filesystem
+reopen. Its native-broker variant uses the signed original VM route and an
+authenticated first-envelope receiver ACK before host completion, cancellation,
+or typed refusal. The public-app success path acknowledges a real nonsecret filesystem
 completion write before one success terminal. The matching refusal points the
 same host handler at a blocked native directory and retains the original storage
 source, one Failed terminal for the submitted instance, and original task
-disposal. Broker prefill coverage proves signed invitation delivery, not the
-pre-adoption VM route. These fixtures do not prove production selected-identity
+disposal. Broker prefill coverage proves signed invitation delivery; the
+native-broker lifecycle fixture covers the pre-adoption VM route in process.
+These fixtures do not prove production selected-identity
 persistence, retry/reopen after refusal, or browser host storage behavior.
 
 ## References

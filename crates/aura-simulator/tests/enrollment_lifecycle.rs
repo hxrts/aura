@@ -32,6 +32,19 @@ async fn issued_with_broker_and_clock(
     Vec<tempfile::TempDir>,
     Arc<ManualPhysicalClock>,
 ) {
+    issued_with_broker_clock_and_sender(broker, false, Arc::new(ManualPhysicalClock::new(5_000)))
+        .await
+}
+
+async fn issued_with_broker_clock_and_sender(
+    broker: Option<aura_agent::BootstrapBrokerConfig>,
+    sender_uses_broker: bool,
+    clock: Arc<ManualPhysicalClock>,
+) -> (
+    SimulatedEnrollment,
+    Vec<tempfile::TempDir>,
+    Arc<ManualPhysicalClock>,
+) {
     let roots: Vec<_> = (0..2)
         .map(|_| tempfile::tempdir().expect("isolated native profile"))
         .collect();
@@ -43,7 +56,7 @@ async fn issued_with_broker_and_clock(
                 base_path: roots[index].path().to_path_buf(),
                 ..Default::default()
             },
-            bootstrap_broker: if index == 1 {
+            bootstrap_broker: if index == 1 || sender_uses_broker {
                 broker.clone().unwrap_or_default()
             } else {
                 aura_agent::BootstrapBrokerConfig::default()
@@ -57,7 +70,6 @@ async fn issued_with_broker_and_clock(
             seed: u64::from(seed),
         }
     });
-    let clock = Arc::new(ManualPhysicalClock::new(5_000));
     let startup = TimeoutBudget::from_start_and_timeout(
         &PhysicalTime {
             ts_ms: 5_000,
@@ -66,10 +78,19 @@ async fn issued_with_broker_and_clock(
         Duration::from_secs(120),
     )
     .expect("original selected startup window");
-    let fixture =
+    let fixture = if sender_uses_broker {
+        SimulatedEnrollment::prepare_native_broker(
+            profiles,
+            clock.clone(),
+            SharedTransport::default(),
+            startup,
+        )
+        .await
+    } else {
         SimulatedEnrollment::prepare(profiles, clock.clone(), SharedTransport::default(), startup)
             .await
-            .expect("genuine signed issuance");
+    }
+    .expect("genuine signed issuance");
     (fixture, roots, clock)
 }
 
@@ -125,6 +146,185 @@ async fn issued_through_broker() -> (
         .await
         .expect("actual signed delivery queued");
     (fixture, roots, supervisor, original)
+}
+
+async fn issued_with_original_vm_broker() -> (
+    SimulatedEnrollment,
+    Vec<tempfile::TempDir>,
+    aura_agent::TaskSupervisor,
+    String,
+    Arc<ManualPhysicalClock>,
+) {
+    use aura_agent::{
+        BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy, LocalBootstrapBrokerService,
+        TaskSupervisor,
+    };
+    let clock = Arc::new(ManualPhysicalClock::new(5_000));
+    let broker = LocalBootstrapBrokerService::bind(
+        "127.0.0.1:0",
+        Duration::from_secs(120),
+        "genuine-complete-vm-auth",
+        BootstrapBrokerLanBindPolicy::LoopbackOnly,
+    )
+    .await
+    .expect("actual original VM broker bind")
+    .with_mailbox_time_provider(clock.clone());
+    let supervisor = TaskSupervisor::new();
+    broker.start(&supervisor.group("genuine_complete_vm_broker"));
+    let url = broker.public_url().to_owned();
+    let config = BootstrapBrokerConfig::default()
+        .enabled(true)
+        .with_base_url(url.as_str())
+        .with_auth_token("genuine-complete-vm-auth");
+    let (fixture, roots, clock) =
+        issued_with_broker_clock_and_sender(Some(config), true, clock).await;
+    fixture
+        .issuer()
+        .drain_issuer_return_vm_mailbox()
+        .await
+        .expect("issuer publishes original signed return registration before import");
+    (fixture, roots, supervisor, url, clock)
+}
+
+async fn original_vm_broker_progress(
+    broker_url: &str,
+    subject: AuthorityId,
+    device: DeviceId,
+    digest: [u8; 32],
+) -> serde_json::Value {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let authority = broker_url
+        .strip_prefix("http://")
+        .expect("test broker uses explicit loopback HTTP")
+        .trim_end_matches('/');
+    let mut stream = tokio::net::TcpStream::connect(authority)
+        .await
+        .expect("actual broker progress connection");
+    let path = format!(
+        "/v2/bootstrap/enrollment-mailbox/progress-witness/{subject}/{device}/{}",
+        hex::encode(digest)
+    );
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer genuine-complete-vm-auth\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("private authenticated broker query");
+    let mut response = Vec::new();
+    (&mut stream)
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut response)
+        .await
+        .expect("bounded broker progress response");
+    assert!(
+        response.len() < 16 * 1024,
+        "broker progress response is bounded"
+    );
+    let divider = response
+        .windows(4)
+        .position(|bytes| bytes == b"\r\n\r\n")
+        .expect("broker progress HTTP divider");
+    assert!(
+        response.starts_with(b"HTTP/1.1 200 "),
+        "broker progress is authorized"
+    );
+    serde_json::from_slice(&response[divider + 4..]).expect("typed broker progress JSON")
+}
+
+async fn drive_brokered_import_until<T, M, F>(
+    fixture: &SimulatedEnrollment,
+    clock: &Arc<ManualPhysicalClock>,
+    broker_url: &str,
+    mut maintenance_pass: M,
+    goal: impl std::future::Future<Output = T>,
+) -> T
+where
+    M: FnMut() -> F,
+    F: std::future::Future<Output = Result<(), aura_core::AuraError>>,
+{
+    let transfer = fixture
+        .start()
+        .manifest_transfer
+        .as_ref()
+        .expect("original signed transfer");
+    let signed_expiry =
+        aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest::decode(
+            &transfer.manifest_code,
+        )
+        .expect("actual signed manifest shape")
+        .manifest
+        .expires_at_ms;
+    let mut goal = Box::pin(goal);
+    let mut maintenance = Box::pin(maintenance_pass());
+    let (subject, device, digest) = fixture
+        .original_mailbox_selector()
+        .expect("retained exact original mailbox selector");
+    let mut first_frame_queued = false;
+    let issuer = fixture.issuer().clone();
+    let mut issuer_drain = Some(Box::pin(issuer.drain_issuer_return_vm_mailbox()));
+    let mut drain_tick = tokio::time::interval(Duration::from_millis(100));
+    let mut tick = tokio::time::interval(Duration::from_millis(10));
+    let result = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            tokio::select! {
+                outcome = &mut goal => break outcome,
+                upkeep = &mut maintenance => {
+                    assert!(upkeep.is_ok() || matches!(&upkeep, Err(aura_core::AuraError::Internal { .. })),
+                        "independent mailbox upkeep preserves typed sync failure: {upkeep:?}");
+                    maintenance = Box::pin(maintenance_pass());
+                }
+                _outcome = async {
+                    match issuer_drain.as_mut() {
+                        Some(drain) => drain.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    issuer_drain = None;
+                }
+                _ = drain_tick.tick() => {
+                    if issuer_drain.is_none() {
+                        issuer_drain = Some(Box::pin(issuer.drain_issuer_return_vm_mailbox()));
+                    }
+                }
+                _ = tick.tick() => {
+                    if !first_frame_queued {
+                        let progress = original_vm_broker_progress(broker_url, subject, device, digest).await;
+                        first_frame_queued = progress["messages"].as_array().is_some_and(|messages| !messages.is_empty());
+                    }
+                    if first_frame_queued {
+                        continue;
+                    }
+                    if let Some(target) = clock.next_registered_deadline().await {
+                        let now = clock.now_ms();
+                        if target.value() > now
+                            && target.value() <= now + 1_000
+                            && target.value() < signed_expiry
+                            && target.value() < fixture.original_startup_window().deadline_at_ms()
+                        {
+                            clock.set_time(target.value());
+                        }
+                    }
+                }
+            }
+        }
+    })
+    .await;
+    match result {
+        Ok(result) => result,
+        Err(_) => {
+            let (subject, device, digest) = fixture
+                .original_mailbox_selector()
+                .expect("retained original signed mailbox selector");
+            let progress = original_vm_broker_progress(broker_url, subject, device, digest).await;
+            panic!("original signed broker VM/host timeout: registration={}, count={}, stage={}, clock={}, next={:?}",
+                progress["registration_present"] == true,
+                progress["messages"].as_array().map_or(0, Vec::len),
+                progress["messages"][0]["stage"].as_str().unwrap_or("absent"),
+                clock.now_ms(),
+                clock.next_registered_deadline().await.map(|d| d.value()));
+        }
+    }
 }
 
 #[tokio::test]
@@ -389,7 +589,8 @@ async fn genuine_public_app_enrollment_import_acknowledges_host_storage_and_reop
     use aura_core::{effects::StorageCoreEffects, AuraError};
 
     eprintln!("[genuine-app-import] issued enter");
-    let (fixture, _roots) = issued().await;
+    let (fixture, _roots, broker_supervisor, broker_url, clock) =
+        issued_with_original_vm_broker().await;
     eprintln!("[genuine-app-import] issued ready");
     let app = fixture.recipient_app();
     let host_root = tempfile::tempdir().expect("isolated real host storage");
@@ -398,162 +599,211 @@ async fn genuine_public_app_enrollment_import_acknowledges_host_storage_and_reop
     ));
     let instance = OperationInstanceId("genuine-public-app-enrollment".into());
     let mut refused_publication = None;
-    let result = async {
-        eprintln!("[genuine-app-import] init_signals enter");
-        aura_core::time::timeout::execute_with_timeout_budget(
-            fixture.selected_clock(),
-            fixture.original_startup_window(),
-            || async {
-                aura_app::AppCore::init_signals_with_hooks(&app)
-                    .await
-                    .map_err(|source| AuraError::Internal {
-                        message: "actual recipient app initialization failed".into(),
-                        source: Some(Arc::new(source)),
-                    })
-            },
-        )
-        .await
-        .map_err(|source| AuraError::Internal {
-            message: "original recipient startup window failed".into(),
-            source: Some(Arc::new(source)),
-        })?;
-        eprintln!("[genuine-app-import] init_signals ready");
-        let admission = app
-            .read()
-            .await
-            .enrollment_import_admission()
-            .cloned()
-            .ok_or_else(|| AuraError::invalid("actual recipient app admission missing"))?;
-        let transfer = fixture
-            .start()
-            .manifest_transfer
-            .as_ref()
-            .ok_or_else(|| AuraError::invalid("actual signed transfer missing"))?;
-        let host_write = host.clone();
-        let prior_events = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let prior = WorkflowHandoffSubmission::submit_with_instance_unpublished(
-            PublicAppSubmission(prior_events.clone()),
-            OperationId::device_enrollment(),
-            SemanticOperationKind::ImportDeviceEnrollmentCode,
-            instance.clone(),
-        );
-        let admitted = import_device_enrollment_with_terminal_status(
-            &app,
-            &admission,
-            fixture.start().enrollment_code.clone(),
-            Some(aura_app::ui_contract::EnrollmentManifestTransferInput {
-                manifest_code: transfer.manifest_code.clone(),
-                initiator_verifier_code: transfer.initiator_verifier_code.clone(),
-            }),
-            Some(instance.clone()),
-            EnrollmentImportHostPolicy::Finalize(Arc::new(move |completion| {
-                let host_write = host_write.clone();
-                Box::pin(async move {
-                    // This test record observes public completion data only. It
-                    // neither stores keys nor grants enrollment authority.
-                    let bytes = serde_json::to_vec(&(
-                        completion.subject_authority(),
-                        completion.device_id(),
-                        completion.invitation_id(),
-                        completion.manifest_digest(),
-                    ))
-                    .map_err(|source| AuraError::Storage {
-                        message: "host completion encoding failed".into(),
-                        source: Some(Arc::new(source)),
-                    })?;
-                    host_write
-                        .store("enrollment-completion", bytes)
+    let result =
+        async {
+            eprintln!("[genuine-app-import] init_signals enter");
+            aura_core::time::timeout::execute_with_timeout_budget(
+                fixture.selected_clock(),
+                fixture.original_startup_window(),
+                || async {
+                    aura_app::AppCore::init_signals_with_hooks(&app)
                         .await
-                        .map_err(|source| AuraError::Storage {
-                            message: "actual host storage acknowledgment failed".into(),
+                        .map_err(|source| AuraError::Internal {
+                            message: "actual recipient app initialization failed".into(),
                             source: Some(Arc::new(source)),
                         })
-                })
-            })),
-        );
-        let mut observation = match admitted {
-            Ok(observation) => observation,
-            Err(refusal) => {
-                let primary = refusal.source_error().clone();
-                refused_publication = Some(prior.fail(refusal.semantic_error()).await);
-                drop(refusal);
-                return Err(primary);
-            }
-        };
-        if let Err((prior, error)) = observation.accept_handoff(prior) {
-            refused_publication = Some(prior.fail(error.semantic_error()).await);
-            return Err(error.source_error().clone());
-        }
-
-        eprintln!("[genuine-app-import] original observation enter");
-        if !prior_events.lock().unwrap().is_empty() {
-            return Err(AuraError::invalid(
-                "handed-off prior owner published a terminal",
-            ));
-        }
-        let outcome = observation.await;
-        eprintln!(
-            "[genuine-app-import] original observation ready: {:?}",
-            outcome.terminal
-        );
-        let completion = outcome.result?;
-        let terminal = outcome
-            .terminal
-            .ok_or_else(|| AuraError::invalid("actual app terminal missing"))?;
-        if terminal.status.phase != SemanticOperationPhase::Succeeded {
-            return Err(AuraError::invalid("actual app import did not succeed"));
-        }
-        let expected = serde_json::to_vec(&(
-            completion.subject_authority(),
-            completion.device_id(),
-            completion.invitation_id(),
-            completion.manifest_digest(),
-        ))
-        .map_err(|source| AuraError::Storage {
-            message: "completion observation encoding failed".into(),
-            source: Some(Arc::new(source)),
-        })?;
-        let actual = host
-            .retrieve("enrollment-completion")
+                },
+            )
             .await
-            .map_err(|source| AuraError::Storage {
-                message: "host completion readback failed".into(),
+            .map_err(|source| AuraError::Internal {
+                message: "original recipient startup window failed".into(),
                 source: Some(Arc::new(source)),
             })?;
-        if actual.as_ref() != Some(&expected) {
-            return Err(AuraError::invalid(
-                "actual persisted host completion differs",
-            ));
-        }
-        let facts = app.read().await.authoritative_semantic_facts();
-        let terminals: Vec<_> = facts
-            .iter()
-            .filter_map(|fact| match fact {
-                aura_app::ui_contract::AuthoritativeSemanticFact::OperationStatus {
-                    instance_id,
-                    status,
-                    ..
-                } if instance_id.as_ref() == Some(&instance)
-                    && matches!(
-                        status.phase,
-                        SemanticOperationPhase::Succeeded
-                            | SemanticOperationPhase::Failed
-                            | SemanticOperationPhase::Cancelled
-                    ) =>
-                {
-                    Some(status.phase)
+            eprintln!("[genuine-app-import] init_signals ready");
+            let admission = app
+                .read()
+                .await
+                .enrollment_import_admission()
+                .cloned()
+                .ok_or_else(|| AuraError::invalid("actual recipient app admission missing"))?;
+            let transfer = fixture
+                .start()
+                .manifest_transfer
+                .as_ref()
+                .ok_or_else(|| AuraError::invalid("actual signed transfer missing"))?;
+            let host_write = host.clone();
+            let prior_events = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let prior = WorkflowHandoffSubmission::submit_with_instance_unpublished(
+                PublicAppSubmission(prior_events.clone()),
+                OperationId::device_enrollment(),
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+                instance.clone(),
+            );
+            let admitted = import_device_enrollment_with_terminal_status(
+                &app,
+                &admission,
+                fixture.start().enrollment_code.clone(),
+                Some(aura_app::ui_contract::EnrollmentManifestTransferInput {
+                    manifest_code: transfer.manifest_code.clone(),
+                    initiator_verifier_code: transfer.initiator_verifier_code.clone(),
+                }),
+                Some(instance.clone()),
+                EnrollmentImportHostPolicy::Finalize(Arc::new(move |completion| {
+                    let host_write = host_write.clone();
+                    Box::pin(async move {
+                        // This test record observes public completion data only. It
+                        // neither stores keys nor grants enrollment authority.
+                        let bytes = serde_json::to_vec(&(
+                            completion.subject_authority(),
+                            completion.device_id(),
+                            completion.invitation_id(),
+                            completion.manifest_digest(),
+                        ))
+                        .map_err(|source| AuraError::Storage {
+                            message: "host completion encoding failed".into(),
+                            source: Some(Arc::new(source)),
+                        })?;
+                        host_write
+                            .store("enrollment-completion", bytes)
+                            .await
+                            .map_err(|source| AuraError::Storage {
+                                message: "actual host storage acknowledgment failed".into(),
+                                source: Some(Arc::new(source)),
+                            })
+                    })
+                })),
+            );
+            let mut observation = match admitted {
+                Ok(observation) => observation,
+                Err(refusal) => {
+                    let primary = refusal.source_error().clone();
+                    refused_publication = Some(prior.fail(refusal.semantic_error()).await);
+                    drop(refusal);
+                    return Err(primary);
                 }
-                _ => None,
-            })
-            .collect();
-        if terminals != vec![SemanticOperationPhase::Succeeded] {
-            return Err(AuraError::invalid(
-                "original app instance must have one success terminal",
-            ));
+            };
+            if let Err((prior, error)) = observation.accept_handoff(prior) {
+                refused_publication = Some(prior.fail(error.semantic_error()).await);
+                return Err(error.source_error().clone());
+            }
+
+            eprintln!("[genuine-app-import] original observation enter");
+            if !prior_events.lock().unwrap().is_empty() {
+                return Err(AuraError::invalid(
+                    "handed-off prior owner published a terminal",
+                ));
+            }
+            let bridge = fixture.recipient().clone().as_runtime_bridge();
+            let outcome = drive_brokered_import_until(
+                &fixture,
+                &clock,
+                &broker_url,
+                || {
+                    aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                        &app, &bridge,
+                    )
+                },
+                observation,
+            )
+            .await;
+            eprintln!(
+                "[genuine-app-import] original observation ready: {:?}",
+                outcome.terminal
+            );
+            let completion = outcome.result?;
+            let progress = original_vm_broker_progress(
+                &broker_url,
+                completion.subject_authority(),
+                completion.device_id(),
+                completion.manifest_digest(),
+            )
+            .await;
+            if progress["subject"] != completion.subject_authority().to_string()
+                || progress["device"] != completion.device_id().to_string()
+                || progress["manifest_digest"] != hex::encode(completion.manifest_digest())
+                || progress["registration_present"] != true
+                || progress["messages"]
+                    .as_array()
+                    .is_none_or(|messages| messages.is_empty() || messages.len() > 4)
+                || progress["messages"][0]["stage"] != "receiver_acknowledged_retained_frame"
+            {
+                return Err(AuraError::invalid(format!(
+                "exact first broker receiver ACK is absent: registration={}, count={}, stage={}",
+                progress["registration_present"] == true,
+                progress["messages"].as_array().map_or(0, Vec::len),
+                progress["messages"][0]["stage"].as_str().unwrap_or("absent")
+            )));
+            }
+            let message_id = progress["messages"][0]["message_id"]
+                .as_str()
+                .ok_or_else(|| AuraError::invalid("original broker ACK message ID absent"))?;
+            uuid::Uuid::parse_str(message_id)
+                .map_err(|_| AuraError::invalid("original broker ACK message ID malformed"))?;
+            let digest = progress["messages"][0]["envelope_digest"]
+                .as_str()
+                .ok_or_else(|| AuraError::invalid("original broker ACK envelope digest absent"))?;
+            if hex::decode(digest).map_or(true, |bytes| bytes.len() != 32) {
+                return Err(AuraError::invalid(
+                    "original broker ACK envelope digest malformed",
+                ));
+            }
+            let terminal = outcome
+                .terminal
+                .ok_or_else(|| AuraError::invalid("actual app terminal missing"))?;
+            if terminal.status.phase != SemanticOperationPhase::Succeeded {
+                return Err(AuraError::invalid("actual app import did not succeed"));
+            }
+            let expected = serde_json::to_vec(&(
+                completion.subject_authority(),
+                completion.device_id(),
+                completion.invitation_id(),
+                completion.manifest_digest(),
+            ))
+            .map_err(|source| AuraError::Storage {
+                message: "completion observation encoding failed".into(),
+                source: Some(Arc::new(source)),
+            })?;
+            let actual = host
+                .retrieve("enrollment-completion")
+                .await
+                .map_err(|source| AuraError::Storage {
+                    message: "host completion readback failed".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            if actual.as_ref() != Some(&expected) {
+                return Err(AuraError::invalid(
+                    "actual persisted host completion differs",
+                ));
+            }
+            let facts = app.read().await.authoritative_semantic_facts();
+            let terminals: Vec<_> = facts
+                .iter()
+                .filter_map(|fact| match fact {
+                    aura_app::ui_contract::AuthoritativeSemanticFact::OperationStatus {
+                        instance_id,
+                        status,
+                        ..
+                    } if instance_id.as_ref() == Some(&instance)
+                        && matches!(
+                            status.phase,
+                            SemanticOperationPhase::Succeeded
+                                | SemanticOperationPhase::Failed
+                                | SemanticOperationPhase::Cancelled
+                        ) =>
+                    {
+                        Some(status.phase)
+                    }
+                    _ => None,
+                })
+                .collect();
+            if terminals != vec![SemanticOperationPhase::Succeeded] {
+                return Err(AuraError::invalid(
+                    "original app instance must have one success terminal",
+                ));
+            }
+            Ok::<_, AuraError>(expected)
         }
-        Ok::<_, AuraError>(expected)
-    }
-    .await;
+        .await;
     // Release the external AppCore/runtime projection before requesting a true
     // profile reopen. Strict task shutdown alone cannot release this Arc.
     drop(app);
@@ -570,6 +820,10 @@ async fn genuine_public_app_enrollment_import_acknowledges_host_storage_and_reop
         .finish_accepted()
         .await
         .expect("actual native confirmation and strict original disposal");
+    broker_supervisor
+        .shutdown_with_timeout(Duration::from_secs(5))
+        .await
+        .expect("original VM broker disposes after exact ACK");
     eprintln!("[genuine-app-import] finish_accepted ready");
     drop(host);
     let reopened_host = aura_effects::FilesystemStorageHandler::new(host_root.path().to_path_buf());
@@ -600,7 +854,8 @@ async fn genuine_public_app_enrollment_cancelled_before_host_ack_has_one_termina
     };
     use aura_core::{effects::StorageCoreEffects, AuraError};
 
-    let (fixture, _roots) = issued().await;
+    let (fixture, _roots, broker_supervisor, broker_url, clock) =
+        issued_with_original_vm_broker().await;
     let issuer = fixture.issuer().clone();
     let recipient = fixture.recipient().clone();
     let app = fixture.recipient_app();
@@ -652,14 +907,21 @@ async fn genuine_public_app_enrollment_cancelled_before_host_ack_has_one_termina
             initiator_verifier_code: transfer.initiator_verifier_code.clone(),
         }),
         Some(instance.clone()),
-        EnrollmentImportHostPolicy::Finalize(Arc::new(move |_completion| {
+        EnrollmentImportHostPolicy::Finalize(Arc::new(move |completion| {
             let entered = entered
                 .lock()
                 .expect("original host callback gate")
                 .take()
                 .expect("one original host invocation");
+            let selector = (
+                completion.subject_authority(),
+                completion.device_id(),
+                completion.manifest_digest(),
+            );
             Box::pin(async move {
-                entered.send(()).expect("original host callback observed");
+                entered
+                    .send(selector)
+                    .expect("original host callback observed");
                 futures::future::pending::<Result<(), AuraError>>().await
             })
         })),
@@ -669,18 +931,37 @@ async fn genuine_public_app_enrollment_cancelled_before_host_ack_has_one_termina
         .accept_handoff(prior)
         .unwrap_or_else(|_| panic!("original workflow handoff"));
     let mut observation = Box::pin(observation);
-    let reached_host = tokio::select! {
-        result = observed => result.is_ok(),
-        _ = &mut observation => false,
-    };
+    let bridge = fixture.recipient().clone().as_runtime_bridge();
+    let host_selector = drive_brokered_import_until(
+        &fixture,
+        &clock,
+        &broker_url,
+        || aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
+        async {
+            tokio::select! {
+                result = observed => result.ok(),
+                _ = &mut observation => None,
+            }
+        },
+    )
+    .await;
+    if let Some((subject, device, digest)) = host_selector {
+        let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
+        assert_eq!(progress["registration_present"], true);
+        assert_eq!(
+            progress["messages"][0]["stage"],
+            "receiver_acknowledged_retained_frame"
+        );
+    }
     drop(observation);
+    drop(bridge);
     let reported = fixture
         .fail(aura_agent::AgentError::config(
             "original app import observer cancelled before host acknowledgment",
         ))
         .await;
     assert!(
-        reached_host,
+        host_selector.is_some(),
         "actual host callback was not reached: {reported}"
     );
     let terminals: Vec<_> = app
@@ -711,6 +992,10 @@ async fn genuine_public_app_enrollment_cancelled_before_host_ack_has_one_termina
     assert_eq!(host.retrieve("enrollment-completion").await.unwrap(), None);
     assert!(issuer.runtime().tasks().active_tasks().is_empty());
     assert!(recipient.runtime().tasks().active_tasks().is_empty());
+    broker_supervisor
+        .shutdown_with_timeout(Duration::from_secs(5))
+        .await
+        .expect("original VM broker disposes after cancelled host observer");
 }
 
 #[tokio::test]
@@ -727,7 +1012,9 @@ async fn genuine_public_app_enrollment_selected_provider_fault_refuses_host_ack(
     use aura_core::AuraError;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    let (fixture, _roots, clock) = issued_with_broker_and_clock(None).await;
+    let (fixture, _roots, broker_supervisor, broker_url, clock) =
+        issued_with_original_vm_broker().await;
+    let driver_clock = clock.clone();
     let app = fixture.recipient_app();
     aura_app::AppCore::init_signals_with_hooks(&app)
         .await
@@ -750,6 +1037,8 @@ async fn genuine_public_app_enrollment_selected_provider_fault_refuses_host_ack(
     let selected_native = native.clone();
     let committed = Arc::new(AtomicBool::new(false));
     let selected_commit = committed.clone();
+    let host_selector = Arc::new(std::sync::Mutex::new(None));
+    let observed_selector = host_selector.clone();
     let instance = OperationInstanceId("genuine-public-app-provider-refusal".into());
     let prior_events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let prior = WorkflowHandoffSubmission::submit_with_instance_unpublished(
@@ -767,7 +1056,12 @@ async fn genuine_public_app_enrollment_selected_provider_fault_refuses_host_ack(
             initiator_verifier_code: transfer.initiator_verifier_code.clone(),
         }),
         Some(instance),
-        EnrollmentImportHostPolicy::Prepare(Arc::new(move |_completion| {
+        EnrollmentImportHostPolicy::Prepare(Arc::new(move |completion| {
+            *observed_selector.lock().unwrap() = Some((
+                completion.subject_authority(),
+                completion.device_id(),
+                completion.manifest_digest(),
+            ));
             let clock = clock.clone();
             let native = selected_native.clone();
             let committed = selected_commit.clone();
@@ -805,7 +1099,25 @@ async fn genuine_public_app_enrollment_selected_provider_fault_refuses_host_ack(
     observation
         .accept_handoff(prior)
         .unwrap_or_else(|_| panic!("original workflow handoff"));
-    let outcome = observation.await;
+    let bridge = fixture.recipient().clone().as_runtime_bridge();
+    let outcome = drive_brokered_import_until(
+        &fixture,
+        &driver_clock,
+        &broker_url,
+        || aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
+        observation,
+    )
+    .await;
+    let (subject, device, digest) = host_selector
+        .lock()
+        .unwrap()
+        .expect("selected provider refusal follows original completion");
+    let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
+    assert_eq!(progress["registration_present"], true);
+    assert_eq!(
+        progress["messages"][0]["stage"],
+        "receiver_acknowledged_retained_frame"
+    );
     let failure = outcome
         .result
         .expect_err("selected provider refused final host ACK");
@@ -832,11 +1144,16 @@ async fn genuine_public_app_enrollment_selected_provider_fault_refuses_host_ack(
         original_provider,
         "original selected provider source retained"
     );
+    drop(bridge);
     drop(app);
     let (_reported, stopped) = fixture
         .settle_accepted_host_failure(failure.into())
         .await
         .expect("provider refusal and original native completion settle separately");
+    broker_supervisor
+        .shutdown_with_timeout(Duration::from_secs(5))
+        .await
+        .expect("original VM broker disposes after selected provider refusal");
     drop(admission);
     stopped
         .reopen_and_shutdown(SharedTransport::default())
@@ -856,7 +1173,8 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
     };
     use aura_core::{effects::StorageCoreEffects, AuraError};
 
-    let (fixture, _roots) = issued().await;
+    let (fixture, _roots, broker_supervisor, broker_url, clock) =
+        issued_with_original_vm_broker().await;
     let issuer = fixture.issuer().clone();
     let recipient = fixture.recipient().clone();
     let app = fixture.recipient_app();
@@ -893,6 +1211,8 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
     ));
     let original_storage_source = Arc::new(std::sync::Mutex::new(None));
     let observed_storage_source = original_storage_source.clone();
+    let host_selector = Arc::new(std::sync::Mutex::new(None));
+    let observed_selector = host_selector.clone();
     let instance = OperationInstanceId("genuine-public-app-host-refusal".into());
     let prior_events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let prior = WorkflowHandoffSubmission::submit_with_instance_unpublished(
@@ -913,6 +1233,11 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
         EnrollmentImportHostPolicy::Finalize(Arc::new(move |completion| {
             let host = host.clone();
             let observed_storage_source = observed_storage_source.clone();
+            *observed_selector.lock().unwrap() = Some((
+                completion.subject_authority(),
+                completion.device_id(),
+                completion.manifest_digest(),
+            ));
             Box::pin(async move {
                 let bytes = serde_json::to_vec(&(
                     completion.subject_authority(),
@@ -950,7 +1275,25 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
     observation
         .accept_handoff(prior)
         .unwrap_or_else(|_| panic!("original workflow handoff"));
-    let (outcome, recovery) = observation.observe_with_host_recovery().await;
+    let bridge = fixture.recipient().clone().as_runtime_bridge();
+    let (outcome, recovery) = drive_brokered_import_until(
+        &fixture,
+        &clock,
+        &broker_url,
+        || aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
+        observation.observe_with_host_recovery(),
+    )
+    .await;
+    let (subject, device, digest) = host_selector
+        .lock()
+        .unwrap()
+        .expect("actual host refusal follows original verified completion");
+    let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
+    assert_eq!(progress["registration_present"], true);
+    assert_eq!(
+        progress["messages"][0]["stage"],
+        "receiver_acknowledged_retained_frame"
+    );
     let original = original_storage_source
         .lock()
         .unwrap()
@@ -1000,11 +1343,16 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
         .collect();
     assert_eq!(terminals, vec![SemanticOperationPhase::Failed]);
     assert!(blocked_directory.path().is_file());
+    drop(bridge);
     drop(app);
     let (reported, stopped) = fixture
         .settle_accepted_host_failure(failure.into())
         .await
         .expect("actual accepted resources settle while host failure remains primary");
+    broker_supervisor
+        .shutdown_with_timeout(Duration::from_secs(5))
+        .await
+        .expect("original VM broker disposes after typed host refusal");
     let original_storage = original
         .downcast_ref::<aura_core::effects::StorageError>()
         .expect("actual original storage error type");

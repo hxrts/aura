@@ -178,13 +178,16 @@ ownership and complete native/browser restart coverage remain required.
 The simulation-feature `runtime/simulation_factory/enrollment.rs` adapter retains
 the original issuer continuation, explicit participant profiles, selected clock
 and startup budget while exercising signed setup export, transferred pins, native
-admission, required disposal and same-profile reopen. Its ten
+admission, required disposal and same-profile reopen. An explicit native-broker
+mode assembles owned testing profiles without the shared simulation inbox, so
+the original signed VM frame uses the authenticated broker and the receiver
+retains an exact first-frame ACK. Its twelve
 `enrollment_lifecycle` tests cover accept, reject, confirmed reopen, failure
 settlement, the Pending/commit cleanup race, broker invitation prefill, and
 public-app host success and real filesystem refusal. The refusal retains the
 original storage source and one Failed terminal for the submitted instance.
 These in-process observations do not establish production selected-identity
-persistence or browser transport delivery. The local broker service is exported
+persistence or independent-process/browser transport delivery. The local broker service is exported
 only for native simulation fixtures; this export grants no production route.
 
 ## Invariants

@@ -38,6 +38,7 @@ pub struct SimulatedEnrollment {
     profiles: [EnrollmentParticipantProfile; 2],
     clock: Arc<dyn PhysicalTimeEffects>,
     transport: SharedTransport,
+    native_broker: bool,
     startup: TimeoutBudget,
     start: DeviceEnrollmentStart,
     invitation: crate::handlers::invitation::Invitation,
@@ -223,24 +224,46 @@ async fn assemble(
     clock: Arc<dyn PhysicalTimeEffects>,
     transport: SharedTransport,
     startup: &TimeoutBudget,
+    native_broker: bool,
 ) -> AgentResult<Arc<AuraAgent>> {
     let context = aura_core::context::EffectContext::new(
         profile.authority,
         profile.context,
-        aura_core::effects::ExecutionMode::Simulation { seed: profile.seed },
+        if native_broker {
+            aura_core::effects::ExecutionMode::Testing
+        } else {
+            aura_core::effects::ExecutionMode::Simulation { seed: profile.seed }
+        },
     );
-    let mut builder = crate::core::AgentBuilder::new()
-        .with_authority(profile.authority)
-        .with_config(profile.config.clone())
-        .with_physical_time_provider(clock.clone());
-    if profile.config.bootstrap_broker.enabled {
-        builder = builder.with_rendezvous_config(profile.config.rendezvous_config());
-    }
-    let agent = Arc::new(
-        builder
-            .build_simulation_async_with_shared_transport(profile.seed, &context, transport)
-            .await?,
-    );
+    let agent = if native_broker {
+        let owner =
+            crate::runtime::builder::TestingOwnedProfileCapability::acquire(&profile.config)?;
+        let mut builder = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(owner)
+            .with_authority(profile.authority)
+            .with_config(profile.config.clone())
+            .with_physical_time_provider(clock.clone())
+            .with_sync_config(Default::default());
+        if profile.config.bootstrap_broker.enabled {
+            builder = builder.with_rendezvous_config(profile.config.rendezvous_config());
+        }
+        Arc::new(AuraAgent::new(
+            builder.build(&context).await.map_err(AgentError::from)?,
+            profile.authority,
+        ))
+    } else {
+        let mut builder = crate::core::AgentBuilder::new()
+            .with_authority(profile.authority)
+            .with_config(profile.config.clone())
+            .with_physical_time_provider(clock.clone());
+        if profile.config.bootstrap_broker.enabled {
+            builder = builder.with_rendezvous_config(profile.config.rendezvous_config());
+        }
+        Arc::new(
+            builder
+                .build_simulation_async_with_shared_transport(profile.seed, &context, transport)
+                .await?,
+        )
+    };
     let initialized = async {
         if agent.runtime().effects().config().storage.base_path != profile.config.storage.base_path
         {
@@ -281,13 +304,57 @@ impl SimulatedEnrollment {
         transport: SharedTransport,
         startup: TimeoutBudget,
     ) -> AgentResult<Self> {
+        Self::prepare_with_mode(profiles, clock, transport, startup, false).await
+    }
+
+    /// Reuse the complete signed lifecycle with the native guarded transport.
+    /// Both participants must explicitly opt into the development broker; the
+    /// production default remains disabled. This fixture mode cannot silently
+    /// fall back to the simulation inbox for the original first frame.
+    pub async fn prepare_native_broker(
+        profiles: [EnrollmentParticipantProfile; 2],
+        clock: Arc<dyn PhysicalTimeEffects>,
+        transport: SharedTransport,
+        startup: TimeoutBudget,
+    ) -> AgentResult<Self> {
+        if profiles
+            .iter()
+            .any(|profile| !profile.config.bootstrap_broker.enabled)
+        {
+            return Err(AgentError::config(
+                "native broker fixture requires both exact participants",
+            ));
+        }
+        Self::prepare_with_mode(profiles, clock, transport, startup, true).await
+    }
+
+    async fn prepare_with_mode(
+        profiles: [EnrollmentParticipantProfile; 2],
+        clock: Arc<dyn PhysicalTimeEffects>,
+        transport: SharedTransport,
+        startup: TimeoutBudget,
+        native_broker: bool,
+    ) -> AgentResult<Self> {
         let mut acquired = Vec::new();
         let mut issued_owner = None;
         let result = async {
-            let issuer = assemble(&profiles[0], clock.clone(), transport.clone(), &startup).await?;
+            let issuer = assemble(
+                &profiles[0],
+                clock.clone(),
+                transport.clone(),
+                &startup,
+                native_broker,
+            )
+            .await?;
             acquired.push(issuer.clone());
-            let recipient =
-                assemble(&profiles[1], clock.clone(), transport.clone(), &startup).await?;
+            let recipient = assemble(
+                &profiles[1],
+                clock.clone(),
+                transport.clone(),
+                &startup,
+                native_broker,
+            )
+            .await?;
             acquired.push(recipient.clone());
             let issuer_app = app(issuer.clone())?;
             let recipient_app = app(recipient.clone())?;
@@ -329,6 +396,7 @@ impl SimulatedEnrollment {
                 profiles,
                 clock: clock.clone(),
                 transport,
+                native_broker,
                 startup: startup.clone(),
                 start,
                 invitation,
@@ -362,6 +430,25 @@ impl SimulatedEnrollment {
     /// The original signed issuance transfer, without reconstructed execution authority.
     pub fn start(&self) -> &DeviceEnrollmentStart {
         &self.start
+    }
+    /// Read-only selector retained by the original signed issuer owner.
+    pub fn original_mailbox_selector(
+        &self,
+    ) -> Option<(AuthorityId, aura_core::DeviceId, [u8; 32])> {
+        let session = aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
+            &self.invitation.invitation_id,
+        );
+        self.issuer
+            .runtime()
+            .effects()
+            .original_mailbox_issuer(session)
+            .map(|retained| {
+                (
+                    retained.manifest().subject,
+                    retained.manifest().invitee_device,
+                    retained.digest(),
+                )
+            })
     }
     /// The original selected physical-time provider.
     pub fn selected_clock(&self) -> &Arc<dyn PhysicalTimeEffects> {
@@ -700,6 +787,7 @@ impl SimulatedEnrollment {
             profiles,
             clock,
             transport,
+            native_broker,
             startup,
             start,
             invitation,
@@ -715,6 +803,7 @@ impl SimulatedEnrollment {
         Ok(StoppedEnrollmentProfiles {
             profiles,
             clock,
+            native_broker,
             startup,
             start,
             invitation,
@@ -728,6 +817,7 @@ impl SimulatedEnrollment {
 pub struct StoppedEnrollmentProfiles {
     profiles: [EnrollmentParticipantProfile; 2],
     clock: Arc<dyn PhysicalTimeEffects>,
+    native_broker: bool,
     startup: TimeoutBudget,
     start: DeviceEnrollmentStart,
     invitation: crate::handlers::invitation::Invitation,
@@ -804,6 +894,7 @@ impl StoppedEnrollmentProfiles {
                 self.clock.clone(),
                 transport.clone(),
                 &self.startup,
+                self.native_broker,
             )
             .await?;
             acquired.push(issuer.clone());
@@ -812,6 +903,7 @@ impl StoppedEnrollmentProfiles {
                 self.clock.clone(),
                 transport,
                 &self.startup,
+                self.native_broker,
             )
             .await?;
             acquired.push(recipient.clone());
@@ -871,6 +963,7 @@ impl StoppedEnrollmentProfiles {
                 self.clock.clone(),
                 transport.clone(),
                 &self.startup,
+                self.native_broker,
             )
             .await?;
             acquired.push(issuer.clone());
@@ -879,6 +972,7 @@ impl StoppedEnrollmentProfiles {
                 self.clock.clone(),
                 transport,
                 &self.startup,
+                self.native_broker,
             )
             .await?;
             acquired.push(recipient.clone());
