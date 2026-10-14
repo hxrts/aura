@@ -501,6 +501,8 @@ ci-build-cache-policy:
     bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/runtime-refs.sh scripts/web/serve-static.sh
     bash scripts/dev/test-cache-rank.sh
     bash scripts/dev/test-cold-cache-store.sh
+    bash scripts/dev/test-run-exact-fixtures.sh
+    bash scripts/dev/test-run-ownership-fast.sh
     bash scripts/dev/test-arch-lane-dispatch.sh
     bash scripts/dev/test-cargo-in-nix.sh
     bash scripts/dev/test-cargo-incremental-default.sh
@@ -816,6 +818,14 @@ ci-accept-chain-stack:
 
 ci-ownership-policy:
     just _policy-check check ownership-policy
+
+# Fast source-scoped lint preflight; full ci-ownership-policy remains the checkpoint gate.
+ci-ownership-fast *FILES:
+    bash scripts/dev/run-ownership-fast.sh {{ FILES }}
+
+# One compile and exact discovery/execution of a declared libtest inventory.
+ci-ownership-exact *FLAGS:
+    bash scripts/dev/run-exact-fixtures.sh {{ FLAGS }}
 
 ci-domain-fact-model:
     just _policy-check check domain-fact-model

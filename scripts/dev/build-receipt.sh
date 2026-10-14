@@ -106,6 +106,22 @@ aura_receipt_safe_failure_identity() {
   printf 'test %s failed%s; details in protected log\n' "$name" "${location:+ at $location}"
 }
 
+aura_receipt_source_fingerprint() {
+  local checkout="$1" revision path
+  revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$revision" ]] || return 1
+  {
+    printf '%s\n' "$revision"
+    git -C "$checkout" diff HEAD --binary
+    while IFS= read -r -d '' path; do
+      printf '%s\0' "$path"
+      if [[ -L "$checkout/$path" ]]; then readlink "$checkout/$path";
+      elif [[ -f "$checkout/$path" ]]; then sha256sum "$checkout/$path";
+      else printf 'missing\n'; fi
+    done < <(git -C "$checkout" ls-files --others --exclude-standard -z)
+  } | sha256sum | awk '{print $1}'
+}
+
 aura_receipt_init() {
   local checkout="$1" build_lane="$2" directory fingerprint revision identity argv path command_log
   shift 2
@@ -116,23 +132,8 @@ aura_receipt_init() {
   command_log="$(mktemp "$directory/command.XXXXXX.log")"
   export AURA_BUILD_COMMAND_LOG="$command_log"
   revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
-  fingerprint=''
-  if [[ -n "$revision" ]]; then
-    # Include new nonignored modules, as well as tracked/staged edits, deletions
-    # and executable-bit changes. Ignored caches and work notes are excluded.
-    fingerprint="$(
-      {
-        printf '%s\n' "$revision"
-        git -C "$checkout" diff HEAD --binary
-        while IFS= read -r -d '' path; do
-          printf '%s\0' "$path"
-          if [[ -L "$checkout/$path" ]]; then readlink "$checkout/$path";
-          elif [[ -f "$checkout/$path" ]]; then sha256sum "$checkout/$path";
-          else printf 'missing\n'; fi
-        done < <(git -C "$checkout" ls-files --others --exclude-standard -z)
-      } | sha256sum | awk '{print $1}'
-    )"
-  fi
+  # Include tracked edits and new nonignored modules; cache artifacts are ignored.
+  fingerprint="$(aura_receipt_source_fingerprint "$checkout" || true)"
   identity="$(ps -p "$$" -o lstart= 2>/dev/null || true)"
   argv="$(jq -cn --args '$ARGS.positional' -- "$@")"
   aura_receipt_cargo_metadata "$@"

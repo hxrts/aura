@@ -2131,6 +2131,19 @@ Acquisition waits at most 900 seconds in compile-fail suites. A timeout retains 
 
 `just ci-ownership-policy` executes the app/agent compile-fail suites, explicitly enabled signals compile-fail suite and native process-lock integration regression sequentially. Required suites fail when Cargo is unavailable or returns an unsuccessful version status; a signals-disabled build contains no pretend passing guard. The fs2 implementation is pinned to 0.4.3 and uses pre-MSRV descriptor APIs; Windows and Unix use their native process-scoped locks.
 
+For an iteration on a few Rust files, `just ci-ownership-fast
+crates/aura-agent/src/path.rs` compiles the ownership lint once and runs six
+source-scoped ownership modes against the named crate files. This is a fast
+preflight; `just ci-ownership-policy` remains the integration gate. For exact
+native fixtures, use `just ci-ownership-exact --package hxrts-aura-agent
+--lib --expected-count 2 --name module::first --name module::second` (or
+`--test <binary>`). The driver requires the declared count and distinct exact
+names before starting, compiles one libtest executable for a frozen source
+fingerprint, then discovers and executes each name under one guarded build
+lifetime. Its receipt records the inventory and each compile, discovery and
+execution result; a source change, missing fixture, failure or ignored test
+fails the batch. Run the full ownership aggregate at the combined checkpoint.
+
 Required ownership coverage checks three separate forms of evidence: Rust test attributes without ignore annotations, exact names published by the selected harness, and successful execution of every required test. The signals harness is selected with `--features signals`. The process-lock lane requires the forced termination, shared namespace and native IO source regressions; its child-process helper does not satisfy coverage. Captured pretty harness output keeps nested trybuild diagnostics from splitting result lines. Zero-test, ignored, failed and name-lookalike output cannot satisfy the gate. When adding a required ownership test, update the typed suite inventory and its validator regressions; do not replace execution evidence with a successful Cargo exit status.
 
 ### Public signature ingress provenance regressions
