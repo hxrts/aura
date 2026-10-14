@@ -48,9 +48,12 @@ private_exchange() { # instance method receipt-label < single request JSON
   fi
 }
 
-private_wait() { # instance label predicate jq program, expected operation instance
-  local instance=$1 label=$2 predicate=$3 expected=$4 after=null deadline remaining response version request counter=0
-  deadline=$((SECONDS + 240))
+private_wait() { # instance label predicate jq program, expected operation and device
+  local instance=$1 label=$2 predicate=$3 expected=$4 expected_device=${5:-} after=null deadline remaining response version request counter=0
+  local wait_seconds=${AURA_E2E_PRIVATE_WAIT_SECONDS:-240}
+  [[ "$wait_seconds" =~ ^[1-9][0-9]{0,2}$ ]] || return 2
+  (( wait_seconds <= 240 )) || return 2
+  deadline=$((SECONDS + wait_seconds))
   while (( SECONDS < deadline )); do
     remaining=$((deadline - SECONDS))
     (( remaining > 0 )) || break
@@ -77,7 +80,7 @@ private_wait() { # instance label predicate jq program, expected operation insta
       echo "device enrollment succeeded without its host acknowledgment; inspect $PRIVATE_RECEIPT" >&2
       return 1
     fi
-    if jq -e --arg operation "$expected" "$predicate" <<< "$response" >/dev/null; then
+    if jq -e --arg operation "$expected" --arg device "$expected_device" "$predicate" <<< "$response" >/dev/null; then
       PRIVATE_RESPONSE=$response
       return 0
     fi
@@ -225,9 +228,21 @@ private_wait barbara-tui accepted '
   .payload.event.snapshot as $s |
   ([ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and .fact.device_count==2 and .fact.device_id!=null) ] | last) as $ack |
   if any($s.operations[]?; .id=="device_enrollment" and .instance_id==$operation and .state=="succeeded")
-  then ($ack!=null and ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$ack.fact.device_id) ]|length)==1)
-  else false end' "$import_operation"
+  then ($ack!=null and $ack.fact.device_id==$device)
+  else false end' "$import_operation" "$device"
 accepted_event=$PRIVATE_RESPONSE
+
+# The canonical devices list is a Settings/Devices projection. Enrollment can
+# succeed during onboarding while that section is not selected; observe it in
+# its owning section after the exact host ACK instead of treating absence from
+# an unrelated screen as missing canonical state.
+private_request barbara-tui submit_semantic_command open-devices \
+  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"Devices"}}}'
+private_wait barbara-tui accepted-devices '
+  .payload.event.snapshot as $s |
+  $s.screen=="settings" and
+  ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device) ]|length)==1 and
+  ([ $s.lists[]?|select(.id=="devices")|.items[]? ]|length)==2' '' "$device"
 accepted_receipt=$PRIVATE_RECEIPT
 
 private_request alex-tui get_authority_id issuer-authority '{"method":"get_authority_id","params":{}}'
@@ -243,10 +258,15 @@ printf '%s\n%s\n' "$issuer_authority" "$accepted_authority" |
 restart_request='{"method":"restart","params":{"expected_operation_instance":null}}'
 private_request barbara-tui restart restart "$restart_request"
 jq -e '.payload.status=="restarted"' <<< "$PRIVATE_RESPONSE" >/dev/null || exit 1
+private_wait barbara-tui reopened-ready '
+  .payload.event.snapshot.readiness=="ready"' ''
+private_request barbara-tui submit_semantic_command reopen-devices \
+  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"Devices"}}}'
 private_wait barbara-tui reopened '
   .payload.event.snapshot as $s |
-  $s.readiness=="ready" and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]? ]|length)==2' "$import_operation"
+  $s.screen=="settings" and $s.readiness=="ready" and
+  ([ $s.lists[]?|select(.id=="devices")|.items[]? ]|length)==2 and
+  ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device) ]|length)==1' '' "$device"
 reopened_event=$PRIVATE_RESPONSE
 reopened_receipt=$PRIVATE_RECEIPT
 private_request barbara-tui get_authority_id reopened-authority '{"method":"get_authority_id","params":{}}'

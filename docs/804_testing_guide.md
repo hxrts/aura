@@ -1107,6 +1107,13 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
+The native `devices` list is a Settings/Devices projection. After the exact
+approval operation and host ACK, the paired checklist opens that section
+through the semantic command plane before checking the signed device ID in the
+two-item list. It opens the section again after restart. Absence of the list on
+an onboarding or other settings section is not evidence that the canonical
+device record is missing.
+
 When a paired batch lacks the exact receiver ACK, retain the owner-only
 `broker-stage.json` receipt from the paired run. Its authenticated broker
 progress witness is scoped to the signed manifest subject, invitee device and
@@ -1167,6 +1174,7 @@ and the original operation/host/reopen receipts without any transferred secret.
 Native `restart` does not accept a browser evidence handle; the checklist keeps
 that exact operation in its pre-restart receipt and verifies fresh readiness,
 authority and devices after restart, without assuming a fixed screen.
+The checklist explicitly selects Settings/Devices before its list observation.
 The checklist decodes only the nonsecret selector from the issuer's exact
 signed manifest through the pinned native codec on stdin. After import
 submission, it requires one bearer-authenticated broker ACK for that manifest,

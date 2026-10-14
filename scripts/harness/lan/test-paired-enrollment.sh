@@ -13,6 +13,8 @@ export AURA_E2E_RUN_TOKEN=paired-enrollment-fixture
 export AURA_E2E_REMOTE=fixture-host AURA_E2E_REMOTE_ROOT=fixture-root
 export AURA_E2E_HOST_ADDR=192.0.2.10 AURA_E2E_BOOTSTRAP=paired-enrollment
 export AURA_E2E_DRV="$fixture/bin/driver" FIXTURE_LOG="$fixture/requests"
+export FIXTURE_DEVICES_OPEN="$fixture/devices-open"
+export AURA_E2E_PRIVATE_WAIT_SECONDS=2
 export AURA_E2E_AURA_BIN="$fixture/bin/aura" AURA_E2E_TOOL_REPL="$fixture/bin/tool_repl"
 export AURA_E2E_WEB_INDEX="$fixture/web-index.html"
 export AURA_E2E_LOCAL_CONFIG="$fixture/broker.toml"
@@ -70,16 +72,36 @@ case "$instance:$method:$intent" in
   barbara-tui:submit_semantic_command:ImportDeviceEnrollmentCode)
     jq -e '.params.intent.ImportDeviceEnrollmentCode=={code:"issued-code-secret",manifest_transfer:{manifest_code:"signed-manifest-secret",initiator_verifier_code:"retained-verifier-secret"}}' <<< "$request" >/dev/null || exit 1
     echo '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2"}}}}' ;;
+  barbara-tui:submit_semantic_command:OpenSettingsSection)
+    jq -e '.params.intent.OpenSettingsSection=="Devices"' <<< "$request" >/dev/null || exit 1
+    : > "$FIXTURE_DEVICES_OPEN"
+    echo '{"status":"ok","payload":{"submission":"accepted"}}' ;;
   barbara-tui:wait_for_ui_snapshot_event:)
     if [[ "${FIXTURE_CASE:-}" == missing_ack ]]; then
       echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[],"lists":[{"id":"devices","items":[]}]}}}}'
       exit 0
     fi
-    if [[ "${FIXTURE_CASE:-}" == wrong_reopen_device && -e "$FIXTURE_RESTARTED" ]]; then
-      echo '{"status":"ok","payload":{"event":{"version":4,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[],"runtime_events":[],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000003"}]}]}}}}'
+    if [[ -e "$FIXTURE_RESTARTED" && ! -e "$FIXTURE_DEVICES_OPEN" ]]; then
+      echo '{"status":"ok","payload":{"event":{"version":4,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[],"runtime_events":[],"lists":[]}}}}'
       exit 0
     fi
-    echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000002","device_count":2}}],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000002"}]}]}}}}' ;;
+    if [[ "${FIXTURE_CASE:-}" == wrong_reopen_device && -e "$FIXTURE_RESTARTED" ]]; then
+      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[],"runtime_events":[],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000003"}]}]}}}}'
+      exit 0
+    fi
+    if [[ "${FIXTURE_CASE:-}" == missing_accepted_list && -e "$FIXTURE_DEVICES_OPEN" && ! -e "$FIXTURE_RESTARTED" ]]; then
+      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"22222222-2222-2222-2222-222222222222","device_count":2}}],"lists":[]}}}}'
+      exit 0
+    fi
+    if [[ -e "$FIXTURE_DEVICES_OPEN" ]]; then
+      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"22222222-2222-2222-2222-222222222222","device_count":2}}],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"22222222-2222-2222-2222-222222222222"}]}]}}}}'
+      exit 0
+    fi
+    if [[ "${FIXTURE_CASE:-}" == wrong_host_ack_device ]]; then
+      echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000003","device_count":2}}],"lists":[]}}}}'
+      exit 0
+    fi
+    echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"22222222-2222-2222-2222-222222222222","device_count":2}}],"lists":[]}}}}' ;;
   barbara-tui:get_authority_id:)
     if [[ "${FIXTURE_CASE:-}" == wrong_authority ]]; then
       echo '{"status":"ok","payload":{"authority_id":"other-authority","source":"backend"}}'
@@ -91,6 +113,7 @@ case "$instance:$method:$intent" in
   barbara-tui:restart:)
     jq -e '.params.expected_operation_instance==null' <<< "$request" >/dev/null || exit 1
     : > "$FIXTURE_RESTARTED"
+    rm -f "$FIXTURE_DEVICES_OPEN"
     echo '{"status":"ok","payload":{"status":"restarted"}}' ;;
   *) echo '{"status":"error","message":"unexpected fixture request"}' ;;
 esac
@@ -117,12 +140,16 @@ export FIXTURE_RESTARTED="$fixture/restarted"
 PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/stdout" 2> "$fixture/stderr"
 manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
 jq -e '.assertions.exact_operation_and_host_ack and .assertions.same_device_after_reopen and .transport.network_delivery_asserted==true and .evidence.network_delivery.message_id=="33333333-3333-3333-3333-333333333333"' "$manifest" >/dev/null
+jq -es '
+  [.[]|select(.params.instance_id=="barbara-tui" and
+    .method=="submit_semantic_command" and
+    .params.intent.OpenSettingsSection=="Devices")]|length==2' "$FIXTURE_LOG" >/dev/null
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
   ! rg -Fq "$secret" "$fixture/stdout" "$fixture/stderr" "$AURA_E2E_RUN_DIR"
   rg -Fq "$secret" "$FIXTURE_LOG"
 done
-for failure in missing_ack wrong_authority wrong_reopen_device no_network_ack wrong_network_digest; do
-  rm -f "$FIXTURE_RESTARTED"
+for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_authority wrong_reopen_device no_network_ack wrong_network_digest; do
+  rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN"
   bad_dir="$fixture/$failure"
   mkdir -m 700 "$bad_dir"
   printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$bad_dir/repl.identity.json"
@@ -144,6 +171,7 @@ for failure in missing_ack wrong_authority wrong_reopen_device no_network_ack wr
 done
 # A same-host diagnostic uses a second owner driver without claiming distinct
 # hosts or satisfying the final paired-LAN evidence requirement.
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN"
 peer_root="$fixture/peer-checkout"
 peer_run="$fixture/peer-run"
 local_run="$fixture/local-run"
