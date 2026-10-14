@@ -1401,6 +1401,14 @@ The target may remain above the soft cap while free space meets the admission
 floor; a global Cargo sweep runs only when headroom falls below that floor.
 Remaining protected excess is reported. Live-process, open-file,
 release-artifact and disk-floor protections still apply.
+When measured incoming growth would miss the admission floor, guarded cleanup
+ranks nonrelease lanes from stale linked worktrees first, then local inactive
+lanes, by reclaimable size. A linked worktree is stale only when it has receipts
+and none was updated in the past 24 hours; missing evidence stays unknown.
+Soft-cap-only recovery considers local lanes. The selected incoming cache and
+release, web-release and canonical wasm-profile outputs are never automatic
+candidates. Every candidate still passes the independent lane cleaner's live
+process, open-file, symlink and lock checks at deletion time.
 
 Each budgeted command prints a JSON receipt path under
 `artifacts/disk-budget/receipts/`. The atomic snapshot records the source

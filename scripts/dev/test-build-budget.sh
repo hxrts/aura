@@ -350,7 +350,7 @@ receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e 'all(.cleanup_events[]; .lane!="wasm-debug" or .outcome!="removed") and
   any(.cleanup_events[]; .lane=="dylint" and .outcome=="removed") and
   .cleanup.target_above_soft_cap==true and
-  any(.cleanup_events[]; .stage=="post-command" and .operation=="guarded-lane")' "$receipt" >/dev/null
+  any(.cleanup_events[]; .operation=="guarded-lane")' "$receipt" >/dev/null
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
 printf '%s\n' $((5 * 1024 * 1024)) > "$WASM_SIZE_FILE"
@@ -388,6 +388,7 @@ expect_status 0 run_budget -- sh -c 'test -f target/debug/deps/reusable.rlib && 
 [[ ! -s "$CALLS_FILE" && -f "$project/target/debug/deps/reusable.rlib" ]]
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.cleanup.target_above_soft_cap==true and
+  ([.cleanup_events[] | select(.operation=="guarded-lane" and .outcome=="removed") | .lane][0]=="wasm-debug") and
   all(.cleanup_events[]; .operation!="sweep") and
   ([(.cleanup_events[] | select(.stage=="pre-admission" and .outcome=="removed") | .lane)] |
     index("wasm-debug")!=null and index("dylint")!=null and index("trybuild")!=null)' "$receipt" >/dev/null

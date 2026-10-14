@@ -125,6 +125,7 @@ emergency_kib=$((emergency_gib * 1024 * 1024))
 # Only this checkout's builders and harness consumers block its sweeps;
 # sibling worktrees build concurrently against their own target/.
 source "$repo_root/scripts/dev/scoped-builders.sh"
+source "$repo_root/scripts/dev/cache-rank.sh"
 active_consumers() {
   local names='cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep'
   (( allow_live_harness == 1 )) || names="$names|tool_repl|aura-harness|aura"
@@ -320,23 +321,9 @@ sweep_original() {
   sweep_failure_reason=cargo-sweep
   (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" .)
 }
-# Default nonincremental builds cannot reuse incremental state. Reclaim that
-# lane with the existing lock and process/open-file guards before cargo-sweep
-# evicts dependencies needed by the current batch.
-prune_unused_incremental() {
-  [[ "$CARGO_INCREMENTAL" == 0 && "$allow_live_harness" == 0 ]] || return 0
-  [[ -d "$root/target/debug/incremental" ]] || return 0
-  require_idle || return $?
-  if ! bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" \
-    --lane debug-incremental --apply --lock-owned-by "$$"; then
-    echo 'build-budget: incremental cache remains protected or busy' >&2
-    require_idle || return $?
-  fi
-}
 recover_cache() {
   local sweep_status
-  prune_unused_incremental || return $?
-  if (( $(target_kib strict) <= cap_kib && $(free_kib) >= min_free_kib )); then
+  if (( $(target_kib strict) <= cap_kib && $(free_kib) - incoming_reservation_kib >= min_free_kib )); then
     return 0
   fi
   # Reclaim isolated, inactive caches before considering the shared debug
@@ -354,30 +341,46 @@ recover_cache() {
   fi
 }
 prune_safe_lanes() {
-  local mode="$1" candidate
-  local candidates=(wasm-debug dylint debug-incremental trybuild)
-  # Explicit incremental builds retain that cache, including its debug parent.
-  if [[ "$CARGO_INCREMENTAL" == 1 ]]; then candidates=(wasm-debug dylint trybuild); fi
-  if (( allow_live_harness == 1 )); then candidates=(wasm-debug); fi
-  for candidate in "${candidates[@]}"; do
-    if [[ "$candidate" == "$preserve_cache_lane" ]]; then
-      echo "build-budget: retaining incoming $candidate cache"
+  local mode="$1" scope=soft-cap priority size candidate_root candidate
+  if (( $(free_kib) - incoming_reservation_kib < min_free_kib )); then scope=headroom; fi
+  while IFS=$'\t' read -r priority size candidate_root candidate; do
+    if (( allow_live_harness == 1 )) &&
+      { [[ "$candidate_root" != "$root" ]] || [[ "$candidate" != wasm-debug ]]; }; then
       continue
     fi
+    printf 'Cache candidate: scope=%s worktree=%s lane=%s measured=%s KiB\n' \
+      "$scope" "$candidate_root" "$candidate" "$size"
     if [[ "$mode" == dry ]]; then
-      bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" --lane "$candidate" --dry-run
+      bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$candidate_root" --lane "$candidate" --dry-run
     else
       require_idle || return $?
-      if ! bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" \
-        --lane "$candidate" --apply --lock-owned-by "$$"; then
+      local -a owner_args=()
+      [[ "$candidate_root" != "$root" ]] || owner_args=(--lock-owned-by "$$")
+      prune_status=0
+      bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$candidate_root" \
+        --lane "$candidate" --apply "${owner_args[@]+"${owner_args[@]}"}" || prune_status=$?
+      if [[ "$candidate_root" != "$root" ]]; then
+        aura_receipt_update --arg worktree "$candidate_root" --arg lane "$candidate" \
+          --argjson status "$prune_status" --arg measured "$size" \
+          --argjson free "$(free_kib)" \
+          '.cleanup_events += [{stage:"admission",operation:"guarded-sibling-lane",
+            worktree:$worktree,lane:$lane,exit_status:$status,
+            outcome:(if $status==0 then "completed" else "refused" end),
+            measured_candidate_kib:($measured|tonumber),free_after_kib:$free}]'
+      fi
+      if (( prune_status != 0 )); then
         echo "build-budget: $candidate remains protected or busy" >&2
         require_idle || return $?
+      fi
+      if [[ "$scope" == headroom ]] && (( $(free_kib) - incoming_reservation_kib >= min_free_kib )); then
+        break
       fi
       if (( $(target_kib) <= cap_kib && $(free_kib) >= min_free_kib )); then
         break
       fi
     fi
-  done
+  done < <(aura_cache_rank_candidates "$root" "$scope" "$preserve_cache_lane" "$CARGO_INCREMENTAL" |
+    sort -t $'\t' -k1,1n -k2,2nr)
 }
 
 printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free\n' \
@@ -522,6 +525,9 @@ pre_target="$(target_kib strict)"
 printf 'Pre-build: free=%s KiB target=%s KiB\n' "$pre_free" "$pre_target"
 until admit_build; do
   (( waited < wait_seconds )) || exit 1
+  if (( no_prune == 0 )); then
+    prune_safe_lanes apply || exit $?
+  fi
   # Free space comes from prune-inactive-lane, which needs this checkout's
   # lock; release it while waiting for admission (Task 218: run 175's ship
   # held it and deadlocked the prune that would have admitted it).
