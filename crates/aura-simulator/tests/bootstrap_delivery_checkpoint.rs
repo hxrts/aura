@@ -8,7 +8,6 @@ use aura_agent::{
     BootstrapBrokerLanBindPolicy, BootstrapBrokerRegistration, EnrollmentParticipantProfile,
     LocalBootstrapBrokerService, SharedTransport, SimulatedEnrollment, TaskSupervisor,
 };
-use aura_app::runtime_bridge::RuntimeBridge;
 use aura_core::{
     context::EffectContext,
     effects::ExecutionMode,
