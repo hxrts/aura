@@ -15,6 +15,8 @@ use aura_app::ui_contract::SemanticOperationPhase;
 use aura_core::{AuthorityId, ContextId, DeviceId, PhysicalTime, TimeoutBudget};
 use aura_testkit::time::ManualPhysicalClock;
 
+type BrokerStageTrace = Arc<std::sync::Mutex<Vec<(u64, String)>>>;
+
 async fn issued() -> (SimulatedEnrollment, Vec<tempfile::TempDir>) {
     issued_with_broker(None).await
 }
@@ -278,7 +280,7 @@ async fn drive_brokered_import_until_traced<T, M, F>(
     broker_url: &str,
     mut maintenance_pass: M,
     goal: impl std::future::Future<Output = T>,
-    trace: Option<&Arc<std::sync::Mutex<Vec<(u64, String)>>>>,
+    trace: Option<&BrokerStageTrace>,
 ) -> T
 where
     M: FnMut() -> F,
@@ -1361,22 +1363,24 @@ async fn run_host_storage_refusal_from_fresh_profile(
         progress["messages"][0]["stage"],
         "receiver_acknowledged_retained_frame"
     );
-    let stages = stage_trace.lock().unwrap();
-    assert!(
-        stages.iter().any(|(_, stage)| stage != "no_message"),
-        "actual broker first-envelope stage was observed"
-    );
-    let mut broker_stage_names = Vec::new();
-    for (_, stage) in stages.iter() {
-        if broker_stage_names.last() != Some(stage) {
-            broker_stage_names.push(stage.clone());
+    let mut broker_stage_names = {
+        let stages = stage_trace.lock().unwrap();
+        assert!(
+            stages.iter().any(|(_, stage)| stage != "no_message"),
+            "actual broker first-envelope stage was observed"
+        );
+        let mut names = Vec::new();
+        for (_, stage) in stages.iter() {
+            if names.last() != Some(stage) {
+                names.push(stage.clone());
+            }
         }
-    }
+        names
+    };
     let acknowledged = "receiver_acknowledged_retained_frame".to_string();
     if broker_stage_names.last() != Some(&acknowledged) {
         broker_stage_names.push(acknowledged);
     }
-    drop(stages);
     let original = original_storage_source
         .lock()
         .unwrap()
