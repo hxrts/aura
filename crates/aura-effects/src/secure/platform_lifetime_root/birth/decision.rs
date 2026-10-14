@@ -14,6 +14,8 @@ const HEADER_LEN: usize = 1 + 32 + 32 + 32 + 32 + 4;
 const MAX_RECORD_LEN: usize = DECISION_MAGIC.len() + 12 + HEADER_LEN + MAX_DECISION_BYTES + 16;
 const MAX_MARKER_LEN: usize = 256;
 
+mod negative_denial;
+
 struct DecisionRecord {
     kind: u8,
     root: [u8; 32],
@@ -166,7 +168,13 @@ fn read_record(
     match (root.phase, read_entry(selected, DECISION_USER)?) {
         (BIRTH_COMPLETE, None) => Ok(None),
         (BIRTH_COMPLETE, Some(_)) => Err(invalid("platform decision lacks original root intent")),
-        (DECISION_PENDING | DECISION_COMPLETE, Some(bytes)) => {
+        (
+            DECISION_PENDING
+            | DECISION_COMPLETE
+            | TOMBSTONE_PENDING
+            | TOMBSTONE_ACK_ERASURE_PENDING,
+            Some(bytes),
+        ) => {
             if aura_core::hash::hash(&bytes) != root.decision_digest {
                 return Err(invalid(
                     "platform decision differs from original root intent",
@@ -176,9 +184,13 @@ fn read_record(
             record.bound_to(root)?;
             Ok(Some(record))
         }
-        (DECISION_PENDING | DECISION_COMPLETE, None) => {
-            Err(invalid("platform decision original intent is missing"))
-        }
+        (
+            DECISION_PENDING
+            | DECISION_COMPLETE
+            | TOMBSTONE_PENDING
+            | TOMBSTONE_ACK_ERASURE_PENDING,
+            None,
+        ) => Err(invalid("platform decision original intent is missing")),
         _ => Err(invalid("platform decision root phase is invalid")),
     }
 }
@@ -192,7 +204,11 @@ pub(super) fn validate_recovery(
 ) -> Result<(), AuraError> {
     if let Some(record) = read_record(selected, root)? {
         let marker = marker_state(owned, &record)?;
-        if root.phase == DECISION_COMPLETE && !marker {
+        if matches!(
+            root.phase,
+            DECISION_COMPLETE | TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+        ) && !marker
+        {
             return Err(invalid("completed platform decision marker is missing"));
         }
     } else if owned
@@ -204,7 +220,7 @@ pub(super) fn validate_recovery(
     {
         return Err(invalid("platform decision marker lacks original intent"));
     }
-    Ok(())
+    negative_denial::validate_recovery(owned, selected, root)
 }
 
 fn finish_original(
@@ -557,8 +573,19 @@ pub(super) fn require_live_read(
 ) -> Result<(), AuraError> {
     if let Some(record) = read_record(selected, root)? {
         let marker = marker_state(owned, &record)?;
-        if root.phase == DECISION_COMPLETE && !marker {
+        if matches!(
+            root.phase,
+            DECISION_COMPLETE | TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+        ) && !marker
+        {
             return Err(invalid("completed platform decision marker is missing"));
+        }
+        if matches!(
+            root.phase,
+            TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+        ) && record.kind != NEGATIVE
+        {
+            return Err(invalid("platform denial lacks original negative decision"));
         }
         if record.kind == NEGATIVE || root.phase == DECISION_PENDING {
             return Err(invalid("platform live read denied by first decision"));

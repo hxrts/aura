@@ -277,7 +277,11 @@ fn verify_birth<'a>(
     let root = read_root(owned, selected)?;
     if !matches!(
         root.phase,
-        BIRTH_COMPLETE | DECISION_PENDING | DECISION_COMPLETE
+        BIRTH_COMPLETE
+            | DECISION_PENDING
+            | DECISION_COMPLETE
+            | TOMBSTONE_PENDING
+            | TOMBSTONE_ACK_ERASURE_PENDING
     ) || root.id != birth.root
         || root.birth_id != birth.allocation
     {
@@ -429,7 +433,12 @@ async fn recover_one_inner(
     let mut root = read_root(owned, selected)?;
     if !matches!(
         root.phase,
-        BIRTH_PENDING | BIRTH_COMPLETE | DECISION_PENDING | DECISION_COMPLETE
+        BIRTH_PENDING
+            | BIRTH_COMPLETE
+            | DECISION_PENDING
+            | DECISION_COMPLETE
+            | TOMBSTONE_PENDING
+            | TOMBSTONE_ACK_ERASURE_PENDING
     ) {
         return Err(invalid("platform allocation birth has not started"));
     }

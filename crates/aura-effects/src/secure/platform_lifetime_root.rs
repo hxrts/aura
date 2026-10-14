@@ -27,6 +27,8 @@ const BIRTH_PENDING: u8 = 2;
 const BIRTH_COMPLETE: u8 = 3;
 const DECISION_PENDING: u8 = 4;
 const DECISION_COMPLETE: u8 = 5;
+const TOMBSTONE_PENDING: u8 = 6;
+const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const PLAINTEXT_LEN: usize = 1 + 32 * 6;
 const MAX_FILE_LEN: usize = 256;
 
@@ -128,6 +130,8 @@ impl RootRecord {
                     | BIRTH_COMPLETE
                     | DECISION_PENDING
                     | DECISION_COMPLETE
+                    | TOMBSTONE_PENDING
+                    | TOMBSTONE_ACK_ERASURE_PENDING
             )
             || (matches!(plain[0], PENDING | COMPLETE)
                 && (plain[97..129] != [0; 32]
@@ -137,10 +141,15 @@ impl RootRecord {
                 && (plain[97..129] == [0; 32]
                     || plain[129..161] == [0; 32]
                     || plain[161..193] != [0; 32]))
-            || (matches!(plain[0], DECISION_PENDING | DECISION_COMPLETE)
-                && (plain[97..129] == [0; 32]
-                    || plain[129..161] == [0; 32]
-                    || plain[161..193] == [0; 32]))
+            || (matches!(
+                plain[0],
+                DECISION_PENDING
+                    | DECISION_COMPLETE
+                    | TOMBSTONE_PENDING
+                    | TOMBSTONE_ACK_ERASURE_PENDING
+            ) && (plain[97..129] == [0; 32]
+                || plain[129..161] == [0; 32]
+                || plain[161..193] == [0; 32]))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -366,6 +375,8 @@ mod tests {
                 PlatformSecureStorageHandler::RECORD_INVENTORY_USER,
                 birth::INTENT_USER,
                 birth::RECORD_USER,
+                "allocation-lifetime-first-decision:v1",
+                "allocation-lifetime-negative-tombstone:v1",
             ] {
                 if let Ok(entry) = keyring::Entry::new(&self.service, user) {
                     let _ = entry.delete_credential();
