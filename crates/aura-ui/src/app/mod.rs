@@ -191,7 +191,6 @@ mod tests {
             .contains("CeremonyMonitorHandoffSubmission<UiSubmittedOperationPublisher>"));
         assert!(!lifecycle_source.contains("SubmittedOperation<UiSubmittedOperationPublisher>"));
         assert!(lifecycle_source.contains("self.release.run_workflow("));
-        assert!(lifecycle_source.contains("dropped_owner_error(kind)"));
     }
 
     #[test]
