@@ -563,6 +563,39 @@ first encoded byte. Encoding cannot release secret-bearing intermediate growth
 allocations. Authenticated envelope limits include magic, nonce and AEAD tag;
 codec failures retain their original serialization cause.
 
+### Platform-selected allocation lifetime custody
+
+A production platform credential provider may issue allocation lifetime custody
+only from the same exclusive profile and credential namespace owner that was
+selected for ordinary secure records. A filesystem fallback, another keyring
+namespace, or a newly constructed provider cannot stand in for that owner.
+The provider must authenticate a bounded whole-profile allocation inventory
+before handing out any recovered allocation. Each inventory entry binds its
+original allocation identity, scope, provider identity and protected record;
+serialized references and directory names confer no authority. Missing,
+unknown, conflicting or unauthenticated entries fail closed. A previously
+completed handoff cannot be interpreted as a fresh empty profile after loss of
+its inventory.
+
+Birth, first decision and negative retirement are durable, ordered transitions
+under the selected namespace lock. A birth is acknowledged only when its exact
+protected bytes and inventory binding can be recovered together after a crash.
+The first positive or negative decision is immutable; replay of the same
+decision is idempotent, while an opposite or byte-different decision fails.
+Negative retirement requires that original negative decision and returns an
+acknowledgment only after a recoverable tombstone denies live reads. An
+interruption between credential-store and inventory publication must be
+reconciled from authenticated original intent, never by generating a new
+allocation, discarding an unknown credential, or treating a partial write as
+success. Native provider failures remain typed and retain their original cause.
+
+The credential store and profile inventory are separate durability domains.
+Their implementation must prove crash recovery across every interleaving and
+must not assume that a credential-store write is an atomic transaction with a
+profile file. A provider acknowledgment states only its documented local
+persistence contract; it does not prove erasure from backups or resistance to
+rollback of the complete local profile and credential namespace.
+
 ### Participant envelope ownership across runtime consumers
 
 A participant package's version selects its canonical authenticated decoder.

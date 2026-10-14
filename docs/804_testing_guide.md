@@ -2244,6 +2244,11 @@ cover first physical-provider attachment, original seals and checkpoints,
 retirement ACK/replay, legacy immutable preservation, lifecycle loss, codec
 classification and total ciphertext limits. Zero-test or ignored output does
 not satisfy this lane. Native keyring/browser parity needs separate tests.
+The pending platform-keyring allocation-lifetime lane must execute the exact
+crash and adversarial matrix in [Effects and Handlers Guide](802_effects_guide.md#adding-platform-credential-store-lifetime-custody)
+before production signed enrollment claims selected-provider persistence.
+Test-keyring execution establishes transaction behavior, while a separate
+actual OS credential-provider lane establishes platform integration.
 
 Allocation lifetime syntax checks normalize source paths against the explicit
 checkout root before comparing sanctioned owner files. Outside-checkout sources

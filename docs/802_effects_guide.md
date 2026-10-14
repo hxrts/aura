@@ -471,6 +471,73 @@ and compile-fail guards enforce actual capability custody. Keep immutable
 legacy secrets permanent; allocation tombstone ACK is not a physical or backup
 erasure guarantee.
 
+### Adding platform credential-store lifetime custody
+
+Treat this as a new selected-provider implementation, not an adapter around the
+filesystem fallback. The current native lifetime channel admits only the
+profile-owned filesystem fallback; platform selection must continue to return
+typed `UnsupportedSelectedProvider` until its own custody and recovery path is
+validated. Do not enable a production enrollment flow by substituting that
+fallback or copying protected bytes into a second provider.
+
+Build the platform path in reviewable dependencies:
+
+1. Bind one credential namespace to the original exclusive `OwnedProfileLease`.
+   Carry its private provider identity into the lifetime root. The namespace
+   lock must exclude cooperating profile processes across initialization,
+   recovery, birth, decision and retirement; a service name or serialized
+   profile path is insufficient authority. Refuse a foreign lease or namespace,
+   a second root transfer, and any unsupported platform without a fallback.
+2. Define a versioned, bounded authenticated inventory of allocation IDs,
+   immutable scopes, record digests and transition phases. Its authentication
+   key or equivalent trust anchor must remain in the selected credential
+   namespace; files may carry routing metadata but cannot hold copied live
+   secrets or independently authorize a record. Authenticate the complete
+   inventory and enforce count, depth and byte limits before returning any
+   owner. Missing trust anchor with existing inventory, malformed entries,
+   conflicting identities and an unexplained credential fail closed. Preserve
+   a separate completed-handoff marker so lost inventory is not read as an
+   empty new profile.
+3. Specify an acknowledged transaction across the credential store and the
+   inventory for each transition. A durable intent must name the exact
+   allocation and desired phase before a credential write. Read and verify the
+   selected provider's resulting record before final inventory acknowledgment.
+   Recovery must classify every intent as not started, provider written but
+   unacknowledged, or fully acknowledged using authenticated evidence; it must
+   either complete that same transition or retain a typed conflict. The
+   credential API supplies no cross-store CAS or enumeration, so an inventory
+   entry must precede every credential birth and cover interrupted writes.
+   Directory fsync alone does not acknowledge a credential write; require the
+   selected platform's documented persistence result and readback.
+4. Keep first-decision and retirement records in the provider's protected
+   state. Under the namespace lock, compare against the original first
+   decision before any replacement. A negative tombstone must remain
+   recoverable after live secret removal; deleting the only credential entry
+   is not an ACK. Zeroize decoded secret buffers and preserve original native
+   keyring, inventory, codec and I/O causes.
+
+Before L6 selects this channel, run one exact native provider fixture inventory
+with a fault at every transaction boundary. The required assertions are:
+
+| Boundary / adversary | Required result |
+|---|---|
+| Fresh namespace, same selected profile and provider | One birth, exact live read and same-profile reopen; one root transfer |
+| Foreign profile lease, namespace or provider; second transfer | Typed refusal before protected mutation |
+| Birth intent before credential write; credential write before inventory ACK | Reopen either completes the same authenticated birth or retains a typed conflict; no replacement ID or unindexed live secret |
+| Missing, corrupt, oversized, duplicated or reordered inventory; missing trust anchor or completed-handoff evidence | Whole-profile recovery refusal before any owner is returned |
+| Credential absence, denied access and provider outage | Distinct typed causes; no fresh-profile inference from outage |
+| Opposite or byte-different first decision; replay of exact first decision | Conflict for substitution; idempotent exact replay |
+| Decision intent/write/ACK interruption; retirement intent/tombstone/ACK interruption | Reopen preserves the original first decision and reconciles the exact tombstone; no live read after acknowledged retirement |
+| Wrong allocation scope or record bytes, stale namespace identity, unexpected credential | Typed refusal without selecting another provider or deleting evidence |
+| First writer and concurrent contender under one namespace | Exactly one acknowledged transition; contender observes the authentic winner or typed conflict |
+
+Use the test keyring for deterministic transaction faults, then run a separate
+native credential-provider lane on the actual OS service. Test-keyring success
+does not establish macOS Keychain or another OS provider's durability semantics.
+Only after both the selected-provider fixture and security/ownership gates pass
+should L6 transfer the platform lifetime root and the signed production native
+enrollment fixture resume. Browser storage has its own provider and evidence.
+
 ### Supplying custom runtime handlers
 
 Complete `AgentBuilder::custom()` typestate with crypto, ordinary storage,
