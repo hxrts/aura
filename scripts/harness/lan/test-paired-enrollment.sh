@@ -100,7 +100,12 @@ cat > "$fixture/bin/curl" <<'CURL'
 [[ "$*" == *'--config -'* ]] || exit 2
 config=$(cat)
 [[ "$config" == *'Authorization: Bearer 0000000000000000000000000000000000000000000000000000000000000000'* ]] || exit 2
-[[ "$config" == *'/ack-witness/authority-11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'* ]] || exit 2
+[[ "$config" == *'/enrollment-mailbox/'*'/authority-11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'* ]] || exit 2
+if [[ "$config" == *'/progress-witness/'* ]]; then
+  echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":true,"messages":[{"message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"retrieval_selected_for_receiver_credential"}]}'
+  exit 0
+fi
+[[ "$config" == *'/ack-witness/'* ]] || exit 2
 case "${FIXTURE_CASE:-}" in
   no_network_ack) echo '[]';;
   wrong_network_digest) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
@@ -127,6 +132,12 @@ for failure in missing_ack wrong_authority wrong_reopen_device no_network_ack wr
     echo "paired fixture accepted $failure" >&2; exit 1
   fi
   [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
+  if [[ "$failure" == no_network_ack || "$failure" == wrong_network_digest ]]; then
+    stage_receipt="$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/broker-stage.json"
+    jq -e '.network_delivery_asserted==false and .progress.registration_present==true and
+      .progress.messages[0].stage=="retrieval_selected_for_receiver_credential"' "$stage_receipt" >/dev/null
+    [[ $(stat -c '%a' "$stage_receipt" 2>/dev/null || stat -f '%Lp' "$stage_receipt") == 600 ]]
+  fi
   for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
     ! rg -Fq "$secret" "$fixture/$failure.stdout" "$fixture/$failure.stderr" "$bad_dir"
   done

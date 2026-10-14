@@ -9,7 +9,7 @@ use aura_core::hash::hash;
 use aura_core::{AuthorityId, DeviceId};
 use aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration;
 use aura_invitation::enrollment_mailbox_session::is_original_enrollment_mailbox_session;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -34,6 +34,33 @@ pub(super) struct PendingMailboxAckWitness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum PendingMailboxWitnessStage {
+    ReceiverAcknowledgedRetainedFrame,
+}
+
+/// Broker custody observations. Retrieval selection proves only that the
+/// receiver credential holder requested a frame. It does not prove the HTTP
+/// response reached that receiver; verified retention requires ACK.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(super) struct PendingMailboxProgressWitness {
+    pub manifest_digest: String,
+    pub subject: String,
+    pub device: String,
+    pub registration_present: bool,
+    pub messages: Vec<PendingMailboxMessageProgress>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(super) struct PendingMailboxMessageProgress {
+    pub message_id: String,
+    pub envelope_digest: String,
+    pub stage: PendingMailboxProgressStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum PendingMailboxProgressStage {
+    Queued,
+    RetrievalSelectedForReceiverCredential,
     ReceiverAcknowledgedRetainedFrame,
 }
 #[derive(Debug)]
@@ -64,6 +91,7 @@ struct PendingMailboxEntry {
     credential_commitment: [u8; 32],
     retention_ends_at_ms: u64,
     envelopes: Vec<PendingEnvelope>,
+    served: HashSet<String>,
     acknowledged: HashMap<String, [u8; 32]>,
 }
 
@@ -147,6 +175,7 @@ impl PendingEnrollmentMailboxes {
                 registration,
                 retention_ends_at_ms,
                 envelopes: Vec::new(),
+                served: HashSet::new(),
                 acknowledged: HashMap::new(),
             },
         );
@@ -272,11 +301,38 @@ impl PendingEnrollmentMailboxes {
         if !constant_time_eq(&candidate, &entry.credential_commitment) {
             return Err("pending mailbox retrieval credential rejected");
         }
-        Ok(entry
+        let deliveries: Vec<_> = entry
             .envelopes
             .iter()
             .map(|pending| pending.delivery.clone())
-            .collect())
+            .collect();
+        entry.served.extend(
+            deliveries
+                .iter()
+                .map(|delivery| delivery.message_id.clone()),
+        );
+        Ok(deliveries)
+    }
+
+    pub(super) fn progress_witness(
+        &mut self,
+        key: PendingMailboxKey,
+        now_ms: u64,
+    ) -> Result<PendingMailboxProgressWitness, &'static str> {
+        self.prune_expired(now_ms);
+        let mut witness = PendingMailboxProgressWitness {
+            manifest_digest: hex::encode(key.manifest_digest),
+            subject: key.subject.to_string(),
+            device: key.device.to_string(),
+            registration_present: false,
+            messages: Vec::new(),
+        };
+        let Some(entry) = self.entries.get(&key) else {
+            return Ok(witness);
+        };
+        witness.registration_present = true;
+        witness.messages = progress_messages(&entry.envelopes, &entry.served, &entry.acknowledged)?;
+        Ok(witness)
     }
 
     pub(super) fn acknowledged_witnesses(
@@ -329,6 +385,7 @@ impl PendingEnrollmentMailboxes {
             .position(|pending| pending.delivery.message_id == message_id)
             .ok_or("pending mailbox acknowledgment identity is absent")?;
         let acknowledged = entry.envelopes.remove(index);
+        entry.served.remove(message_id);
         let bytes = serde_json::to_vec(&acknowledged.delivery.envelope)
             .map_err(|_| "pending mailbox acknowledged envelope encoding failed")?;
         entry
@@ -336,6 +393,36 @@ impl PendingEnrollmentMailboxes {
             .insert(message_id.to_owned(), hash(&bytes));
         Ok(())
     }
+}
+
+fn progress_messages(
+    envelopes: &[PendingEnvelope],
+    served: &HashSet<String>,
+    acknowledged: &HashMap<String, [u8; 32]>,
+) -> Result<Vec<PendingMailboxMessageProgress>, &'static str> {
+    let mut messages = Vec::new();
+    for pending in envelopes {
+        let bytes = serde_json::to_vec(&pending.delivery.envelope)
+            .map_err(|_| "pending mailbox progress envelope encoding failed")?;
+        messages.push(PendingMailboxMessageProgress {
+            message_id: pending.delivery.message_id.clone(),
+            envelope_digest: hex::encode(hash(&bytes)),
+            stage: if served.contains(&pending.delivery.message_id) {
+                PendingMailboxProgressStage::RetrievalSelectedForReceiverCredential
+            } else {
+                PendingMailboxProgressStage::Queued
+            },
+        });
+    }
+    messages.extend(acknowledged.iter().map(|(message_id, digest)| {
+        PendingMailboxMessageProgress {
+            message_id: message_id.clone(),
+            envelope_digest: hex::encode(digest),
+            stage: PendingMailboxProgressStage::ReceiverAcknowledgedRetainedFrame,
+        }
+    }));
+    messages.sort_by(|a, b| a.message_id.cmp(&b.message_id));
+    Ok(messages)
 }
 
 fn ack_witness(
@@ -380,5 +467,50 @@ mod witness_tests {
         assert_eq!(json["envelope_digest"], hex::encode([4; 32]));
         assert_eq!(json["stage"], "receiver_acknowledged_retained_frame");
         assert_eq!(json.as_object().unwrap().len(), 6);
+
+        // Hold the receiver out of the fixture: the same retained envelope
+        // advances only when credential selection and verified ACK occur.
+        let envelope = TransportEnvelope {
+            destination: key.subject,
+            source: key.subject,
+            context: aura_core::ContextId::new_from_entropy([5; 32]),
+            payload: b"private-envelope-marker".to_vec(),
+            metadata: HashMap::new(),
+            receipt: None,
+        };
+        let retained = [PendingEnvelope {
+            delivery: PendingMailboxDelivery {
+                message_id: message_id.to_owned(),
+                envelope,
+            },
+        }];
+        let mut selected = HashSet::new();
+        let mut acknowledged = HashMap::new();
+        let queued = progress_messages(&retained, &selected, &acknowledged).unwrap();
+        assert_eq!(queued[0].stage, PendingMailboxProgressStage::Queued);
+        selected.insert(message_id.to_owned());
+        let selected_progress = progress_messages(&retained, &selected, &acknowledged).unwrap();
+        assert_eq!(
+            selected_progress[0].stage,
+            PendingMailboxProgressStage::RetrievalSelectedForReceiverCredential
+        );
+        acknowledged.insert(message_id.to_owned(), [4; 32]);
+        let admitted = progress_messages(&[], &HashSet::new(), &acknowledged).unwrap();
+        assert_eq!(
+            admitted[0].stage,
+            PendingMailboxProgressStage::ReceiverAcknowledgedRetainedFrame
+        );
+        assert_eq!(queued[0].message_id, admitted[0].message_id);
+        for stage in [&queued, &selected_progress, &admitted] {
+            let serialized = serde_json::to_string(stage).unwrap();
+            assert!(!serialized.contains("private-envelope-marker"));
+            assert_eq!(
+                serde_json::to_value(stage).unwrap()[0]
+                    .as_object()
+                    .unwrap()
+                    .len(),
+                3
+            );
+        }
     }
 }

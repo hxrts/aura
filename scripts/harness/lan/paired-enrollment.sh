@@ -155,7 +155,9 @@ config_mode=$(stat -c '%a' "$local_config" 2>/dev/null || stat -f '%Lp' "$local_
 broker_token=$(sed -n 's/^[[:space:]]*"AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=\([0-9a-f]*\)",/\1/p' "$local_config" | sort -u)
 [[ "$broker_token" =~ ^[0-9a-f]{64}$ ]] || { echo 'broker credential shape differs' >&2; exit 1; }
 witness_url="$broker_url/v2/bootstrap/enrollment-mailbox/ack-witness/$subject/$device/$digest"
+progress_url="$broker_url/v2/bootstrap/enrollment-mailbox/progress-witness/$subject/$device/$digest"
 network_witness=''
+latest_progress=''
 witness_timeout=${AURA_E2E_NETWORK_WITNESS_TIMEOUT:-240}
 [[ "$witness_timeout" =~ ^[1-9][0-9]{0,2}$ && "$witness_timeout" -le 240 ]] || exit 2
 deadline=$((SECONDS + witness_timeout))
@@ -164,8 +166,25 @@ while (( SECONDS < deadline )); do
   # retained logs, or the redacted result.
   witness_response=$(printf 'url = "%s"\nheader = "Authorization: Bearer %s"\n' \
     "$witness_url" "$broker_token" | curl --silent --show-error --fail --max-time 5 --config -) || {
-    echo 'broker ACK witness request failed' >&2; exit 1;
+    echo 'broker ACK witness request failed' >&2; break;
   }
+  progress_response=$(printf 'url = "%s"\nheader = "Authorization: Bearer %s"\n' \
+    "$progress_url" "$broker_token" | curl --silent --show-error --fail --max-time 5 --config -) || progress_response=''
+  if [[ -n "$progress_response" ]]; then
+    progress_candidate=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" '
+      select(.subject==$subject and .device==$device and .manifest_digest==$digest and
+        (.registration_present|type)=="boolean" and (.messages|type)=="array" and
+        (.messages|length)<=128 and
+        all(.messages[]; (.message_id|type)=="string" and
+          (.message_id|test("^[0-9a-f-]{36}$")) and
+          (.envelope_digest|type)=="string" and
+          (.envelope_digest|test("^[0-9a-f]{64}$")) and
+          (.stage|IN("queued","retrieval_selected_for_receiver_credential","receiver_acknowledged_retained_frame")))) |
+      {subject,device,manifest_digest,registration_present,
+       messages:[.messages[]|{message_id,envelope_digest,stage}]}' \
+      <<< "$progress_response") || progress_candidate=''
+    [[ -z "$progress_candidate" ]] || latest_progress=$progress_candidate
+  fi
   network_witness=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" '
     select(type=="array" and length==1) | .[0] |
     select(.subject==$subject and .device==$device and .manifest_digest==$digest and
@@ -177,10 +196,19 @@ while (( SECONDS < deadline )); do
   [[ -z "$network_witness" ]] || break
   sleep 1
 done
-unset broker_token witness_response
+unset broker_token witness_response progress_response progress_candidate
 [[ -n "$network_witness" ]] || {
-  echo 'exact original receiver ACK witness is absent or mismatched' >&2; exit 1;
+  stage_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+  stage_receipt="$stage_dir/broker-stage.json"
+  [[ -d "$stage_dir" && ! -L "$stage_dir" && -O "$stage_dir" &&
+     ! -e "$stage_receipt" && ! -L "$stage_receipt" ]] || exit 1
+  [[ -n "$latest_progress" ]] || latest_progress='null'
+  (umask 077; set -C; jq -cn --argjson progress "$latest_progress" \
+    '{schema:1,network_delivery_asserted:false,progress:$progress}' > "$stage_receipt") || exit 1
+  echo "exact original receiver ACK witness is absent or mismatched; inspect $stage_receipt" >&2
+  exit 1
 }
+unset latest_progress
 
 private_wait barbara-tui accepted '
   .payload.event.snapshot as $s |

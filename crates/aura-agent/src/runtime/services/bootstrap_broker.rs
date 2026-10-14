@@ -272,8 +272,6 @@ struct BootstrapBrokerState {
     #[cfg(test)]
     pending_registration_miss: Option<tokio::sync::oneshot::Sender<()>>,
     #[cfg(test)]
-    pending_envelope_queued: Option<tokio::sync::oneshot::Sender<String>>,
-    #[cfg(test)]
     pending_registration_pause: Option<(
         tokio::sync::oneshot::Sender<()>,
         tokio::sync::oneshot::Receiver<()>,
@@ -306,8 +304,6 @@ impl BootstrapBrokerState {
             pending_enrollment_mailboxes: PendingEnrollmentMailboxes::new(retention),
             #[cfg(test)]
             pending_registration_miss: None,
-            #[cfg(test)]
-            pending_envelope_queued: None,
             #[cfg(test)]
             pending_registration_pause: None,
             enrollment_return_mailboxes: EnrollmentReturnMailboxes::new(retention),
@@ -421,15 +417,6 @@ impl LocalBootstrapBrokerService {
     ) -> tokio::sync::oneshot::Receiver<()> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.shared.write().await.pending_registration_miss = Some(sender);
-        receiver
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn observe_next_pending_envelope_for_test(
-        &self,
-    ) -> tokio::sync::oneshot::Receiver<String> {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.shared.write().await.pending_envelope_queued = Some(sender);
         receiver
     }
 
@@ -566,18 +553,11 @@ impl LocalBootstrapBrokerService {
             .ok_or("pending enrollment VM envelope has no exact device")?;
         let key = PendingMailboxKey::new(envelope.destination, device, manifest_digest);
         let now_ms = self.mailbox_now_ms().await?;
-        #[cfg(test)]
-        let message_id = envelope.metadata.get("aura-message-id").cloned();
         let mut state = self.shared.write().await;
         state
             .pending_enrollment_mailboxes
             .enqueue(key, envelope, now_ms)
             .map_err(str::to_string)?;
-        #[cfg(test)]
-        if let (Some(sender), Some(message_id)) = (state.pending_envelope_queued.take(), message_id)
-        {
-            let _ = sender.send(message_id);
-        }
         Ok(())
     }
 
@@ -1305,21 +1285,11 @@ async fn handle_http_connection(
                 device,
                 payload.manifest_digest,
             );
-            #[cfg(test)]
-            let message_id = payload.envelope.metadata.get("aura-message-id").cloned();
             let now_ms = mailbox_now!();
             let mut state = shared.write().await;
             let result = state
                 .pending_enrollment_mailboxes
                 .enqueue(key, payload.envelope, now_ms);
-            #[cfg(test)]
-            if result.is_ok() {
-                if let (Some(sender), Some(message_id)) =
-                    (state.pending_envelope_queued.take(), message_id)
-                {
-                    let _ = sender.send(message_id);
-                }
-            }
             drop(state);
             let (status, body) = match result {
                 Ok(()) => (204, ""),
@@ -1378,6 +1348,43 @@ async fn handle_http_connection(
             let status = if result.is_ok() { 204 } else { 401 };
             let _ =
                 write_http_response(&mut stream, status, "text/plain; charset=utf-8", b"").await;
+        }
+        ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/progress-witness/") => {
+            let Some(key) = pending_enrollment_mailbox_key(
+                path.trim_start_matches("/v2/bootstrap/enrollment-mailbox/progress-witness/"),
+            ) else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"invalid pending enrollment mailbox selector",
+                )
+                .await;
+                return;
+            };
+            let now_ms = mailbox_now!();
+            let result = shared
+                .write()
+                .await
+                .pending_enrollment_mailboxes
+                .progress_witness(key, now_ms)
+                .and_then(|witness| {
+                    serde_json::to_vec(&witness).map_err(|_| "progress witness encoding failed")
+                });
+            match result {
+                Ok(body) => {
+                    let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
+                }
+                Err(_) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        500,
+                        "text/plain; charset=utf-8",
+                        b"pending enrollment progress witness encoding failed",
+                    )
+                    .await;
+                }
+            }
         }
         ("GET", path) if path.starts_with("/v2/bootstrap/enrollment-mailbox/ack-witness/") => {
             let Some(key) = pending_enrollment_mailbox_key(
@@ -1977,6 +1984,31 @@ pub fn pending_enrollment_mailbox_endpoint(
         normalize_base_url(base_url),
         hex::encode(manifest_digest)
     )
+}
+
+#[cfg(test)]
+pub(crate) async fn fetch_pending_progress_witness_for_test(
+    base_url: &str,
+    auth_token: &str,
+    subject: AuthorityId,
+    device: DeviceId,
+    manifest_digest: [u8; 32],
+) -> Result<serde_json::Value, aura_core::AuraError> {
+    let body = send_http_request(
+        "GET",
+        &pending_enrollment_mailbox_endpoint(
+            base_url,
+            "progress-witness",
+            subject,
+            device,
+            manifest_digest,
+        ),
+        auth_token,
+        &[],
+        None,
+    )
+    .await?;
+    serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
 }
 
 pub fn issuer_return_mailbox_endpoint(
@@ -3133,7 +3165,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("broker should bind");
+        .expect("broker should bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_broker_auth_test"));
         tokio::task::yield_now().await;
@@ -3175,6 +3208,32 @@ mod tests {
                 .status(),
             401
         );
+
+        let progress_url = pending_enrollment_mailbox_endpoint(
+            broker.public_url(),
+            "progress-witness",
+            AuthorityId::new_from_entropy([8; 32]),
+            DeviceId::from_bytes([7; 32]),
+            [3; 32],
+        );
+        let progress_error = send_http_request("GET", &progress_url, "wrong-token", &[], None)
+            .await
+            .expect_err("unauthorized progress witness should be rejected");
+        assert_eq!(
+            std::error::Error::source(&progress_error)
+                .unwrap()
+                .downcast_ref::<BootstrapBrokerHttpStatus>()
+                .unwrap()
+                .status(),
+            401
+        );
+        let progress = send_http_request("GET", &progress_url, AUTH_TOKEN, &[], None)
+            .await
+            .expect("authorized read-only progress witness");
+        let progress: serde_json::Value = serde_json::from_slice(&progress).unwrap();
+        assert_eq!(progress["registration_present"], false);
+        assert_eq!(progress["messages"].as_array().unwrap().len(), 0);
+        assert_eq!(progress.as_object().unwrap().len(), 5);
 
         let invitation = serde_json::to_vec(&BootstrapBrokerInvitation {
             recipient_authority_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),

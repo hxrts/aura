@@ -2252,6 +2252,16 @@ mod tests {
                 .expect("Alice waits on the original signed enrollment lifetime")
                 .expect("original registration retry remained owned");
             let manifest = admitted.manifest();
+            let missing_progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                    broker.public_url(),
+                    "genuine-first-vm-broker-auth",
+                    manifest.subject,
+                    manifest.invitee_device,
+                    admitted.manifest_digest(),
+                )
+                .await.unwrap();
+            assert_eq!(missing_progress["registration_present"], false);
+            assert_eq!(missing_progress["messages"].as_array().unwrap().len(), 0);
             let (registration_entered, release_registration) =
                 broker.pause_next_pending_registration_for_test().await;
             let pending_app = invitee_app.clone();
@@ -2291,10 +2301,115 @@ mod tests {
                     .is_none(),
                 "held registration has not been published or exposed to Alice"
             );
-            let first_envelope = broker.observe_next_pending_envelope_for_test().await;
             release_registration
                 .send(())
                 .expect("release broker registration response");
+            let first_progress = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                let mut observation_tick = tokio::time::interval(std::time::Duration::from_millis(20));
+                let mut last_stage = None;
+                loop {
+                    let progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                        broker.public_url(),
+                        "genuine-first-vm-broker-auth",
+                        manifest.subject,
+                        manifest.invitee_device,
+                        admitted.manifest_digest(),
+                    ).await.expect("authenticated exact broker progress");
+                    let stage = (
+                        progress["subject"] == manifest.subject.to_string(),
+                        progress["device"] == manifest.invitee_device.to_string(),
+                        progress["manifest_digest"] == hex::encode(admitted.manifest_digest()),
+                        progress["registration_present"] == true,
+                        progress["messages"].as_array().map(Vec::len),
+                        progress["messages"][0]["stage"].as_str().map(str::to_owned),
+                    );
+                    if last_stage.as_ref() != Some(&stage) {
+                        eprintln!("broker fixture progress flags: {stage:?}");
+                        last_stage = Some(stage);
+                    }
+                    if progress["subject"] == manifest.subject.to_string()
+                        && progress["device"] == manifest.invitee_device.to_string()
+                        && progress["manifest_digest"] == hex::encode(admitted.manifest_digest())
+                        && progress["registration_present"] == true
+                        && progress["messages"].as_array().is_some_and(|messages| messages.len()==1)
+                        && matches!(progress["messages"][0]["stage"].as_str(), Some("queued" | "retrieval_selected_for_receiver_credential" | "receiver_acknowledged_retained_frame")) {
+                        break progress;
+                    }
+                    if let Some(target) = clock.next_registered_deadline().await {
+                        assert!(target.value() > clock.now_ms(), "observed selected-clock wait must be future");
+                        assert!(target.value() < manifest.expires_at_ms, "retry must stay inside original signed lifetime");
+                        clock.set_time(target.value());
+                    } else {
+                        observation_tick.tick().await;
+                    }
+                }
+            })
+            .await
+            .expect("original issuer submitted the first exact authenticated envelope");
+            let first_message_id = first_progress["messages"][0]["message_id"]
+                .as_str()
+                .expect("broker message has exact ID")
+                .to_owned();
+            uuid::Uuid::parse_str(&first_message_id).expect("broker message ID is typed UUID");
+            let first_digest = first_progress["messages"][0]["envelope_digest"]
+                .as_str()
+                .expect("broker message has exact digest");
+            assert_eq!(hex::decode(first_digest).unwrap().len(), 32);
+            assert_eq!(first_progress["registration_present"], true);
+            assert_eq!(
+                first_progress["messages"][0]["message_id"],
+                first_message_id
+            );
+            assert!(
+                crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                    broker.public_url(),
+                    "wrong-bearer",
+                    manifest.subject,
+                    manifest.invitee_device,
+                    admitted.manifest_digest(),
+                )
+                .await
+                .is_err(),
+                "progress witness refuses the wrong bearer even for an existing selector"
+            );
+            for (subject, device, digest) in [
+                (
+                    aura_core::AuthorityId::new_from_entropy([9; 32]),
+                    manifest.invitee_device,
+                    admitted.manifest_digest(),
+                ),
+                (
+                    manifest.subject,
+                    aura_core::DeviceId::from_bytes([9; 32]),
+                    admitted.manifest_digest(),
+                ),
+                (manifest.subject, manifest.invitee_device, [9; 32]),
+            ] {
+                let mismatched = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                    broker.public_url(),
+                    "genuine-first-vm-broker-auth",
+                    subject,
+                    device,
+                    digest,
+                )
+                .await
+                .expect("authorized nonmatching selector has no broker custody");
+                assert_eq!(mismatched["registration_present"], false);
+                assert_eq!(mismatched["messages"].as_array().unwrap().len(), 0);
+            }
+            use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+            let credential_location =
+                crate::core::agent::pending_enrollment_mailbox::retained_location(&admitted);
+            let credential_bytes = invitee_effects
+                .secure_retrieve(&credential_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("recipient owns exact mailbox credential");
+            let retained: crate::core::agent::pending_enrollment_mailbox::RetainedMailboxCredential =
+                aura_core::util::serialization::from_slice(&credential_bytes).unwrap();
+            let encoded_progress = serde_json::to_string(&first_progress).unwrap();
+            assert!(!encoded_progress.contains(&retained.credential));
+            assert_eq!(first_progress.as_object().unwrap().len(), 5);
+            assert_eq!(first_progress["messages"][0].as_object().unwrap().len(), 3);
             let retry_result = tokio::time::timeout(
                 std::time::Duration::from_secs(10),
                 aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
@@ -2304,42 +2419,16 @@ mod tests {
             )
             .await
             .expect("receiver retries bounded maintenance");
-            // The fixture has no running rendezvous service for sibling sync.
-            // Mailbox upkeep precedes that sync and must complete independently.
+            // Mailbox upkeep precedes sibling sync; this fixture has no running
+            // rendezvous service, so the independent sync error stays typed.
             assert!(
                 matches!(retry_result, Err(aura_core::AuraError::Internal { .. })),
                 "retry must preserve the independent typed sync failure: {retry_result:?}"
             );
-            assert!(
-                broker
-                    .pending_enrollment_mailbox_registration(
-                        manifest.subject,
-                        manifest.invitee_device,
-                        admitted.manifest_digest(),
-                    )
-                    .await
-                    .unwrap()
-                    .is_some(),
-                "runtime maintenance registers Bob's exact signed mailbox"
-            );
-            let mut first_envelope = Box::pin(first_envelope);
-            let first_message_id = tokio::time::timeout(std::time::Duration::from_secs(20), async {
-                loop {
-                    tokio::select! {
-                        result = &mut first_envelope => {
-                            break result.expect("first-envelope observation remained owned");
-                        }
-                        retry = clock.observe_next_relative_sleep_of(100) => {
-                            let retry = retry.expect("observe original signed retry");
-                            let target = retry.await.expect("original retry remains admitted");
-                            assert!(target.value() < manifest.expires_at_ms, "retry must stay inside original signed lifetime");
-                            clock.set_time(target.value());
-                        }
-                    }
-                }
-            })
-            .await
-            .expect("original issuer enqueued its first authenticated envelope");
+            issuer
+                .drain_issuer_return_vm_mailbox()
+                .await
+                .expect("Alice publishes her signed return mailbox before Bob responds");
             broker.interrupt_next_issuer_return_ack_for_test().await;
             let accepted = async {
                 invitee
@@ -2417,7 +2506,22 @@ mod tests {
                     ),
                 "runtime maintenance must retain and ACK the exact original first envelope"
             );
-            use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+            let acknowledged_progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                    broker.public_url(),
+                    "genuine-first-vm-broker-auth",
+                    manifest.subject,
+                    manifest.invitee_device,
+                    admitted.manifest_digest(),
+                )
+                .await.unwrap();
+            assert_eq!(
+                acknowledged_progress["messages"][0]["message_id"],
+                first_message_id
+            );
+            assert_eq!(
+                acknowledged_progress["messages"][0]["stage"],
+                "receiver_acknowledged_retained_frame"
+            );
             let pending_location =
                 crate::core::agent::pending_enrollment_mailbox::retained_location(&admitted);
             let pending_credential = invitee_effects

@@ -1085,6 +1085,17 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
+When a paired batch lacks the exact receiver ACK, retain the owner-only
+`broker-stage.json` receipt from the paired run. Its authenticated broker
+progress witness is scoped to the signed manifest subject, invitee device and
+digest. It distinguishes no stored registration, queued first message, a
+message selected for an authorized receiver retrieval, and a receiver ACK after
+verified immutable retention. Retrieval selection does not prove HTTP delivery
+or receiver admission; only the exact ACK can satisfy the network-delivery
+assertion. The receipt
+contains message IDs and envelope digests, never mailbox credentials or
+envelope bytes, and remains diagnostic evidence when the run fails.
+
 `scripts/harness/lan/provision-enrollment.sh <fresh-run-token>` prepares the
 broker prerequisite without changing the production default. It writes
 owner-only generated Host A/Host B configs under
