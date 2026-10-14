@@ -232,6 +232,7 @@ async fn original_vm_broker_progress(
     serde_json::from_slice(&response[divider + 4..]).expect("typed broker progress JSON")
 }
 
+#[cfg(test)]
 async fn drive_brokered_import_until<T, M, F>(
     fixture: &SimulatedEnrollment,
     clock: &Arc<ManualPhysicalClock>,
