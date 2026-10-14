@@ -45,6 +45,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
 hex = { workspace = true }
+sha2 = { workspace = true }
 rand_chacha = { workspace = true }
 sysinfo = { workspace = true }
 portable-pty = "0.9"

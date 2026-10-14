@@ -1249,7 +1249,7 @@ just harness-run -- --config configs/harness/local-loopback.toml \
 just harness-replay -- --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
 ```
 
-Always lint before running to catch configuration errors early. Use replay bundles to reproduce failures deterministically.
+Always lint before running to catch configuration errors early. For a failed frontend or Tool API run, replay its existing bundle first with the same prebuilt executable artifacts. The harness checks the recorded checkout revision and exact harness/local-instance executable hashes (and the browser driver script when selected) before launching instances. Hash equality proves the replay uses identical executable bytes; the checkout revision is an additional compatibility label, not a claim about an external binary's build provenance. A divergence reports the first action index, request method, response classes, and redacted JSON field path/value shapes, including same-variant payload drift. Response values, enrollment codes, and raw diagnostics stay in the protected run artifacts. Rebuild and record a new bundle only when source or an executable artifact changes. Older bundles without compatibility evidence cannot authorize replay, and this Tool API replay does not restore runtime checkpoints or credentials. Remote SSH executable identity and browser web assets are not yet verified by this guard; retain their separate build receipts.
 
 ### Interactive Mode
 

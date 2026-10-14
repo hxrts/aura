@@ -124,6 +124,9 @@ fn contract_replay_and_artifacts_subsystems() {
             .map(|instance| AddressResolver::resolve(instance, &instance.bind_address))
             .collect(),
         seed_bundle: build_seed_bundle(&run_config),
+        compatibility: Some(
+            aura_harness::replay::ReplayCompatibility::capture(&run_config).unwrap(),
+        ),
     };
 
     let outcome = match ReplayRunner::execute(&replay_bundle) {

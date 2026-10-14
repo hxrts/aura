@@ -22,7 +22,9 @@ use aura_harness::network_lab::{
     load_topology, resolve_backend_mode, NetworkBackendMode, ProvisionedLab,
 };
 use aura_harness::preflight::{run_preflight, PreflightReport};
-use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
+use aura_harness::replay::{
+    parse_bundle, ReplayBundle, ReplayCompatibility, ReplayRunner, REPLAY_SCHEMA_VERSION,
+};
 use aura_harness::residue_checks::check_run_residue;
 use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
@@ -420,6 +422,7 @@ fn run_with_tool_api(
         actions: action_log,
         routing_metadata: routing_metadata.clone(),
         seed_bundle: seed_bundle.clone(),
+        compatibility: ReplayCompatibility::capture(config).ok(),
     };
     let remote_sync_report = sync_remote_artifacts(config, artifact_bundle)?;
     let resource_report = resource_guard.report();
@@ -745,9 +748,15 @@ fn replay(args: ReplayArgs) -> Result<()> {
     })?;
     let bundle = parse_bundle(&payload)?;
     let outcome = ReplayRunner::execute(&bundle)?;
+    if let Some(first) = &outcome.first_divergence {
+        anyhow::bail!(
+            "replay divergence action_index={} request_method={} expected_response={} actual_response={} field_path={} expected_shape={} actual_shape={} mismatches={}",
+            first.action_index, first.request_method, first.expected_response, first.actual_response, first.field_path, first.expected_shape, first.actual_shape, outcome.mismatches
+        );
+    }
     println!(
-        "replay_ok actions_executed={} mismatches={}",
-        outcome.actions_executed, outcome.mismatches
+        "replay_ok actions_executed={} mismatches=0",
+        outcome.actions_executed
     );
     Ok(())
 }

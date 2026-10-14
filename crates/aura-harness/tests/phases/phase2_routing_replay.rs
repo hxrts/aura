@@ -10,7 +10,9 @@ use aura_harness::config::{
 };
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
-use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
+use aura_harness::replay::{
+    parse_bundle, ReplayBundle, ReplayCompatibility, ReplayRunner, REPLAY_SCHEMA_VERSION,
+};
 use aura_harness::routing::AddressResolver;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 
@@ -87,6 +89,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             .map(|instance| AddressResolver::resolve(instance, &instance.bind_address))
             .collect(),
         seed_bundle: build_seed_bundle(&run_config),
+        compatibility: Some(ReplayCompatibility::capture(&run_config).unwrap()),
     };
 
     let encoded = match serde_json::to_string_pretty(&bundle) {
@@ -104,6 +107,14 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
 
     assert_eq!(outcome.actions_executed, bundle.actions.len() as u64);
     assert_eq!(outcome.mismatches, 0);
+    assert!(outcome.first_divergence.is_none());
+
+    let mut stale = parsed.clone();
+    stale.compatibility.as_mut().unwrap().harness_sha256 = "0".repeat(64);
+    let error = ReplayRunner::execute(&stale).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("prebuilt revision or executable differs"));
 }
 
 fn local_instance(id: &str, data_dir: PathBuf, bind_address: &str) -> InstanceConfig {
