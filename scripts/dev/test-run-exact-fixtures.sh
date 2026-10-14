@@ -29,7 +29,8 @@ cat > "$fixture/fakebin/cargo" <<'EOF'
 #!/usr/bin/env bash
 [[ "$*" == *'--no-run --message-format=json'* ]] || exit 2
 printf 'compile\n' >> "$COMPILE_COUNTER"
-printf '{"reason":"compiler-artifact","executable":"%s/target/debug/deps/fixture-test","target":{"test":true}}\n' "$PROJECT_ROOT"
+printf '{"reason":"compiler-artifact","executable":"%s/target/debug/deps/fixture-test","target":{"name":"smoke","kind":["test"],"test":true}}\n' "$PROJECT_ROOT"
+printf '{"reason":"compiler-artifact","executable":"%s/target/debug/fixture-bin","target":{"name":"fixture-bin","kind":["bin"],"test":true}}\n' "$PROJECT_ROOT"
 EOF
 chmod +x "$project/target/debug/deps/fixture-test" "$fixture/fakebin/cargo"
 export PATH="$fixture/fakebin:$PATH" PROJECT_ROOT="$project" COMPILE_COUNTER="$fixture/compile-count"

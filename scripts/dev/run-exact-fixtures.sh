@@ -63,7 +63,11 @@ bash "$repo_root/scripts/dev/build-phase.sh" compile -- cargo "${cargo_args[@]}"
 compile_log="$(jq -r '[.phases[] | select(.phase=="compile") | .log][-1]' "$AURA_BUILD_RECEIPT")"
 executables=()
 while IFS= read -r executable; do [[ -z "$executable" ]] || executables+=("$executable"); done < <(
-  jq -Rr 'fromjson? | select(.reason=="compiler-artifact" and .executable!=null and .target.test==true) | .executable' "$compile_log"
+  jq -Rr --arg target "$binary" --arg kind "$target" '
+    fromjson? | select(.reason=="compiler-artifact" and .executable!=null and
+      ((($kind=="test") and .target.name==$target and (.target.kind | index("test")!=null)) or
+       (($kind=="lib") and (.target.kind | index("lib")!=null) and .target.test==true))) |
+    .executable' "$compile_log"
 )
 [[ "${#executables[@]}" -eq 1 && -f "${executables[0]:-}" && -x "${executables[0]:-}" ]] || {
   echo 'run-exact-fixtures: compile did not produce exactly one test executable' >&2; exit 1;
