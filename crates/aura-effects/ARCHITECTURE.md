@@ -51,6 +51,8 @@ record inventory and secure retrieval failures preserve their native causes.
   it never ignores surplus shares or erases native aggregation causes.
 
 - Handlers must be stateless (no shared mutable state).
+- `RealRandomHandler::random_bytes_32_sync` supplies fallible OS-backed entropy
+  to synchronous infrastructure constructors that cannot await the random trait.
 - Handlers must be single-party (each handler independent).
 - Handlers must be context-free (no assumptions about caller context).
 - No dependencies on domain crates or aura-protocol.

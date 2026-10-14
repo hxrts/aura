@@ -30,6 +30,15 @@ impl RealRandomHandler {
     pub fn new() -> Self {
         Self
     }
+
+    /// Generate one credential-sized value for synchronous infrastructure
+    /// constructors. OS entropy failures remain errors instead of silently
+    /// producing a predictable credential.
+    pub fn random_bytes_32_sync(&self) -> Result<[u8; 32], rand::Error> {
+        let mut bytes = [0_u8; 32];
+        rand::rngs::OsRng.try_fill_bytes(&mut bytes)?;
+        Ok(bytes)
+    }
 }
 
 #[async_trait]

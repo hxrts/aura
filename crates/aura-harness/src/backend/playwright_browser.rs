@@ -17,10 +17,10 @@ use aura_app::ui::contract::{
 use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse, SettingsSection};
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
+use aura_effects::RealRandomHandler;
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::signal;
 use nix::unistd::Pid;
-use rand::RngCore;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1246,8 +1246,9 @@ fn browser_broker_credentials(env_entries: &[String]) -> Result<Option<BrowserBr
             }
             // Each page receives a separate unpredictable retrieval credential.
             // The backend retains it across browser restart in this run.
-            let mut invitation_bytes = [0_u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut invitation_bytes);
+            let invitation_bytes = RealRandomHandler::new()
+                .random_bytes_32_sync()
+                .context("browser broker retrieval credential entropy unavailable")?;
             let invitation = hex::encode(invitation_bytes);
             Ok(Some(BrowserBrokerCredentials {
                 url,
