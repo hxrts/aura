@@ -271,6 +271,13 @@ struct BootstrapBrokerState {
     pending_enrollment_mailboxes: PendingEnrollmentMailboxes,
     #[cfg(test)]
     pending_registration_miss: Option<tokio::sync::oneshot::Sender<()>>,
+    #[cfg(test)]
+    pending_envelope_queued: Option<tokio::sync::oneshot::Sender<String>>,
+    #[cfg(test)]
+    pending_registration_pause: Option<(
+        tokio::sync::oneshot::Sender<()>,
+        tokio::sync::oneshot::Receiver<()>,
+    )>,
     enrollment_return_mailboxes: EnrollmentReturnMailboxes,
     started_at: Instant,
 }
@@ -299,6 +306,10 @@ impl BootstrapBrokerState {
             pending_enrollment_mailboxes: PendingEnrollmentMailboxes::new(retention),
             #[cfg(test)]
             pending_registration_miss: None,
+            #[cfg(test)]
+            pending_envelope_queued: None,
+            #[cfg(test)]
+            pending_registration_pause: None,
             enrollment_return_mailboxes: EnrollmentReturnMailboxes::new(retention),
             started_at: Instant::now(),
         }
@@ -413,6 +424,58 @@ impl LocalBootstrapBrokerService {
         receiver
     }
 
+    #[cfg(test)]
+    pub(crate) async fn observe_next_pending_envelope_for_test(
+        &self,
+    ) -> tokio::sync::oneshot::Receiver<String> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.shared.write().await.pending_envelope_queued = Some(sender);
+        receiver
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn pause_next_pending_registration_for_test(
+        &self,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        self.shared.write().await.pending_registration_pause =
+            Some((entered_sender, release_receiver));
+        (entered_receiver, release_sender)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn pending_ack_witnesses_for_test(
+        &self,
+        subject: AuthorityId,
+        device: DeviceId,
+        manifest_digest: [u8; 32],
+    ) -> Result<Vec<(String, String, String, String)>, String> {
+        let now_ms = self.mailbox_now_ms().await?;
+        Ok(self
+            .shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .acknowledged_witnesses(
+                PendingMailboxKey::new(subject, device, manifest_digest),
+                now_ms,
+            )
+            .into_iter()
+            .map(|witness| {
+                (
+                    witness.message_id,
+                    witness.subject,
+                    witness.device,
+                    witness.manifest_digest,
+                )
+            })
+            .collect())
+    }
+
     pub async fn register(&self, registration: BootstrapBrokerRegistration) -> Result<(), String> {
         let now_ms = broker_elapsed_ms(&self.shared).await;
         prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
@@ -503,12 +566,19 @@ impl LocalBootstrapBrokerService {
             .ok_or("pending enrollment VM envelope has no exact device")?;
         let key = PendingMailboxKey::new(envelope.destination, device, manifest_digest);
         let now_ms = self.mailbox_now_ms().await?;
-        self.shared
-            .write()
-            .await
+        #[cfg(test)]
+        let message_id = envelope.metadata.get("aura-message-id").cloned();
+        let mut state = self.shared.write().await;
+        state
             .pending_enrollment_mailboxes
             .enqueue(key, envelope, now_ms)
-            .map_err(str::to_string)
+            .map_err(str::to_string)?;
+        #[cfg(test)]
+        if let (Some(sender), Some(message_id)) = (state.pending_envelope_queued.take(), message_id)
+        {
+            let _ = sender.send(message_id);
+        }
+        Ok(())
     }
 
     pub(crate) async fn take_pending_enrollment_vm_envelopes(
@@ -1137,6 +1207,13 @@ async fn handle_http_connection(
                 .await;
                 return;
             }
+            #[cfg(test)]
+            let registration_pause = { shared.write().await.pending_registration_pause.take() };
+            #[cfg(test)]
+            if let Some((entered, release)) = registration_pause {
+                let _ = entered.send(());
+                let _ = release.await;
+            }
             let now_ms = mailbox_now!();
             let result = shared.write().await.pending_enrollment_mailboxes.register(
                 payload.registration,
@@ -1228,12 +1305,22 @@ async fn handle_http_connection(
                 device,
                 payload.manifest_digest,
             );
+            #[cfg(test)]
+            let message_id = payload.envelope.metadata.get("aura-message-id").cloned();
             let now_ms = mailbox_now!();
-            let result = shared.write().await.pending_enrollment_mailboxes.enqueue(
-                key,
-                payload.envelope,
-                now_ms,
-            );
+            let mut state = shared.write().await;
+            let result = state
+                .pending_enrollment_mailboxes
+                .enqueue(key, payload.envelope, now_ms);
+            #[cfg(test)]
+            if result.is_ok() {
+                if let (Some(sender), Some(message_id)) =
+                    (state.pending_envelope_queued.take(), message_id)
+                {
+                    let _ = sender.send(message_id);
+                }
+            }
+            drop(state);
             let (status, body) = match result {
                 Ok(()) => (204, ""),
                 Err(reason) => (429, reason),

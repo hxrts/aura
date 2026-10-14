@@ -2216,6 +2216,16 @@ mod tests {
             );
             issuer_effects.attach_rendezvous_manager(issuer_manager);
             invitee_effects.attach_rendezvous_manager(invitee_manager);
+            let invitee_bridge: Arc<dyn aura_app::runtime_bridge::RuntimeBridge> = Arc::new(
+                crate::runtime_bridge::AgentRuntimeBridge::new(invitee.clone()),
+            );
+            let invitee_app = Arc::new(async_lock::RwLock::new(
+                aura_app::AppCore::with_runtime(
+                    aura_app::AppConfig::default(),
+                    invitee_bridge.clone(),
+                )
+                .expect("actual invitee app owns its runtime"),
+            ));
             let session =
                 aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
                     &invitation.invitation_id,
@@ -2241,12 +2251,95 @@ mod tests {
                 .await
                 .expect("Alice waits on the original signed enrollment lifetime")
                 .expect("original registration retry remained owned");
-            assert_eq!(
-                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
-                0,
-                "Bob registers the exact signed mailbox after Alice's first send attempt"
+            let manifest = admitted.manifest();
+            let (registration_entered, release_registration) =
+                broker.pause_next_pending_registration_for_test().await;
+            let pending_app = invitee_app.clone();
+            let pending_bridge = invitee_bridge.clone();
+            let blocked_pass = tokio::spawn(async move {
+                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                    &pending_app,
+                    &pending_bridge,
+                )
+                .await
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(10), registration_entered)
+                .await
+                .expect("receiver reached actual broker registration")
+                .expect("registration pause remained owned");
+            // The fixture uses the selected manual PhysicalTimeEffects provider;
+            // elapsed wall time must not be substituted for its deadline.
+            clock.advance(1_100);
+            let blocked_result =
+                tokio::time::timeout(std::time::Duration::from_secs(10), blocked_pass)
+                    .await
+                    .expect("bounded maintenance terminates while registration is held")
+                    .expect("maintenance task did not panic");
+            assert!(
+                blocked_result.is_err(),
+                "registration wait must fail bounded maintenance"
             );
-            clock.advance(100);
+            assert!(
+                broker
+                    .pending_enrollment_mailbox_registration(
+                        manifest.subject,
+                        manifest.invitee_device,
+                        admitted.manifest_digest(),
+                    )
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "held registration has not been published or exposed to Alice"
+            );
+            let first_envelope = broker.observe_next_pending_envelope_for_test().await;
+            release_registration
+                .send(())
+                .expect("release broker registration response");
+            let retry_result = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                    &invitee_app,
+                    &invitee_bridge,
+                ),
+            )
+            .await
+            .expect("receiver retries bounded maintenance");
+            // The fixture has no running rendezvous service for sibling sync.
+            // Mailbox upkeep precedes that sync and must complete independently.
+            assert!(
+                matches!(retry_result, Err(aura_core::AuraError::Internal { .. })),
+                "retry must preserve the independent typed sync failure: {retry_result:?}"
+            );
+            assert!(
+                broker
+                    .pending_enrollment_mailbox_registration(
+                        manifest.subject,
+                        manifest.invitee_device,
+                        admitted.manifest_digest(),
+                    )
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "runtime maintenance registers Bob's exact signed mailbox"
+            );
+            let mut first_envelope = Box::pin(first_envelope);
+            let first_message_id = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                loop {
+                    tokio::select! {
+                        result = &mut first_envelope => {
+                            break result.expect("first-envelope observation remained owned");
+                        }
+                        retry = clock.observe_next_relative_sleep_of(100) => {
+                            let retry = retry.expect("observe original signed retry");
+                            let target = retry.await.expect("original retry remains admitted");
+                            assert!(target.value() < manifest.expires_at_ms, "retry must stay inside original signed lifetime");
+                            clock.set_time(target.value());
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("original issuer enqueued its first authenticated envelope");
             broker.interrupt_next_issuer_return_ack_for_test().await;
             let accepted = async {
                 invitee
@@ -2259,8 +2352,14 @@ mod tests {
             // Preserve Alice's in-flight broker take/ACK across select turns.
             // Recreating it after every ready Bob poll cancels the network request.
             let mut issuer_drain = Box::pin(issuer.drain_issuer_return_vm_mailbox());
-            let mut admitted_frames = 0;
+            let mut maintenance_rounds = 0;
             let mut accepted_completed = false;
+            let mut receiver_maintenance = Box::pin(
+                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                    &invitee_app,
+                    &invitee_bridge,
+                ),
+            );
             let ack_failure = tokio::time::timeout(std::time::Duration::from_secs(20), async {
                 loop {
                     tokio::select! {
@@ -2272,8 +2371,13 @@ mod tests {
                             // and tested; never poll the completed future again.
                             accepted_completed = true;
                         },
-                        result = invitee.drain_pending_enrollment_vm_mailbox() => {
-                            admitted_frames += result.expect("Bob's protected mailbox intake");
+                        _result = &mut receiver_maintenance => {
+                            maintenance_rounds += 1;
+                            receiver_maintenance = Box::pin(
+                                aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                                    &invitee_app, &invitee_bridge,
+                                ),
+                            );
                             tokio::task::yield_now().await;
                         },
                         result = &mut issuer_drain => {
@@ -2293,6 +2397,25 @@ mod tests {
             assert!(
                 format!("{ack_failure:?}").contains("status: 401"),
                 "first return frame must fail only at injected broker ACK status: {ack_failure:?}"
+            );
+            let pending_acks = broker
+                .pending_ack_witnesses_for_test(
+                    manifest.subject,
+                    manifest.invitee_device,
+                    admitted.manifest_digest(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                pending_acks
+                    .iter()
+                    .any(
+                        |(message_id, subject, device, digest)| message_id == &first_message_id
+                            && subject == &manifest.subject.to_string()
+                            && device == &manifest.invitee_device.to_string()
+                            && digest == &hex::encode(admitted.manifest_digest())
+                    ),
+                "runtime maintenance must retain and ACK the exact original first envelope"
             );
             use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
             let pending_location =
@@ -2362,7 +2485,7 @@ mod tests {
             assert_eq!(
                 frame_keys.len(),
                 1,
-                "Alice retained the exact encrypted frame before the interrupted ACK; external intake count={admitted_frames}"
+                "Alice retained the exact encrypted frame before the interrupted ACK; maintenance rounds={maintenance_rounds}"
             );
             let frame_key = &frame_keys[0];
             let frame_bytes = issuer_effects
