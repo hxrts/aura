@@ -222,6 +222,9 @@ same host handler at a blocked native directory and retains the original storage
 source, one Failed terminal for the submitted instance, and original task
 disposal. Broker prefill coverage proves signed invitation delivery; the
 native-broker lifecycle fixture covers the pre-adoption VM route in process.
+The separate `bootstrap_delivery_checkpoint` binary combines canonical signed
+contact and enrollment codes with the local broker, two runtime-backed devices
+of one recipient authority, and app-owned purpose dispatch/refusal.
 These fixtures do not prove production selected-identity
 persistence, retry/reopen after refusal, or browser host storage behavior.
 
