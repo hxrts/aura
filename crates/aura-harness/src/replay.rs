@@ -5,7 +5,6 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::io::Read;
 
 use crate::api_version::TOOL_API_VERSIONS;
@@ -35,7 +34,7 @@ pub struct ReplayBundle {
 #[serde(deny_unknown_fields)]
 pub struct ReplayCompatibility {
     pub source_revision: String,
-    pub harness_sha256: String,
+    pub harness_digest: String,
     pub instance_executables: Vec<ReplayExecutable>,
 }
 
@@ -43,9 +42,9 @@ pub struct ReplayCompatibility {
 #[serde(deny_unknown_fields)]
 pub struct ReplayExecutable {
     pub instance_id: String,
-    pub sha256: String,
+    pub digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub driver_sha256: Option<String>,
+    pub driver_digest: Option<String>,
 }
 
 impl ReplayCompatibility {
@@ -65,7 +64,7 @@ impl ReplayCompatibility {
         if source_revision.len() != 40 || !source_revision.bytes().all(|b| b.is_ascii_hexdigit()) {
             bail!("invalid replay source revision");
         }
-        let harness_sha256 = sha256_file(&std::env::current_exe()?)?;
+        let harness_digest = digest_file(&std::env::current_exe()?)?;
         let mut instance_executables = Vec::new();
         for instance in &config.instances {
             let (command, driver) = match instance.mode {
@@ -111,22 +110,22 @@ impl ReplayCompatibility {
                 .with_context(|| format!("resolve replay executable for {}", instance.id))?;
             instance_executables.push(ReplayExecutable {
                 instance_id: instance.id.clone(),
-                sha256: sha256_file(&path)?,
-                driver_sha256: driver.as_deref().map(sha256_file).transpose()?,
+                digest: digest_file(&path)?,
+                driver_digest: driver.as_deref().map(digest_file).transpose()?,
             });
         }
         Ok(Self {
             source_revision,
-            harness_sha256,
+            harness_digest,
             instance_executables,
         })
     }
 }
 
-fn sha256_file(path: &std::path::Path) -> Result<String> {
+fn digest_file(path: &std::path::Path) -> Result<String> {
     let mut file = std::fs::File::open(path)
         .with_context(|| format!("open replay executable {}", path.display()))?;
-    let mut digest = Sha256::new();
+    let mut digest = aura_core::hash::hasher();
     let mut chunk = [0_u8; 64 * 1024];
     loop {
         let count = file.read(&mut chunk)?;
@@ -193,7 +192,7 @@ impl ReplayRunner {
         let expected = bundle
             .compatibility
             .as_ref()
-            .expect("validated compatibility");
+            .ok_or_else(|| anyhow!("replay bundle has no prebuilt revision evidence"))?;
         let actual = ReplayCompatibility::capture(&bundle.run_config)?;
         if &actual != expected {
             bail!(
@@ -489,15 +488,15 @@ mod tests {
     fn replay_compatibility_rejects_changed_prebuilt_digest() {
         let original = ReplayCompatibility {
             source_revision: "a".repeat(40),
-            harness_sha256: "b".repeat(64),
+            harness_digest: "b".repeat(64),
             instance_executables: vec![ReplayExecutable {
                 instance_id: "alice".into(),
-                sha256: "c".repeat(64),
-                driver_sha256: None,
+                digest: "c".repeat(64),
+                driver_digest: None,
             }],
         };
         let mut changed = original.clone();
-        changed.instance_executables[0].sha256 = "d".repeat(64);
+        changed.instance_executables[0].digest = "d".repeat(64);
         assert_ne!(original, changed);
     }
 

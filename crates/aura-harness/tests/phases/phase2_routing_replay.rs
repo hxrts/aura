@@ -109,8 +109,8 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
     assert_eq!(outcome.mismatches, 0);
     assert!(outcome.first_divergence.is_none());
 
-    let mut stale = parsed.clone();
-    stale.compatibility.as_mut().unwrap().harness_sha256 = "0".repeat(64);
+    let mut stale = parsed;
+    stale.compatibility.as_mut().unwrap().harness_digest = "0".repeat(64);
     let error = ReplayRunner::execute(&stale).unwrap_err();
     assert!(error
         .to_string()
