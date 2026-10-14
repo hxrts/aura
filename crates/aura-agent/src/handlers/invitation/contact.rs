@@ -7,6 +7,7 @@ use super::context_sync::{
 };
 use super::*;
 use crate::reactive::{MessageDrop, MessageDropReason};
+use crate::runtime::effects::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
 use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::ChannelParticipantEvent;
 use aura_protocol::{
@@ -26,11 +27,27 @@ enum ContactInvitationAcceptanceError {
 
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,
+    #[cfg(test)]
+    receive_pause_for_test: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 impl<'a> InvitationContactHandler<'a> {
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
-        Self { handler }
+        Self {
+            handler,
+            #[cfg(test)]
+            receive_pause_for_test: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_receive_pause_for_test(
+        mut self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        self.receive_pause_for_test = Some((entered, release));
+        self
     }
 
     fn verified_invitation_payload<T>(
@@ -386,8 +403,8 @@ impl<'a> InvitationContactHandler<'a> {
         effects: Arc<AuraEffectSystem>,
     ) -> AgentResult<usize> {
         let mut processed = 0usize;
-        let mut deferred_envelopes = Vec::new();
-        let mut in_flight_envelope: Option<TransportEnvelope> = None;
+        let mut deferred_envelopes = DeferredInboundEnvelopeReturns::new();
+        let mut in_flight_envelope: Option<InboundEnvelopeLease<'_>> = None;
         let mut scanned = 0usize;
         const MAX_SCANS_PER_TICK: usize = 4096;
         let budget = invitation_timeout_budget(
@@ -399,7 +416,7 @@ impl<'a> InvitationContactHandler<'a> {
 
         let process_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
             while scanned < MAX_SCANS_PER_TICK {
-                let envelope = match effects.receive_envelope().await {
+                let envelope = match effects.receive_envelope_retained().await {
                     Ok(env) => env,
                     Err(TransportError::NoMessage) => break,
                     Err(
@@ -419,6 +436,11 @@ impl<'a> InvitationContactHandler<'a> {
                 };
                 scanned = scanned.saturating_add(1);
                 in_flight_envelope = Some(envelope);
+                #[cfg(test)]
+                if let Some((entered, release)) = &self.receive_pause_for_test {
+                    entered.notify_one();
+                    release.notified().await;
+                }
 
                 let Some(content_type) = in_flight_envelope
                     .as_ref()
@@ -443,7 +465,11 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %error,
                                 "Failed to apply contact invitation response"
                             );
+                            // An awaited persistence failure has not settled this
+                            // response; the lease returns it for the next tick.
+                            break;
                         }
+                        let _ = envelope.consume();
                     }
                     continue;
                 }
@@ -459,7 +485,7 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %e,
                                 "Invalid contact invitation acceptance payload"
                             );
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                         None => continue,
@@ -476,14 +502,14 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %error,
                                 "Rejected unverified contact invitation acceptance"
                             );
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                     };
                     let acceptance = acceptance.payload();
 
                     if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -498,12 +524,12 @@ impl<'a> InvitationContactHandler<'a> {
                             invitation_id = %acceptance.invitation_id,
                             "Ignoring acceptance for unknown invitation"
                         );
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     };
 
                     if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -517,7 +543,7 @@ impl<'a> InvitationContactHandler<'a> {
                             invitation_id = %acceptance.invitation_id,
                             "Rejected contact invitation acceptance with mismatched source authority"
                         );
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -539,7 +565,7 @@ impl<'a> InvitationContactHandler<'a> {
                             acceptor_id = %acceptance.acceptor_id,
                             "Rejected contact invitation acceptance with invalid signature"
                         );
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -601,8 +627,9 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %error,
                                 "Failed to send contact invitation response"
                             );
+                            break;
                         }
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -717,7 +744,7 @@ impl<'a> InvitationContactHandler<'a> {
                         .invitation_cache
                         .cache_invitation(updated)
                         .await;
-                    if let Err(error) = self
+                    let confirmation_sent = match self
                         .handler
                         .send_contact_invitation_response(
                             effects.clone(),
@@ -729,12 +756,16 @@ impl<'a> InvitationContactHandler<'a> {
                         )
                         .await
                     {
-                        tracing::warn!(
-                            invitation_id = %acceptance.invitation_id,
-                            error = %error,
-                            "Failed to send contact invitation confirmation; the acceptor may resend"
-                        );
-                    }
+                        Ok(()) => true,
+                        Err(error) => {
+                            tracing::warn!(
+                                invitation_id = %acceptance.invitation_id,
+                                error = %error,
+                                "Failed to send contact invitation confirmation; the acceptor may resend"
+                            );
+                            false
+                        }
+                    };
                     if let Err(error) = self
                         .ensure_sender_peer_channel(effects.as_ref(), acceptance.acceptor_id)
                         .await
@@ -747,8 +778,13 @@ impl<'a> InvitationContactHandler<'a> {
                         );
                     }
 
+                    if !confirmation_sent {
+                        // The local acceptance is durable, but its response is
+                        // not; retry the exact envelope on a later tick.
+                        break;
+                    }
                     processed = processed.saturating_add(1);
-                    in_flight_envelope = None;
+                    let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                     continue;
                 }
 
@@ -763,7 +799,7 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %e,
                                 "Invalid channel invitation acceptance payload"
                             );
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                         None => continue,
@@ -780,14 +816,14 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %error,
                                 "Rejected unverified channel invitation acceptance"
                             );
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                     };
                     let acceptance = acceptance.payload();
 
                     if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -799,11 +835,11 @@ impl<'a> InvitationContactHandler<'a> {
                     .await;
 
                     let Some(invitation) = invitation else {
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     };
                     if !matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
                     let now_ms =
@@ -811,7 +847,7 @@ impl<'a> InvitationContactHandler<'a> {
                     if invitation.is_expired(now_ms)
                         || invitation.status == InvitationStatus::Accepted
                     {
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -825,7 +861,7 @@ impl<'a> InvitationContactHandler<'a> {
                             invitation_id = %acceptance.invitation_id,
                             "Rejected channel invitation acceptance with mismatched source authority"
                         );
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
                     if let Err(error) = verify_invitation_acceptance_signature(
@@ -848,7 +884,7 @@ impl<'a> InvitationContactHandler<'a> {
                             acceptor_id = %acceptance.acceptor_id,
                             "Rejected channel invitation acceptance with invalid signature"
                         );
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -1009,7 +1045,7 @@ impl<'a> InvitationContactHandler<'a> {
                     let _ = home_name;
 
                     processed = processed.saturating_add(1);
-                    in_flight_envelope = None;
+                    let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                     continue;
                 }
 
@@ -1021,6 +1057,7 @@ impl<'a> InvitationContactHandler<'a> {
                         Ok(message) => message,
                         Err(error) => {
                             tracing::warn!(error = %error, "Invalid context sync message");
+                            let _ = envelope.consume();
                             continue;
                         }
                     };
@@ -1031,6 +1068,7 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %error,
                                 "Rejected unverified context sync message"
                             );
+                            let _ = envelope.consume();
                             continue;
                         }
                     };
@@ -1039,7 +1077,9 @@ impl<'a> InvitationContactHandler<'a> {
                         .await
                     {
                         tracing::debug!(error = %error, "context sync message not handled");
+                        break;
                     }
+                    let _ = envelope.consume();
                     processed = processed.saturating_add(1);
                     continue;
                 }
@@ -1061,7 +1101,7 @@ impl<'a> InvitationContactHandler<'a> {
                                     },
                                 ));
                             }
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                         None => continue,
@@ -1084,7 +1124,7 @@ impl<'a> InvitationContactHandler<'a> {
                                     },
                                 ));
                             }
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                     };
@@ -1104,7 +1144,7 @@ impl<'a> InvitationContactHandler<'a> {
                                 detail: rejection.to_string(),
                             },
                         ));
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
                     // The receipt binds the envelope source to the sender, so a
@@ -1121,7 +1161,7 @@ impl<'a> InvitationContactHandler<'a> {
                                         claimed_author: author,
                                     },
                                 ));
-                                in_flight_envelope = None;
+                                let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                                 continue;
                             }
                         }
@@ -1137,7 +1177,7 @@ impl<'a> InvitationContactHandler<'a> {
                                 Some(fact),
                                 MessageDropReason::PeerFactRejected { detail },
                             ));
-                            in_flight_envelope = None;
+                            let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                             continue;
                         }
                         // A membership event written for someone else needs
@@ -1154,7 +1194,7 @@ impl<'a> InvitationContactHandler<'a> {
                                     context = %context,
                                     "membership event deferred until its author's standing is observed"
                                 );
-                                in_flight_envelope = None;
+                                let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                                 continue;
                             }
                             super::context_sync::MembershipStanding::Refused(reason) => {
@@ -1164,7 +1204,7 @@ impl<'a> InvitationContactHandler<'a> {
                                     Some(fact),
                                     reason,
                                 ));
-                                in_flight_envelope = None;
+                                let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                                 continue;
                             }
                         }
@@ -1176,7 +1216,7 @@ impl<'a> InvitationContactHandler<'a> {
                         .await?
                     {
                         processed = processed.saturating_add(1);
-                        in_flight_envelope = None;
+                        let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                         continue;
                     }
 
@@ -1195,22 +1235,22 @@ impl<'a> InvitationContactHandler<'a> {
                     }
 
                     processed = processed.saturating_add(1);
-                    in_flight_envelope = None;
+                    let _ = in_flight_envelope.take().map(InboundEnvelopeLease::consume);
                     continue;
                 }
 
                 if content_type == INVITATION_CONTENT_TYPE {
-                    let payload = in_flight_envelope
-                        .take()
-                        .map(|envelope| envelope.payload)
-                        .unwrap_or_default();
-                    let code = match String::from_utf8(payload) {
+                    let Some(envelope) = in_flight_envelope.take() else {
+                        continue;
+                    };
+                    let code = match String::from_utf8(envelope.payload.clone()) {
                         Ok(code) => code,
                         Err(error) => {
                             tracing::warn!(
                                 error = %error,
                                 "Invalid invitation payload envelope"
                             );
+                            let _ = envelope.consume();
                             continue;
                         }
                     };
@@ -1218,6 +1258,7 @@ impl<'a> InvitationContactHandler<'a> {
                     let code = code.trim();
                     if code.is_empty() {
                         tracing::warn!("Received empty invitation payload envelope");
+                        let _ = envelope.consume();
                         continue;
                     }
 
@@ -1250,8 +1291,10 @@ impl<'a> InvitationContactHandler<'a> {
                                 error = %error,
                                 "Failed to import inbound invitation envelope"
                             );
+                            break;
                         }
                     }
+                    let _ = envelope.consume();
                     continue;
                 }
 
@@ -1268,9 +1311,7 @@ impl<'a> InvitationContactHandler<'a> {
             deferred_envelopes.push(envelope);
         }
 
-        for envelope in deferred_envelopes {
-            effects.requeue_envelope(envelope);
-        }
+        drop(deferred_envelopes);
 
         match process_result {
             Ok(()) => Ok(processed),

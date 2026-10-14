@@ -625,7 +625,12 @@ Runtime bridge lookup follows the same strong-ref rule:
   settled invitation yields a typed rejection and no contact, and no response
   within the bounded wait is a typed failure that leaves it pending. The
   inviter authenticates an acceptance before answering, and re-confirms a
-  duplicate from the same acceptor
+  duplicate from the same acceptor.
+- Contact invitation intake retains each original inbound frame and its return
+  capacity across signature, fact, projection, persistence, and response
+  awaits. Cancellation or a transient processing error returns that exact
+  frame for a later tick. Definitively rejected frames and durably processed
+  frames consume their lease; unrelated frames return in their original order.
 - imported channel invitations and channel-acceptance notification must require
   the authoritative invitation context end to end; they may not default to the
   sender's home context when importing, loading, or establishing the sender

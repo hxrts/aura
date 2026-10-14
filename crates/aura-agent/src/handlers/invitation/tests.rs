@@ -122,6 +122,61 @@ async fn send_invitation_test_verified_envelope(
         .await
 }
 
+#[tokio::test]
+async fn cancelled_contact_receive_restores_exact_frame_before_mutation() {
+    let authority = AuthorityId::new_from_entropy([231; 32]);
+    let peer = AuthorityId::new_from_entropy([232; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+    );
+    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+    let context = ContextId::new_from_entropy([233; 32]);
+    let original = TransportEnvelope {
+        source: peer,
+        destination: authority,
+        context,
+        payload: b"cancelled before import".to_vec(),
+        metadata: HashMap::from([(
+            "content-type".to_string(),
+            INVITATION_CONTENT_TYPE.to_string(),
+        )]),
+        receipt: None,
+    };
+    send_invitation_test_verified_envelope(&effects, original.clone())
+        .await
+        .unwrap();
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let contact = contact::InvitationContactHandler::new(&handler)
+        .with_receive_pause_for_test(entered.clone(), release);
+    let mut processing = Box::pin(contact.process_contact_invitation_acceptances(effects.clone()));
+    timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            _ = entered.notified() => {},
+            result = &mut processing => panic!("receive should pause before mutation: {result:?}"),
+        }
+    })
+    .await
+    .expect("actual contact receive reached its retained pre-mutation pause");
+    drop(processing);
+
+    let restored = effects
+        .receive_envelope_retained()
+        .await
+        .expect("cancelled receive restores original frame and capacity");
+    assert_eq!(restored.source, original.source);
+    assert_eq!(restored.destination, original.destination);
+    assert_eq!(restored.context, original.context);
+    assert_eq!(restored.payload, original.payload);
+    let _ = restored.consume();
+    assert!(matches!(
+        effects.receive_envelope_retained().await,
+        Err(aura_core::effects::transport::TransportError::NoMessage)
+    ));
+}
+
 fn install_full_invitation_biscuit_cache(effects: &Arc<AuraEffectSystem>, authority: AuthorityId) {
     let issuer = aura_authorization::TokenAuthority::new(authority);
     let token = issuer
