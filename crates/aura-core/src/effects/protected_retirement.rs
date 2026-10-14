@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// Upper bound on one selected profile's protected retirement inventory.
-pub const MAX_PROTECTED_RETIREMENT_RECORDS: usize = 4096;
+pub const MAX_PROTECTED_RETIREMENT_RECORD_COUNT: usize = 4096;
 
 /// Pure inventory identity. It cannot select or retire an existing record.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,7 +96,7 @@ impl ProtectedRetirementRecoveryCapability {
             ));
         }
         let owners = self.backend.recover_owned_inventory().await?;
-        if owners.len() > MAX_PROTECTED_RETIREMENT_RECORDS {
+        if owners.len() > MAX_PROTECTED_RETIREMENT_RECORD_COUNT {
             return Err(AuraError::invalid(
                 "protected retirement inventory exceeded",
             ));
@@ -138,7 +138,7 @@ impl ProtectedRetirementRecoveryCapability {
             ));
         }
         let owners = self.backend.recover_owned_inventory().await?;
-        if owners.len() > MAX_PROTECTED_RETIREMENT_RECORDS {
+        if owners.len() > MAX_PROTECTED_RETIREMENT_RECORD_COUNT {
             return Err(AuraError::invalid(
                 "protected retirement inventory exceeded",
             ));

@@ -45,7 +45,7 @@ pub enum InvitationPurpose {
 }
 
 /// Bound shared by the broker mailbox and its finite receiving owner.
-pub const MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT: usize = 16;
+pub const MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT_COUNT: usize = 16;
 
 /// Untrusted transport record. Purpose and recipient observations grant no
 /// signature verification, enrollment approval, or contact authority.

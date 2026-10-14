@@ -3,7 +3,7 @@
 use super::*;
 use aura_core::effects::task::{RequiredTaskExit, RequiredTaskSettlement};
 use aura_core::invitation::{
-    BootstrapBrokerInvitation, InvitationPurpose, MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT,
+    BootstrapBrokerInvitation, InvitationPurpose, MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT_COUNT,
 };
 use aura_core::OwnedTaskHandle;
 use futures::channel::oneshot;
@@ -176,7 +176,7 @@ impl BootstrapBatchCoordinator {
             self.pending = batch.deliveries.into();
             self.fetched = true;
             let valid = batch.recipient_authority_id == expected_authority
-                && self.pending.len() <= MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT
+                && self.pending.len() <= MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT_COUNT
                 && self.pending.iter().all(|delivery| {
                     delivery.recipient_authority_id == expected_authority.to_string()
                         && delivery.recipient_device_id == batch.recipient_device_id

@@ -457,8 +457,8 @@ pub struct ProvisionedLab {
 pub struct FinishedLabArtifacts {
     pub bundle: ArtifactBundle,
     /// Lab events in the final timeline; zero means the lab wrote no event log.
-    pub lab_event_count: usize,
-    pub harness_event_count: usize,
+    pub lab_event_count: u64,
+    pub harness_event_count: u64,
 }
 
 impl fmt::Debug for ProvisionedLab {
@@ -561,7 +561,9 @@ impl ProvisionedLab {
             lab_event_count = entries
                 .iter()
                 .filter(|entry| matches!(entry, TimelineEntry::Lab { .. }))
-                .count();
+                .count()
+                .try_into()
+                .context("lab event count exceeds u64")?;
             // Keep the complete log next to the live copy, which was taken
             // before the flush and may be empty.
             if log.exists() {
@@ -577,7 +579,10 @@ impl ProvisionedLab {
         Ok(FinishedLabArtifacts {
             bundle,
             lab_event_count,
-            harness_event_count: receipts.len(),
+            harness_event_count: receipts
+                .len()
+                .try_into()
+                .context("harness event count exceeds u64")?,
         })
     }
 }

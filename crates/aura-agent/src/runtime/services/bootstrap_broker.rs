@@ -54,7 +54,7 @@ const MAX_BOOTSTRAP_CANDIDATES: usize = 256;
 const MAX_PENDING_INVITATIONS: usize = 256;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_INVITATIONS_PER_RECIPIENT: usize =
-    aura_core::invitation::MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT;
+    aura_core::invitation::MAX_BOOTSTRAP_INVITATIONS_PER_RECIPIENT_COUNT;
 #[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_MAX_BOOTSTRAP_CONNECTIONS: usize = 64;
 #[cfg(not(target_arch = "wasm32"))]
