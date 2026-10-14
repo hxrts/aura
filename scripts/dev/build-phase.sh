@@ -25,6 +25,11 @@ if [[ -n "$expected" ]]; then
 fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/scripts/dev/build-receipt.sh"
+aura_receipt_cargo_metadata "$@"
+phase_packages="$receipt_packages"
+phase_features="$receipt_features"
+phase_target="$receipt_test_target"
+phase_filter="$receipt_test_filter"
 phase_lock="${AURA_BUILD_RECEIPT}.phase-lock"
 mkdir "$phase_lock" 2>/dev/null || {
   echo 'build-phase: another phase owns this receipt' >&2; exit 2;
@@ -61,8 +66,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 aura_receipt_update --arg phase "$phase" --arg log "$phase_log" --arg started "$started" \
   --argjson argv "$argv" --argjson pid "$$" --arg identity "$runner_identity" \
+  --arg packages "$phase_packages" --arg features "$phase_features" \
+  --arg target "$phase_target" --arg filter "$phase_filter" \
+  --argjson expected "$expected_json" \
   '.current_phase=$phase | .active_phase={phase:$phase,command_argv:$argv,log:$log,
-    started_utc:$started,runner:{pid:$pid,start_identity:$identity},child:null}'
+    started_utc:$started,runner:{pid:$pid,start_identity:$identity},child:null} |
+    .metadata.phase_commands += [{phase:$phase,
+      packages:(if $packages=="" then null else $packages end),
+      features:(if $features=="" then null else $features end),
+      test_target:(if $target=="" then null else $target end),
+      test_filter:(if $filter=="" then null else $filter end),
+      expected_tests:$expected}]'
 # Capture output as an artifact; do not infer a successful command from output.
 "$@" > "$phase_log" 2>&1 &
 child=$!

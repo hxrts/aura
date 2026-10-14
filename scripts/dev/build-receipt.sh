@@ -88,13 +88,33 @@ aura_receipt_cargo_metadata() {
   [[ "$subcommand" == test && "$filter_safe" == 1 ]] || receipt_test_filter=''
 }
 
+# Only Rust test identifiers and source locations may leave the protected
+# output log. Values, assertion operands and arbitrary diagnostic lines stay
+# in that log, even when a failing test prints them before its terminal line.
+aura_receipt_safe_failure_identity() {
+  local name='' location='' log=''
+  [[ -f "$AURA_BUILD_RECEIPT" ]] || return 0
+  name="$(jq -r '[.phases[]?.failed_tests[]?][0] // empty' "$AURA_BUILD_RECEIPT")"
+  log="$(jq -r '[.phases[]? | select(.failed_count>0) | .log][0] // .artifacts.command_log // empty' "$AURA_BUILD_RECEIPT")"
+  [[ -f "$log" && ! -L "$log" ]] || return 0
+  if [[ -z "$name" ]]; then
+    name="$(sed -nE 's/^test ([A-Za-z_][A-Za-z0-9_:]*) \.\.\. FAILED.*/\1/p' "$log" | sed -n '1p')"
+  fi
+  [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_:]{0,95}$ ]] || return 0
+  location="$(sed -nE 's/.*panicked at ([A-Za-z0-9_./-]+\.rs):([0-9]+)(:[0-9]+)?.*/\1:\2/p' "$log" | sed -n '1p')"
+  [[ "$location" =~ ^[A-Za-z0-9_./-]+\.rs:[0-9]+$ && ${#location} -le 100 ]] || location=''
+  printf 'test %s failed%s; details in protected log\n' "$name" "${location:+ at $location}"
+}
+
 aura_receipt_init() {
-  local checkout="$1" build_lane="$2" directory fingerprint revision identity argv path
+  local checkout="$1" build_lane="$2" directory fingerprint revision identity argv path command_log
   shift 2
   command -v jq >/dev/null || { echo 'build-budget: jq required for receipts' >&2; return 2; }
   mkdir -p "$checkout/artifacts/disk-budget/receipts"
   directory="$(mktemp -d "$checkout/artifacts/disk-budget/receipts/run.XXXXXX")"
   export AURA_BUILD_RECEIPT="$directory/receipt.json"
+  command_log="$(mktemp "$directory/command.XXXXXX.log")"
+  export AURA_BUILD_COMMAND_LOG="$command_log"
   revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
   fingerprint=''
   if [[ -n "$revision" ]]; then
@@ -122,25 +142,56 @@ aura_receipt_init() {
     --arg packages "${AURA_BUILD_PACKAGES:-$receipt_packages}" --arg features "${AURA_BUILD_FEATURES:-$receipt_features}" \
     --arg test_target "$receipt_test_target" --arg test_filter "$receipt_test_filter" \
     --arg inventory "${AURA_BUILD_TEST_INVENTORY:-}" --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{schema:1,root:$root,lane:$lane,source:{revision:$revision, fingerprint:$fingerprint},
+    --arg command_log "$command_log" \
+    '{schema:2,root:$root,lane:$lane,source:{revision:$revision, fingerprint:$fingerprint},
       metadata:{packages:(if $packages=="" then null else $packages end),
         features:(if $features=="" then null else $features end),
         test_target:(if $test_target=="" then null else $test_target end),
         test_filter:(if $test_filter=="" then null else $test_filter end),
-        test_inventory:(if $inventory=="" then null else $inventory end)},
+        test_inventory:(if $inventory=="" then null else $inventory end),
+        phase_commands:[]},
       wrapper:{pid:$pid,start_identity:$identity},child:null,command_argv:$argv,
       started_utc:$started,finished_utc:null,current_phase:"admission",active_phase:null,phases:[],
-      command_exit_status:null,cleanup:null,cleanup_events:[],final_exit_status:null}' > "$AURA_BUILD_RECEIPT"
+      command_exit_status:null,cleanup:null,cleanup_events:[],final_exit_status:null,
+      artifacts:{command_log:$command_log},failure_excerpt:null,notification:null}' > "$AURA_BUILD_RECEIPT"
   printf 'Build receipt: %s\n' "$AURA_BUILD_RECEIPT"
 }
 
 aura_receipt_finish() {
-  local exit_status="$1"
+  local exit_status="$1" notification temporary finished safe_failure=''
   [[ -n "${AURA_BUILD_RECEIPT:-}" && -f "$AURA_BUILD_RECEIPT" ]] || return 0
+  if (( exit_status != 0 )); then safe_failure="$(aura_receipt_safe_failure_identity)"; fi
+  finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  notification="$(dirname "$AURA_BUILD_RECEIPT")/completion.json"
   aura_receipt_update --argjson status "$exit_status" \
-    --arg finished "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg finished "$finished" --arg notification "$notification" --arg safe_failure "$safe_failure" \
     '.final_exit_status=$status | .finished_utc=$finished |
-      .last_observed_phase=.current_phase | .current_phase="finished"'
+      .last_observed_phase=.current_phase | .current_phase="finished" |
+      .notification=$notification |
+      .metadata |= (
+        .packages=(.packages // ([.phase_commands[].packages | select(.!=null)] | unique |
+          if length==1 then .[0] else null end)) |
+        .features=(.features // ([.phase_commands[].features | select(.!=null)] | unique |
+          if length==1 then .[0] else null end)) |
+        .test_target=(.test_target // ([.phase_commands[].test_target | select(.!=null)] | unique |
+          if length==1 then .[0] else null end)) |
+        .test_filter=(.test_filter // ([.phase_commands[].test_filter | select(.!=null)] | unique |
+          if length==1 then .[0] else null end)) |
+        .test_inventory=(.test_inventory // ([.phase_commands[].expected_tests | select(.!=null)] | unique |
+          if length==1 then .[0] else null end))) |
+      .failure_excerpt=(if $status==0 then null else
+        (if $safe_failure!="" then $safe_failure
+         elif .active_phase!=null then "phase interrupted; details in protected log"
+         elif .admission.admitted==false then "build admission refused; details in receipt"
+         elif any(.phases[]?; .exit_status!=0) then "phase failed; details in protected log"
+         elif .command_exit_status!=null and .command_exit_status!=0 then
+           "command failed; details in protected log"
+         else "build failed; details in receipt" end) end)'
+  temporary="$(mktemp "${notification}.XXXXXX")"
+  jq -n --arg receipt "$AURA_BUILD_RECEIPT" --arg finished "$finished" \
+    --argjson status "$exit_status" \
+    '{receipt:$receipt,finished_utc:$finished,exit_status:$status}' > "$temporary"
+  mv "$temporary" "$notification"
   printf 'Build complete: exit=%s receipt=%s\n' "$exit_status" "$AURA_BUILD_RECEIPT"
 }
 

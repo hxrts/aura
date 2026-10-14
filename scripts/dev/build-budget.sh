@@ -205,12 +205,23 @@ admit_build() {
   printf 'Admission: free=%s KiB other-reservations=%s KiB incoming-reservation=%s KiB floor=%s GiB\n' \
     "$free" "$others" "$incoming_reservation_kib" "$min_free_gib"
   if (( free - others - incoming_reservation_kib < min_free_kib )); then
+    aura_receipt_update --arg reason insufficient-headroom \
+      --argjson free "$free" --argjson others "$others" \
+      --argjson incoming "$incoming_reservation_kib" \
+      --argjson floor "$min_free_kib" \
+      '.admission.admitted=false | .admission.refusal={reason:$reason,
+        free_kib:$free,other_reservations_kib:$others,
+        incoming_reservation_kib:$incoming,floor_kib:$floor} |
+        .admission.refusal_count=((.admission.refusal_count // 0)+1)'
     rm -f "$lock/pid"; rmdir "$lock"
     echo "build-budget: insufficient headroom: need ${min_free_gib} GiB free after other admitted builds' reservations and incoming measured growth" >&2
     return 1
   fi
   reservation="$shared_dir/reservations/$$"
   printf '%s\n' "$incoming_reservation_kib" > "$reservation"
+  aura_receipt_update --argjson free "$free" --argjson others "$others" \
+    '.admission.admitted=true | .admission.admitted_free_kib=$free |
+      .admission.admitted_other_reservations_kib=$others'
   rm -f "$lock/pid"; rmdir "$lock"
 }
 idle_now() {
@@ -436,6 +447,8 @@ release_checkout_lock() {
 }
 acquire_checkout_lock
 child_pid=''
+command_log_fd=''
+command_tee_pid=''
 stop_owned_group() {
   local pid="$1" attempt
   [[ -n "$pid" ]] || return 0
@@ -452,6 +465,20 @@ cleanup() {
     stop_owned_group "$child_pid"
     wait "$child_pid" 2>/dev/null || true
   fi
+  if [[ -n "$command_log_fd" ]]; then
+    exec {command_log_fd}>&-
+    command_log_fd=''
+  fi
+  if [[ -n "$command_tee_pid" ]]; then
+    wait "$command_tee_pid" 2>/dev/null || true
+    command_tee_pid=''
+  fi
+  aura_receipt_update --argjson status "$exit_status" \
+    --arg finished "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    'if .command_phase!=null and .command_phase.finished_utc==null then
+      .command_phase.finished_utc=$finished | .command_phase.exit_status=$status |
+      .phases += [.command_phase]
+     else . end'
   [[ -z "$reservation" ]] || rm -f "$reservation"
   release_checkout_lock
   # A signal can exit before the normal report path. Retain its observed
@@ -508,10 +535,14 @@ started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf 'Build lane=%s command:' "$lane"
 printf ' %q' "$@"
 printf '\n'
-aura_receipt_update '.current_phase="command"'
+aura_receipt_update --arg started "$started" \
+  '.current_phase="command" | .command_phase={phase:"command",started_utc:$started,
+    finished_utc:null,exit_status:null}'
 export AURA_BUILD_CLEANUP_STAGE=command
 set -m # Give the background build its own process group for bounded shutdown.
-(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") &
+exec {command_log_fd}> >(tee -a "$AURA_BUILD_COMMAND_LOG")
+command_tee_pid=$!
+(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") >&"$command_log_fd" 2>&1 &
 child_pid=$!
 set +m
 aura_receipt_update --argjson pid "$child_pid" \
@@ -540,8 +571,16 @@ done
 if wait "$child_pid"; then :; else child_status=$?; (( status == 0 )) && status="$child_status"; fi
 stop_owned_group "$child_pid" # Reap any build-owned background descendants.
 child_pid=''
-aura_receipt_update --argjson status "$status" \
-  '.command_exit_status=$status | .current_phase="cache-cleanup"'
+exec {command_log_fd}>&-
+command_log_fd=''
+tee_status=0
+wait "$command_tee_pid" || tee_status=$?
+command_tee_pid=''
+(( tee_status == 0 || status != 0 )) || status=77
+aura_receipt_update --argjson status "$status" --arg finished "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '.command_exit_status=$status | .current_phase="cache-cleanup" |
+    .command_phase.finished_utc=$finished | .command_phase.exit_status=$status |
+    .phases += [.command_phase]'
 post_build_target="$(target_kib)"
 post_build_free="$(free_kib)"
 (( post_build_target > peak_target )) && peak_target="$post_build_target"
@@ -614,7 +653,7 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n
 aura_receipt_update --arg disk_log "$log_path" --arg report "${report_path:-}" \
   --argjson pre_free "$pre_free" --argjson pre_target "$pre_target" \
   --argjson lowest_free "$lowest_free" --argjson peak_target "$peak_target" \
-  '.artifacts={disk_log:$disk_log,disk_report:(if $report=="" then null else $report end)} |
+  '.artifacts += {disk_log:$disk_log,disk_report:(if $report=="" then null else $report end)} |
    .disk={pre_free_kib:$pre_free,pre_target_kib:$pre_target,
      lowest_free_kib:$lowest_free,peak_target_kib:$peak_target,
      measured_growth_kib:([0,($pre_free-$lowest_free),($peak_target-$pre_target)]|max)}'

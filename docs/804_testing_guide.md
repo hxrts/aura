@@ -1410,6 +1410,22 @@ wrapper, driver and active phase command identities, current phase,
 command/final exit statuses, cache cleanup
 observations and artifact paths. Missing metadata and unexecuted phases remain
 unknown; an opaque command's exit does not prove test discovery or execution.
+Nested scripts that call `build-phase.sh` publish each actual Cargo phase's
+package, features, target and filter under `metadata.phase_commands`; the
+exact expected inventory is attached to its discovery and execution phases.
+When a script does not use phase commands, declare known selectors with
+`AURA_BUILD_PACKAGES`, `AURA_BUILD_FEATURES` and `AURA_BUILD_TEST_INVENTORY`;
+otherwise the receipt leaves them unknown. Every admitted child also gets a
+command phase with start, finish and outcome, even for opaque `bash`/`just`
+gates. Unambiguous nested phase selectors and expected inventories populate
+the top-level metadata when no explicit declaration exists.
+Admission refusal records its measured headroom reason without claiming a
+command started. Command and phase logs live inside the private receipt
+directory. The receipt keeps only a short failure identity (test name and
+source location when safely parseable, or a status class) and
+points to those protected logs for details. At terminal status, an atomic
+`completion.json` beside the receipt provides its path, exit status and UTC
+completion time for file watchers, after command output has flushed.
 Read JSON with `jq`; never source or evaluate receipt contents.
 Receipt read/modify/write updates use a bounded writer lock, preserving
 concurrent phase and native-cleanup observations. A stopped writer's lock is

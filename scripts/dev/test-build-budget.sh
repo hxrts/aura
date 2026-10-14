@@ -146,8 +146,30 @@ expect_status 0 run_budget -- sh -c 'exit 0'
 rg -l 'Build context: lane=test' "$project"/artifacts/disk-budget/report.* >/dev/null
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.final_exit_status==0 and .command_exit_status==0 and .current_phase=="finished"
-  and .phases==[] and .cleanup.result=="skipped-healthy" and .child.pid!=null
-  and .artifacts.disk_report!=null' "$receipt" >/dev/null
+  and (.phases|length)==1 and .phases[0].phase=="command" and
+  .phases[0].started_utc!=null and .phases[0].finished_utc!=null and
+  .phases[0].exit_status==0 and .cleanup.result=="skipped-healthy" and .child.pid!=null
+  and .artifacts.disk_report!=null and .artifacts.command_log!=null and
+  .notification!=null and .admission.admitted==true' "$receipt" >/dev/null
+command_log="$(jq -r '.artifacts.command_log' "$receipt")"
+[[ -f "$command_log" && "$(find "$command_log" -perm 0600 -print)" == "$command_log" ]]
+jq -e --arg receipt "$receipt" '.receipt==$receipt and .exit_status==0' \
+  "$(dirname "$receipt")/completion.json" >/dev/null
+
+# Failure details stay in a protected artifact; the compact receipt and
+# terminal notification disclose only typed status, never command output.
+reset_case
+expect_status 37 env FIXTURE_SECRET=fixture-private bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test -- sh -c '
+  printf "test first_failure ... FAILED\npanicked at src/first.rs:42\n"
+  printf "assertion left=$FIXTURE_SECRET\n"
+  for index in $(seq 1 100); do printf "diagnostic %s\n" "$index"; done
+  exit 37'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==37 and
+  .failure_excerpt=="test first_failure failed at src/first.rs:42; details in protected log"' "$receipt" >/dev/null
+! rg -q 'fixture-private' "$receipt" "$(dirname "$receipt")/completion.json"
+rg -q 'fixture-private' "$(jq -r '.artifacts.command_log' "$receipt")"
 
 # A successful build below the soft cap must retain useful dependency objects
 # even when cargo sweep would choose them as old. The hard disk floor is safe.
@@ -511,7 +533,10 @@ expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
 rg -q 'other admitted builds' "$test_root/output"
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.final_exit_status==1 and .current_phase=="finished" and
-  .finished_utc!=null and .command_exit_status==null and .child==null' "$receipt" >/dev/null
+  .finished_utc!=null and .command_exit_status==null and .child==null and
+  .admission.admitted==false and .admission.refusal.reason=="insufficient-headroom" and
+  .admission.refusal_count==1 and
+  .failure_excerpt=="build admission refused; details in receipt"' "$receipt" >/dev/null
 [[ ! -d "${receipt}.write-lock" ]]
 kill "$holder_pid"; wait "$holder_pid" 2>/dev/null || true
 expect_status 0 run_budget --no-prune -- sh -c 'ls "$AURA_BUILD_SHARED_DIR/reservations" > "$FREE_FILE.during"'

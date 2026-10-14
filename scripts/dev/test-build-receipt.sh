@@ -45,6 +45,11 @@ jq -e '.metadata.packages=="aura-terminal" and .metadata.test_target=="test:regr
 aura_receipt_init "$fixture" fixture just test-crate hxrts-aura-agent
 jq -e '.metadata.packages==null and .metadata.features==null and .metadata.test_target==null and
   .metadata.test_filter==null and .metadata.test_inventory==null' "$AURA_BUILD_RECEIPT" >/dev/null
+AURA_BUILD_PACKAGES=hxrts-aura-agent AURA_BUILD_FEATURES=testing \
+  AURA_BUILD_TEST_INVENTORY='fixture_one' \
+  aura_receipt_init "$fixture" declared-script bash ./opaque-gate.sh
+jq -e '.metadata.packages=="hxrts-aura-agent" and .metadata.features=="testing" and
+  .metadata.test_inventory=="fixture_one" and .phases==[]' "$AURA_BUILD_RECEIPT" >/dev/null
 aura_receipt_init "$fixture" fixture cargo test -p hxrts-aura-agent --lib --test smoke --mystery value
 jq -e '.metadata.packages=="hxrts-aura-agent" and .metadata.test_target==null and
   .metadata.test_filter==null and .metadata.test_inventory==null' "$AURA_BUILD_RECEIPT" >/dev/null
@@ -106,6 +111,18 @@ jq -e '(.phases|length)==9 and .phases[1].observed_count==2 and
   .phases[5].command_exit_status==37 and .phases[6].exit_status==78 and
   .phases[7].child.start_identity!=null and .phases[8].exit_status==0 and
   .active_phase==null' "$AURA_BUILD_RECEIPT" >/dev/null
+# Nested scripts publish Cargo selectors from the actual compile phase, not
+# from their outer shell argv. They cannot claim test execution by intent.
+mkdir -p "$fixture/fakebin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/fakebin/cargo"
+chmod +x "$fixture/fakebin/cargo"
+PATH="$fixture/fakebin:$PATH" phase compile -- cargo test -p hxrts-aura-agent \
+  --features 'native,testing' --lib --no-run
+jq -e '.metadata.phase_commands[-1] | .phase=="compile" and
+  .packages=="hxrts-aura-agent" and .features=="native,testing" and
+  .test_target=="lib" and .expected_tests==null' "$AURA_BUILD_RECEIPT" >/dev/null
+jq -e '.metadata.phase_commands[1].expected_tests==["first","second"] and
+  .phases[1].inventory_result=="matched"' "$AURA_BUILD_RECEIPT" >/dev/null
 printf 'failed_fixture\n' > "$fixture/failed-expected"
 status=0
 phase execution --expected-tests "$fixture/failed-expected" -- sh -c \
@@ -234,7 +251,11 @@ jq -e '.unexpected_reclaim==null' "$AURA_BUILD_RECEIPT" >/dev/null
 rm "${AURA_BUILD_RECEIPT}.write-lock/pid"
 rmdir "${AURA_BUILD_RECEIPT}.write-lock"
 aura_receipt_finish 37
-jq -e '.final_exit_status==37 and .current_phase=="finished" and .finished_utc!=null' "$AURA_BUILD_RECEIPT" >/dev/null
+jq -e '.final_exit_status==37 and .current_phase=="finished" and .finished_utc!=null and
+  .failure_excerpt=="test failed_fixture failed; details in protected log" and
+  .notification!=null' "$AURA_BUILD_RECEIPT" >/dev/null
+jq -e --arg receipt "$AURA_BUILD_RECEIPT" '.receipt==$receipt and .exit_status==37' \
+  "$(dirname "$AURA_BUILD_RECEIPT")/completion.json" >/dev/null
 if phase compile -- sh -c 'exit 0'; then echo 'finished receipt was reused' >&2; exit 1; fi
 # The guarded prune and build finalizers write from EXIT traps. Bash does not
 # execute the writer subshell's EXIT trap in that context, so its normal path
@@ -251,4 +272,16 @@ bash -c '
 jq -e '.cleanup_events|length==1' "$AURA_BUILD_RECEIPT" >/dev/null
 jq -e '.final_exit_status==79 and .current_phase=="finished" and .finished_utc!=null' "$AURA_BUILD_RECEIPT" >/dev/null
 [[ ! -d "${AURA_BUILD_RECEIPT}.write-lock" ]]
+printf 'first\nsecond\n' > "$fixture/expected"
+aura_receipt_init "$fixture" nested-phases bash ./batch.sh
+PATH="$fixture/fakebin:$PATH" phase compile -- cargo test -p hxrts-aura-agent \
+  --features testing --lib --no-run
+phase discovery --expected-tests "$fixture/expected" -- printf 'first: test\nsecond: test\n'
+phase execution --expected-tests "$fixture/expected" -- printf \
+  'test first ... ok\ntest second ... ok\ntest result: ok. 2 passed; 0 failed; 0 ignored\n'
+aura_receipt_finish 0
+jq -e '.metadata.packages=="hxrts-aura-agent" and .metadata.features=="testing" and
+  .metadata.test_target=="lib" and .metadata.test_inventory==["first","second"] and
+  [.phases[] | select(.phase=="discovery" or .phase=="execution") | .inventory_result]==["matched","matched"]' \
+  "$AURA_BUILD_RECEIPT" >/dev/null
 echo 'build receipts: source fingerprint, unknown metadata, exact inventories, command failures and separate disposal passed'
