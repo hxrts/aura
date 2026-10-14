@@ -350,6 +350,52 @@ pub(super) async fn reconcile_second(owned: &ProfileOwnedSecureStorage) -> Resul
     replay(owned, selected, &root, &claim, StopAfter::Never)
 }
 
+/// Custody of the complete, authenticated two-entry roster. This deliberately
+/// exposes no per-entry decision or retirement method while V4 has no second
+/// transition anchor. The original profile lease is retained, never reopened
+/// as an independent storage owner.
+#[allow(dead_code)]
+pub(super) struct PlatformRosterAdmission {
+    root: [u8; 32],
+    allocations: [[u8; 32]; 2],
+    _owner: Arc<crate::profile_storage::OwnedProfileLease>,
+}
+
+/// Recover both exact birth records under the selected namespace lock before
+/// transferring the original profile's lifetime root once. A partial append
+/// may be reconciled only from its root-anchored claim and sealed intent.
+#[allow(dead_code)]
+pub(super) async fn recover_roster(
+    owned: &ProfileOwnedSecureStorage,
+) -> Result<PlatformRosterAdmission, AuraError> {
+    let (selected, owner) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let root = read_root(owned, selected)?;
+    let bytes = read_entry(selected, CLAIM_USER)?
+        .ok_or_else(|| invalid("platform whole roster lacks second claim"))?;
+    let claim = Claim::decode(&bytes, &root)?;
+    verify_first(owned, selected, &root)?;
+    if root.phase == ERASURE_COMPLETE {
+        let mut verified = root.clone();
+        decision::recover_erasure(owned, selected, &mut verified)?;
+    }
+    replay(owned, selected, &root, &claim, StopAfter::Never)?;
+    if !marker_state(owned, &roster(&root, &claim))? {
+        return Err(invalid("platform whole roster is not acknowledged"));
+    }
+    owner
+        .lifetime_root_claimed
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| invalid("platform whole roster root already transferred"))?;
+    let mut allocations = [root.birth_id, claim.allocation];
+    allocations.sort();
+    Ok(PlatformRosterAdmission {
+        root: root.id,
+        allocations,
+        _owner: owner.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,6 +568,119 @@ mod tests {
             assert!(
                 recover_one(owned).await.is_err(),
                 "no first owner on partial roster"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn whole_roster_recovers_both_exact_entries_and_transfers_once() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let birth = allocate_one(owned, &empty, b"first", b"first secret").await?;
+        append_second(owned, &birth, b"second", b"second secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        let claim = Claim::decode(&read_entry(selected, CLAIM_USER)?.expect("claim"), &root)?;
+        let expected = [root.birth_id, claim.allocation];
+        drop(birth);
+        drop(empty);
+        drop(first);
+
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let roster = recover_roster(owned).await?;
+        let mut sorted = expected;
+        sorted.sort();
+        assert_eq!(roster.root, root.id);
+        assert_eq!(roster.allocations, sorted);
+        assert!(Arc::ptr_eq(&roster._owner, &owned._owner));
+        assert!(recover_roster(owned).await.is_err(), "one owner transfer");
+        assert!(recover_one(owned).await.is_err(), "no first-only downgrade");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn whole_roster_replays_only_root_anchored_pending_birth() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let birth = allocate_one(owned, &empty, b"first", b"first secret").await?;
+        assert!(append_inner(
+            owned,
+            &birth,
+            b"second",
+            b"second secret",
+            None,
+            StopAfter::Intent,
+        )
+        .await
+        .is_err());
+        drop(birth);
+        drop(empty);
+        drop(first);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let roster = recover_roster(owned).await?;
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        let claim = Claim::decode(&read_entry(selected, CLAIM_USER)?.expect("claim"), &root)?;
+        assert_eq!(roster.allocations.len(), 2);
+        assert!(marker_state(owned, &self::roster(&root, &claim))?);
+        assert_eq!(
+            read_entry(selected, &user(RECORD_PREFIX, &claim.allocation))?,
+            read_entry(selected, &user(INTENT_PREFIX, &claim.allocation))?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn whole_roster_refuses_lost_or_changed_entry_before_owner() -> TestResult {
+        for loss in ["claim", "intent", "record", "marker", "first"] {
+            let fixture = Fixture::new()?;
+            let first = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+                unreachable!()
+            };
+            let empty = admit_empty_root(owned).await?;
+            let birth = allocate_one(owned, &empty, b"first", b"first secret").await?;
+            append_second(owned, &birth, b"second", b"second secret").await?;
+            let (selected, _) = selected_owner(owned)?;
+            let root = read_root(owned, selected)?;
+            let claim = Claim::decode(&read_entry(selected, CLAIM_USER)?.expect("claim"), &root)?;
+            match loss {
+                "claim" => selected.entry_for_user(CLAIM_USER)?.delete_credential()?,
+                "intent" => selected
+                    .entry_for_user(&user(INTENT_PREFIX, &claim.allocation))?
+                    .delete_credential()?,
+                "record" => selected
+                    .entry_for_user(&user(RECORD_PREFIX, &claim.allocation))?
+                    .delete_credential()?,
+                "marker" => std::fs::remove_file(fixture.profile.path().join(SECOND_ROSTER_FILE))?,
+                _ => selected.entry_for_user(RECORD_USER)?.delete_credential()?,
+            }
+            drop(birth);
+            drop(empty);
+            drop(first);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            assert!(recover_roster(owned).await.is_err(), "lost {loss}");
+            assert!(
+                !owned._owner.lifetime_root_claimed.load(Ordering::Acquire),
+                "lost {loss} never hands out owner"
             );
         }
         Ok(())

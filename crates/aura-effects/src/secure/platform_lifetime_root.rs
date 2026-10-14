@@ -34,6 +34,7 @@ const ERASURE_COMPLETE: u8 = 9;
 const PLAINTEXT_LEN: usize = 1 + 32 * 7;
 const MAX_FILE_LEN: usize = 256;
 
+#[derive(Clone)]
 struct RootRecord {
     phase: u8,
     id: [u8; 32],
