@@ -480,16 +480,15 @@ validation. The scope is a mailbox selector, not receipt acceptance,
 membership, or outbound broker routing authority. An authenticated broker
 mailbox protocol still needs separate implementation and end-to-end evidence.
 
-Once the agent-owned authenticated pending-enrollment mailbox drain is wired
-into the browser generation supervisor, it runs on every tick in all modes.
-The agent retains registration proof, credential, protected admission and VM
-ingress; the browser reports the first drain failure visibly once per
-generation while the app continues to own the import terminal result. The
-same generation tick separately drives the agent-owned issuer return mailbox
-drain. Its retained original registration, credential, encrypted response
-frame and broker acknowledgment remain agent-owned; the browser supplies no
-route identifiers or credentials and reports the first return-drain failure
-visibly. An exact browser transfer must observe Alice consuming Bob's response
+The browser generation supervisor schedules shared runtime ceremony processing
+on each tick except a background-sync tick, which invokes it before and after
+sync. That runtime ingress owns both authenticated enrollment mailbox drains
+for native and browser. The agent retains registration proof, credential,
+protected admission, VM ingress, exact return registration, encrypted response
+frame and broker acknowledgment. The browser supplies no route identifiers or
+credentials and reports the first mailbox failure once per generation under a
+consolidated upkeep code with the original typed source error. The app still
+owns the import terminal result. An exact browser transfer must observe Alice consuming Bob's response
 and the app/host terminal acknowledgment before this upkeep proves completion.
 The existing harness relay poll remains a separate compatibility path. Require an
 actual browser transfer and failure fixture before claiming the authenticated

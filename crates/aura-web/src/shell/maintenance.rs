@@ -497,8 +497,7 @@ fn spawn_generation_maintenance_supervisor(
     } else {
         0
     };
-    let broker_failure_reported = Rc::new(Cell::new(false));
-    let return_failure_reported = Rc::new(Cell::new(false));
+    let mailbox_failure_reported = Rc::new(Cell::new(false));
     let broker_tick_controller = controller.clone();
     let mut tick_count: u64 = 0;
     spawn_browser_maintenance_loop(
@@ -514,46 +513,33 @@ fn spawn_generation_maintenance_supervisor(
             let tick_app_core = tick_app_core.clone();
             let agent = agent.clone();
             let tick_controller = broker_tick_controller.clone();
-            let broker_failure_reported = broker_failure_reported.clone();
-            let return_failure_reported = return_failure_reported.clone();
+            let mailbox_failure_reported = mailbox_failure_reported.clone();
             let run_background_sync = account_ready
                 && tick_count >= background_sync_start_delay_ticks
                 && tick_count % background_sync_interval_ticks == 0;
             async move {
                 if let Some(agent) = agent.clone() {
-                    // The runtime owns authenticated enrollment mailbox
-                    // registration, credentials, and VM admission. Browser
-                    // upkeep only drives that owner once per generation tick.
-                    if let Err(source) = agent.drain_pending_enrollment_vm_mailbox().await {
-                        if !broker_failure_reported.replace(true) {
-                            let error = WebUiError::operation(
-                                WebUiOperation::BackgroundSync,
-                                "WEB_ENROLLMENT_MAILBOX_DRAIN_FAILED",
-                                "authenticated enrollment mailbox upkeep failed",
-                            )
-                            .with_source(source);
-                            log_web_error("error", &error);
-                            tick_controller.runtime_error_toast(
-                                "Enrollment transport is unavailable; import is still pending",
-                            );
-                        }
-                    }
-                    // This is issuer-side mailbox upkeep, separate from the
-                    // invitee pending-mailbox drain. The agent alone verifies
-                    // original return registration, durable frame custody and
-                    // broker ACK before its VM can consume a response.
-                    if let Err(source) = agent.drain_issuer_return_vm_mailbox().await {
-                        if !return_failure_reported.replace(true) {
-                            let error = WebUiError::operation(
-                                WebUiOperation::BackgroundSync,
-                                "WEB_ENROLLMENT_RETURN_MAILBOX_DRAIN_FAILED",
-                                "authenticated enrollment return mailbox upkeep failed",
-                            )
-                            .with_source(source);
-                            log_web_error("error", &error);
-                            tick_controller.runtime_error_toast(
-                                "Enrollment response transport is unavailable; enrollment is still pending",
-                            );
+                    // Both original mailbox directions now enter through one
+                    // agent runtime owner, shared with the native maintenance
+                    // pass. The browser schedules it but never holds a scoped
+                    // credential, verifies a frame, or acknowledges the broker.
+                    let runtime = { tick_app_core.read().await.runtime().cloned() };
+                    // The scheduled background-sync pass already invokes this
+                    // owner ingress before and after sync on its ticks.
+                    if let Some(runtime) = runtime.filter(|_| !run_background_sync) {
+                        if let Err(source) = runtime.process_ceremony_messages().await {
+                            if !mailbox_failure_reported.replace(true) {
+                                let error = WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_ENROLLMENT_MAILBOX_MAINTENANCE_FAILED",
+                                    "authenticated enrollment mailbox upkeep failed",
+                                )
+                                .with_source(source);
+                                log_web_error("error", &error);
+                                tick_controller.runtime_error_toast(
+                                    "Enrollment transport is unavailable; enrollment is still pending",
+                                );
+                            }
                         }
                     }
                     if browser_harness_mode {

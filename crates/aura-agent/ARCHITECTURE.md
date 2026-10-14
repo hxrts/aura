@@ -2064,6 +2064,12 @@ profile-owned retirement decision. They do not delete protected bytes or grant
 physical retirement; that operation still requires the provider's exact-record
 retirement contract and its own authorized lifetime owner.
 
+The shared runtime ceremony-processing ingress schedules both authenticated
+mailbox drains for native and browser upkeep. It registers the original pending
+receiver and polls the issuer return route before processing other ceremony
+messages. Frontends do not own registration credentials, frame verification, or
+broker acknowledgment.
+
 The pending invitee mailbox likewise seals an immutable root over its original
 signed registration and retrieval credential before broker registration. Each
 retained first-VM frame gets an immutable leaf bound to that root and its exact

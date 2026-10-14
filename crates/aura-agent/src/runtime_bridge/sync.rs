@@ -208,6 +208,20 @@ pub(super) async fn process_ceremony_messages(
     bridge: &AgentRuntimeBridge,
 ) -> Result<CeremonyProcessingOutcome, IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_CEREMONY_PROCESSING_CAPABILITY;
+    // This runtime owner is shared by native and browser frontends. The
+    // receiver registers and drains its original mailbox here; the issuer
+    // likewise drains its signed return mailbox. Frontends only schedule the
+    // bounded pass and never own credentials, verification, or broker ACKs.
+    let pending_enrollment_frames = bridge
+        .agent
+        .drain_pending_enrollment_vm_mailbox()
+        .await
+        .map_err(|e| bridge_internal("Process original pending enrollment mailbox failed", e))?;
+    let issuer_return_frames = bridge
+        .agent
+        .drain_issuer_return_vm_mailbox()
+        .await
+        .map_err(|e| bridge_internal("Process original issuer return mailbox failed", e))?;
     let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
         crate::core::AuthorityContext::new_with_device(
             bridge.agent.authority_id(),
@@ -254,6 +268,8 @@ pub(super) async fn process_ceremony_messages(
         completions: 0,
         contact_messages: processed_contact_messages,
         handshakes: processed_handshakes,
+        pending_enrollment_frames,
+        issuer_return_frames,
     };
 
     if counts.total() == 0 {

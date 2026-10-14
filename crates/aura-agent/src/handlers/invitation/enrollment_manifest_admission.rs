@@ -1268,10 +1268,12 @@ mod tests {
             );
             issuer_effects.attach_rendezvous_manager(issuer_manager.clone());
             invitee_effects.attach_rendezvous_manager(invitee_manager.clone());
-            assert_eq!(
-                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
-                0
-            );
+            let invitee_bridge = AgentRuntimeBridge::new(invitee.clone());
+            invitee_bridge
+                .process_ceremony_messages()
+                .await
+                .expect("ordinary native ceremony maintenance registers Bob's pending mailbox");
+            drop(invitee_bridge);
             let session =
                 aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
                     &invitation.invitation_id,
@@ -1398,7 +1400,10 @@ mod tests {
                 .interrupt_next_pending_enrollment_ack_for_test()
                 .await;
             assert!(
-                invitee.drain_pending_enrollment_vm_mailbox().await.is_err(),
+                AgentRuntimeBridge::new(invitee.clone())
+                    .process_ceremony_messages()
+                    .await
+                    .is_err(),
                 "injected ACK interruption preserves Bob's encrypted frame custody"
             );
             let frame_key = crate::core::agent::pending_enrollment_mailbox::frame_location(
@@ -1406,10 +1411,12 @@ mod tests {
                 &first[0].message_id,
             );
             assert!(invitee_effects.secure_exists(&frame_key).await.unwrap());
-            assert_eq!(
-                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
-                0,
-                "broker redelivery ACKs exact retained bytes without duplicate runtime intake"
+            assert!(
+                AgentRuntimeBridge::new(invitee.clone())
+                    .process_ceremony_messages()
+                    .await
+                    .is_ok(),
+                "ordinary runtime upkeep ACKs exact retained bytes without duplicate runtime intake"
             );
             let queued = invitee_effects
                 .take_unclaimed_choreography_envelope_retained(|candidate| {

@@ -59,6 +59,10 @@ pub struct CeremonyProcessingCounts {
     pub contact_messages: usize,
     /// Processed rendezvous handshake envelopes.
     pub handshakes: usize,
+    /// Original invitee enrollment VM frames admitted from the broker.
+    pub pending_enrollment_frames: usize,
+    /// Original issuer return VM frames admitted from the broker.
+    pub issuer_return_frames: usize,
 }
 
 impl CeremonyProcessingCounts {
@@ -68,6 +72,8 @@ impl CeremonyProcessingCounts {
             .saturating_add(self.completions)
             .saturating_add(self.contact_messages)
             .saturating_add(self.handshakes)
+            .saturating_add(self.pending_enrollment_frames)
+            .saturating_add(self.issuer_return_frames)
     }
 }
 
