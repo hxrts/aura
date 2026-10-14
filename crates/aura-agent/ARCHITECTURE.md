@@ -19,6 +19,11 @@ position, returning a valid frame there if startup is cancelled or fails before
 VM ownership transfers. A malformed selected frame is consumed instead. Once
 VM admission may own the frame, the caller cannot replay a weaker copy.
 
+The exported inbound envelope lease also lets the terminal demo listener keep
+the exact accepted frame and bounded return capacity across awaited work.
+Dropping it returns the frame; explicit consumption follows definitive handling.
+Callers must consume before starting an effect that can durably reject replay.
+
 ## Scope
 
 | Belongs here | Does not belong here |

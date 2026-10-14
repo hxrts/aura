@@ -146,9 +146,8 @@ mod sync;
 mod system;
 mod time;
 mod transport;
-pub(crate) use transport::{
-    usable_establish_paths, DeferredInboundEnvelopeReturns, InboundEnvelopeLease,
-};
+pub(crate) use transport::usable_establish_paths;
+pub use transport::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
 mod tree;
 
 const DEFAULT_WINDOW: u32 = 1024;

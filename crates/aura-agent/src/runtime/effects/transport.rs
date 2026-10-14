@@ -55,7 +55,7 @@ const ENCRYPTED_AURA_CONTENT_TYPES: &[&str] = &[
 /// borrowed receive restores the exact frame; successful processing must
 /// explicitly consume it. This capability cannot be cloned or rebuilt from
 /// envelope metadata.
-pub(crate) struct InboundEnvelopeLease<'a> {
+pub struct InboundEnvelopeLease<'a> {
     effects: &'a AuraEffectSystem,
     envelope: Option<TransportEnvelope>,
     return_index: Option<usize>,
@@ -64,14 +64,22 @@ pub(crate) struct InboundEnvelopeLease<'a> {
 
 /// Deferred frames return in reverse take order so every original inbox index
 /// is restored, including when a caller is cancelled during an awaited check.
-pub(crate) struct DeferredInboundEnvelopeReturns<'a>(Vec<InboundEnvelopeLease<'a>>);
+pub struct DeferredInboundEnvelopeReturns<'a>(Vec<InboundEnvelopeLease<'a>>);
+
+impl<'a> Default for DeferredInboundEnvelopeReturns<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<'a> DeferredInboundEnvelopeReturns<'a> {
-    pub(crate) fn new() -> Self {
+    /// Begin a batch of unrelated frames whose original inbox order must survive cancellation.
+    pub fn new() -> Self {
         Self(Vec::new())
     }
 
-    pub(crate) fn push(&mut self, lease: InboundEnvelopeLease<'a>) {
+    /// Retain a frame until the batch ends or is cancelled.
+    pub fn push(&mut self, lease: InboundEnvelopeLease<'a>) {
         self.0.push(lease);
     }
 }
@@ -103,7 +111,8 @@ impl<'a> InboundEnvelopeLease<'a> {
         })
     }
 
-    pub(crate) fn consume(mut self) -> TransportEnvelope {
+    /// Acknowledge definitive processing and release the reserved return slot.
+    pub fn consume(mut self) -> TransportEnvelope {
         let envelope = self.envelope.take().expect("admitted inbound frame");
         self.effects.transport.consume_reserved();
         self.reserved = false;
@@ -1572,7 +1581,7 @@ fn browser_target_uses_harness_transport(current_host: &str, normalized_target: 
 impl AuraEffectSystem {
     /// Receive with retained return capacity for callers that may discover an
     /// unrelated frame or be cancelled before deciding to consume it.
-    pub(crate) async fn receive_envelope_retained(
+    pub async fn receive_envelope_retained(
         &self,
     ) -> Result<InboundEnvelopeLease<'_>, TransportError> {
         self.drain_flow_checkpoint_envelopes();
@@ -2388,6 +2397,66 @@ mod original_readiness_tests {
         assert_eq!(inbox.len(), usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY));
         assert_eq!(inbox[7].payload, [7]);
         assert_eq!(inbox.iter().filter(|frame| frame.payload == [7]).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn public_retained_receive_cancel_before_mutation_restores_original_frame() {
+        use crate::runtime::subsystems::transport::{
+            QueueEnvelopeOutcome, LOCAL_TRANSPORT_INBOX_CAPACITY,
+        };
+        let effects = configured(
+            "public-retained-cancel",
+            vec![Arc::new(CustomProviderProbe::default())],
+        );
+        let original = TransportEnvelope {
+            source: AuthorityId::new_from_entropy([7; 32]),
+            destination: effects.authority_id,
+            context: ContextId::new_from_entropy([4; 32]),
+            payload: vec![7, 8, 9],
+            metadata: std::collections::HashMap::new(),
+            receipt: None,
+        };
+        assert_eq!(
+            effects.queue_runtime_envelope(original.clone()),
+            QueueEnvelopeOutcome::Queued
+        );
+        for index in 1..usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY) {
+            let mut frame = original.clone();
+            frame.payload = vec![index as u8];
+            assert_eq!(
+                effects.queue_runtime_envelope(frame),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+        let interrupted = async {
+            let lease = effects
+                .receive_envelope_retained()
+                .await
+                .expect("admitted frame");
+            assert_eq!(lease.payload, original.payload);
+            assert_eq!(lease.source, original.source);
+            std::future::pending::<()>().await;
+            lease.consume()
+        };
+        let mut interrupted = Box::pin(interrupted);
+        assert!(futures::poll!(interrupted.as_mut()).is_pending());
+        assert_eq!(
+            effects.queue_runtime_envelope(original.clone()),
+            QueueEnvelopeOutcome::DroppedOverflow,
+            "the leased frame retains its original capacity slot"
+        );
+        drop(interrupted);
+        assert_eq!(
+            effects.transport.inbox().read().len(),
+            usize::from(LOCAL_TRANSPORT_INBOX_CAPACITY)
+        );
+        let lease = effects
+            .receive_envelope_retained()
+            .await
+            .expect("returned frame");
+        assert_eq!(lease.payload, original.payload);
+        assert_eq!(lease.source, original.source);
+        let _ = lease.consume();
     }
 
     #[tokio::test]

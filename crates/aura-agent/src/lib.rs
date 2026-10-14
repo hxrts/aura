@@ -303,6 +303,7 @@ pub use aura_core::effects::ExecutionMode;
 pub use runtime::system::AdmittedRuntimeEffectsCapability;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::AuraEffectSystem;
+pub use runtime::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
 
 // Simulation factory (feature-gated)
 #[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]

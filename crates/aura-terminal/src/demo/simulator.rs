@@ -14,7 +14,9 @@ use tokio::time::{interval, Duration};
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::handlers::InvitationType;
-use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext, SharedTransport};
+use aura_agent::{
+    AuraAgent, AuraEffectSystem, DeferredInboundEnvelopeReturns, EffectContext, SharedTransport,
+};
 use aura_app::ui::workflows::context::default_relational_context;
 use aura_chat::ChatFact;
 use aura_core::effects::transport::{TransportEnvelope, TransportError};
@@ -1131,8 +1133,9 @@ pub fn spawn_amp_inbox_listener(
             // Keep per-tick processing bounded so non-AMP envelopes do not
             // block AMP updates from simulated peers.
             const MAX_ENVELOPES_PER_TICK: usize = 128;
+            let mut deferred = DeferredInboundEnvelopeReturns::new();
             for _ in 0..MAX_ENVELOPES_PER_TICK {
-                let envelope = match effects.receive_envelope().await {
+                let envelope = match effects.receive_envelope_retained().await {
                     Ok(env) => env,
                     Err(aura_core::effects::TransportError::NoMessage) => break,
                     Err(e) => {
@@ -1142,24 +1145,30 @@ pub fn spawn_amp_inbox_listener(
                 };
 
                 let Some(content_type) = envelope.metadata.get("content-type").cloned() else {
-                    effects.requeue_envelope(envelope);
+                    deferred.push(envelope);
                     continue;
                 };
 
                 if content_type.as_str() != "application/aura-amp" {
-                    effects.requeue_envelope(envelope);
+                    deferred.push(envelope);
                     continue;
                 }
 
                 // Ignore messages sent by Bob (self)
                 if envelope.source == bob_authority {
+                    let _ = envelope.consume();
                     continue;
                 }
 
                 let payload_hash = aura_core::Hash32::from_bytes(&envelope.payload);
                 if !seen_payloads.insert((payload_hash, envelope.source)) {
+                    let _ = envelope.consume();
                     continue;
                 }
+
+                // AMP receive can durably mark this payload as replayed. Once
+                // it starts, returning the frame would not make it reusable.
+                let envelope = envelope.consume();
 
                 // Validate/decrypt to ensure the channel state is correct.
                 if let Err(err) = aura_protocol::amp::amp_recv(

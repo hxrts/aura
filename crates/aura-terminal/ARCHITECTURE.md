@@ -7,6 +7,11 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 The deterministic demo passes the same typed `SimulationSharedInbox` from
 `aura-agent` to simulated peers, preserving the runtime's shared return
 capacity owner across terminal-created environments.
+Its AMP listener borrows inbound frames through the agent's retained lease;
+unrelated frames return in original order, and cancellation before AMP receive
+starts returns the exact frame. AMP receive records a durable replay marker, so
+the listener consumes its lease before that effect starts. Chat-fact commit is
+separate and still requires its own recovery boundary.
 
 ## Scope
 

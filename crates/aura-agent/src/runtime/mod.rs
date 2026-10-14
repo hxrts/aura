@@ -117,6 +117,7 @@ pub use effect_trace_capture::{
     EffectTraceCaptureError, EffectTraceCaptureOptions,
 };
 pub use effects::AuraEffectSystem;
+pub use effects::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
 pub use errors::RuntimeBoundaryError;
 pub use instrumentation::{
     RuntimeReconfigurationEvent, RuntimeServiceLifecycleEvent, RuntimeSessionEvent,
