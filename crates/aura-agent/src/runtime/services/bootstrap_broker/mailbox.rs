@@ -353,6 +353,13 @@ fn ack_witness(
     }
 }
 
+fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
 #[cfg(test)]
 mod witness_tests {
     use super::*;
@@ -374,11 +381,4 @@ mod witness_tests {
         assert_eq!(json["stage"], "receiver_acknowledged_retained_frame");
         assert_eq!(json.as_object().unwrap().len(), 6);
     }
-}
-
-fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
-    left.iter()
-        .zip(right)
-        .fold(0_u8, |diff, (a, b)| diff | (a ^ b))
-        == 0
 }

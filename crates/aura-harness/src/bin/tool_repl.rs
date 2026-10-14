@@ -3,7 +3,7 @@
 use std::io::{self, BufRead, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -144,7 +144,7 @@ fn write_response(
     Ok(())
 }
 
-fn validate_private_socket_path(path: &PathBuf) -> Result<()> {
+fn validate_private_socket_path(path: &Path) -> Result<()> {
     let parent = path
         .parent()
         .context("private socket needs a parent directory")?;
