@@ -34,6 +34,15 @@ printf '%s\n' "$request" | PATH="$fixture/bin:$PATH" req_private barbara-tui 7 >
 jq -e --arg expected "$secret" '.params.instance_id=="barbara-tui" and .params.intent.ImportDeviceEnrollmentCode.code==$expected' "$FIXTURE_REQUEST" >/dev/null
 ! rg -Fq "$secret" "$FIXTURE_ARGS" "$fixture/remote-response"
 rg -q 'drv.sh req-private' "$FIXTURE_ARGS"
+rg -Fq 'AURA_E2E_RUN_TOKEN=private-enrollment-fixture scripts/harness/lan/drv.sh req-private' "$FIXTURE_ARGS"
+cp "$FIXTURE_ARGS" "$fixture/remote-args-before-invalid-token"
+if (
+  export AURA_E2E_RUN_TOKEN='invalid token'
+  printf '%s\n' "$request" | PATH="$fixture/bin:$PATH" req_private barbara-tui 7 > "$fixture/invalid-token-response"
+); then
+  echo 'private request accepted an invalid run token' >&2; exit 1
+fi
+cmp -s "$FIXTURE_ARGS" "$fixture/remote-args-before-invalid-token"
 
 # Whitelist the exact operation and host acknowledgment while excluding code,
 # diagnostic detail, labels and unrelated snapshot fields.

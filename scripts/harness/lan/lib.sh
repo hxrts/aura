@@ -25,12 +25,15 @@ req() { # req <instance> <method> [JSON object fields] [transport timeout second
 req_private() { # req_private <instance> [transport timeout seconds] < request.json
   local inst=$1 transport_timeout=${2:-60} quoted_root
   if [ -n "$AURA_E2E_REMOTE" ] && [[ "$inst" == "$AURA_E2E_REMOTE_PREFIX"* ]]; then
+    [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || {
+      echo 'private LAN request requires the exact run token' >&2; return 2;
+    }
     quoted_root=${AURA_E2E_REMOTE_ROOT//\'/\'\\\'\'}
     jq -ce --arg instance "$inst" \
       'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
        | .params.instance_id=$instance' \
       | timeout "$transport_timeout" ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-        "cd '$quoted_root' && scripts/harness/lan/drv.sh req-private"
+        "cd '$quoted_root' && AURA_E2E_RUN_TOKEN=$AURA_E2E_RUN_TOKEN scripts/harness/lan/drv.sh req-private"
   else
     jq -ce --arg instance "$inst" \
       'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
