@@ -242,7 +242,7 @@ async fn assemble(
             .with_authority(profile.authority)
             .with_config(profile.config.clone())
             .with_physical_time_provider(clock.clone())
-            .with_sync_config(Default::default());
+            .with_sync_config(crate::runtime::services::SyncManagerConfig::default());
         if profile.config.bootstrap_broker.enabled {
             builder = builder.with_rendezvous_config(profile.config.rendezvous_config());
         }
