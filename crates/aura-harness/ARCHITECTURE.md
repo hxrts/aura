@@ -87,6 +87,10 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   ACK, which follows the original receiver's verified immutable retention,
   before accepting terminal success. The redacted result binds that ACK to
   distinct host/process identities and the signed-manifest selector.
+  The single-host diagnostic reuses this private checklist with two native
+  owners in clean same-commit checkouts and disjoint loopback profiles. Its
+  preflight and result state `cross_host_asserted:false`; a loopback broker ACK
+  and same-host reopen cannot satisfy the paired-host evidence requirement.
 
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;

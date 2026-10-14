@@ -1067,6 +1067,17 @@ enrollment and verifier transfers: those helpers retain whole responses and
 snapshots. Capture only redacted operation and transport evidence, and retain
 the original secret values in the owning process or a private transfer channel.
 
+For a local process-boundary diagnostic, run
+`scripts/harness/lan/single-host-enrollment.sh <fresh-token> <clean-peer-checkout>`
+with two clean same-commit checkouts and identical prebuilt native binaries.
+The runner provisions an authenticated loopback broker and distinct profile
+ports, then uses the paired private checklist. Its `single-host-result.json`
+retains exact operation, broker ACK, host acknowledgment, and reopen evidence;
+private per-step receipts retain typed failures, and `single-host-disposal.json`
+records each owner's shutdown.
+`cross_host_asserted:false` prevents this evidence from satisfying the final
+two-host batch. Use a fresh token and inspect private receipts on failure.
+
 The paired enrollment inventory must prove, in order: a provisional device on
 one host exports its actual signed setup; the other host's issuer consumes that
 exact external setup and emits the original enrollment code, signed manifest

@@ -26,6 +26,17 @@ Run exact test discovery and execution together inside one guarded build. The
 fixture does not prove production identity persistence, browser host behavior,
 or network delivery to a pre-adoption device; those require their own adapters.
 
+After the in-process fixture passes, `scripts/harness/lan/single-host-enrollment.sh
+<fresh-token> <clean-peer-checkout>` runs the private paired checklist through
+two separate native owner processes on one host. Both clean checkouts must
+contain the same commit; the caller supplies prebuilt `tool_repl` and `aura`
+binaries through `AURA_E2E_TOOL_REPL` and `AURA_E2E_AURA_BIN` or their defaults.
+The runner checks their hashes, uses disjoint private profiles and loopback
+ports, and records the authenticated broker ACK, exact operation instance,
+host acknowledgment, process identities, reopen, and independent shutdown.
+Its result states `cross_host_asserted:false`. The final two-host batch remains
+the evidence for cross-machine delivery and platform behavior.
+
 ## Simulation vs Harness
 
 The simulation architecture is specified in [Simulation Infrastructure Reference](119_simulator.md). The harness architecture is specified in [User Flow Harness](121_user_flow_harness.md).

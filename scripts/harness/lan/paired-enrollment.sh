@@ -10,14 +10,25 @@ source "$here/lib.sh"
 [[ "${AURA_E2E_BOOTSTRAP:-}" == paired-enrollment ]] || {
   echo 'paired enrollment requires the unlinked paired bootstrap' >&2; exit 2;
 }
-[[ -n "$AURA_E2E_REMOTE" ]] || { echo 'paired enrollment requires the other host' >&2; exit 2; }
+single_host=0
+if [[ -n "${AURA_E2E_LOCAL_PEER_ROOT:-}" ]]; then
+  single_host=1
+  [[ -z "$AURA_E2E_REMOTE" && -d "$AURA_E2E_LOCAL_PEER_ROOT" &&
+     -d "${AURA_E2E_LOCAL_PEER_RUN_DIR:-}" ]] || exit 2
+else
+  [[ -n "$AURA_E2E_REMOTE" ]] || { echo 'paired enrollment requires the other host' >&2; exit 2; }
+fi
 preflight="$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
 commit=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
-jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" '
-  .phase=="preflight" and .commit.local==$commit and .commit.remote==$commit and
+jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "$single_host" '
+  .phase==(if $local==1 then "single-host-preflight" else "preflight" end) and
+  .commit.local==$commit and .commit.remote==$commit and
   .run_token==$token and .network_delivery_asserted==false and
-  .planned_process_identity.local.host != .planned_process_identity.remote.host and
-  .broker.policy=="development_only_lan_http"' "$preflight" >/dev/null || {
+  (if $local==1 then
+    .planned_process_identity.local.host == .planned_process_identity.remote.host and
+    .cross_host_asserted==false
+   else .planned_process_identity.local.host != .planned_process_identity.remote.host end) and
+  .broker.policy==(if $local==1 then "development_only_loopback_http" else "development_only_lan_http" end)' "$preflight" >/dev/null || {
   echo 'paired enrollment requires its fixed-commit preflight manifest' >&2; exit 1;
 }
 
@@ -253,23 +264,29 @@ printf '%s\n%s\n' "$accepted_event" "$reopened_event" | jq -es '
 
 quoted_root=${AURA_E2E_REMOTE_ROOT//\'/\'\\\'\'}
 local_identity=$(jq -ce '{pid,birth,run_token}' "$AURA_E2E_RUN_DIR/repl.identity.json")
-remote_identity=$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-  "cd '$quoted_root' && jq -ce '{pid,birth,run_token}' .tmp/e2e/run/repl.identity.json")
+if (( single_host )); then
+  remote_identity=$(jq -ce '{pid,birth,run_token}' \
+    "$AURA_E2E_LOCAL_PEER_RUN_DIR/repl.identity.json")
+else
+  remote_identity=$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
+    "cd '$quoted_root' && jq -ce '{pid,birth,run_token}' .tmp/e2e/run/repl.identity.json")
+fi
 printf '%s\n%s\n' "$local_identity" "$remote_identity" |
-  jq -es --arg token "$AURA_E2E_RUN_TOKEN" 'all(.[]; .run_token==$token and (.pid|type=="number") and (.birth|type=="string" and length>0))' >/dev/null || {
+  jq -es --arg token "$AURA_E2E_RUN_TOKEN" 'all(.[]; .run_token==$token and (.pid|type=="number") and (.birth|type=="string" and length>0)) and .[0].pid!=.[1].pid' >/dev/null || {
   echo 'paired host process identities differ from the run token' >&2; exit 1;
 }
 manifest_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
-manifest="$manifest_dir/paired-result.json"
+manifest="$manifest_dir/$(if (( single_host )); then echo single-host-result; else echo paired-result; fi).json"
 [[ ! -e "$manifest" && ! -L "$manifest" ]] || exit 1
 manifest_tmp=$(mktemp "$manifest_dir/.manifest.XXXXXX")
-jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" \
+jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "$single_host" \
   --arg preflight "$preflight" \
   --argjson local_identity "$local_identity" --argjson remote_identity "$remote_identity" \
   --arg issued "$issue_operation" --arg accepted "$import_operation" \
   --argjson network_witness "$network_witness" \
   --arg accepted_receipt "$accepted_receipt" --arg reopened_receipt "$reopened_receipt" '
-  {schema:1,phase:"result",commit:$commit,run_token:$token,preflight_manifest:$preflight,
+  {schema:1,phase:(if $local==1 then "single-host-result" else "result" end),
+   cross_host_asserted:($local==0),commit:$commit,run_token:$token,preflight_manifest:$preflight,
    process_identity:{local:$local_identity,remote:$remote_identity},
    inventory:["signed_setup_export","issue_code_manifest_verifier","pre_approval_no_import",
      "exact_approval_operation","host_ack_two_devices","same_authority_after_reopen",
@@ -280,7 +297,8 @@ jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" \
    assertions:{independent_accounts_before_issue:true,explicit_approval:true,
      exact_operation_and_host_ack:true,same_authority_after_reopen:true,
      same_device_after_reopen:true,two_devices_after_reopen:true},
-   transport:{broker_policy:"development_only_lan_http",network_delivery_asserted:true}}' > "$manifest_tmp"
+   transport:{broker_policy:(if $local==1 then "development_only_loopback_http" else "development_only_lan_http" end),
+     network_delivery_asserted:true}}' > "$manifest_tmp"
 chmod 600 "$manifest_tmp"
 ln "$manifest_tmp" "$manifest"
 rm -f "$manifest_tmp"

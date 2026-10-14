@@ -142,6 +142,53 @@ for failure in missing_ack wrong_authority wrong_reopen_device no_network_ack wr
     ! rg -Fq "$secret" "$fixture/$failure.stdout" "$fixture/$failure.stderr" "$bad_dir"
   done
 done
+# A same-host diagnostic uses a second owner driver without claiming distinct
+# hosts or satisfying the final paired-LAN evidence requirement.
+peer_root="$fixture/peer-checkout"
+peer_run="$fixture/peer-run"
+local_run="$fixture/local-run"
+mkdir -p "$peer_root/scripts/harness/lan" "$peer_run" "$local_run"
+cat > "$peer_root/scripts/harness/lan/drv.sh" <<'PEER'
+#!/usr/bin/env bash
+exec "$AURA_E2E_DRV" "$@"
+PEER
+chmod +x "$peer_root/scripts/harness/lan/drv.sh"
+printf '{"pid":101,"birth":"fixture-peer","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$peer_run/repl.identity.json"
+printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$local_run/repl.identity.json"
+preflight="$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
+jq '.phase="single-host-preflight" | .cross_host_asserted=false |
+  .broker.policy="development_only_loopback_http" |
+  .planned_process_identity.remote.host=.planned_process_identity.local.host' \
+  "$preflight" > "$fixture/local-preflight"
+mv "$fixture/local-preflight" "$preflight"
+AURA_E2E_REMOTE='' AURA_E2E_LOCAL_PEER_ROOT="$peer_root" \
+  AURA_E2E_LOCAL_PEER_RUN_DIR="$peer_run" AURA_E2E_RUN_DIR="$local_run" \
+  PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" \
+  > "$fixture/local.stdout" 2> "$fixture/local.stderr"
+local_result="$local_run/private-enrollment-$AURA_E2E_RUN_TOKEN/single-host-result.json"
+jq -e '.phase=="single-host-result" and .cross_host_asserted==false and
+  .process_identity.local.pid!=.process_identity.remote.pid and
+  .transport.network_delivery_asserted==true and .assertions.exact_operation_and_host_ack' \
+  "$local_result" >/dev/null
+for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
+  ! rg -Fq "$secret" "$fixture/local.stdout" "$fixture/local.stderr" "$local_run"
+done
+# A one-host preflight cannot claim cross-host evidence or be reused as LAN.
+before=$(wc -l < "$FIXTURE_LOG")
+jq '.cross_host_asserted=true' "$preflight" > "$fixture/forged-local-preflight"
+mv "$fixture/forged-local-preflight" "$preflight"
+if AURA_E2E_REMOTE='' AURA_E2E_LOCAL_PEER_ROOT="$peer_root" \
+    AURA_E2E_LOCAL_PEER_RUN_DIR="$peer_run" AURA_E2E_RUN_DIR="$fixture/forged-run" \
+    PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" \
+    > "$fixture/forged-local.stdout" 2> "$fixture/forged-local.stderr"; then
+  echo 'single-host diagnostic accepted a forged cross-host claim' >&2; exit 1
+fi
+[[ $(wc -l < "$FIXTURE_LOG") == "$before" ]]
+unset AURA_E2E_LOCAL_PEER_ROOT AURA_E2E_LOCAL_PEER_RUN_DIR
+jq '.phase="preflight" | .planned_process_identity.remote.host="fixture-remote" |
+  .broker.policy="development_only_lan_http" |
+  del(.cross_host_asserted)' "$preflight" > "$fixture/lan-preflight"
+mv "$fixture/lan-preflight" "$preflight"
 preflight="$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
 before=$(wc -l < "$FIXTURE_LOG")
 jq '.commit.remote="wrong-commit"' "$preflight" > "$fixture/wrong-preflight"
