@@ -9,10 +9,13 @@ use zeroize::Zeroizing;
 pub(super) const INTENT_USER: &str = "allocation-lifetime-birth-intent:v1";
 pub(super) const RECORD_USER: &str = "allocation-lifetime-birth-record:v1";
 mod decision;
-const INVENTORY_FILE: &str = "platform_lifetime/inventory.v1";
-const INVENTORY_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-INVENTORY-V1";
+const INVENTORY_FILE: &str = "platform_lifetime/inventory.v4";
+const INVENTORY_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-INVENTORY-V4";
 const INTENT_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-BIRTH-V1";
-const MAX_INVENTORY_FILE: usize = 256;
+const ROSTER_ENTRY_LEN: usize = 32 * 5;
+const MAX_INVENTORY_FILE: usize = INVENTORY_MAGIC.len()
+    + 2
+    + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT * ROSTER_ENTRY_LEN;
 const MAX_INTENT: usize =
     INTENT_MAGIC.len() + 12 + 16 + 64 + 4 + MAX_SCOPE_BYTES + MAX_SECRET_BYTES;
 
@@ -110,12 +113,57 @@ impl BirthIntent {
 fn inventory_marker(root: &RootRecord) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(INVENTORY_MAGIC.len() + 160);
     bytes.extend_from_slice(INVENTORY_MAGIC);
+    bytes.extend_from_slice(&1u16.to_le_bytes());
     bytes.extend_from_slice(&root.id);
     bytes.extend_from_slice(&root.birth_id);
     bytes.extend_from_slice(&root.intent_digest);
     bytes.extend_from_slice(&root.profile);
     bytes.extend_from_slice(&root.service);
     bytes
+}
+
+fn validate_roster(bytes: &[u8], root: &RootRecord) -> Result<(), AuraError> {
+    if !bytes.starts_with(INVENTORY_MAGIC) || bytes.len() < INVENTORY_MAGIC.len() + 2 {
+        return Err(invalid("platform roster version is invalid"));
+    }
+    let count = u16::from_le_bytes(
+        bytes[INVENTORY_MAGIC.len()..INVENTORY_MAGIC.len() + 2]
+            .try_into()
+            .expect("bounded roster count"),
+    ) as usize;
+    if count == 0
+        || count > aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
+        || bytes.len() != INVENTORY_MAGIC.len() + 2 + count * ROSTER_ENTRY_LEN
+    {
+        return Err(invalid("platform roster count or length is invalid"));
+    }
+    let mut previous: Option<&[u8]> = None;
+    for entry in bytes[INVENTORY_MAGIC.len() + 2..].chunks_exact(ROSTER_ENTRY_LEN) {
+        let allocation = &entry[32..64];
+        if previous.is_some_and(|old| old >= allocation) {
+            return Err(invalid(
+                "platform roster allocation order or identity is invalid",
+            ));
+        }
+        if entry[0..32] != root.id
+            || entry[96..128] != root.profile
+            || entry[128..160] != root.service
+        {
+            return Err(invalid(
+                "platform roster belongs to another root or provider",
+            ));
+        }
+        previous = Some(allocation);
+    }
+    if aura_core::hash::hash(bytes) != root.roster_digest {
+        return Err(invalid("platform roster differs from original root anchor"));
+    }
+    // Per-allocation addresses and transitions are a later dependency. Until
+    // then, accepting a second entry would leave its credential unverified.
+    if count != 1 || bytes != inventory_marker(root) {
+        return Err(invalid("platform roster contains an unverified allocation"));
+    }
+    Ok(())
 }
 
 fn read_entry(
@@ -235,7 +283,10 @@ fn verify_inventory(
         .map_err(io)?;
     match observed {
         None => Ok(None),
-        Some((bytes, None)) if bytes == inventory_marker(root) => Ok(Some(())),
+        Some((bytes, None)) => {
+            validate_roster(&bytes, root)?;
+            Ok(Some(()))
+        }
         _ => Err(invalid(
             "platform birth inventory differs from original intent",
         )),
@@ -380,6 +431,7 @@ async fn allocate_one_inner(
     root.phase = BIRTH_PENDING;
     root.birth_id = allocation;
     root.intent_digest = aura_core::hash::hash(&bytes);
+    root.roster_digest = aura_core::hash::hash(&inventory_marker(&root));
     write_keyring(selected, &root)?;
     if stop == StopAfter::RootIntent {
         return Err(interrupted());
@@ -732,6 +784,76 @@ mod tests {
             unreachable!()
         };
         assert!(recover_one(owned).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v4_roster_anchor_survives_original_birth_and_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let birth = allocate_one(owned, &empty, b"scope", b"secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        assert_ne!(root.roster_digest, [0; 32]);
+        assert_eq!(verify_inventory(owned, &root)?, Some(()));
+        drop(birth);
+        drop(empty);
+        drop(first);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let birth = recover_one(owned).await?;
+        assert_eq!(&**read_live_secret(owned, &birth).await?, b"secret");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v4_roster_rejects_duplicate_reordered_foreign_and_unverified_entries() -> TestResult {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let _birth = allocate_one(owned, &empty, b"scope", b"secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let mut root = read_root(owned, selected)?;
+        let original = inventory_marker(&root);
+        let entry = &original[INVENTORY_MAGIC.len() + 2..];
+
+        let mut duplicate = Vec::from(INVENTORY_MAGIC);
+        duplicate.extend_from_slice(&2u16.to_le_bytes());
+        duplicate.extend_from_slice(entry);
+        duplicate.extend_from_slice(entry);
+        assert!(validate_roster(&duplicate, &root).is_err());
+
+        let mut reordered = duplicate.clone();
+        let first_offset = INVENTORY_MAGIC.len() + 2;
+        reordered[first_offset + 32..first_offset + 64].fill(2);
+        reordered[first_offset + ROSTER_ENTRY_LEN + 32..first_offset + ROSTER_ENTRY_LEN + 64]
+            .fill(1);
+        assert!(validate_roster(&reordered, &root).is_err());
+
+        let mut foreign = original.clone();
+        foreign[INVENTORY_MAGIC.len() + 2 + 96] ^= 1;
+        assert!(validate_roster(&foreign, &root).is_err());
+
+        let mut unverified = duplicate;
+        unverified[first_offset + ROSTER_ENTRY_LEN + 32..first_offset + ROSTER_ENTRY_LEN + 64]
+            .fill(0xff);
+        root.roster_digest = aura_core::hash::hash(&unverified);
+        assert!(validate_roster(&unverified, &root).is_err());
+        let mut oversized = original;
+        oversized[INVENTORY_MAGIC.len()..INVENTORY_MAGIC.len() + 2].copy_from_slice(
+            &((aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT + 1) as u16)
+                .to_le_bytes(),
+        );
+        assert!(validate_roster(&oversized, &root).is_err());
         Ok(())
     }
 }

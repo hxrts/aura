@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V3";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V4";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,7 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_LEN: usize = 1 + 32 * 6;
+const PLAINTEXT_LEN: usize = 1 + 32 * 7;
 const MAX_FILE_LEN: usize = 256;
 
 struct RootRecord {
@@ -42,6 +42,7 @@ struct RootRecord {
     birth_id: [u8; 32],
     intent_digest: [u8; 32],
     decision_digest: [u8; 32],
+    roster_digest: [u8; 32],
 }
 
 fn invalid(message: &'static str) -> AuraError {
@@ -80,6 +81,7 @@ impl RootRecord {
         plain.extend_from_slice(&self.birth_id);
         plain.extend_from_slice(&self.intent_digest);
         plain.extend_from_slice(&self.decision_digest);
+        plain.extend_from_slice(&self.roster_digest);
         let ciphertext = ChaCha20Poly1305::new((&key).into())
             .encrypt(
                 Nonce::from_slice(&nonce),
@@ -140,11 +142,13 @@ impl RootRecord {
             || (matches!(plain[0], PENDING | COMPLETE)
                 && (plain[97..129] != [0; 32]
                     || plain[129..161] != [0; 32]
-                    || plain[161..193] != [0; 32]))
+                    || plain[161..193] != [0; 32]
+                    || plain[193..225] != [0; 32]))
             || (matches!(plain[0], BIRTH_PENDING | BIRTH_COMPLETE)
                 && (plain[97..129] == [0; 32]
                     || plain[129..161] == [0; 32]
-                    || plain[161..193] != [0; 32]))
+                    || plain[161..193] != [0; 32]
+                    || plain[193..225] == [0; 32]))
             || (matches!(
                 plain[0],
                 DECISION_PENDING
@@ -155,7 +159,8 @@ impl RootRecord {
                     | ERASURE_COMPLETE
             ) && (plain[97..129] == [0; 32]
                 || plain[129..161] == [0; 32]
-                || plain[161..193] == [0; 32]))
+                || plain[161..193] == [0; 32]
+                || plain[193..225] == [0; 32]))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -171,6 +176,9 @@ impl RootRecord {
             decision_digest: plain[161..193]
                 .try_into()
                 .expect("bounded decision intent digest"),
+            roster_digest: plain[193..225]
+                .try_into()
+                .expect("bounded original roster digest"),
         })
     }
 }
@@ -260,6 +268,7 @@ pub(super) async fn admit_empty_root(
                 birth_id: [0; 32],
                 intent_digest: [0; 32],
                 decision_digest: [0; 32],
+                roster_digest: [0; 32],
             };
             write_keyring(selected, &record)?;
             record
@@ -432,6 +441,7 @@ mod tests {
             birth_id: [0; 32],
             intent_digest: [0; 32],
             decision_digest: [0; 32],
+            roster_digest: [0; 32],
         };
         {
             let _guard = platform.namespace_owner()?.mutation_guard().await;
@@ -478,6 +488,37 @@ mod tests {
             admit_empty_root(owned).await.is_err(),
             "completed marker loss is not fresh initialization"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v3_root_cannot_be_reinterpreted_as_v4_roster_authority() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let ProductionSecureStorageHandler::Platform(platform) = owned.backend.as_ref() else {
+            unreachable!()
+        };
+        let original = admit_empty_root(owned).await?;
+        let root = RootRecord::decode(
+            platform,
+            &platform.entry_for_user(KEYRING_USER)?.get_secret()?,
+        )?;
+        let mut encoded = root.encode(platform)?;
+        encoded[..KEYRING_MAGIC.len()].copy_from_slice(b"AURA-PLATFORM-LIFETIME-ROOT-V3");
+        assert!(RootRecord::decode(platform, &encoded).is_err());
+        platform
+            .entry_for_user(KEYRING_USER)?
+            .set_secret(&encoded)?;
+        drop(original);
+        drop(selected);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert!(admit_empty_root(owned).await.is_err());
         Ok(())
     }
 }
