@@ -8,6 +8,7 @@ use zeroize::Zeroizing;
 
 pub(super) const INTENT_USER: &str = "allocation-lifetime-birth-intent:v1";
 pub(super) const RECORD_USER: &str = "allocation-lifetime-birth-record:v1";
+mod append;
 mod decision;
 const INVENTORY_FILE: &str = "platform_lifetime/inventory.v4";
 const INVENTORY_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-INVENTORY-V4";
@@ -18,6 +19,11 @@ const MAX_INVENTORY_FILE: usize = INVENTORY_MAGIC.len()
     + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT * ROSTER_ENTRY_LEN;
 const MAX_INTENT: usize =
     INTENT_MAGIC.len() + 12 + 16 + 64 + 4 + MAX_SCOPE_BYTES + MAX_SECRET_BYTES;
+
+#[cfg(test)]
+pub(super) fn cleanup_append_fixture(service: &str) {
+    append::cleanup_fixture(service);
+}
 
 struct BirthIntent {
     root: [u8; 32],
@@ -345,6 +351,11 @@ fn verify_birth<'a>(
     if verify_inventory(owned, &root)?.is_none() {
         return Err(invalid("platform live inventory is missing"));
     }
+    if append::claim_present(selected)? {
+        return Err(invalid(
+            "platform birth has an unverified second allocation",
+        ));
+    }
     if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
         return Err(invalid("platform live read denied by original erasure"));
     }
@@ -410,6 +421,7 @@ async fn allocate_one_inner(
     if verify_inventory(owned, &root)?.is_some()
         || read_entry(selected, INTENT_USER)?.is_some()
         || read_entry(selected, RECORD_USER)?.is_some()
+        || append::claim_present(selected)?
     {
         return Err(invalid(
             "platform birth found an unexplained existing allocation",
@@ -511,6 +523,11 @@ async fn recover_one_inner(
                 "platform birth reconciliation lacks original root owner",
             ));
         }
+    }
+    if append::claim_present(selected)? {
+        return Err(invalid(
+            "platform recovery requires whole-roster owner validation",
+        ));
     }
     if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
         if verify_inventory(owned, &root)?.is_none() {

@@ -384,6 +384,7 @@ mod tests {
     }
     impl Drop for Fixture {
         fn drop(&mut self) {
+            birth::cleanup_append_fixture(&self.service);
             for user in [
                 KEYRING_USER,
                 PlatformSecureStorageHandler::RECORD_KEY_USER,
