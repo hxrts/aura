@@ -620,13 +620,33 @@ async fn send_planned_envelope(
                     }
                 })?;
                 let manifest = retained.manifest();
-                let registration = manager.original_pending_mailbox_registration(
-                    manifest.subject, manifest.invitee_device, retained.digest(),
-                ).await.map_err(|source| match source {
-                    crate::runtime::services::rendezvous_manager::RendezvousManagerError::PendingMailboxRegistrationUnavailable =>
-                        TransportError::DestinationUnreachable { destination: envelope.destination },
-                    other => TransportError::ProtocolError { details: other.to_string() },
-                })?;
+                // The issuer starts its original VM before the invitee can import
+                // the setup and register the signed mailbox. Keep the same
+                // recipient and digest while waiting only for that registration.
+                let registration = loop {
+                    match manager.original_pending_mailbox_registration(
+                        manifest.subject, manifest.invitee_device, retained.digest(),
+                    ).await {
+                        Ok(registration) => break registration,
+                        Err(crate::runtime::services::rendezvous_manager::RendezvousManagerError::PendingMailboxRegistrationUnavailable) => {
+                            let now = effects.time_effects().physical_time().await.map_err(|source|
+                                TransportError::ProtocolError { details: source.to_string() }
+                            )?.ts_ms;
+                            let remaining = manifest.expires_at_ms.saturating_sub(now);
+                            if remaining == 0 {
+                                return Err(TransportError::DestinationUnreachable {
+                                    destination: envelope.destination,
+                                });
+                            }
+                            effects.time_effects().sleep_ms(remaining.min(100)).await.map_err(|source|
+                                TransportError::ProtocolError { details: source.to_string() }
+                            )?;
+                        }
+                        Err(other) => return Err(TransportError::ProtocolError {
+                            details: other.to_string(),
+                        }),
+                    }
+                };
                 let route = crate::handlers::invitation::enrollment_trust::verify_original_pending_mailbox_sender_route(
                     retained.as_ref(), registration,
                 ).await.map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;

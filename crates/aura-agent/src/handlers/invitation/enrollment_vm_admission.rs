@@ -2216,11 +2216,6 @@ mod tests {
             );
             issuer_effects.attach_rendezvous_manager(issuer_manager);
             invitee_effects.attach_rendezvous_manager(invitee_manager);
-            assert_eq!(
-                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
-                0,
-                "Bob's actual setup key registers before Alice's first VM send"
-            );
             let session =
                 aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
                     &invitation.invitation_id,
@@ -2233,8 +2228,26 @@ mod tests {
                 .await
                 .expect("original issuer reached its actual first VM execution")
                 .expect("original issuer first-VM gate remained owned");
-            broker.interrupt_next_issuer_return_ack_for_test().await;
+            let first_lookup_miss = broker
+                .observe_next_pending_registration_miss_for_test()
+                .await;
+            let retry_sleep = clock.observe_next_relative_sleep_of(100).await.unwrap();
             issuer_release.release();
+            tokio::time::timeout(std::time::Duration::from_secs(20), first_lookup_miss)
+                .await
+                .expect("Alice looked up Bob's original mailbox before import registered it")
+                .expect("first missing registration was observed");
+            tokio::time::timeout(std::time::Duration::from_secs(20), retry_sleep)
+                .await
+                .expect("Alice waits on the original signed enrollment lifetime")
+                .expect("original registration retry remained owned");
+            assert_eq!(
+                invitee.drain_pending_enrollment_vm_mailbox().await.unwrap(),
+                0,
+                "Bob registers the exact signed mailbox after Alice's first send attempt"
+            );
+            clock.advance(100);
+            broker.interrupt_next_issuer_return_ack_for_test().await;
             let accepted = async {
                 invitee
                     .invitations()

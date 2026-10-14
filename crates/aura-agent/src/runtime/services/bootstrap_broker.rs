@@ -269,6 +269,8 @@ struct BootstrapBrokerState {
     invitations: HashMap<(String, DeviceId), Vec<BootstrapBrokerInvitation>>,
     invitation_credentials: HashMap<(String, DeviceId), String>,
     pending_enrollment_mailboxes: PendingEnrollmentMailboxes,
+    #[cfg(test)]
+    pending_registration_miss: Option<tokio::sync::oneshot::Sender<()>>,
     enrollment_return_mailboxes: EnrollmentReturnMailboxes,
     started_at: Instant,
 }
@@ -295,6 +297,8 @@ impl BootstrapBrokerState {
             invitations: HashMap::new(),
             invitation_credentials: HashMap::new(),
             pending_enrollment_mailboxes: PendingEnrollmentMailboxes::new(retention),
+            #[cfg(test)]
+            pending_registration_miss: None,
             enrollment_return_mailboxes: EnrollmentReturnMailboxes::new(retention),
             started_at: Instant::now(),
         }
@@ -400,6 +404,15 @@ impl LocalBootstrapBrokerService {
         &self.public_url
     }
 
+    #[cfg(test)]
+    pub(crate) async fn observe_next_pending_registration_miss_for_test(
+        &self,
+    ) -> tokio::sync::oneshot::Receiver<()> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.shared.write().await.pending_registration_miss = Some(sender);
+        receiver
+    }
+
     pub async fn register(&self, registration: BootstrapBrokerRegistration) -> Result<(), String> {
         let now_ms = broker_elapsed_ms(&self.shared).await;
         prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
@@ -464,15 +477,18 @@ impl LocalBootstrapBrokerService {
         String,
     > {
         let now_ms = self.mailbox_now_ms().await?;
-        Ok(self
-            .shared
-            .write()
-            .await
-            .pending_enrollment_mailboxes
-            .registration(
-                PendingMailboxKey::new(subject, device, manifest_digest),
-                now_ms,
-            ))
+        let mut state = self.shared.write().await;
+        let registration = state.pending_enrollment_mailboxes.registration(
+            PendingMailboxKey::new(subject, device, manifest_digest),
+            now_ms,
+        );
+        #[cfg(test)]
+        if registration.is_none() {
+            if let Some(sender) = state.pending_registration_miss.take() {
+                let _ = sender.send(());
+            }
+        }
+        Ok(registration)
     }
 
     pub(crate) async fn queue_pending_enrollment_vm_envelope(
@@ -1153,11 +1169,15 @@ async fn handle_http_connection(
                 return;
             };
             let now_ms = mailbox_now!();
-            let found = shared
-                .write()
-                .await
-                .pending_enrollment_mailboxes
-                .registration(key, now_ms);
+            let mut state = shared.write().await;
+            let found = state.pending_enrollment_mailboxes.registration(key, now_ms);
+            #[cfg(test)]
+            if found.is_none() {
+                if let Some(sender) = state.pending_registration_miss.take() {
+                    let _ = sender.send(());
+                }
+            }
+            drop(state);
             match serde_json::to_vec(&found) {
                 Ok(body) => {
                     let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
