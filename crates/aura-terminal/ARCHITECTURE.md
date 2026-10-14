@@ -52,6 +52,9 @@ separate and still requires its own recovery boundary.
   selection; the TUI acquires it once per launch, shares it with IoContext
   and hands its owner to production assembly. Demo mode keeps the
   simulation runtime's nonproduction store.
+  The post-bootstrap reload observes account persistence under one local
+  `PhysicalTimeEffects` deadline; provider failure or rollback refuses the
+  reload, while an elapsed window reports that the account is still absent.
 
 - One process holds an account's profile. A node (the TUI in production
   mode, or `aura serve`) hosts `rpc_socket` at a short `aura-<hash of data dir>.sock` in the user runtime dir, recorded in `<data-dir>.sock-path` (hosting failure fails the launch): mode

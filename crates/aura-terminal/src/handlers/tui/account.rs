@@ -181,19 +181,54 @@ pub(super) async fn try_load_account(
 
 pub(super) async fn wait_for_persisted_account(
     storage: &impl StorageCoreEffects,
+    time: &impl PhysicalTimeEffects,
     timeout: std::time::Duration,
     poll_interval: std::time::Duration,
 ) -> Result<AccountLoadResult, AuraError> {
-    let deadline = std::time::Instant::now() + timeout;
+    let started_at = time
+        .physical_time()
+        .await
+        .map_err(|source| AuraError::Internal {
+            message: "Read bootstrap account observation clock".into(),
+            source: Some(Arc::new(source)),
+        })?;
+    let budget = aura_core::TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(
+        |source| AuraError::Internal {
+            message: "Allocate bootstrap account observation window".into(),
+            source: Some(Arc::new(source)),
+        },
+    )?;
     loop {
         let loaded = try_load_account(storage).await?;
         if matches!(loaded, AccountLoadResult::Loaded { .. }) {
             return Ok(loaded);
         }
-        if std::time::Instant::now() >= deadline {
-            return Ok(loaded);
-        }
-        tokio::time::sleep(poll_interval).await;
+        let observed_at = time
+            .physical_time()
+            .await
+            .map_err(|source| AuraError::Internal {
+                message: "Read bootstrap account observation clock".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let remaining = match budget.remaining_at(&observed_at) {
+            Ok(remaining) => remaining,
+            Err(aura_core::TimeoutBudgetError::DeadlineExceeded { .. }) => return Ok(loaded),
+            Err(source) => {
+                return Err(AuraError::Internal {
+                    message: "Validate bootstrap account observation window".into(),
+                    source: Some(Arc::new(source)),
+                })
+            }
+        };
+        let sleep_ms = u64::try_from(poll_interval.min(remaining).as_millis())
+            .map_err(|_| AuraError::internal("Bootstrap account poll interval is too large"))?
+            .max(1);
+        time.sleep_ms(sleep_ms)
+            .await
+            .map_err(|source| AuraError::Internal {
+                message: "Wait for bootstrap account persistence".into(),
+                source: Some(Arc::new(source)),
+            })?;
     }
 }
 
@@ -597,6 +632,7 @@ pub async fn import_account_backup(
 #[allow(clippy::expect_used)]
 mod tests {
     use aura_core::effects::ReactiveEffects;
+    use aura_testkit::time::{ControllableTimeSource, ManualPhysicalClock};
     use tempfile::tempdir;
 
     use super::*;
@@ -609,6 +645,51 @@ mod tests {
 
     async fn try_load_account_from_path(path: &Path) -> Result<AccountLoadResult, AuraError> {
         try_load_account(&open_bootstrap_storage(path)).await
+    }
+
+    #[tokio::test]
+    async fn account_visibility_wait_uses_one_selected_physical_deadline() {
+        let dir = tempdir().unwrap();
+        let storage = FilesystemStorageHandler::new(dir.path().to_path_buf());
+        let clock = ControllableTimeSource::new(1_000);
+        let result = wait_for_persisted_account(
+            &storage,
+            &clock,
+            std::time::Duration::from_millis(12),
+            std::time::Duration::from_millis(5),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, AccountLoadResult::NotFound));
+        assert_eq!(clock.physical_time().await.unwrap().ts_ms, 1_012);
+    }
+
+    #[tokio::test]
+    async fn account_visibility_wait_retains_selected_clock_failure() {
+        let dir = tempdir().unwrap();
+        let storage = FilesystemStorageHandler::new(dir.path().to_path_buf());
+        let clock = ManualPhysicalClock::new(1_000);
+        clock
+            .fail_next_observation(aura_core::effects::time::TimeError::ServiceUnavailable)
+            .await;
+        let error = match wait_for_persisted_account(
+            &storage,
+            &clock,
+            std::time::Duration::from_millis(12),
+            std::time::Duration::from_millis(5),
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("selected clock failure must refuse account observation"),
+        };
+        assert!(matches!(
+            error,
+            AuraError::Internal {
+                source: Some(_),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

@@ -1172,6 +1172,7 @@ async fn handle_tui_launch_with_bootstrap(
             }
             match wait_for_persisted_account(
                 &storage,
+                &aura_effects::time::PhysicalTimeHandler::new(),
                 std::time::Duration::from_secs(5),
                 std::time::Duration::from_millis(50),
             )

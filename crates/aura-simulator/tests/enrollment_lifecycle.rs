@@ -296,10 +296,12 @@ where
     let mut issuer_drain = Some(Box::pin(issuer.drain_issuer_return_vm_mailbox()));
     let mut drain_tick = tokio::time::interval(Duration::from_millis(100));
     let mut tick = tokio::time::interval(Duration::from_millis(10));
-    let result = tokio::time::timeout(Duration::from_secs(30), async {
+    let result = aura_testkit::infrastructure::time::assertions::assert_completes_within(
+        Duration::from_secs(30),
+        async {
         loop {
             tokio::select! {
-                outcome = &mut goal => break outcome,
+                outcome = &mut goal => break Ok(outcome),
                 upkeep = &mut maintenance => {
                     assert!(upkeep.is_ok() || matches!(&upkeep, Err(aura_core::AuraError::Internal { .. })),
                         "independent mailbox upkeep preserves typed sync failure: {upkeep:?}");
