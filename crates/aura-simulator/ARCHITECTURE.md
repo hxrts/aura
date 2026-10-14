@@ -42,6 +42,9 @@ finalization or cryptoshred evidence.
 - Deterministic execution: Same seed produces identical execution paths.
 - No real delays: Simulated time advances without actual delays.
 - Effect-based only: All simulation via effect system (no globals).
+- Scenario checkpoint import restores only a captured tick. Production-flow
+  replay creates fresh profile owners from recorded inputs and injected faults;
+  it never rewinds live capabilities, broker queues, credentials, or tasks.
 - Must NOT create persistent effect handlers (use aura-effects).
 - Must NOT implement multi-party coordination (use aura-protocol).
 - Serialized participant limits, trace loop indices and differential-report

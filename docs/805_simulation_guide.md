@@ -546,11 +546,9 @@ Phase 0 hardening uses three simulator workflows as CI gates.
 
 ### Checkpoint Snapshot Workflow
 
-`SimulationScenarioHandler` supports portable checkpoint snapshots. The `export_checkpoint_snapshot(label)` function exports a serializable `ScenarioCheckpointSnapshot`. The `import_checkpoint_snapshot(snapshot)` function restores a checkpoint into a fresh simulator instance.
+`SimulationScenarioHandler` exports and imports scenario-counter checkpoints. An imported snapshot is registered in a fresh handler; `restore_checkpoint` then restores only its captured scenario tick. Missing or invalid tick data fails closed. It does not restore live runtime owners, credentials, broker queues, storage, tasks, or capabilities.
 
-This enables baseline checkpoint persistence for representative choreography suites. It also supports restore-and-continue regression tests. Upgrade smoke tests can resume from pre-upgrade snapshots.
-
-Use checkpoints when validating runtime upgrades or migration safety, not only end-to-end success.
+For production-flow regression, record the seed, selected physical-time inputs, original operation and owner, broker stage transitions, injected fault, and typed outcome. Recreate the original profile and replay those inputs through the real runtime and app owners. A scenario-counter checkpoint alone is not an upgrade or durable-state migration test.
 
 ### Scenario Contract Workflow
 

@@ -11,6 +11,7 @@ use aura_agent::{
     AgentConfig, EnrollmentLifecycleFailure, EnrollmentParticipantProfile, SharedTransport,
     SimulatedEnrollment,
 };
+use aura_app::ui_contract::SemanticOperationPhase;
 use aura_core::{AuthorityId, ContextId, DeviceId, PhysicalTime, TimeoutBudget};
 use aura_testkit::time::ManualPhysicalClock;
 
@@ -45,11 +46,24 @@ async fn issued_with_broker_clock_and_sender(
     Vec<tempfile::TempDir>,
     Arc<ManualPhysicalClock>,
 ) {
+    issued_with_broker_clock_and_sender_seed(broker, sender_uses_broker, clock, 151).await
+}
+
+async fn issued_with_broker_clock_and_sender_seed(
+    broker: Option<aura_agent::BootstrapBrokerConfig>,
+    sender_uses_broker: bool,
+    clock: Arc<ManualPhysicalClock>,
+    seed_base: u8,
+) -> (
+    SimulatedEnrollment,
+    Vec<tempfile::TempDir>,
+    Arc<ManualPhysicalClock>,
+) {
     let roots: Vec<_> = (0..2)
         .map(|_| tempfile::tempdir().expect("isolated native profile"))
         .collect();
     let profiles = std::array::from_fn(|index| {
-        let seed = 151 + index as u8 * 3;
+        let seed = seed_base + index as u8 * 3;
         let config = AgentConfig {
             device_id: DeviceId::new_from_entropy([seed + 1; 32]),
             storage: aura_agent::core::config::StorageConfig {
@@ -72,7 +86,7 @@ async fn issued_with_broker_clock_and_sender(
     });
     let startup = TimeoutBudget::from_start_and_timeout(
         &PhysicalTime {
-            ts_ms: 5_000,
+            ts_ms: clock.now_ms(),
             uncertainty: None,
         },
         Duration::from_secs(120),
@@ -155,11 +169,24 @@ async fn issued_with_original_vm_broker() -> (
     String,
     Arc<ManualPhysicalClock>,
 ) {
+    issued_with_original_vm_broker_from(151, 5_000).await
+}
+
+async fn issued_with_original_vm_broker_from(
+    seed_base: u8,
+    selected_time_ms: u64,
+) -> (
+    SimulatedEnrollment,
+    Vec<tempfile::TempDir>,
+    aura_agent::TaskSupervisor,
+    String,
+    Arc<ManualPhysicalClock>,
+) {
     use aura_agent::{
         BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy, LocalBootstrapBrokerService,
         TaskSupervisor,
     };
-    let clock = Arc::new(ManualPhysicalClock::new(5_000));
+    let clock = Arc::new(ManualPhysicalClock::new(selected_time_ms));
     let broker = LocalBootstrapBrokerService::bind(
         "127.0.0.1:0",
         Duration::from_secs(120),
@@ -177,7 +204,7 @@ async fn issued_with_original_vm_broker() -> (
         .with_base_url(url.as_str())
         .with_auth_token("genuine-complete-vm-auth");
     let (fixture, roots, clock) =
-        issued_with_broker_clock_and_sender(Some(config), true, clock).await;
+        issued_with_broker_clock_and_sender_seed(Some(config), true, clock, seed_base).await;
     fixture
         .issuer()
         .drain_issuer_return_vm_mailbox()
@@ -237,8 +264,24 @@ async fn drive_brokered_import_until<T, M, F>(
     fixture: &SimulatedEnrollment,
     clock: &Arc<ManualPhysicalClock>,
     broker_url: &str,
+    maintenance_pass: M,
+    goal: impl std::future::Future<Output = T>,
+) -> T
+where
+    M: FnMut() -> F,
+    F: std::future::Future<Output = Result<(), aura_core::AuraError>>,
+{
+    drive_brokered_import_until_traced(fixture, clock, broker_url, maintenance_pass, goal, None)
+        .await
+}
+
+async fn drive_brokered_import_until_traced<T, M, F>(
+    fixture: &SimulatedEnrollment,
+    clock: &Arc<ManualPhysicalClock>,
+    broker_url: &str,
     mut maintenance_pass: M,
     goal: impl std::future::Future<Output = T>,
+    trace: Option<&Arc<std::sync::Mutex<Vec<(u64, String)>>>>,
 ) -> T
 where
     M: FnMut() -> F,
@@ -289,9 +332,20 @@ where
                     }
                 }
                 _ = tick.tick() => {
-                    if !first_frame_queued {
+                    if !first_frame_queued || trace.is_some() {
                         let progress = original_vm_broker_progress(broker_url, subject, device, digest).await;
-                        first_frame_queued = progress["messages"].as_array().is_some_and(|messages| !messages.is_empty());
+                        if let Some(trace) = trace {
+                            let stage = progress["messages"][0]["stage"]
+                                .as_str()
+                                .unwrap_or("no_message")
+                                .to_string();
+                            let observation = (clock.now_ms(), stage);
+                            let mut trace = trace.lock().unwrap();
+                            if trace.last() != Some(&observation) {
+                                trace.push(observation);
+                            }
+                        }
+                        first_frame_queued |= progress["messages"].as_array().is_some_and(|messages| !messages.is_empty());
                     }
                     if first_frame_queued {
                         continue;
@@ -1162,8 +1216,43 @@ async fn genuine_public_app_enrollment_selected_provider_fault_refuses_host_ack(
         .expect("original selected startup endpoint permits same-profile reopen");
 }
 
-#[tokio::test]
-async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failure() {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostRefusalReplayInputs {
+    seed_base: u8,
+    selected_physical_ms: u64,
+    operation_instance: &'static str,
+    owner: &'static str,
+    injected_fault: &'static str,
+}
+
+impl Default for HostRefusalReplayInputs {
+    fn default() -> Self {
+        Self {
+            seed_base: 151,
+            selected_physical_ms: 5_000,
+            operation_instance: "genuine-public-app-host-refusal",
+            owner: "WorkflowHandoffSubmission/ImportDeviceEnrollmentCode",
+            injected_fault: "HostPathIsFile",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct HostRefusalReplayReceipt {
+    inputs: HostRefusalReplayInputs,
+    /// Ordered, redacted broker observations; no selector, frame, or credential.
+    broker_stage_names: Vec<String>,
+    broker_registration: bool,
+    broker_first_envelope: bool,
+    broker_receiver_ack: bool,
+    typed_terminal: SemanticOperationPhase,
+    typed_host_failure: &'static str,
+    same_profile_reopened: bool,
+}
+
+async fn run_host_storage_refusal_from_fresh_profile(
+    inputs: HostRefusalReplayInputs,
+) -> HostRefusalReplayReceipt {
     use aura_app::frontend_primitives::WorkflowHandoffSubmission;
     use aura_app::ui::workflows::invitation::{
         import_device_enrollment_with_terminal_status, EnrollmentImportHostPolicy,
@@ -1175,7 +1264,7 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
     use aura_core::{effects::StorageCoreEffects, AuraError};
 
     let (fixture, _roots, broker_supervisor, broker_url, clock) =
-        issued_with_original_vm_broker().await;
+        issued_with_original_vm_broker_from(inputs.seed_base, inputs.selected_physical_ms).await;
     let issuer = fixture.issuer().clone();
     let recipient = fixture.recipient().clone();
     let app = fixture.recipient_app();
@@ -1214,7 +1303,7 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
     let observed_storage_source = original_storage_source.clone();
     let host_selector = Arc::new(std::sync::Mutex::new(None));
     let observed_selector = host_selector.clone();
-    let instance = OperationInstanceId("genuine-public-app-host-refusal".into());
+    let instance = OperationInstanceId(inputs.operation_instance.into());
     let prior_events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let prior = WorkflowHandoffSubmission::submit_with_instance_unpublished(
         PublicAppSubmission(prior_events.clone()),
@@ -1277,12 +1366,14 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
         .accept_handoff(prior)
         .unwrap_or_else(|_| panic!("original workflow handoff"));
     let bridge = fixture.recipient().clone().as_runtime_bridge();
-    let (outcome, recovery) = drive_brokered_import_until(
+    let stage_trace = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (outcome, recovery) = drive_brokered_import_until_traced(
         &fixture,
         &clock,
         &broker_url,
         || aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
         observation.observe_with_host_recovery(),
+        Some(&stage_trace),
     )
     .await;
     let (subject, device, digest) = host_selector
@@ -1295,6 +1386,22 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
         progress["messages"][0]["stage"],
         "receiver_acknowledged_retained_frame"
     );
+    let stages = stage_trace.lock().unwrap();
+    assert!(
+        stages.iter().any(|(_, stage)| stage != "no_message"),
+        "actual broker first-envelope stage was observed"
+    );
+    let mut broker_stage_names = Vec::new();
+    for (_, stage) in stages.iter() {
+        if broker_stage_names.last() != Some(stage) {
+            broker_stage_names.push(stage.clone());
+        }
+    }
+    let acknowledged = "receiver_acknowledged_retained_frame".to_string();
+    if broker_stage_names.last() != Some(&acknowledged) {
+        broker_stage_names.push(acknowledged);
+    }
+    drop(stages);
     let original = original_storage_source
         .lock()
         .unwrap()
@@ -1445,6 +1552,39 @@ async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failu
         .shutdown()
         .await
         .expect("reopened native owner shutdown");
+    HostRefusalReplayReceipt {
+        inputs,
+        broker_stage_names,
+        broker_registration: progress["registration_present"] == true,
+        broker_first_envelope: progress["messages"]
+            .as_array()
+            .is_some_and(|messages| !messages.is_empty()),
+        broker_receiver_ack: progress["messages"][0]["stage"]
+            == "receiver_acknowledged_retained_frame",
+        typed_terminal: SemanticOperationPhase::Failed,
+        typed_host_failure: "Storage",
+        same_profile_reopened: true,
+    }
+}
+
+#[tokio::test]
+async fn genuine_public_app_enrollment_host_storage_refusal_keeps_original_failure() {
+    let receipt =
+        run_host_storage_refusal_from_fresh_profile(HostRefusalReplayInputs::default()).await;
+    assert!(receipt.broker_receiver_ack);
+}
+
+#[tokio::test]
+async fn original_host_storage_refusal_replays_from_captured_inputs() {
+    let captured =
+        run_host_storage_refusal_from_fresh_profile(HostRefusalReplayInputs::default()).await;
+    assert_eq!(
+        captured.inputs.owner,
+        "WorkflowHandoffSubmission/ImportDeviceEnrollmentCode"
+    );
+    assert_eq!(captured.inputs.injected_fault, "HostPathIsFile");
+    let replayed = run_host_storage_refusal_from_fresh_profile(captured.inputs.clone()).await;
+    assert_eq!(captured, replayed);
 }
 
 #[tokio::test]

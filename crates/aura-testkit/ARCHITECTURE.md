@@ -35,6 +35,8 @@ Shared testing infrastructure providing test fixtures, effect system harnesses, 
   Native selected-task read faults target the owning Tokio workflow task, so
   background readers cannot consume its one-shot provider failure.
 - Mock effects behave consistently with production ones.
+- `MockSimulationHandler` checkpoints restore only the selected simulation-time
+  value; a missing checkpoint is an error. They do not rewind runtime state.
 - Mock handlers MAY be stateful (using `Arc<Mutex<>>`) for controllable testing.
 - Host-only helpers must be explicit and local; shared or wasm-exercised test surfaces must stay aligned with the same async-trait and boundary contracts as production.
 

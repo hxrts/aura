@@ -152,8 +152,14 @@ impl SimulationControlEffects for MockSimulationHandler {
         Ok(id)
     }
 
-    async fn restore_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<()> {
-        // Mock implementation - in real use would restore state
+    async fn restore_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<()> {
+        let mut storage = self.storage.write().await;
+        let checkpoint = storage
+            .checkpoints
+            .get(&checkpoint_id.0)
+            .ok_or_else(|| aura_core::AuraError::invalid("simulation checkpoint does not exist"))?;
+        let selected_time = checkpoint.simulation_time.clone();
+        storage.simulation_time = selected_time;
         Ok(())
     }
 
@@ -349,3 +355,46 @@ impl SimulationObservationEffects for MockSimulationHandler {
 
 // StatelessSimulationHandler removed - use aura_effects::FallbackSimulationHandler instead
 // This was a duplicate that served no purpose since aura-effects provides the fallback
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn simulation_checkpoint_restores_only_selected_time_and_rejects_missing() {
+        let handler = MockSimulationHandler::new();
+        let original = handler.get_simulation_time().await.expect("initial time");
+        let checkpoint = handler
+            .create_checkpoint("selected-time".into())
+            .await
+            .expect("checkpoint");
+        handler
+            .advance_time(Duration::from_secs(4))
+            .await
+            .expect("advance selected time");
+        assert_ne!(
+            handler
+                .get_simulation_time()
+                .await
+                .expect("advanced time")
+                .current,
+            original.current
+        );
+        handler
+            .restore_checkpoint(&checkpoint)
+            .await
+            .expect("restore selected time");
+        assert_eq!(
+            handler
+                .get_simulation_time()
+                .await
+                .expect("restored time")
+                .current,
+            original.current
+        );
+        assert!(handler
+            .restore_checkpoint(&CheckpointId("missing".into()))
+            .await
+            .is_err());
+    }
+}

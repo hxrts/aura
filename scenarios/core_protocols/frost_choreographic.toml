@@ -178,9 +178,8 @@ behavior = "delay"
 delay_ms = 5000
 phase = "signing_round"
 
-# Time-travel debugging configuration
+# Scenario debugging configuration (no runtime rewind)
 [debugging]
-enable_time_travel = true
 checkpoint_interval_ms = 100
 max_checkpoints = 50
 

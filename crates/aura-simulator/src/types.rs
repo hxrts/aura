@@ -189,8 +189,6 @@ impl Default for NetworkConfig {
 pub struct TimeConfig {
     /// Time acceleration factor
     pub acceleration_factor: f64,
-    /// Enable time travel debugging
-    pub enable_time_travel: bool,
     /// Checkpoint creation frequency
     pub checkpoint_frequency: Duration,
     /// Maximum time drift tolerance
@@ -201,7 +199,6 @@ impl Default for TimeConfig {
     fn default() -> Self {
         Self {
             acceleration_factor: 1.0,
-            enable_time_travel: false,
             checkpoint_frequency: Duration::from_secs(10),
             max_drift: Duration::from_millis(100),
         }

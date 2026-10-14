@@ -173,7 +173,6 @@ include_performance_metrics = true
 
 # Debugging features
 [debugging]
-enable_time_travel = true
 checkpoint_interval_ms = 50
 max_checkpoints = 100
 enable_step_through = true

@@ -947,7 +947,8 @@ impl SimulationScenarioHandler {
         Ok(checkpoint_id)
     }
 
-    /// Export one checkpoint snapshot payload for cross-instance restore tests.
+    /// Export a scenario-counter checkpoint for cross-instance tests. This does
+    /// not capture runtime owners, credentials, queues, or durable state.
     pub fn export_checkpoint_snapshot(
         &self,
         checkpoint_id: &str,
@@ -966,7 +967,8 @@ impl SimulationScenarioHandler {
         Ok(checkpoint.into())
     }
 
-    /// Import one checkpoint snapshot payload into this simulator instance.
+    /// Import a scenario-counter checkpoint. Runtime state must be replayed
+    /// from its original inputs in a fresh profile instead.
     pub fn import_checkpoint_snapshot(
         &self,
         snapshot: ScenarioCheckpointSnapshot,
@@ -3227,17 +3229,22 @@ impl TestingEffects for SimulationScenarioHandler {
 
         drop(state);
 
-        // Restore limited state values captured in snapshot
-        if let Some(tick_str) = checkpoint.state_snapshot.get("current_tick") {
-            if let Ok(tick) = tick_str.parse::<u64>() {
-                let mut state_mut = self.shared.state.lock().map_err(|e| {
-                    TestingError::SystemError(aura_core::AuraError::internal(format!(
-                        "Lock error: {e}"
-                    )))
-                })?;
-                state_mut.current_tick = tick;
-            }
-        }
+        let tick = checkpoint
+            .state_snapshot
+            .get("current_tick")
+            .ok_or_else(|| TestingError::CheckpointError {
+                checkpoint_id: checkpoint_id.to_string(),
+                reason: "checkpoint has no captured scenario tick".to_string(),
+            })?
+            .parse::<u64>()
+            .map_err(|_| TestingError::CheckpointError {
+                checkpoint_id: checkpoint_id.to_string(),
+                reason: "checkpoint scenario tick is invalid".to_string(),
+            })?;
+        let mut state_mut = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        state_mut.current_tick = tick;
 
         Ok(())
     }

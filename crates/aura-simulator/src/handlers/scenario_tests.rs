@@ -818,6 +818,31 @@ async fn test_upgrade_resume_from_exported_checkpoint_snapshot() {
     assert_eq!(*resumed_tick, 13);
 }
 
+#[tokio::test]
+async fn scenario_checkpoint_refuses_missing_or_malformed_tick() {
+    let handler = SimulationScenarioHandler::new(7);
+    for (id, state_snapshot) in [
+        ("missing-tick", std::collections::HashMap::new()),
+        (
+            "malformed-tick",
+            std::collections::HashMap::from([("current_tick".into(), "invalid".into())]),
+        ),
+    ] {
+        handler
+            .import_checkpoint_snapshot(ScenarioCheckpointSnapshot {
+                id: id.into(),
+                label: id.into(),
+                timestamp: 0_u64,
+                state_snapshot,
+            })
+            .expect("import diagnostic checkpoint");
+        assert!(matches!(
+            aura_core::effects::testing::TestingEffects::restore_checkpoint(&handler, id).await,
+            Err(aura_core::effects::testing::TestingError::CheckpointError { .. })
+        ));
+    }
+}
+
 #[test]
 fn test_telltale_fault_pattern_builders() {
     let partition = ScenarioDefinition::telltale_network_partition(
