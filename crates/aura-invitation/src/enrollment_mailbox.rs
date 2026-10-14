@@ -474,7 +474,9 @@ impl IssuerEnrollmentReturnRegistration {
             || self.proof.signers.contains(&0)
             || match self.mode {
                 SigningMode::Threshold => self.proof.signer_count < 2,
-                SigningMode::SingleSigner => !self.proof.is_single_signer(),
+                SigningMode::SingleSigner => {
+                    !self.proof.is_single_signer() || self.proof.signers != [1]
+                }
             }
         {
             return Err(PendingEnrollmentMailboxError::SigningPolicy);
@@ -545,6 +547,7 @@ impl IssuerEnrollmentReturnRegistration {
                 SigningMode::SingleSigner => {
                     policy.threshold != 1
                         || !self.proof.is_single_signer()
+                        || self.proof.signers != [1]
                         || policy.participants
                             != vec![aura_core::threshold::ParticipantIdentity::Device(
                                 manifest.initiator_device,

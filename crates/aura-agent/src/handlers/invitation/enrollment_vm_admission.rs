@@ -199,6 +199,44 @@ mod original_k1_return_registration_tests {
                 )
                 .await
                 .is_err());
+            let mut stale_epoch = registration.clone();
+            stale_epoch.proof.epoch = stale_epoch.proof.epoch.wrapping_add(1);
+            assert!(matches!(stale_epoch.verify_for_admitted_original(
+                invitee.runtime().effects().as_ref(), admitted.baseline(), admitted.local_setup(),
+            ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)));
+            for field in ["session", "retrieval_credential_commitment"] {
+                let mut foreign = serde_json::to_value(&registration).unwrap();
+                foreign["statement"][field] = if field == "session" {
+                    serde_json::json!(uuid::Uuid::from_bytes([91; 16]))
+                } else {
+                    serde_json::json!(vec![91_u8; 32])
+                };
+                let foreign: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                    serde_json::from_value(foreign).unwrap();
+                let result = foreign
+                    .verify_for_admitted_original(
+                        invitee.runtime().effects().as_ref(),
+                        admitted.baseline(),
+                        admitted.local_setup(),
+                    )
+                    .await;
+                assert!(
+                    if field == "session" {
+                        matches!(result, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::Binding))
+                    } else {
+                        matches!(result, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::InvalidSignature))
+                    },
+                    "foreign {field} cannot select the original K1 registration"
+                );
+            }
+            let mut reordered = registration.clone();
+            reordered.proof.signers = vec![2, 1];
+            assert!(matches!(reordered.verify_untrusted_broker_registration(
+                invitee.runtime().effects().as_ref(), invitee.runtime().effects().as_ref(),
+            ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)));
+            assert!(matches!(reordered.verify_for_admitted_original(
+                invitee.runtime().effects().as_ref(), admitted.baseline(), admitted.local_setup(),
+            ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)));
             let mut forged = registration.clone();
             forged.proof.signature[0] ^= 1;
             assert!(matches!(forged.verify_for_admitted_original(
@@ -4876,10 +4914,42 @@ mod committed_receipt_tests {
                     let altered: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
                         serde_json::from_value(altered).unwrap();
                     assert!(matches!(altered.verify_for_admitted_original(
-                        third.runtime().effects().as_ref(),
-                        return_original.baseline(), return_original.local_setup(),
+                        third.runtime().effects().as_ref(), return_original.baseline(), return_original.local_setup(),
                     ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::Binding)),
-                    "foreign {field} cannot select original quorum return route");
+                        "foreign {field} cannot select original quorum return route"
+                    );
+                }
+                for (field, replacement, expected_binding) in [
+                    (
+                        "session",
+                        serde_json::json!(uuid::Uuid::from_bytes([91; 16])),
+                        true,
+                    ),
+                    (
+                        "retrieval_credential_commitment",
+                        serde_json::json!(vec![91_u8; 32]),
+                        false,
+                    ),
+                ] {
+                    let mut altered = serde_json::to_value(&return_registration).unwrap();
+                    altered["statement"][field] = replacement;
+                    let altered: aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration =
+                        serde_json::from_value(altered).unwrap();
+                    let result = altered
+                        .verify_for_admitted_original(
+                            third.runtime().effects().as_ref(),
+                            return_original.baseline(),
+                            return_original.local_setup(),
+                        )
+                        .await;
+                    assert!(
+                        if expected_binding {
+                            matches!(result, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::Binding))
+                        } else {
+                            matches!(result, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::InvalidSignature))
+                        },
+                        "foreign {field} must fail with its typed boundary"
+                    );
                 }
                 let mut false_key = return_registration.clone();
                 false_key.proof.public_key_package[0] ^= 1;
@@ -4894,6 +4964,25 @@ mod committed_receipt_tests {
                         .is_err(),
                     "foreign group package cannot authorize return route"
                 );
+                let mut stale_package = return_registration.clone();
+                stale_package.proof.public_key_package =
+                    return_manifest.parents[0].public_key_package.clone();
+                assert!(matches!(stale_package.verify_for_admitted_original(
+                    third.runtime().effects().as_ref(), return_original.baseline(), return_original.local_setup(),
+                ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)),
+                    "previous epoch package cannot authorize the current return route");
+                let mut stale_epoch = return_registration.clone();
+                stale_epoch.proof.epoch = stale_epoch.proof.epoch.wrapping_add(1);
+                assert!(matches!(stale_epoch.verify_for_admitted_original(
+                    third.runtime().effects().as_ref(), return_original.baseline(), return_original.local_setup(),
+                ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)),
+                    "stale group epoch cannot authorize return route");
+                let mut reordered_roster = return_registration.clone();
+                reordered_roster.proof.signers.reverse();
+                assert!(matches!(reordered_roster.verify_for_admitted_original(
+                    third.runtime().effects().as_ref(), return_original.baseline(), return_original.local_setup(),
+                ).await, Err(aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxError::SigningPolicy)),
+                    "reordered full signer metadata cannot authorize return route");
                 let mut false_roster = return_registration.clone();
                 false_roster.proof.signer_count = 1;
                 false_roster.proof.signers = vec![1];
