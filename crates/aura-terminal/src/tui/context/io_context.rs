@@ -691,17 +691,7 @@ impl IoContext {
     ) -> aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy {
         // Retained enrollment custody needs the original profile helper, not
         // the entire frontend context (which also owns the UI task root).
-        let account_files = self.account_files.clone();
-        aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy::Finalize(Arc::new(
-            move |completed| {
-                let account_files = account_files.clone();
-                Box::pin(async move {
-                    account_files
-                        .persist_completed_enrollment_identity(completed)
-                        .await
-                })
-            },
-        ))
+        self.account_files.enrollment_import_host_policy()
     }
 
     pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<CeremonyHandle> {

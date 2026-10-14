@@ -505,6 +505,14 @@ mailbox path validated end to end.
 Browser harness failures surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__`, `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`, and the page-owned semantic submit publication surface. Those globals are diagnostic-only and do not replace the authoritative `UiSnapshot` and `RenderHeartbeat` payloads. They are the canonical observed source for browser bootstrap and rebinding state. Driver-owned `restart_page_session` is infrastructure recovery only. Semantic command submission and runtime-identity staging must wait on or fail from the page-owned publication contract rather than replaying work through a restarted browser session.
 
 The approved-transfer browser scenario submits through the mounted modal confirm button, then requires the exact `device_enrollment` operation instance to reach `Succeeded`, a `device_enrollment_accepted` event from the same browser generation's added-device settings projection, and a two-device settings count before restarting Bob. After reopen it checks the projection again. Immediately before restart, the Playwright driver writes a private `*-pre-restart-*.json` artifact with the observed operation instance and state, typed failure (if any), the two-device host projection witness, revision, and filtered console tail. Preserve this artifact when a later restart loses page diagnostics; neither a generic success state nor a modal dismissal proves the enrollment chain.
+
+The native `native_enrollment_host` development fixture uses the terminal's
+canonical `AccountFilesHelper` host policy against the original recipient's
+selected testing profile owner. It checks signed import, app-issued completion,
+one success terminal for the original instance, encrypted identity/account
+readback and same-profile reopen after strict shutdown. A second lease is
+refused. Testing-owned filesystem secure storage does not prove production
+platform-keyring persistence; keep that platform evidence separate.
 The scenario captures the instance after mounted submission and checks that same instance again immediately before restart. A success on another `device_enrollment` instance cannot satisfy these exact waits.
 For the scenario restart, `restart_actor` passes the captured operation instance to the browser backend. Before it stops the old Playwright process, the driver requires that exact operation to be `Succeeded` and retains the same-generation two-device added-device projection event in a private pre-restart artifact, alongside all observed typed failures. The backend passes only that bounded evidence to the new driver process. A post-restart private artifact is written only after the new page generation observes two devices including that event's device ID; it carries the original instance and host witness beside the reopened device IDs. The scenario report must still prove readiness and the final settings projection.
 

@@ -186,6 +186,11 @@ retains an exact first-frame ACK. Its twelve
 settlement, the Pending/commit cleanup race, broker invitation prefill, and
 public-app host success and real filesystem refusal. The refusal retains the
 original storage source and one Failed terminal for the submitted instance.
+The simulation-feature runtime exposes only an owner-presence observation for
+the terminal native-host fixture; it does not export the lease, path, or a new
+profile writer. The fixture borrows that runtime's selected storage to exercise
+the canonical terminal host callback, then reopens under the same selected
+testing provider. This does not prove production platform-keyring migration.
 These in-process observations do not establish production selected-identity
 persistence or independent-process/browser transport delivery. The local broker service is exported
 only for native simulation fixtures; this export grants no production route.

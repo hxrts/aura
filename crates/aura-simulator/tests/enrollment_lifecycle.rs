@@ -182,35 +182,32 @@ async fn issued_with_original_vm_broker_from(
     String,
     Arc<ManualPhysicalClock>,
 ) {
-    use aura_agent::{
-        BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy, LocalBootstrapBrokerService,
-        TaskSupervisor,
-    };
+    use aura_simulator::native_enrollment_fixture::NativeEnrollmentFixture;
     let clock = Arc::new(ManualPhysicalClock::new(selected_time_ms));
-    let broker = LocalBootstrapBrokerService::bind(
-        "127.0.0.1:0",
-        Duration::from_secs(120),
-        "genuine-complete-vm-auth",
-        BootstrapBrokerLanBindPolicy::LoopbackOnly,
-    )
-    .await
-    .expect("actual original VM broker bind")
-    .with_mailbox_time_provider(clock.clone());
-    let supervisor = TaskSupervisor::new();
-    broker.start(&supervisor.group("genuine_complete_vm_broker"));
-    let url = broker.public_url().to_owned();
-    let config = BootstrapBrokerConfig::default()
-        .enabled(true)
-        .with_base_url(url.as_str())
-        .with_auth_token("genuine-complete-vm-auth");
-    let (fixture, roots, clock) =
-        issued_with_broker_clock_and_sender_seed(Some(config), true, clock, seed_base).await;
-    fixture
-        .issuer()
-        .drain_issuer_return_vm_mailbox()
+    let roots: Vec<_> = (0..2)
+        .map(|_| tempfile::tempdir().expect("isolated native profile"))
+        .collect();
+    let profiles = std::array::from_fn(|index| {
+        let seed = seed_base + index as u8 * 3;
+        EnrollmentParticipantProfile {
+            config: AgentConfig {
+                device_id: DeviceId::new_from_entropy([seed + 1; 32]),
+                storage: aura_agent::core::config::StorageConfig {
+                    base_path: roots[index].path().to_path_buf(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            authority: AuthorityId::new_from_entropy([seed; 32]),
+            context: ContextId::new_from_entropy([seed + 2; 32]),
+            seed: u64::from(seed),
+        }
+    });
+    let owner = NativeEnrollmentFixture::prepare(profiles, clock, "genuine-complete-vm-auth")
         .await
-        .expect("issuer publishes original signed return registration before import");
-    (fixture, roots, supervisor, url, clock)
+        .expect("original signed native broker issuance");
+    let url = owner.broker_url().to_owned();
+    (owner.enrollment, roots, owner.supervisor, url, owner.clock)
 }
 
 async fn original_vm_broker_progress(
@@ -287,18 +284,6 @@ where
     M: FnMut() -> F,
     F: std::future::Future<Output = Result<(), aura_core::AuraError>>,
 {
-    let transfer = fixture
-        .start()
-        .manifest_transfer
-        .as_ref()
-        .expect("original signed transfer");
-    let signed_expiry =
-        aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest::decode(
-            &transfer.manifest_code,
-        )
-        .expect("actual signed manifest shape")
-        .manifest
-        .expires_at_ms;
     let mut goal = Box::pin(goal);
     let mut maintenance = Box::pin(maintenance_pass());
     let (subject, device, digest) = fixture
@@ -347,19 +332,9 @@ where
                         }
                         first_frame_queued |= progress["messages"].as_array().is_some_and(|messages| !messages.is_empty());
                     }
-                    if first_frame_queued {
-                        continue;
-                    }
-                    if let Some(target) = clock.next_registered_deadline().await {
-                        let now = clock.now_ms();
-                        if target.value() > now
-                            && target.value() <= now + 1_000
-                            && target.value() < signed_expiry
-                            && target.value() < fixture.original_startup_window().deadline_at_ms()
-                        {
-                            clock.set_time(target.value());
-                        }
-                    }
+                    aura_simulator::native_enrollment_fixture::advance_selected_clock_before_frame(
+                        fixture, clock, first_frame_queued,
+                    ).await;
                 }
             }
         }

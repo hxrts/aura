@@ -33,10 +33,15 @@ required-features = ["development"]
 name = "e2e_terminal_state"
 # Runs under plain `cargo test`; app internals come from the dev-dependency below.
 
+[[test]]
+name = "native_enrollment_host"
+path = "tests/native_enrollment_host.rs"
+required-features = ["development"]
+
 [features]
 default = ["terminal"]
 terminal = []
-testing = ["terminal", "aura-app/app-internals"]
+testing = ["terminal", "aura-app/app-internals", "aura-agent/simulation"]
 development = [
     "terminal",
     "testing",

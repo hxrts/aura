@@ -8,6 +8,12 @@ The effect composer passes one `aura-agent::SimulationSharedInbox` owner to
 simulated peers sharing an inbox, keeping frame storage and reserved return
 capacity together across runtimes.
 
+`native_enrollment_fixture` is simulation-only test support for the original
+signed issuer path. It binds the loopback broker, retains the selected physical
+clock and broker supervisor, and drives mailbox upkeep without advancing time
+after the first authenticated broker frame. It does not issue credentials or
+replace the agent's signed enrollment owner.
+
 ## Scope
 
 | Belongs here | Does not belong here |

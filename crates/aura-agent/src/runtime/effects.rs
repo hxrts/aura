@@ -3478,6 +3478,13 @@ impl AuraEffectSystem {
         &self.config
     }
 
+    /// Test-only observation that a native simulation runtime retains the
+    /// original selected profile owner. No lease or profile path is exported.
+    #[cfg(feature = "simulation")]
+    pub fn has_selected_native_profile_owner_for_simulation(&self) -> bool {
+        self.profile_owner.is_some()
+    }
+
     /// Get composite handler
     pub fn composite(&self) -> &CompositeHandlerAdapter {
         &self.composite

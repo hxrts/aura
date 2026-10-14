@@ -42,6 +42,42 @@ pub struct ProfileStore {
 }
 
 impl ProfileStore {
+    /// Borrow the actual selected storage and its retained opaque lease from a
+    /// simulation runtime. This cannot acquire another owner for its path.
+    #[cfg(feature = "testing")]
+    pub fn from_selected_runtime_for_testing(
+        effects: Arc<AuraEffectSystem>,
+    ) -> Result<Self, AuraError> {
+        if !effects.has_selected_native_profile_owner_for_simulation() {
+            return Err(AuraError::storage(
+                "Selected native profile owner is absent",
+            ));
+        }
+        Ok(Self {
+            base_path: effects.config().storage.base_path.clone(),
+            storage: effects,
+            owner: None,
+        })
+    }
+
+    /// Stage the actual provisional runtime authority through the terminal
+    /// account writer for a native owned-profile integration fixture.
+    #[cfg(feature = "testing")]
+    pub async fn stage_provisional_runtime_account_for_testing(
+        &self,
+        recipient: &Arc<aura_agent::AuraAgent>,
+    ) -> Result<(), AuraError> {
+        let effects = recipient.runtime().effects();
+        let selected_storage: Arc<dyn StorageEffects> = effects.clone();
+        if !Arc::ptr_eq(&self.storage, &selected_storage)
+            || !effects.has_selected_native_profile_owner_for_simulation()
+        {
+            return Err(AuraError::storage("Selected native profile owner differs"));
+        }
+        persist_selected_authority(self, recipient.authority_id(), None)
+            .await
+            .map(|_| ())
+    }
     /// Acquire the production profile at `base_path`. Fails while another
     /// process (a running TUI or `aura serve`) owns it.
     pub fn production(base_path: &Path) -> Result<Self, AuraError> {

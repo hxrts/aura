@@ -20,6 +20,7 @@ aura-chat = { package = "hxrts-aura-chat", path = "../aura-chat", version = "=0.
 aura-consensus = { package = "hxrts-aura-consensus", path = "../aura-consensus", version = "=0.2.0" }
 aura-protocol = { package = "hxrts-aura-protocol", path = "../aura-protocol", version = "=0.2.0" }
 aura-testkit = { path = "../aura-testkit" }
+aura-invitation = { package = "hxrts-aura-invitation", path = "../aura-invitation", version = "=0.2.0" }
 aura-sync = { package = "hxrts-aura-sync", path = "../aura-sync", version = "=0.2.0" }
 aura-quint = { path = "../aura-quint" }
 aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.2.0" }

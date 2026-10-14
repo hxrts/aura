@@ -147,6 +147,8 @@ pub mod scenario;
 pub mod scenarios;
 
 // Testkit integration bridge
+/// Simulation-only original signed enrollment broker and selected-clock driver.
+pub mod native_enrollment_fixture;
 pub mod testkit_bridge;
 
 // Choreographic protocol simulation transport

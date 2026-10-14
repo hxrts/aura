@@ -40,6 +40,23 @@ pub struct AccountFilesHelper {
 }
 
 impl AccountFilesHelper {
+    /// The same retained native host acknowledgment used by the TUI import.
+    pub fn enrollment_import_host_policy(
+        &self,
+    ) -> aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy {
+        let account_files = self.clone();
+        aura_app::ui::workflows::invitation::EnrollmentImportHostPolicy::Finalize(Arc::new(
+            move |completed| {
+                let account_files = account_files.clone();
+                Box::pin(async move {
+                    account_files
+                        .persist_completed_enrollment_identity(completed)
+                        .await
+                })
+            },
+        ))
+    }
+
     pub fn new(
         base_path: PathBuf,
         device_id_str: String,
