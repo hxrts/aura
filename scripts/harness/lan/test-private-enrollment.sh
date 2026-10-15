@@ -18,6 +18,10 @@ DRIVER
 cat > "$fixture/bin/ssh" <<'SSH'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$FIXTURE_ARGS"
+remote_command=${*: -1}
+[[ "$remote_command" == *'/nix/var/nix/profiles/default/bin/nix develop --command scripts/harness/lan/drv.sh req'* ]] || {
+  echo 'remote request bypassed pinned Nix tool environment' >&2; exit 127
+}
 cat > "$FIXTURE_REQUEST"
 printf '%s\n' '{"status":"ok","payload":{"setup_code":"private-setup-code-fixture"}}'
 SSH
@@ -33,8 +37,10 @@ jq -e --arg expected "$secret" '.params.instance_id=="alex-tui" and .params.inte
 printf '%s\n' "$request" | PATH="$fixture/bin:$PATH" req_private barbara-tui 7 > "$fixture/remote-response"
 jq -e --arg expected "$secret" '.params.instance_id=="barbara-tui" and .params.intent.ImportDeviceEnrollmentCode.code==$expected' "$FIXTURE_REQUEST" >/dev/null
 ! rg -Fq "$secret" "$FIXTURE_ARGS" "$fixture/remote-response"
-rg -q 'drv.sh req-private' "$FIXTURE_ARGS"
-rg -Fq 'AURA_E2E_RUN_TOKEN=private-enrollment-fixture scripts/harness/lan/drv.sh req-private' "$FIXTURE_ARGS"
+rg -q 'nix develop --command scripts/harness/lan/drv.sh req-private' "$FIXTURE_ARGS"
+rg -Fq 'AURA_E2E_RUN_TOKEN=private-enrollment-fixture' "$FIXTURE_ARGS"
+PATH="$fixture/bin:$PATH" req barbara-tui ui_state > "$fixture/remote-generic-response"
+rg -q 'nix develop --command scripts/harness/lan/drv.sh req ' "$FIXTURE_ARGS"
 cp "$FIXTURE_ARGS" "$fixture/remote-args-before-invalid-token"
 if (
   export AURA_E2E_RUN_TOKEN='invalid token'

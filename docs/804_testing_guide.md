@@ -1185,7 +1185,9 @@ build and ship the exact commit with `AURA_E2E_LAN_HTTP_DEV=1` on
 `scripts/harness/lan/ship.sh`, which selects the `lan-http-dev` Cargo feature.
 Pass those generated config paths as
 `AURA_E2E_LOCAL_CONFIG` and `AURA_E2E_REMOTE_CONFIG` to the owned `batch.sh`
-run. This provisions transport only. The ordinary `drv.sh req`/`lib.sh`
+run. Remote native requests enter `drv.sh` through the peer's pinned Nix shell,
+including the private stdin channel, so login-shell tools cannot determine
+whether the selected owner starts or receives a request. This provisions transport only. The ordinary `drv.sh req`/`lib.sh`
 semantic path still places transferred codes in arguments or retained REPL
 output, so it must not be used for the paired enrollment transfer. Send one
 complete JSON request on stdin through `lib.sh`'s `req_private <instance>`;

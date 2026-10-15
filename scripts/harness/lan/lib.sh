@@ -7,7 +7,7 @@
 AURA_E2E_DRV="${AURA_E2E_DRV:-$AURA_E2E_ROOT/scripts/harness/lan/drv.sh}"
 
 req() { # req <instance> <method> [JSON object fields] [transport timeout seconds]
-  local inst=$1 method=$2 extra=${3:-} transport_timeout=${4:-60} body quoted_body quoted_root
+  local inst=$1 method=$2 extra=${3:-} transport_timeout=${4:-60} body remote_nix remote_command
   body=$(jq -cn --arg instance "$inst" --arg method "$method" --argjson extra "{${extra}}" \
     '{method:$method,params:({instance_id:$instance}+$extra)}') || return
   if [[ -n "${AURA_E2E_LOCAL_PEER_ROOT:-}" && "$inst" == "$AURA_E2E_REMOTE_PREFIX"* ]]; then
@@ -16,10 +16,11 @@ req() { # req <instance> <method> [JSON object fields] [transport timeout second
       AURA_E2E_RUN_TOKEN="$AURA_E2E_RUN_TOKEN" \
       "$AURA_E2E_LOCAL_PEER_ROOT/scripts/harness/lan/drv.sh" req "$body" "$transport_timeout"
   elif [ -n "$AURA_E2E_REMOTE" ] && [[ "$inst" == "$AURA_E2E_REMOTE_PREFIX"* ]]; then
-    quoted_body=${body//\'/\'\\\'\'}
-    quoted_root=${AURA_E2E_REMOTE_ROOT//\'/\'\\\'\'}
+    remote_nix=${AURA_E2E_REMOTE_NIX:-/nix/var/nix/profiles/default/bin/nix}
+    printf -v remote_command 'cd %q && %q develop --command scripts/harness/lan/drv.sh req %q %q' \
+      "$AURA_E2E_REMOTE_ROOT" "$remote_nix" "$body" "$transport_timeout"
     timeout "$transport_timeout" ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-      "cd '$quoted_root' && scripts/harness/lan/drv.sh req '$quoted_body' $transport_timeout"
+      "$remote_command"
   else
     timeout "$transport_timeout" "$AURA_E2E_DRV" req "$body" "$transport_timeout"
   fi
@@ -28,7 +29,7 @@ req() { # req <instance> <method> [JSON object fields] [transport timeout second
 # socket. The complete JSON body is supplied on stdin; neither request nor
 # response passes through process arguments or retained repl.out.
 req_private() { # req_private <instance> [transport timeout seconds] < request.json
-  local inst=$1 transport_timeout=${2:-60} quoted_root
+  local inst=$1 transport_timeout=${2:-60} remote_nix remote_command
   if [[ -n "${AURA_E2E_LOCAL_PEER_ROOT:-}" && "$inst" == "$AURA_E2E_REMOTE_PREFIX"* ]]; then
     jq -ce --arg instance "$inst" \
       'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
@@ -41,12 +42,14 @@ req_private() { # req_private <instance> [transport timeout seconds] < request.j
     [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || {
       echo 'private LAN request requires the exact run token' >&2; return 2;
     }
-    quoted_root=${AURA_E2E_REMOTE_ROOT//\'/\'\\\'\'}
+    remote_nix=${AURA_E2E_REMOTE_NIX:-/nix/var/nix/profiles/default/bin/nix}
+    printf -v remote_command 'cd %q && AURA_E2E_RUN_TOKEN=%q %q develop --command scripts/harness/lan/drv.sh req-private' \
+      "$AURA_E2E_REMOTE_ROOT" "$AURA_E2E_RUN_TOKEN" "$remote_nix"
     jq -ce --arg instance "$inst" \
       'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
        | .params.instance_id=$instance' \
       | timeout "$transport_timeout" ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-        "cd '$quoted_root' && AURA_E2E_RUN_TOKEN=$AURA_E2E_RUN_TOKEN scripts/harness/lan/drv.sh req-private"
+        "$remote_command"
   else
     jq -ce --arg instance "$inst" \
       'select(type=="object" and (.method|type=="string") and (.params|type=="object"))
