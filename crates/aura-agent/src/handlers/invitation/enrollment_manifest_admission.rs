@@ -1236,13 +1236,19 @@ mod tests {
                 .expect("actual protected original admission");
             assert_eq!(admitted.len(), 1);
             let admitted = &admitted[0];
+            let selected_now = invitee_effects
+                .physical_time()
+                .await
+                .expect("selected receiver time")
+                .ts_ms;
+            let broker_time = Arc::new(aura_testkit::time::ManualPhysicalClock::new(selected_now));
             let broker = crate::runtime::services::bootstrap_broker::LocalBootstrapBrokerService::bind(
                 "127.0.0.1:0",
                 std::time::Duration::from_secs(60),
                 "first-frame-global-broker-auth",
                 crate::runtime::services::bootstrap_broker::BootstrapBrokerLanBindPolicy::LoopbackOnly,
             ).await.expect("loopback broker")
-                .with_mailbox_time_provider(Arc::new(invitee_effects.time_effects().clone()));
+                .with_mailbox_time_provider(broker_time.clone());
             broker.start(
                 &issuer
                     .runtime()
@@ -1268,6 +1274,23 @@ mod tests {
             );
             issuer_effects.attach_rendezvous_manager(issuer_manager.clone());
             invitee_effects.attach_rendezvous_manager(invitee_manager.clone());
+            assert!(
+                selected_now < admitted.manifest().expires_at_ms,
+                "the original signed admission is still live before upkeep"
+            );
+            assert!(
+                matches!(
+                    issuer_manager
+                        .original_pending_mailbox_registration(
+                            admitted.manifest().subject,
+                            admitted.manifest().invitee_device,
+                            admitted.manifest_digest(),
+                        )
+                        .await,
+                    Err(crate::runtime::services::rendezvous_manager::RendezvousManagerError::PendingMailboxRegistrationUnavailable)
+                ),
+                "a live original admission has no broker registration before receiver owner upkeep"
+            );
             let invitee_bridge: Arc<dyn aura_app::runtime_bridge::RuntimeBridge> =
                 Arc::new(AgentRuntimeBridge::new(invitee.clone()).with_sync_failure_for_test());
             let app = Arc::new(async_lock::RwLock::new(
@@ -1300,6 +1323,13 @@ mod tests {
                 )
                 .await
                 .expect("Bob's actual setup-key registration reached broker");
+            let progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                broker.public_url(), "first-frame-global-broker-auth",
+                admitted.manifest().subject, admitted.manifest().invitee_device,
+                admitted.manifest_digest(),
+            ).await.expect("authenticated registration stage");
+            assert_eq!(progress["registration_present"], true);
+            assert_eq!(progress["messages"].as_array().map(Vec::len), Some(0));
             let route =
                 super::super::enrollment_trust::verify_original_pending_mailbox_sender_route(
                     retained.as_ref(),
@@ -1348,6 +1378,16 @@ mod tests {
                 )
                 .await
                 .expect("only sealed original issuer route enqueues exact frame");
+            let progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                broker.public_url(), "first-frame-global-broker-auth",
+                admitted.manifest().subject, admitted.manifest().invitee_device,
+                admitted.manifest_digest(),
+            ).await.expect("authenticated first queue stage");
+            assert_eq!(progress["messages"][0]["stage"], "queued");
+            assert_eq!(
+                progress["messages"][0]["message_id"],
+                envelope.metadata["aura-message-id"]
+            );
             let retained_record = invitee_effects
                 .secure_retrieve(
                     &crate::core::agent::pending_enrollment_mailbox::retained_location(admitted),
@@ -1407,6 +1447,16 @@ mod tests {
             assert_eq!(retried.len(), 1);
             assert_eq!(retried[0].message_id, first[0].message_id);
             assert_eq!(retried[0].envelope.payload, envelope.payload);
+            let progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                broker.public_url(), "first-frame-global-broker-auth",
+                admitted.manifest().subject, admitted.manifest().invitee_device,
+                admitted.manifest_digest(),
+            ).await.expect("authenticated receiver selection stage");
+            assert_eq!(
+                progress["messages"][0]["stage"],
+                "retrieval_selected_for_receiver_credential"
+            );
+            assert_eq!(progress["messages"][0]["message_id"], first[0].message_id);
             broker
                 .interrupt_next_pending_enrollment_ack_for_test()
                 .await;
@@ -1432,6 +1482,16 @@ mod tests {
                 .await
                 .expect_err("required sibling sync failure remains observable after mailbox ACK");
             assert!(sync_error.to_string().contains("converge sync"));
+            let progress = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                broker.public_url(), "first-frame-global-broker-auth",
+                admitted.manifest().subject, admitted.manifest().invitee_device,
+                admitted.manifest_digest(),
+            ).await.expect("authenticated exact receiver ACK stage");
+            assert_eq!(
+                progress["messages"][0]["stage"],
+                "receiver_acknowledged_retained_frame"
+            );
+            assert_eq!(progress["messages"][0]["message_id"], first[0].message_id);
             let queued = invitee_effects
                 .take_unclaimed_choreography_envelope_retained(|candidate| {
                     candidate.metadata.get("aura-message-id")
@@ -1461,6 +1521,14 @@ mod tests {
                     .is_empty(),
                 "ACK follows actual runtime admission"
             );
+            broker_time.advance(60_000);
+            let expired = crate::runtime::services::bootstrap_broker::fetch_pending_progress_witness_for_test(
+                broker.public_url(), "first-frame-global-broker-auth",
+                admitted.manifest().subject, admitted.manifest().invitee_device,
+                admitted.manifest_digest(),
+            ).await.expect("authenticated post-retention observation");
+            assert_eq!(expired["registration_present"], false);
+            assert_eq!(expired["messages"].as_array().map(Vec::len), Some(0));
             let config = invitee_effects.config().clone();
             let clock = Arc::new(invitee_effects.time_effects().clone());
             let authority = invitee.authority_id();
