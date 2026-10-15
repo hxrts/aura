@@ -357,10 +357,8 @@ pub(super) async fn reconcile_second(owned: &ProfileOwnedSecureStorage) -> Resul
     replay(owned, selected, &root, &claim, StopAfter::Never)
 }
 
-/// Custody of the complete, authenticated two-entry roster. This deliberately
-/// exposes no per-entry decision or retirement method while V4 has no second
-/// transition anchor. The original profile lease is retained, never reopened
-/// as an independent storage owner.
+/// Custody of the complete, authenticated two-entry roster. The original
+/// profile lease is retained, never reopened as an independent storage owner.
 #[allow(dead_code)]
 pub(super) struct PlatformRosterAdmission {
     root: [u8; 32],
@@ -394,15 +392,10 @@ pub(super) fn verify_roster_owner(
     Ok(root)
 }
 
-/// Recover both exact birth records under the selected namespace lock before
-/// transferring the original profile's lifetime root once. A partial append
-/// may be reconciled only from its root-anchored claim and sealed intent.
-#[allow(dead_code)]
-pub(super) async fn recover_roster(
+fn validate_complete_roster(
     owned: &ProfileOwnedSecureStorage,
-) -> Result<PlatformRosterAdmission, AuraError> {
-    let (selected, owner) = selected_owner(owned)?;
-    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    selected: &PlatformSecureStorageHandler,
+) -> Result<(RootRecord, Claim), AuraError> {
     let root = read_root(owned, selected)?;
     let bytes = read_entry(selected, CLAIM_USER)?
         .ok_or_else(|| invalid("platform whole roster lacks second claim"))?;
@@ -419,17 +412,84 @@ pub(super) async fn recover_roster(
         let mut verified = read_root(owned, selected)?;
         decision::recover_erasure(owned, selected, &mut verified)?;
     }
+    Ok((root, claim))
+}
+
+fn owner_from_roster(
+    root: &RootRecord,
+    claim: &Claim,
+    owner: &Arc<crate::profile_storage::OwnedProfileLease>,
+) -> PlatformRosterAdmission {
+    let mut allocations = [root.birth_id, claim.allocation];
+    allocations.sort();
+    PlatformRosterAdmission {
+        root: root.id,
+        allocations,
+        _owner: owner.clone(),
+    }
+}
+
+/// Consume the original first owner and transfer its already claimed profile
+/// root to complete-roster custody without reopening the profile. On refusal,
+/// the caller retains the same first owner for exact retry or diagnosis.
+#[allow(dead_code)]
+pub(super) async fn promote_after_append(
+    owned: &ProfileOwnedSecureStorage,
+    first: PlatformBirthAdmission,
+) -> Result<PlatformRosterAdmission, (AuraError, PlatformBirthAdmission)> {
+    let result = async {
+        let (selected, owner) = selected_owner(owned)?;
+        let _guard = selected.namespace_owner()?.mutation_guard().await;
+        if !Arc::ptr_eq(&first._owner, owner)
+            || !owner.lifetime_root_claimed.load(Ordering::Acquire)
+        {
+            return Err(invalid(
+                "platform roster handoff lacks original first owner",
+            ));
+        }
+        let expected = read_root(owned, selected)?;
+        if first.root != expected.id || first.allocation != expected.birth_id {
+            return Err(invalid(
+                "platform roster handoff differs from original first birth",
+            ));
+        }
+        let (root, claim) = validate_complete_roster(owned, selected)?;
+        Ok(owner_from_roster(&root, &claim, owner))
+    }
+    .await;
+    result.map_err(|error| (error, first))
+}
+
+/// Write the second birth under the held first owner, then consume that owner
+/// into complete-roster custody. A failed append returns the same owner.
+#[allow(dead_code)]
+pub(super) async fn append_second_owned(
+    owned: &ProfileOwnedSecureStorage,
+    first: PlatformBirthAdmission,
+    scope: &[u8],
+    secret: &[u8],
+) -> Result<PlatformRosterAdmission, (AuraError, PlatformBirthAdmission)> {
+    if let Err(error) = append_second(owned, &first, scope, secret).await {
+        return Err((error, first));
+    }
+    promote_after_append(owned, first).await
+}
+
+/// Recover both exact birth records under the selected namespace lock before
+/// transferring the original profile's lifetime root once. A partial append
+/// may be reconciled only from its root-anchored claim and sealed intent.
+#[allow(dead_code)]
+pub(super) async fn recover_roster(
+    owned: &ProfileOwnedSecureStorage,
+) -> Result<PlatformRosterAdmission, AuraError> {
+    let (selected, owner) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, claim) = validate_complete_roster(owned, selected)?;
     owner
         .lifetime_root_claimed
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .map_err(|_| invalid("platform whole roster root already transferred"))?;
-    let mut allocations = [root.birth_id, claim.allocation];
-    allocations.sort();
-    Ok(PlatformRosterAdmission {
-        root: root.id,
-        allocations,
-        _owner: owner.clone(),
-    })
+    Ok(owner_from_roster(&root, &claim, owner))
 }
 
 #[cfg(test)]
@@ -437,6 +497,104 @@ mod tests {
     use super::*;
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    #[tokio::test]
+    async fn live_first_owner_promotes_to_exact_roster_without_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let first = allocate_one(owned, &empty, b"first", b"first secret").await?;
+        let roster = append_second_owned(owned, first, b"second", b"second secret")
+            .await
+            .map_err(|(error, _)| error)?;
+        assert_eq!(
+            &**read_roster_first_secret(owned, &roster).await?,
+            b"first secret"
+        );
+        assert_eq!(
+            &**read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        decision::decide_roster(owned, &roster, true, b"first approval").await?;
+        lifecycle::decide(owned, &roster, true, b"second approval").await?;
+        assert!(
+            recover_roster(owned).await.is_err(),
+            "no duplicate root transfer"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn live_roster_promotion_refusal_returns_original_first_owner() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let first = allocate_one(owned, &empty, b"first", b"first secret").await?;
+        let (_, first) = promote_after_append(owned, first)
+            .await
+            .err()
+            .expect("cannot promote before second birth");
+        let foreign = tempfile::tempdir()?;
+        let foreign_selected =
+            super::super::super::tests::selected(foreign.path(), &fixture.service)?;
+        let ProductionSecureStorageHandler::ProfileOwned(foreign_owned) = &foreign_selected else {
+            unreachable!()
+        };
+        let (_, first) = promote_after_append(foreign_owned, first)
+            .await
+            .err()
+            .expect("foreign owner cannot promote");
+        let roster = append_second_owned(owned, first, b"second", b"second secret")
+            .await
+            .map_err(|(error, _)| error)?;
+        assert_eq!(
+            &**read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn live_roster_promotion_replays_only_recoverable_append() -> TestResult {
+        for stop in [
+            StopAfter::RootAnchor,
+            StopAfter::Claim,
+            StopAfter::Intent,
+            StopAfter::Record,
+        ] {
+            let fixture = Fixture::new()?;
+            let selected = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+                unreachable!()
+            };
+            let empty = admit_empty_root(owned).await?;
+            let first = allocate_one(owned, &empty, b"first", b"first secret").await?;
+            assert!(
+                append_inner(owned, &first, b"second", b"second secret", None, stop)
+                    .await
+                    .is_err()
+            );
+            match promote_after_append(owned, first).await {
+                Ok(roster) if stop == StopAfter::Intent => {
+                    assert_eq!(
+                        &**read_roster_second_secret(owned, &roster).await?,
+                        b"second secret"
+                    );
+                }
+                Err((_, first)) if stop != StopAfter::Intent => {
+                    assert!(read_live_secret(owned, &first).await.is_err());
+                }
+                _ => panic!("unexpected roster handoff result after {stop:?}"),
+            }
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn retained_roster_scope_mismatch_refuses_recovered_owner() -> TestResult {
