@@ -131,12 +131,18 @@ config=$(cat)
 [[ "$config" == *'Authorization: Bearer 0000000000000000000000000000000000000000000000000000000000000000'* ]] || exit 2
 [[ "$config" == *'/enrollment-mailbox/'*'/authority-11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'* ]] || exit 2
 if [[ "$config" == *'/progress-witness/'* ]]; then
+  if [[ "${FIXTURE_CASE:-}" == no_registration ]]; then
+    echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":false,"messages":[]}'
+    exit 0
+  fi
   echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":true,"messages":[{"message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"retrieval_selected_for_receiver_credential"}]}'
   exit 0
 fi
 [[ "$config" == *'/ack-witness/'* ]] || exit 2
 case "${FIXTURE_CASE:-}" in
   no_network_ack) echo '[]';;
+  no_registration) echo '[]';;
+  wrong_network_message_id) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"44444444-4444-4444-4444-444444444444","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
   wrong_network_digest) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
   *) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
 esac
@@ -154,7 +160,7 @@ for secret in signed-setup-secret issued-code-secret signed-manifest-secret reta
   ! rg -Fq "$secret" "$fixture/stdout" "$fixture/stderr" "$AURA_E2E_RUN_DIR"
   rg -Fq "$secret" "$FIXTURE_LOG"
 done
-for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_authority wrong_reopen_device no_network_ack wrong_network_digest; do
+for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_authority wrong_reopen_device no_network_ack no_registration wrong_network_message_id wrong_network_digest; do
   rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
   bad_dir="$fixture/$failure"
   mkdir -m 700 "$bad_dir"
@@ -165,12 +171,21 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
     echo "paired fixture accepted $failure" >&2; exit 1
   fi
   [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
-  if [[ "$failure" == no_network_ack || "$failure" == wrong_network_digest ]]; then
+  if [[ "$failure" == no_network_ack || "$failure" == no_registration || "$failure" == wrong_network_message_id || "$failure" == wrong_network_digest ]]; then
     stage_receipt="$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/broker-stage.json"
-    jq -e '.network_delivery_asserted==false and .progress.registration_present==true and
-      .progress.messages[0].stage=="retrieval_selected_for_receiver_credential" and
-      (.progress_history|length)==1 and
+    jq -e '.network_delivery_asserted==false and (.progress_history|length)==1 and
       .progress_history[0]==.progress' "$stage_receipt" >/dev/null
+    if [[ "$failure" == no_registration ]]; then
+      jq -e '.first_missing_stage=="registration" and .original_message_id==null and
+        .progress.registration_present==false and .progress.messages==[]' "$stage_receipt" >/dev/null
+    else
+      jq -e '.progress.registration_present==true and
+        .progress.messages[0].stage=="retrieval_selected_for_receiver_credential" and
+        .original_message_id=="33333333-3333-3333-3333-333333333333"' "$stage_receipt" >/dev/null
+    fi
+    if [[ "$failure" == wrong_network_message_id ]]; then
+      jq -e '.first_missing_stage=="exact_first_message_ack"' "$stage_receipt" >/dev/null
+    fi
     if [[ "$failure" == no_network_ack ]]; then
       jq -e '.owner_observation.operation.instance_id=="tui-op-device_enrollment-2" and
         .owner_observation.operation.state=="failed" and

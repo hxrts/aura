@@ -174,9 +174,18 @@ progress_url="$broker_url/v2/bootstrap/enrollment-mailbox/progress-witness/$subj
 network_witness=''
 latest_progress=''
 progress_history='[]'
-witness_timeout=${AURA_E2E_NETWORK_WITNESS_TIMEOUT:-240}
-[[ "$witness_timeout" =~ ^[1-9][0-9]{0,2}$ && "$witness_timeout" -le 240 ]] || exit 2
+witness_timeout=${AURA_E2E_NETWORK_WITNESS_TIMEOUT:-120}
+[[ "$witness_timeout" =~ ^[1-9][0-9]{0,2}$ && "$witness_timeout" -le 120 ]] || exit 2
 deadline=$((SECONDS + witness_timeout))
+registration_deadline=$((SECONDS + (witness_timeout + 3) / 4))
+queue_deadline=$((SECONDS + (witness_timeout + 1) / 2))
+intake_deadline=$((SECONDS + (3 * witness_timeout + 3) / 4))
+registration_seen=false
+queue_seen=false
+intake_seen=false
+first_message_id=''
+first_envelope_digest=''
+first_missing_stage=''
 while (( SECONDS < deadline )); do
   # curl reads its authorization header on stdin. No bearer enters argv, URL,
   # retained logs, or the redacted result.
@@ -200,7 +209,26 @@ while (( SECONDS < deadline )); do
        messages:[.messages[]|{message_id,envelope_digest,stage}]}' \
       <<< "$progress_response") || progress_candidate=''
     if [[ -n "$progress_candidate" ]]; then
+      [[ $(jq -r '.registration_present' <<< "$progress_candidate") == true ]] && registration_seen=true
+      if [[ -z "$first_message_id" ]]; then
+        message_count=$(jq -r '.messages|length' <<< "$progress_candidate")
+        if (( message_count > 1 )); then
+          first_missing_stage=ambiguous_first_queue
+          break
+        elif (( message_count == 1 )); then
+          first_message_id=$(jq -r '.messages[0].message_id' <<< "$progress_candidate")
+          first_envelope_digest=$(jq -r '.messages[0].envelope_digest' <<< "$progress_candidate")
+        fi
+      fi
+      # Later issuer retries can have different IDs. Retain only the first
+      # original envelope's authenticated stage in this diagnostic receipt.
+      progress_candidate=$(jq -ce --arg id "$first_message_id" --arg digest "$first_envelope_digest" '
+        .messages |= map(select(.message_id==$id and .envelope_digest==$digest))' \
+        <<< "$progress_candidate") || exit 1
       latest_progress=$progress_candidate
+      stage=$(jq -r '.messages[0].stage // empty' <<< "$progress_candidate")
+      [[ -z "$stage" ]] || queue_seen=true
+      [[ "$stage" != retrieval_selected_for_receiver_credential && "$stage" != receiver_acknowledged_retained_frame ]] || intake_seen=true
       # Retain only changed, authenticated stage snapshots. The broker may
       # retire a registration before the final query, so a final empty result
       # alone cannot identify the first missing delivery hop.
@@ -218,9 +246,34 @@ while (( SECONDS < deadline )); do
       (.envelope_digest|type=="string" and test("^[0-9a-f]{64}$"))) |
     {subject,device,manifest_digest,message_id,envelope_digest,stage}' \
     <<< "$witness_response") || network_witness=''
-  [[ -z "$network_witness" ]] || break
+  if [[ -n "$network_witness" ]]; then
+    if [[ -z "$first_message_id" ]] ||
+       [[ $(jq -r '.message_id' <<< "$network_witness") != "$first_message_id" ]] ||
+       [[ $(jq -r '.envelope_digest' <<< "$network_witness") != "$first_envelope_digest" ]]; then
+      network_witness=''
+      first_missing_stage=exact_first_message_ack
+      break
+    fi
+    break
+  fi
+  if [[ "$registration_seen" == false ]] && (( SECONDS >= registration_deadline )); then
+    first_missing_stage=registration
+    break
+  elif [[ "$queue_seen" == false ]] && (( SECONDS >= queue_deadline )); then
+    first_missing_stage=first_queue
+    break
+  elif [[ "$intake_seen" == false ]] && (( SECONDS >= intake_deadline )); then
+    first_missing_stage=receiver_intake
+    break
+  fi
   sleep 1
 done
+if [[ -z "$network_witness" && -z "$first_missing_stage" ]]; then
+  if [[ "$registration_seen" == false ]]; then first_missing_stage=registration
+  elif [[ "$queue_seen" == false ]]; then first_missing_stage=first_queue
+  elif [[ "$intake_seen" == false ]]; then first_missing_stage=receiver_intake
+  else first_missing_stage=receiver_ack; fi
+fi
 unset broker_token witness_response progress_response progress_candidate
 [[ -n "$network_witness" ]] || {
   stage_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
@@ -244,8 +297,10 @@ unset broker_token witness_response progress_response progress_candidate
   fi
   (umask 077; set -C; jq -cn --argjson progress "$latest_progress" \
     --argjson history "$progress_history" --argjson owner "$owner_observation" \
+    --arg stage "$first_missing_stage" --arg message "$first_message_id" \
     '{schema:1,network_delivery_asserted:false,progress:$progress,
-     progress_history:$history,owner_observation:$owner}' > "$stage_receipt") || exit 1
+     progress_history:$history,first_missing_stage:$stage,
+     original_message_id:(if $message=="" then null else $message end),owner_observation:$owner}' > "$stage_receipt") || exit 1
   echo "exact original receiver ACK witness is absent or mismatched; inspect $stage_receipt" >&2
   exit 1
 }
