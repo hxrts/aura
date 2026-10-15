@@ -508,6 +508,13 @@ Build the platform path in reviewable dependencies:
    for the original authenticated V6 scopes and refuses a third birth with a
    typed capacity cause. Keep this channel unselected in L6 until capacity,
    host handoff, and native credential-service evidence are complete.
+   The runtime contract admits up to 4096 original profile allocations; this
+   two-birth adapter cannot yet satisfy it. Native platform handoff therefore
+   keeps the typed `UnsupportedSelectedProvider` refusal before transferring
+   its root or mutating protected birth state. The exact effects host fixture
+   checks that refusal and same-profile reopen. Extend the authenticated roster
+   before attempting L6 selection; the test keyring fixture is separate from
+   actual OS credential-service durability.
 3. Specify an acknowledged transaction across the credential store and the
    inventory for each transition. A durable intent must name the exact
    allocation and desired phase before a credential write. Read and verify the

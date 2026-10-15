@@ -197,6 +197,8 @@ The private V6 selected-keyring root retains each bounded original birth scope a
 
 A private selected-platform lifetime actor now keeps that original profile lease and selected provider through empty, one-birth, and two-birth recovery. It reconciles an interrupted root-anchored birth before returning an allocation owner, maps references to the immutable V6 retained scopes, and refuses a third birth with a typed capacity cause. Its first-owner token remains held across the awaited append handoff so cancellation cannot silently lose custody. The actor is not selected by L6; two-birth capacity, native host acceptance, and actual OS credential-service durability remain distinct production requirements.
 
+The runtime contract admits up to 4096 profile allocations. Because this private actor supports two, the production selected-platform handoff still returns typed `UnsupportedSelectedProvider` before claiming its root or writing a birth. An exact same-profile host fixture guards that refusal and unchanged selected keyring state. The authenticated roster must scale before L6 can select it; OS credential-service durability remains a separate requirement.
+
 ### Filesystem replacement durability
 
 `StorageCoreEffects::store` publishes complete sibling staging files using an

@@ -460,6 +460,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selected_platform_handoff_refuses_bounded_private_adapter_without_mutation(
+    ) -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let error = match selected.into_selected_profile_lifetime_channel() {
+            Err(error) => error,
+            Ok(_) => panic!("two-entry private adapter must not enter production runtime"),
+        };
+        assert!(matches!(
+            std::error::Error::source(&error).and_then(|source| source
+                .downcast_ref::<aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable>()),
+            Some(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider)
+        ));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let ProductionSecureStorageHandler::Platform(platform) = owned.backend.as_ref() else {
+            unreachable!()
+        };
+        assert!(matches!(
+            platform.entry_for_user(KEYRING_USER)?.get_secret(),
+            Err(keyring::Error::NoEntry)
+        ));
+        assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn selected_empty_root_reopens_once_under_original_provider() -> TestResult {
         let fixture = Fixture::new()?;
         let first = fixture.selected()?;
