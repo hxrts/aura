@@ -110,6 +110,13 @@ pub(super) struct PendingEnrollmentMailboxes {
 }
 
 impl PendingEnrollmentMailboxes {
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn has_unsettled_delivery(&self) -> bool {
+        self.entries
+            .values()
+            .any(|entry| !entry.envelopes.is_empty() || !entry.served.is_empty())
+    }
+
     pub(super) fn new(retention: Duration) -> Self {
         Self {
             entries: HashMap::new(),

@@ -692,6 +692,15 @@ Before reviewing a deployable change, run
 it checks the terminal/RPC, app-host, and web release feature graphs for the
 absence of simulator checkpoint and test-keyring code.
 
+The local broker has a private simulator-checkpoint stop gate. It seals admission,
+stops and awaits its original task group, and refuses live owners or unsettled
+delivery. The three broker fixtures cover original-group disposal, missing or
+repeated start, foreign tasks, and a queued invitation. This gate has no export,
+import, or replay authority. Receiver and return mailbox refusal predicates
+remain fail-closed, but their signed-envelope fixtures require the canonical
+signed setup driver in a later effect-owned protected co-checkpoint. The fixture
+authorization token is never a checkpoint encryption key.
+
 ### Scenario Contract Workflow
 
 Conformance CI includes scenario contracts for consensus, sync, recovery, and reconfiguration. Each bundle is validated over a seed corpus. Validation checks terminal status (`AllDone`), required labels observed in trace, and minimum observable event count.

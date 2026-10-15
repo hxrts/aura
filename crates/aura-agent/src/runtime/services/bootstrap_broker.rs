@@ -6,6 +6,11 @@ use std::net::IpAddr;
 use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -328,6 +333,40 @@ pub struct LocalBootstrapBrokerService {
     limits: BootstrapBrokerLimits,
     connection_permits: Arc<Semaphore>,
     mailbox_time: Option<Arc<dyn PhysicalTimeEffects>>,
+    #[cfg(feature = "simulator-checkpoint")]
+    checkpoint_group: OnceLock<TaskGroup>,
+    #[cfg(feature = "simulator-checkpoint")]
+    checkpoint_start_conflict: AtomicBool,
+}
+
+/// Private stopped broker owner; it cannot authorize a profile or restore a
+/// continuation. Only a later effect-owned co-checkpoint may consume its state.
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+pub(crate) struct StoppedBrokerCheckpointOwner {
+    _state: BootstrapBrokerState,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum BrokerCheckpointQuiescenceError {
+    #[error("broker checkpoint requires its original started task group")]
+    NotStarted,
+    #[error("broker checkpoint original task group was started more than once")]
+    RepeatedStart,
+    #[error("broker checkpoint group contains another live task")]
+    ForeignTask,
+    #[error("broker checkpoint has no selected mailbox time provider")]
+    MissingSelectedClock,
+    #[error("broker checkpoint task disposal failed: {0}")]
+    Disposal(#[from] crate::task_registry::TaskSupervisionError),
+    #[error("broker checkpoint original task group retained a terminal failure")]
+    FailedTask,
+    #[error("broker checkpoint original task disposal belongs to another group")]
+    ForeignDisposal,
+    #[error("broker checkpoint retains a live listener or connection owner")]
+    LiveOwner,
+    #[error("broker checkpoint has unsettled invitation or mailbox delivery")]
+    UnsettledDelivery,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -397,6 +436,10 @@ impl LocalBootstrapBrokerService {
             limits,
             connection_permits: Arc::new(Semaphore::new(limits.max_connections)),
             mailbox_time: None,
+            #[cfg(feature = "simulator-checkpoint")]
+            checkpoint_group: OnceLock::new(),
+            #[cfg(feature = "simulator-checkpoint")]
+            checkpoint_start_conflict: AtomicBool::new(false),
         })
     }
 
@@ -766,6 +809,11 @@ impl LocalBootstrapBrokerService {
     }
 
     pub fn start(&self, tasks: &TaskGroup) {
+        #[cfg(feature = "simulator-checkpoint")]
+        if self.checkpoint_group.set(tasks.clone()).is_err() {
+            self.checkpoint_start_conflict
+                .store(true, Ordering::Release);
+        }
         let listener = self.listener.clone();
         let shared = self.shared.clone();
         let mailbox_time = self.mailbox_time.clone();
@@ -814,6 +862,57 @@ impl LocalBootstrapBrokerService {
                         });
                 }
             });
+    }
+
+    /// Stop exactly the broker's original supervised subtree before any
+    /// simulator checkpoint can inspect it. No bytes or restore authority leave
+    /// this private method. A failure consumes the service and remains closed.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(crate) async fn stop_for_simulator_checkpoint(
+        self,
+        timeout: Duration,
+    ) -> Result<StoppedBrokerCheckpointOwner, BrokerCheckpointQuiescenceError> {
+        use BrokerCheckpointQuiescenceError as Refusal;
+        let group = self.checkpoint_group.get().ok_or(Refusal::NotStarted)?;
+        let repeated = self.checkpoint_start_conflict.load(Ordering::Acquire);
+        let foreign = group
+            .active_tasks()
+            .iter()
+            .any(|task| task != "bootstrap_broker_http" && task != "bootstrap_broker_conn");
+        let sealed = group.seal_admission();
+        group.shutdown_with_timeout(timeout).await?;
+        let disposed = sealed.await_disposal().await;
+        disposed
+            .require_original_group(group)
+            .map_err(|_| Refusal::ForeignDisposal)?;
+        if disposed.failure().is_some() {
+            return Err(Refusal::FailedTask);
+        }
+        if repeated {
+            return Err(Refusal::RepeatedStart);
+        }
+        if foreign {
+            return Err(Refusal::ForeignTask);
+        }
+        if self.mailbox_time.is_none() {
+            return Err(Refusal::MissingSelectedClock);
+        }
+        if Arc::strong_count(&self.listener) != 1
+            || Arc::strong_count(&self.shared) != 1
+            || self.connection_permits.available_permits() != self.limits.max_connections
+        {
+            return Err(Refusal::LiveOwner);
+        }
+        let state = Arc::try_unwrap(self.shared)
+            .map_err(|_| Refusal::LiveOwner)?
+            .into_inner();
+        if state.invitations.values().any(|items| !items.is_empty())
+            || state.pending_enrollment_mailboxes.has_unsettled_delivery()
+            || state.enrollment_return_mailboxes.has_unsettled_delivery()
+        {
+            return Err(Refusal::UnsettledDelivery);
+        }
+        Ok(StoppedBrokerCheckpointOwner { _state: state })
     }
 }
 
@@ -2551,6 +2650,96 @@ mod tests {
 
     const AUTH_TOKEN: &str = "test-broker-auth-token";
     const INVITE_TOKEN: &str = "test-invitation-retrieval-token";
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    async fn checkpoint_broker() -> LocalBootstrapBrokerService {
+        LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("original broker bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()))
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn simulator_broker_quiescence_stops_original_owned_group() {
+        let broker = checkpoint_broker().await;
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("checkpoint_original_broker");
+        broker.start(&group);
+        assert_eq!(group.active_tasks(), ["bootstrap_broker_http"]);
+        let stopped = broker
+            .stop_for_simulator_checkpoint(Duration::from_secs(5))
+            .await
+            .expect("original broker subtree disposed");
+        assert!(group.active_tasks().is_empty());
+        assert!(stopped._state.invitations.is_empty());
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn simulator_broker_quiescence_refuses_unstarted_and_repeated_start() {
+        let unstarted = checkpoint_broker().await;
+        assert!(matches!(
+            unstarted
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::NotStarted)
+        ));
+        let repeated = checkpoint_broker().await;
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("checkpoint_repeated_broker");
+        repeated.start(&group);
+        repeated.start(&group);
+        assert!(matches!(
+            repeated
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::RepeatedStart)
+        ));
+        assert!(group.active_tasks().is_empty());
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn simulator_broker_quiescence_refuses_foreign_task_and_pending_invitation() {
+        let broker = checkpoint_broker().await;
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("checkpoint_foreign_task");
+        broker.start(&group);
+        let _foreign = group.spawn_named("foreign_runtime_owner", std::future::pending());
+        assert!(matches!(
+            broker
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::ForeignTask)
+        ));
+        assert!(group.active_tasks().is_empty());
+
+        let broker = checkpoint_broker().await;
+        let group = supervisor.group("checkpoint_pending_invitation");
+        broker.start(&group);
+        broker
+            .queue_invitation(BootstrapBrokerInvitation {
+                recipient_authority_id: "11111111-1111-1111-1111-111111111111".into(),
+                recipient_device_id: DeviceId::from_bytes([7; 32]),
+                purpose: InvitationPurpose::DeviceEnrollment,
+                invitation_code: "pending-private-code".into(),
+            })
+            .await
+            .expect("pending delivery retained");
+        assert!(matches!(
+            broker
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::UnsettledDelivery)
+        ));
+        assert!(group.active_tasks().is_empty());
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]

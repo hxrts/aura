@@ -287,6 +287,12 @@ Summary:
   `PhysicalTimeEffects` provider. Missing or backward observations refuse the
   action; the observation and candidate mutation are ordered under one broker
   state lock.
+- Invitation delivery and temporary enrollment mailboxes remain runtime-owned.
+  Under the simulator-checkpoint feature, a private stop gate seals the original
+  broker task group, waits for its disposal, and refuses foreign tasks, live
+  connection owners, queued invitations, and unsettled receiver/return envelopes.
+  The gate exports no broker bytes or restore authority; authenticated broker
+  co-checkpoint and canonical signed-mailbox refusal fixtures remain open.
 - The authenticated pending-enrollment progress witness reports only exact
   selector, message ID, envelope digest, and broker custody stage. Retrieval
   selection does not prove HTTP delivery. The broker retains the first
