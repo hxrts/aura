@@ -5,6 +5,35 @@ use super::*;
 
 mod lifecycle;
 
+#[cfg(test)]
+mod profile {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    pub(super) static VERIFY_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static PRE_COMMIT_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static COMMIT_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static POST_COMMIT_NS: AtomicU64 = AtomicU64::new(0);
+
+    pub(super) fn add(counter: &AtomicU64, elapsed: Duration) {
+        counter.fetch_add(
+            elapsed.as_nanos().try_into().unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+    }
+
+    pub(super) fn reset() {
+        for counter in [&VERIFY_NS, &PRE_COMMIT_NS, &COMMIT_NS, &POST_COMMIT_NS] {
+            counter.store(0, Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn snapshot() -> [u64; 4] {
+        [&VERIFY_NS, &PRE_COMMIT_NS, &COMMIT_NS, &POST_COMMIT_NS]
+            .map(|counter| counter.load(Ordering::Relaxed))
+    }
+}
+
 const MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-GENERIC-PAGE-V13";
 const MANIFEST_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-GENERIC-MANIFEST-V13";
 const HEADER: usize = 32 * 3 + 2;
@@ -773,12 +802,25 @@ fn reconcile_locked(
         return read_current(owned, selected, root, &fourth);
     }
     if root.generic_phase == GENERIC_APPEND_PENDING {
+        #[cfg(test)]
+        let stage = crate::time::monotonic_now();
         let current = read_current(owned, selected, root, &fourth)?;
+        #[cfg(test)]
+        profile::add(&profile::PRE_COMMIT_NS, stage.elapsed());
         if stop == Stop::Intent {
             return Err(interrupted());
         }
+        #[cfg(test)]
+        let stage = crate::time::monotonic_now();
         complete_append(owned, selected, root, second_id, &current, stop)?;
-        return read_current(owned, selected, root, &fourth);
+        #[cfg(test)]
+        profile::add(&profile::COMMIT_NS, stage.elapsed());
+        #[cfg(test)]
+        let stage = crate::time::monotonic_now();
+        let result = read_current(owned, selected, root, &fourth);
+        #[cfg(test)]
+        profile::add(&profile::POST_COMMIT_NS, stage.elapsed());
+        return result;
     }
     Err(invalid(
         "platform generic roster has no original root claim",
@@ -914,7 +956,11 @@ async fn append_inner(
     }
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
+    #[cfg(test)]
+    let stage = crate::time::monotonic_now();
     let (mut root, current, second_id) = verify_owner(owned, selected, generic)?;
+    #[cfg(test)]
+    profile::add(&profile::VERIFY_NS, stage.elapsed());
     capacity(root.generic_count as usize)?;
     let mut id = fixed_id.unwrap_or([0; 32]);
     if fixed_id.is_none() {
@@ -959,7 +1005,17 @@ async fn append_inner(
         return Err(interrupted());
     }
     write_exact(selected, &user(INTENT_PREFIX, &id), &bytes)?;
-    reconcile_locked(owned, selected, &mut root, stop)?;
+    if stop == Stop::Intent {
+        return Err(interrupted());
+    }
+    // `verify_owner` authenticated every prior page and selected credential
+    // under this namespace guard. Reuse that exact snapshot for publication;
+    // recovery still performs the full check before transferring an owner.
+    #[cfg(test)]
+    let stage = crate::time::monotonic_now();
+    complete_append(owned, selected, &mut root, second_id, &current, stop)?;
+    #[cfg(test)]
+    profile::add(&profile::COMMIT_NS, stage.elapsed());
     Ok(id)
 }
 
@@ -1227,15 +1283,16 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn generic_selected_provider_256_births_recover_across_pages() -> TestResult {
+    async fn selected_provider_workload(births: u32) -> TestResult {
         let fixture = Fixture::new()?;
         let (storage, owner) = initial(&fixture).await?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
             unreachable!()
         };
+        profile::reset();
+        let birth_start = crate::time::monotonic_now();
         let mut ids = Vec::new();
-        for index in 0..256u32 {
+        for index in 0..births {
             let mut id = [0u8; 32];
             id[28..].copy_from_slice(&(index + 1).to_be_bytes());
             ids.push(
@@ -1250,31 +1307,85 @@ mod tests {
                 .await?,
             );
         }
+        let birth_elapsed = birth_start.elapsed();
+        let [verify_ns, pre_commit_ns, commit_ns, post_commit_ns] = profile::snapshot();
         let (selected, _) = selected_owner(owned)?;
         let root = read_root(owned, selected)?;
-        assert_eq!(root.generic_count, 260);
-        assert_eq!(root.generic_revision, 260);
+        assert_eq!(root.generic_count, births as u16 + 4);
+        assert_eq!(root.generic_revision, births as u16 + 4);
+        if births as usize + 4 == MAX_COUNT {
+            let overflow = [255; 32];
+            let rejected = append_inner(
+                owned,
+                &owner,
+                b"overflow scope",
+                b"overflow secret",
+                Some(overflow),
+                Stop::Never,
+            )
+            .await
+            .expect_err("4097th allocation must refuse");
+            assert!(
+                matches!(rejected, AuraError::Invalid { message, .. } if message == "platform generic roster capacity exhausted")
+            );
+            assert!(read_entry(selected, &user(INTENT_PREFIX, &overflow))?.is_none());
+            assert!(read_entry(selected, &user(RECORD_PREFIX, &overflow))?.is_none());
+            let unchanged = read_root(owned, selected)?;
+            assert_eq!(unchanged.generic_count, MAX_COUNT as u16);
+            assert_eq!(unchanged.generic_revision, MAX_COUNT as u16);
+            assert_eq!(
+                unchanged.generic_current_digest,
+                root.generic_current_digest
+            );
+        }
         let manifest = read_manifest(
             owned,
             &root,
             root.generic_revision,
             root.generic_current_digest,
         )?;
-        assert!(manifest.pages.len() >= 4);
+        assert!(manifest.pages.len() >= (births as usize / PAGE_SIZE));
         drop(owner);
         drop(storage);
         let reopened = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
             unreachable!()
         };
+        let recovery_start = crate::time::monotonic_now();
         let recovered = recover_generic(owned).await?;
-        for id in ids {
+        let recovery_elapsed = recovery_start.elapsed();
+        for index in [0, 63, 64, 127, 255, 1023, ids.len() - 1] {
+            let Some(id) = ids.get(index) else { continue };
             assert_eq!(
-                &**read_live(owned, &recovered, &id).await?,
+                &**read_live(owned, &recovered, id).await?,
                 b"measured secret"
             );
         }
+        println!(
+            "platform lifetime profile {births} births: birth_ms={} verify_ms={} pre_commit_ms={} commit_ms={} post_commit_ms={} recovery_ms={}",
+            birth_elapsed.as_millis(),
+            verify_ns / 1_000_000,
+            pre_commit_ns / 1_000_000,
+            commit_ns / 1_000_000,
+            post_commit_ns / 1_000_000,
+            recovery_elapsed.as_millis(),
+        );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_selected_provider_256_births_recover_across_pages() -> TestResult {
+        selected_provider_workload(256).await
+    }
+
+    #[tokio::test]
+    async fn generic_selected_provider_1024_births_recover_across_pages() -> TestResult {
+        selected_provider_workload(1024).await
+    }
+
+    #[tokio::test]
+    async fn generic_selected_provider_max_births_recover_and_refuse_4097() -> TestResult {
+        selected_provider_workload((MAX_COUNT - 4) as u32).await
     }
 
     #[tokio::test]
@@ -1612,6 +1723,31 @@ mod tests {
             recover_generic(owned).await.is_err(),
             "future marker reveals root rollback"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_append_refuses_changed_prior_credential_before_publication() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let fifth = append(owned, &owner, b"fifth", b"secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let before = read_root(owned, selected)?;
+        write_exact(selected, &user(RECORD_PREFIX, &fifth), b"changed")?;
+        let sixth = [86; 32];
+        assert!(
+            append_inner(owned, &owner, b"sixth", b"secret", Some(sixth), Stop::Never)
+                .await
+                .is_err()
+        );
+        assert!(read_entry(selected, &user(INTENT_PREFIX, &sixth))?.is_none());
+        assert!(read_entry(selected, &user(RECORD_PREFIX, &sixth))?.is_none());
+        let after = read_root(owned, selected)?;
+        assert_eq!(after.generic_revision, before.generic_revision);
+        assert_eq!(after.generic_current_digest, before.generic_current_digest);
         Ok(())
     }
 

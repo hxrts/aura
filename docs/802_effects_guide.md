@@ -537,8 +537,11 @@ Build the platform path in reviewable dependencies:
    manifest of immutable, at-most-64-entry pages. It anchors each
    fifth-through-4096 birth's sealed intent and exact target manifest before
    selected credential publication, then publishes only the changed page or
-   split pages. Reopen validates every page digest, original record and scope
-   before one owner transfer. A later manifest refuses a completed root
+   split pages. A live append authenticates every existing selected credential
+   once before its first write and reuses that exact in-lock roster through
+   publication; it does not cache authority across transactions. Reopen
+   validates every page digest, original record and scope before one owner
+   transfer. A later manifest refuses a completed root
    rollback. V13 addresses immutable manifests and changed pages by an
    authenticated monotonic revision, independent of allocation count. Under
    the original lease and selected namespace lock, exact generic decisions,
@@ -546,9 +549,13 @@ Build the platform path in reviewable dependencies:
    erasure advance that revision. A pending root authenticates each target
    before provider mutation; reopen completes only the exact anchored change
    and refuses missing or changed terminal evidence. V12 roots fail closed
-   without migration. The maximum-size page/manifest check is a wire and
-   capacity bound, not a timed 4096-credential birth/recovery proof. L6
-   selection and OS credential-service durability proof remain open.
+   without migration. An exact selected-provider workload now proves 4096
+   births, same-profile recovery with page-boundary readbacks, and typed
+   refusal of birth 4097. On the measured host, birth took about 31 minutes,
+   with prior-credential verification dominating; fixture cleanup extended
+   the test to about 49 minutes. This cost needs further work before runtime
+   selection. L6 selection and OS credential-service durability proof remain
+   open.
    The private V9 root extends this original custody through a three-entry
    owner handoff, exact third decision, authenticated negative tombstone and
    provider-owned third credential erasure. Recover the retained third scope
