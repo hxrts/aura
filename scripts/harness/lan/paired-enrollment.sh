@@ -421,8 +421,10 @@ if (( single_host )); then
   remote_identity=$(jq -ce '{pid,birth,run_token}' \
     "$AURA_E2E_LOCAL_PEER_RUN_DIR/repl.identity.json")
 else
+  remote_nix=${AURA_E2E_REMOTE_NIX:-/nix/var/nix/profiles/default/bin/nix}
+  printf -v quoted_nix '%q' "$remote_nix"
   remote_identity=$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-    "cd '$quoted_root' && jq -ce '{pid,birth,run_token}' .tmp/e2e/run/repl.identity.json")
+    "cd '$quoted_root' && $quoted_nix develop --command jq -ce '{pid,birth,run_token}' .tmp/e2e/run/repl.identity.json")
 fi
 printf '%s\n%s\n' "$local_identity" "$remote_identity" |
   jq -es --arg token "$AURA_E2E_RUN_TOKEN" 'all(.[]; .run_token==$token and (.pid|type=="number") and (.birth|type=="string" and length>0)) and .[0].pid!=.[1].pid' >/dev/null || {

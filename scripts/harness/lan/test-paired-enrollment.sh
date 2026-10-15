@@ -37,7 +37,12 @@ cat > "$fixture/bin/ssh" <<'SSH'
 #!/usr/bin/env bash
 case "$*" in
   *'git rev-parse HEAD'*) printf '%s\n' "$FIXTURE_COMMIT"; exit 0;;
-  *'repl.identity.json'*) printf '{"pid":101,"birth":"fixture-remote","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN"; exit 0;;
+  *'repl.identity.json'*)
+    [[ "$*" == *'/nix/var/nix/profiles/default/bin/nix develop --command jq -ce'* ]] || {
+      echo 'remote identity observation bypassed pinned Nix tools' >&2; exit 127
+    }
+    printf '{"pid":101,"birth":"fixture-remote","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN"
+    exit 0;;
 esac
 exec "$AURA_E2E_DRV" req-private
 SSH
