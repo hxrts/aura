@@ -12,9 +12,9 @@ check_graph() {
   local name="$1"
   shift
   cargo tree --locked -e normal,build,features "$@" > "$graph"
-  if rg -q 'feature "(simulator-checkpoint|test-keyring)"|aura-simulator v' "$graph"; then
+  if rg -q 'feature "(simulator-checkpoint|test-keyring|os-keychain-diagnostic)"|aura-simulator v' "$graph"; then
     printf 'simulator checkpoint reachable from deployable %s feature graph\n' "$name" >&2
-    rg -n 'feature "(simulator-checkpoint|test-keyring)"|aura-simulator v' "$graph" >&2
+    rg -n 'feature "(simulator-checkpoint|test-keyring|os-keychain-diagnostic)"|aura-simulator v' "$graph" >&2
     return 1
   fi
   printf 'simulator checkpoint absent from %s feature graph\n' "$name"

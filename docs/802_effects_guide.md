@@ -609,8 +609,17 @@ non-writable, non-symlink marker
 directories must also be root-owned and not group/other writable. The script
 refuses a missing or unsafe marker, a developer-account match, or execution by
 another UID. It never accesses Keychain and a passing preflight is no
-durability proof. The actual isolated-account credential run and cleanup remain
-separate acceptance evidence; do not run it against a developer login Keychain.
+durability proof. The separate `os-keychain-diagnostic` feature builds a native,
+non-test `aura-os-keychain-diagnostic` binary. Under the isolated account, run
+`AURA_OS_KEYCHAIN_DIAGNOSTIC=isolated-account scripts/dev/run-os-keychain-diagnostic.sh --run <prebuilt-binary> <new-private-receipt-dir>`.
+The binary repeats the marker/UID preflight before constructing the selected
+platform provider, retains one original profile lease, writes an ordinary
+diagnostic item, reopens the same profile with a fresh lease, reads and deletes
+that item, and emits only typed status/class JSON. The private receipt retains
+the result, stderr and exit status. `test-keyring` and unit-test builds refuse
+the positive lane. This is an opt-in diagnostic, not a production lifetime
+root or a durability proof. Its real OS-service positive has not run on the
+developer account; do not run it against a developer login Keychain.
 Only after both the selected-provider fixture and security/ownership gates pass
 should L6 transfer the platform lifetime root and the signed production native
 enrollment fixture resume. Browser storage has its own provider and evidence.

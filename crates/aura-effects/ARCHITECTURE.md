@@ -6,6 +6,13 @@ Production-grade stateless effect handlers implementing infrastructure effect tr
 
 Native secure token expiry and device attestation read the retained selected `PhysicalTimeEffects` provider. Runtime clock selection updates the same secure writer before the assembled runtime is exposed; provider failures remain typed and do not silently select a second wall clock.
 
+The `os-keychain-diagnostic` binary is a non-test, explicitly selected native
+probe of the existing platform secure provider under one original profile lease.
+It repeats the root-owned isolated-UID marker preflight before provider access;
+its feature is excluded from deployable graphs. A local refusal or preflight
+pass does not prove OS Keychain durability or authorize L6 platform-lifetime
+selection. See the isolated-account procedure in `docs/802_effects_guide.md`.
+
 Encrypted storage initializes a new master key only for an empty ordinary record
 namespace. A populated profile requires its original secure key, including when
 another first-use wrapper has just published it. Missing or corrupt key material
