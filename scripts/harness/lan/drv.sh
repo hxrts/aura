@@ -43,6 +43,39 @@ physical_repo="$(pwd -P)"
 RETENTION_ROOT_FILE=$D/retention-root
 RETENTION_RUN_FILE=$D/retention-run-id
 RETENTION_TOOL=$AURA_E2E_ROOT/scripts/dev/retain-e2e-runs.sh
+PRIVATE_REQUEST_LOCK=$PRIVATE_DIR/request-lifetime.lock
+
+# A private ToolApi request is a separate, short-lived tool_repl process. Its
+# response can race the lifecycle finalizer's process inventory. Shared lease
+# custody spans that process; stop/finalize take the exclusive side and still
+# require an empty owned-process inventory after the owner shuts down.
+private_request_lease() {
+  local kind=$1 mode dir_mode wait_seconds=${AURA_E2E_PRIVATE_LEASE_WAIT_SECONDS:-10}
+  [[ "$wait_seconds" =~ ^[1-9][0-9]?$ && "$wait_seconds" -le 10 ]] || return 2
+  [[ -d "$PRIVATE_DIR" && ! -L "$D" && ! -L "$PRIVATE_DIR" && -O "$PRIVATE_DIR" &&
+     ! -L "$PRIVATE_REQUEST_LOCK" ]] || return 1
+  dir_mode=$(stat -c %a "$PRIVATE_DIR" 2>/dev/null ||
+    /usr/bin/stat -f %Lp "$PRIVATE_DIR") || return 1
+  [[ "$dir_mode" == 700 ]] || return 1
+  if [[ ! -e "$PRIVATE_REQUEST_LOCK" ]]; then
+    (umask 077; set -C; : > "$PRIVATE_REQUEST_LOCK") ||
+      [[ -f "$PRIVATE_REQUEST_LOCK" ]] || return 1
+  fi
+  [[ -f "$PRIVATE_REQUEST_LOCK" && ! -L "$PRIVATE_REQUEST_LOCK" &&
+     -O "$PRIVATE_REQUEST_LOCK" ]] || return 1
+  mode=$(stat -c %a "$PRIVATE_REQUEST_LOCK" 2>/dev/null ||
+    /usr/bin/stat -f %Lp "$PRIVATE_REQUEST_LOCK") || return 1
+  [[ "$mode" == 600 ]] || return 1
+  exec 8>>"$PRIVATE_REQUEST_LOCK"
+  case "$kind" in
+    shared) flock -s -w "$wait_seconds" 8 ;;
+    exclusive) flock -x -w "$wait_seconds" 8 ;;
+    *) return 2 ;;
+  esac || {
+    echo "private LAN request lease did not quiesce within $wait_seconds seconds" >&2
+    return 1
+  }
+}
 
 # Keep one persistent lock inode outside the replaceable run directory. Kernel
 # custody releases dead holders; a leftover file does not constitute a lock.
@@ -97,6 +130,22 @@ stop_owned_run() {
   if [[ -f "$PIDF" ]]; then
     repl_pid=$(cat "$PIDF")
     verify_repl_identity "$repl_pid" || {
+      # A previous finalizer may have stopped the exact owner and then found
+      # a still-exiting private helper. Never signal a reused or mismatched
+      # PID. Reclaim only when the recorded PID is absent and the complete
+      # same-checkout process inventory is empty.
+      if [[ "$repl_pid" =~ ^[1-9][0-9]*$ ]] &&
+        ! kill -0 "$repl_pid" 2>/dev/null &&
+        [[ -f "$IDENTITY" ]] &&
+        jq -e --argjson pid "$repl_pid" --arg root "$physical_repo" \
+          --arg token "$(cat "$RETENTION_RUN_FILE")" \
+          '.pid==$pid and .checkout==$root and .run_token==$token' "$IDENTITY" >/dev/null; then
+        require_no_owned_harness || return 1
+        [[ -z "$expected" ]] || require_run_token "$expected"
+        rm -f "$PIDF" "$IDENTITY"
+        echo stopped
+        return 0
+      fi
       echo 'LAN PID ownership is missing/stale/mismatched; retaining state without signalling' >&2; return 1;
     }
     # TERM enters the REPL's shared stop_all owner. Revalidate exact batch and
@@ -122,7 +171,7 @@ stop_owned_run() {
 }
 
 finish_owned_run() {
-  local outcome=$1 expected=${2:-} run_token runs_root
+  local outcome=$1 expected=${2:-} run_token runs_root manifest
   [[ "$outcome" == success || "$outcome" == failed ]] || { echo 'finish outcome must be success or failed' >&2; return 2; }
   require_no_owned_harness
   [[ ! -f "$PIDF" && ! -f "$IDENTITY" ]] || { echo 'stop the LAN driver before recording an outcome' >&2; return 1; }
@@ -132,6 +181,14 @@ finish_owned_run() {
   run_token=$(cat "$RETENTION_RUN_FILE")
   runs_root=$(cat "$RETENTION_ROOT_FILE")
   [[ -z "$expected" ]] || require_run_token "$expected"
+  manifest="$runs_root/$run_token/.aura-retention.json"
+  if [[ -f "$manifest" && ! -L "$manifest" ]] &&
+    jq -e --arg outcome "$outcome" --arg token "$run_token" \
+      '.schema_version==1 and .run_id==$token and .state=="completed" and .outcome==$outcome' \
+      "$manifest" >/dev/null; then
+    echo "finish: $outcome"
+    return 0
+  fi
   bash "$RETENTION_TOOL" --root "$runs_root" finish "$run_token" "$outcome"
 }
 owned_harness_processes() {
@@ -297,6 +354,7 @@ req-private)
   verify_repl_identity "$(cat "$PIDF")" || {
     echo 'private LAN owner identity does not match; request rejected' >&2; exit 1;
   }
+  private_request_lease shared || exit 1
   exec "$AURA_E2E_TOOL_REPL" --private-request-socket "$PRIVATE_SOCKET"
   ;;
 inspect-enrollment-manifest)
@@ -305,6 +363,7 @@ inspect-enrollment-manifest)
   exec "$AURA_E2E_TOOL_REPL" --inspect-enrollment-manifest
   ;;
 stop)
+  private_request_lease exclusive || exit 1
   stop_owned_run
   ;;
 finish)
@@ -314,6 +373,7 @@ finish)
 finalize)
   [[ $# == 3 && ( "$3" == success || "$3" == failed ) ]] || { echo 'usage: drv.sh finalize <expected-token> success|failed' >&2; exit 2; }
   require_run_token "$2"
+  private_request_lease exclusive || exit 1
   stop_owned_run "$2"
   finish_owned_run "$3" "$2"
   ;;
