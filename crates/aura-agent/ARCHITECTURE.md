@@ -283,6 +283,10 @@ Summary:
   constant-time credential helper, and protected by explicit connection and
   request-read limits. Loopback remains the default bind policy; LAN binding is
   opt-in.
+- Candidate registration and expiry use the broker's selected
+  `PhysicalTimeEffects` provider. Missing or backward observations refuse the
+  action; the observation and candidate mutation are ordered under one broker
+  state lock.
 - The authenticated pending-enrollment progress witness reports only exact
   selector, message ID, envelope digest, and broker custody stage. Retrieval
   selection does not prove HTTP delivery. The broker retains the first

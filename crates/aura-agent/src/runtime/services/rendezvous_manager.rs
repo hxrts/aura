@@ -1856,6 +1856,9 @@ impl RendezvousManager {
             let candidates = broker
                 .list_candidates()
                 .await
+                .map_err(|reason| {
+                    RendezvousManagerError::BootstrapBroker(AuraError::invalid(reason))
+                })?
                 .into_iter()
                 .filter(|candidate| {
                     (candidate.authority_id != self.authority_id.to_string()

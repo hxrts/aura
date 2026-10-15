@@ -33,7 +33,7 @@ use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::{RwLock, Semaphore};
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::time::{timeout, Instant};
+use tokio::time::timeout;
 
 const DEFAULT_LOOPBACK_BIND_ADDR: &str = "127.0.0.1:0";
 #[cfg(not(target_arch = "wasm32"))]
@@ -277,7 +277,7 @@ struct BootstrapBrokerState {
         tokio::sync::oneshot::Receiver<()>,
     )>,
     enrollment_return_mailboxes: EnrollmentReturnMailboxes,
-    started_at: Instant,
+    candidate_time_high_water_ms: Option<u64>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -307,7 +307,7 @@ impl BootstrapBrokerState {
             #[cfg(test)]
             pending_registration_pause: None,
             enrollment_return_mailboxes: EnrollmentReturnMailboxes::new(retention),
-            started_at: Instant::now(),
+            candidate_time_high_water_ms: None,
         }
     }
 }
@@ -464,21 +464,27 @@ impl LocalBootstrapBrokerService {
     }
 
     pub async fn register(&self, registration: BootstrapBrokerRegistration) -> Result<(), String> {
-        let now_ms = broker_elapsed_ms(&self.shared).await;
-        prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
-        insert_registration(&self.shared, registration, now_ms).await
+        with_candidate_time(
+            &self.shared,
+            self.mailbox_time.as_deref(),
+            |state, now_ms| {
+                prune_candidates(state, now_ms, self.registration_ttl);
+                insert_registration(state, registration, now_ms)
+            },
+        )
+        .await?
     }
 
-    pub async fn list_candidates(&self) -> Vec<BootstrapBrokerCandidateRecord> {
-        let now_ms = broker_elapsed_ms(&self.shared).await;
-        prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
-        self.shared
-            .read()
-            .await
-            .candidates
-            .values()
-            .cloned()
-            .collect()
+    pub async fn list_candidates(&self) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
+        with_candidate_time(
+            &self.shared,
+            self.mailbox_time.as_deref(),
+            |state, now_ms| {
+                prune_candidates(state, now_ms, self.registration_ttl);
+                state.candidates.values().cloned().collect()
+            },
+        )
+        .await
     }
 
     pub async fn queue_invitation(
@@ -812,15 +818,9 @@ impl LocalBootstrapBrokerService {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn prune_candidates(
-    shared: &Arc<RwLock<BootstrapBrokerState>>,
-    now_ms: u64,
-    registration_ttl: Duration,
-) {
+fn prune_candidates(state: &mut BootstrapBrokerState, now_ms: u64, registration_ttl: Duration) {
     let max_age_ms = registration_ttl.as_millis() as u64;
-    shared
-        .write()
-        .await
+    state
         .candidates
         .retain(|_, candidate| now_ms.saturating_sub(candidate.discovered_at_ms) < max_age_ms);
 }
@@ -850,8 +850,8 @@ fn validate_bind_addr(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn insert_registration(
-    shared: &Arc<RwLock<BootstrapBrokerState>>,
+fn insert_registration(
+    state: &mut BootstrapBrokerState,
     registration: BootstrapBrokerRegistration,
     now_ms: u64,
 ) -> Result<(), String> {
@@ -862,7 +862,6 @@ async fn insert_registration(
         "{}:{}@{}",
         registration.authority_id, registration.device_id, registration.address
     );
-    let mut state = shared.write().await;
     if !state.candidates.contains_key(&key) && state.candidates.len() >= MAX_BOOTSTRAP_CANDIDATES {
         if let Some(oldest_key) = state
             .candidates
@@ -1046,9 +1045,26 @@ async fn handle_http_connection(
                     }
                 };
 
-            let now_ms = broker_elapsed_ms(&shared).await;
-            prune_candidates(&shared, now_ms, registration_ttl).await;
-            if let Err(error) = insert_registration(&shared, registration, now_ms).await {
+            let admission =
+                match with_candidate_time(&shared, mailbox_time.as_deref(), |state, now_ms| {
+                    prune_candidates(state, now_ms, registration_ttl);
+                    insert_registration(state, registration, now_ms)
+                })
+                .await
+                {
+                    Ok(admission) => admission,
+                    Err(_) => {
+                        let _ = write_http_response(
+                            &mut stream,
+                            503,
+                            "text/plain; charset=utf-8",
+                            b"bootstrap broker selected physical-time provider unavailable",
+                        )
+                        .await;
+                        return;
+                    }
+                };
+            if let Err(error) = admission {
                 let _ = write_http_response(
                     &mut stream,
                     429,
@@ -1061,9 +1077,25 @@ async fn handle_http_connection(
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
         ("GET", "/v2/bootstrap/candidates") => {
-            let now_ms = broker_elapsed_ms(&shared).await;
-            prune_candidates(&shared, now_ms, registration_ttl).await;
-            let candidates: Vec<_> = shared.read().await.candidates.values().cloned().collect();
+            let candidates: Vec<_> =
+                match with_candidate_time(&shared, mailbox_time.as_deref(), |state, now_ms| {
+                    prune_candidates(state, now_ms, registration_ttl);
+                    state.candidates.values().cloned().collect()
+                })
+                .await
+                {
+                    Ok(candidates) => candidates,
+                    Err(_) => {
+                        let _ = write_http_response(
+                            &mut stream,
+                            503,
+                            "text/plain; charset=utf-8",
+                            b"bootstrap broker selected physical-time provider unavailable",
+                        )
+                        .await;
+                        return;
+                    }
+                };
             match serde_json::to_vec(&candidates) {
                 Ok(body) => {
                     let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
@@ -1947,8 +1979,21 @@ async fn write_http_response(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn broker_elapsed_ms(shared: &Arc<RwLock<BootstrapBrokerState>>) -> u64 {
-    shared.read().await.started_at.elapsed().as_millis() as u64
+async fn with_candidate_time<T>(
+    shared: &Arc<RwLock<BootstrapBrokerState>>,
+    provider: Option<&dyn PhysicalTimeEffects>,
+    action: impl FnOnce(&mut BootstrapBrokerState, u64) -> T,
+) -> Result<T, String> {
+    let now_ms = selected_mailbox_now_ms(provider).await?;
+    let mut state = shared.write().await;
+    if state
+        .candidate_time_high_water_ms
+        .is_some_and(|observed| now_ms < observed)
+    {
+        return Err("bootstrap broker selected physical time moved backward".to_string());
+    }
+    state.candidate_time_high_water_ms = Some(now_ms);
+    Ok(action(&mut state, now_ms))
 }
 
 fn normalize_base_url(base_url: &str) -> String {
@@ -2597,7 +2642,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("actual broker bind");
+        .expect("actual broker bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("broker_mixed_purposes"));
         let authority = "fedcba98-7654-3210-fedc-ba9876543210";
@@ -2677,7 +2723,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("broker_device_isolation"));
         let authority = "fedcba98-7654-3210-fedc-ba9876543210";
@@ -2966,7 +3013,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("broker should bind");
+        .expect("broker should bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         broker
             .register(BootstrapBrokerRegistration {
                 authority_id: "01234567-89ab-cdef-0123-456789abcdef".to_string(),
@@ -2978,7 +3026,7 @@ mod tests {
             .await
             .expect("registration should be accepted");
 
-        let candidates = broker.list_candidates().await;
+        let candidates = broker.list_candidates().await.expect("selected clock");
         assert_eq!(candidates.len(), 1);
         assert_eq!(
             candidates[0].authority_id,
@@ -2986,6 +3034,50 @@ mod tests {
         );
         assert_eq!(candidates[0].address, "127.0.0.1:40123");
         assert_eq!(candidates[0].nickname_suggestion.as_deref(), Some("Alice"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn broker_candidates_use_selected_clock_and_refuse_backward_observation() {
+        let without_time = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_millis(10),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker bind");
+        assert!(without_time.list_candidates().await.is_err());
+
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_millis(10),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker bind")
+        .with_mailbox_time_provider(clock.clone());
+        let registration = BootstrapBrokerRegistration {
+            authority_id: "01234567-89ab-cdef-0123-456789abcdef".to_string(),
+            device_id: DeviceId::from_bytes([7; 32]),
+            address: "127.0.0.1:40123".to_string(),
+            invitation_retrieval_token: INVITE_TOKEN.to_string(),
+            nickname_suggestion: None,
+        };
+        broker
+            .register(registration.clone())
+            .await
+            .expect("first registration");
+        assert_eq!(broker.list_candidates().await.unwrap().len(), 1);
+        clock.set_time(99);
+        assert!(broker.register(registration).await.is_err());
+        assert!(broker.list_candidates().await.is_err());
+        clock.set_time(100);
+        assert_eq!(broker.list_candidates().await.unwrap().len(), 1);
+        clock.set_time(110);
+        assert!(broker.list_candidates().await.unwrap().is_empty());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2998,7 +3090,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("broker should bind");
+        .expect("broker should bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_broker_test"));
         tokio::task::yield_now().await;
@@ -3038,7 +3131,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("broker should bind");
+        .expect("broker should bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_broker_invitation_test"));
         tokio::task::yield_now().await;
@@ -3118,7 +3212,8 @@ mod tests {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("broker should bind");
+        .expect("broker should bind")
+        .with_mailbox_time_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()));
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_broker_query_token_test"));
         tokio::task::yield_now().await;
@@ -3440,9 +3535,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn bootstrap_broker_prunes_stale_and_bounds_candidates() {
-        let shared = Arc::new(RwLock::new(BootstrapBrokerState::new()));
+        let mut state = BootstrapBrokerState::new();
         insert_registration(
-            &shared,
+            &mut state,
             BootstrapBrokerRegistration {
                 authority_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
                 device_id: DeviceId::from_bytes([7; 32]),
@@ -3452,16 +3547,15 @@ mod tests {
             },
             1000,
         )
-        .await
         .expect("registration should be accepted");
-        prune_candidates(&shared, 1000, Duration::from_millis(1)).await;
-        assert_eq!(shared.read().await.candidates.len(), 1);
-        prune_candidates(&shared, 1001, Duration::from_millis(1)).await;
-        assert!(shared.read().await.candidates.is_empty());
+        prune_candidates(&mut state, 1000, Duration::from_millis(1));
+        assert_eq!(state.candidates.len(), 1);
+        prune_candidates(&mut state, 1001, Duration::from_millis(1));
+        assert!(state.candidates.is_empty());
 
         for index in 0..(MAX_BOOTSTRAP_CANDIDATES + 8) {
             insert_registration(
-                &shared,
+                &mut state,
                 BootstrapBrokerRegistration {
                     authority_id: format!("authority-{index}"),
                     device_id: DeviceId::from_bytes([7; 32]),
@@ -3471,10 +3565,8 @@ mod tests {
                 },
                 2000 + index as u64,
             )
-            .await
             .expect("registration should stay bounded");
         }
-        let state = shared.read().await;
         assert_eq!(state.candidates.len(), MAX_BOOTSTRAP_CANDIDATES);
         assert!(!state
             .candidates
