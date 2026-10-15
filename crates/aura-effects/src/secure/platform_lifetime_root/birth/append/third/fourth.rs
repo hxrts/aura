@@ -9,9 +9,11 @@ const MAX_V10_ROSTER_FILE: usize = ROSTER_MAGIC_V10.len()
     + 2
     + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
         * (ROSTER_ENTRY_HEADER_LEN + MAX_SCOPE_BYTES);
+mod lifecycle;
 
 #[cfg(test)]
 pub(super) fn cleanup_fixture(service: &str, id: &[u8; 32]) {
+    lifecycle::cleanup_fixture(service, id);
     for name in [user(INTENT_PREFIX, id), user(RECORD_PREFIX, id)] {
         if let Ok(entry) = keyring::Entry::new(service, &name) {
             let _ = entry.delete_credential();
@@ -157,10 +159,10 @@ fn replay(
     third_scope: &[u8],
     stop: StopAfter,
 ) -> Result<(), AuraError> {
-    if !matches!(root.tail_phase, TAIL_APPEND_PENDING | TAIL_APPEND_COMPLETE)
+    if !matches!(root.tail_phase, TAIL_APPEND_PENDING..=TAIL_ERASURE_COMPLETE)
         || (root.tail_phase == TAIL_APPEND_PENDING
             && (root.tail_count != 3 || root.tail_roster_digest != root.third_roster_digest))
-        || (root.tail_phase == TAIL_APPEND_COMPLETE
+        || (root.tail_phase >= TAIL_APPEND_COMPLETE
             && (root.tail_count != 4 || root.tail_roster_digest != root.tail_target_digest))
         || root.tail_next_id == [0; 32]
         || root.tail_next_id == root.birth_id
@@ -171,16 +173,40 @@ fn replay(
     }
     let intent_user = user(INTENT_PREFIX, &root.tail_next_id);
     let record_user = user(RECORD_PREFIX, &root.tail_next_id);
-    let bytes = read_entry(selected, &intent_user)?
-        .ok_or_else(|| invalid("platform fourth birth sealed intent is missing"))?;
-    if aura_core::hash::hash(&bytes) != root.tail_next_intent_digest {
-        return Err(invalid("platform fourth birth sealed intent differs"));
-    }
-    let intent = BirthIntent::decode(selected, &bytes)?;
-    if intent.root != root.id || intent.allocation != root.tail_next_id {
-        return Err(invalid("platform fourth birth has foreign identity"));
-    }
-    let expected = candidate(root, claim, third_scope, &intent.scope)?;
+    let retained = owned
+        ._owner
+        .directory
+        .read_private_publication(Path::new(FOURTH_ROSTER_FILE), MAX_V10_ROSTER_FILE)
+        .map_err(io)?;
+    let bytes = read_entry(selected, &intent_user)?;
+    let fourth_scope = match &bytes {
+        Some(bytes) => {
+            if aura_core::hash::hash(bytes) != root.tail_next_intent_digest {
+                return Err(invalid("platform fourth birth sealed intent differs"));
+            }
+            let intent = BirthIntent::decode(selected, bytes)?;
+            if intent.root != root.id || intent.allocation != root.tail_next_id {
+                return Err(invalid("platform fourth birth has foreign identity"));
+            }
+            intent.scope
+        }
+        None if root.tail_phase >= TAIL_ERASURE_PENDING => {
+            let (marker, None) = retained
+                .as_ref()
+                .ok_or_else(|| invalid("platform fourth retained roster is missing"))?
+            else {
+                return Err(invalid("platform fourth retained roster is incomplete"));
+            };
+            let roster = entries(marker, ROSTER_MAGIC_V10, root)?;
+            let fourth = roster
+                .iter()
+                .find(|entry| entry[32..64] == root.tail_next_id)
+                .ok_or_else(|| invalid("platform fourth retained scope is missing"))?;
+            fourth[ROSTER_ENTRY_HEADER_LEN..].to_vec()
+        }
+        None => return Err(invalid("platform fourth birth sealed intent is missing")),
+    };
+    let expected = candidate(root, claim, third_scope, &fourth_scope)?;
     if aura_core::hash::hash(&expected) != root.tail_target_digest {
         return Err(invalid("platform fourth roster differs from root target"));
     }
@@ -188,20 +214,30 @@ fn replay(
         return Err(interrupted());
     }
     let marker = marker_state(owned, &expected)?;
-    match read_entry(selected, &record_user)? {
-        Some(observed) if observed == bytes => {}
-        Some(_) => return Err(invalid("platform fourth record differs from sealed intent")),
-        None if marker => return Err(invalid("platform fourth record is missing after ACK")),
-        None if root.tail_phase == TAIL_APPEND_COMPLETE => {
+    if root.tail_phase >= TAIL_ERASURE_PENDING {
+        if !marker {
+            return Err(invalid("platform fourth retained roster ACK is missing"));
+        }
+        return Ok(());
+    }
+    match (read_entry(selected, &record_user)?, bytes.as_ref()) {
+        (Some(observed), Some(bytes)) if observed == *bytes => {}
+        (Some(_), None) => return Err(invalid("erased platform fourth record reappeared")),
+        (Some(_), Some(_)) => {
+            return Err(invalid("platform fourth record differs from sealed intent"))
+        }
+        (None, _) if marker => return Err(invalid("platform fourth record is missing after ACK")),
+        (None, _) if root.tail_phase >= TAIL_APPEND_COMPLETE => {
             return Err(invalid("completed platform fourth record is missing"));
         }
-        None => write_exact(selected, &record_user, &bytes)?,
+        (None, Some(bytes)) => write_exact(selected, &record_user, bytes)?,
+        (None, None) => return Err(invalid("platform fourth original intent is missing")),
     }
     if stop == StopAfter::Record {
         return Err(interrupted());
     }
     if !marker {
-        if root.tail_phase == TAIL_APPEND_COMPLETE {
+        if root.tail_phase >= TAIL_APPEND_COMPLETE {
             return Err(invalid("completed platform fourth ACK is missing"));
         }
         publish_marker(owned, &expected)?;
@@ -351,7 +387,8 @@ fn verify_four(
     }
     let (claim, scope) = prior(owned, selected, &mut root)?;
     replay(owned, selected, &mut root, &claim, &scope, StopAfter::Never)?;
-    if root.tail_phase != TAIL_APPEND_COMPLETE || root.tail_count != 4 {
+    lifecycle::recover(owned, selected, &mut root)?;
+    if root.tail_phase < TAIL_APPEND_COMPLETE || root.tail_count != 4 {
         return Err(invalid("platform fourth owner lacks complete roster ACK"));
     }
     Ok(root)
@@ -388,7 +425,8 @@ async fn promote_borrowed(
         return Err(invalid("platform fourth handoff has foreign prior roster"));
     }
     replay(owned, selected, &mut root, &claim, &scope, StopAfter::Never)?;
-    if root.tail_phase != TAIL_APPEND_COMPLETE || root.tail_count != 4 {
+    lifecycle::recover(owned, selected, &mut root)?;
+    if root.tail_phase < TAIL_APPEND_COMPLETE || root.tail_count != 4 {
         return Err(invalid("platform fourth handoff lacks complete ACK"));
     }
     Ok(PlatformFourRosterAdmission {
@@ -407,6 +445,7 @@ pub(super) async fn recover_four_roster(
     let mut root = read_root(owned, selected)?;
     let (claim, scope) = prior(owned, selected, &mut root)?;
     replay(owned, selected, &mut root, &claim, &scope, StopAfter::Never)?;
+    lifecycle::recover(owned, selected, &mut root)?;
     owner
         .lifetime_root_claimed
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -426,8 +465,19 @@ pub(super) async fn read_fourth_secret(
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
     let root = verify_four(owned, selected, four)?;
+    if root.tail_phase >= TAIL_TOMBSTONE_PENDING {
+        return Err(invalid(
+            "platform fourth live read denied by original tombstone",
+        ));
+    }
     let bytes = read_entry(selected, &user(INTENT_PREFIX, &root.tail_next_id))?
         .ok_or_else(|| invalid("platform fourth original intent is missing"))?;
+    if aura_core::hash::hash(&bytes) != root.tail_next_intent_digest
+        || read_entry(selected, &user(RECORD_PREFIX, &root.tail_next_id))?.as_deref()
+            != Some(bytes.as_slice())
+    {
+        return Err(invalid("platform fourth live credential differs"));
+    }
     Ok(BirthIntent::decode(selected, &bytes)?.secret)
 }
 
@@ -437,7 +487,7 @@ mod tests {
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-    async fn first_three(
+    pub(super) async fn first_three(
         fixture: &Fixture,
     ) -> Result<(ProductionSecureStorageHandler, PlatformThreeRosterAdmission), AuraError> {
         let (storage, two) = super::super::tests::first_two(fixture).await?;
