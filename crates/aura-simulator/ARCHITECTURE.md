@@ -15,6 +15,15 @@ after the first authenticated broker frame. It does not issue credentials or
 replace the agent's signed enrollment owner.
 The lifecycle test's 30-second diagnostic watchdog is testkit-owned and does
 not advance the selected physical clock or decide protocol completion.
+The `simulator-checkpoint` feature reuses that signed native fixture from a
+quiescent pre-issuance selected-profile artifact. Each branch restores under
+fresh original owners, reissues through the normal signing effect, and creates
+a new empty-broker registration and queue. A fixture-scoped FROST commitment
+retirement ledger stays outside the checkpoint. The 1-of-1 enrollment fast
+path does not exercise FROST; a separate threshold-service test proves actual
+commitment reuse refusal. Source-bound redacted receipts record the selected
+clock, operation, broker stages, typed outcome, and local benchmark. Browser,
+independent-process, two-host, and post-issuance rewind are not established.
 
 ## Scope
 

@@ -56,9 +56,30 @@ pub struct NativeEnrollmentFixture {
 impl NativeEnrollmentFixture {
     /// Bind a loopback broker and publish the original signed issuer registration.
     pub async fn prepare(
+        profiles: [EnrollmentParticipantProfile; 2],
+        clock: Arc<ManualPhysicalClock>,
+        auth_token: &str,
+    ) -> Result<Self, String> {
+        Self::prepare_inner(profiles, clock, auth_token, None).await
+    }
+
+    /// Use the same signed issuance path with an external simulator retirement
+    /// owner that survives profile restore. No signature is fixture-assembled.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub async fn prepare_with_nonce_retirement(
+        profiles: [EnrollmentParticipantProfile; 2],
+        clock: Arc<ManualPhysicalClock>,
+        auth_token: &str,
+        retirements: [Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2],
+    ) -> Result<Self, String> {
+        Self::prepare_inner(profiles, clock, auth_token, Some(retirements)).await
+    }
+
+    async fn prepare_inner(
         mut profiles: [EnrollmentParticipantProfile; 2],
         clock: Arc<ManualPhysicalClock>,
         auth_token: &str,
+        retirements: Option<[Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2]>,
     ) -> Result<Self, String> {
         let broker = LocalBootstrapBrokerService::bind(
             "127.0.0.1:0",
@@ -87,13 +108,30 @@ impl NativeEnrollmentFixture {
             Duration::from_secs(120),
         )
         .map_err(|error| format!("startup window: {error}"))?;
-        let enrollment = SimulatedEnrollment::prepare_native_broker(
-            profiles,
-            clock.clone(),
-            SharedTransport::default(),
-            startup,
-        )
-        .await
+        let enrollment = match retirements {
+            #[cfg(feature = "simulator-checkpoint")]
+            Some(retirements) => {
+                SimulatedEnrollment::prepare_native_broker_with_nonce_retirement(
+                    profiles,
+                    clock.clone(),
+                    SharedTransport::default(),
+                    startup,
+                    retirements,
+                )
+                .await
+            }
+            #[cfg(not(feature = "simulator-checkpoint"))]
+            Some(_) => unreachable!("simulator retirement cannot be supplied without feature"),
+            None => {
+                SimulatedEnrollment::prepare_native_broker(
+                    profiles,
+                    clock.clone(),
+                    SharedTransport::default(),
+                    startup,
+                )
+                .await
+            }
+        }
         .map_err(|error| format!("signed issuance: {error}"))?;
         enrollment
             .issuer()

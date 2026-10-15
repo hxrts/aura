@@ -15,7 +15,7 @@ use aura_app::ui_contract::SemanticOperationPhase;
 use aura_core::{AuthorityId, ContextId, DeviceId, PhysicalTime, TimeoutBudget};
 use aura_testkit::time::ManualPhysicalClock;
 
-type BrokerStageTrace = Arc<std::sync::Mutex<Vec<(u64, String)>>>;
+type BrokerStageTrace = Arc<std::sync::Mutex<Vec<(u64, String, String)>>>;
 
 async fn issued() -> (SimulatedEnrollment, Vec<tempfile::TempDir>) {
     issued_with_broker(None).await
@@ -189,7 +189,19 @@ async fn issued_with_original_vm_broker_from(
     let roots: Vec<_> = (0..2)
         .map(|_| tempfile::tempdir().expect("isolated native profile"))
         .collect();
-    let profiles = std::array::from_fn(|index| {
+    let profiles = original_vm_profiles(seed_base, &roots);
+    let owner = NativeEnrollmentFixture::prepare(profiles, clock, "genuine-complete-vm-auth")
+        .await
+        .expect("original signed native broker issuance");
+    let url = owner.broker_url().to_owned();
+    (owner.enrollment, roots, owner.supervisor, url, owner.clock)
+}
+
+fn original_vm_profiles(
+    seed_base: u8,
+    roots: &[tempfile::TempDir],
+) -> [EnrollmentParticipantProfile; 2] {
+    std::array::from_fn(|index| {
         let seed = seed_base + index as u8 * 3;
         EnrollmentParticipantProfile {
             config: AgentConfig {
@@ -204,12 +216,7 @@ async fn issued_with_original_vm_broker_from(
             context: ContextId::new_from_entropy([seed + 2; 32]),
             seed: u64::from(seed),
         }
-    });
-    let owner = NativeEnrollmentFixture::prepare(profiles, clock, "genuine-complete-vm-auth")
-        .await
-        .expect("original signed native broker issuance");
-    let url = owner.broker_url().to_owned();
-    (owner.enrollment, roots, owner.supervisor, url, owner.clock)
+    })
 }
 
 async fn original_vm_broker_progress(
@@ -270,8 +277,16 @@ where
     M: FnMut() -> F,
     F: std::future::Future<Output = Result<(), aura_core::AuraError>>,
 {
-    drive_brokered_import_until_traced(fixture, clock, broker_url, maintenance_pass, goal, None)
-        .await
+    drive_brokered_import_until_traced(
+        fixture,
+        clock,
+        broker_url,
+        maintenance_pass,
+        goal,
+        None,
+        false,
+    )
+    .await
 }
 
 async fn drive_brokered_import_until_traced<T, M, F>(
@@ -281,6 +296,7 @@ async fn drive_brokered_import_until_traced<T, M, F>(
     mut maintenance_pass: M,
     goal: impl std::future::Future<Output = T>,
     trace: Option<&BrokerStageTrace>,
+    finish_inflight_maintenance: bool,
 ) -> T
 where
     M: FnMut() -> F,
@@ -301,7 +317,30 @@ where
         async {
         loop {
             tokio::select! {
-                outcome = &mut goal => break Ok(outcome),
+                outcome = &mut goal => {
+                    if finish_inflight_maintenance {
+                        fixture
+                            .original_startup_window()
+                            .remaining_at(&PhysicalTime {
+                                ts_ms: clock.now_ms(),
+                                uncertainty: None,
+                            })
+                            .expect("in-flight maintenance remains in original selected window");
+                        let upkeep = tokio::time::timeout(
+                            Duration::from_secs(5),
+                            &mut maintenance,
+                        )
+                        .await
+                        .expect("original in-flight mailbox maintenance must settle");
+                        if let Err(error) = upkeep {
+                            panic!(
+                                "original in-flight mailbox maintenance failed with typed kind {:?}",
+                                std::mem::discriminant(&error)
+                            );
+                        }
+                    }
+                    break Ok(outcome);
+                },
                 upkeep = &mut maintenance => {
                     assert!(upkeep.is_ok() || matches!(&upkeep, Err(aura_core::AuraError::Internal { .. })),
                         "independent mailbox upkeep preserves typed sync failure: {upkeep:?}");
@@ -328,7 +367,11 @@ where
                                 .as_str()
                                 .unwrap_or("no_message")
                                 .to_string();
-                            let observation = (clock.now_ms(), stage);
+                            let message_id = progress["messages"][0]["message_id"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_owned();
+                            let observation = (clock.now_ms(), message_id, stage);
                             let mut trace = trace.lock().unwrap();
                             if trace.last() != Some(&observation) {
                                 trace.push(observation);
@@ -1219,8 +1262,8 @@ impl Default for HostRefusalReplayInputs {
 #[derive(Debug, PartialEq, Eq)]
 struct HostRefusalReplayReceipt {
     inputs: HostRefusalReplayInputs,
-    /// Ordered, redacted broker observations; no selector, frame, or credential.
-    broker_stage_names: Vec<String>,
+    /// Ordered authoritative milestones; polling may skip transient stages.
+    broker_milestones: Vec<&'static str>,
     broker_registration: bool,
     broker_first_envelope: bool,
     broker_receiver_ack: bool,
@@ -1232,6 +1275,18 @@ struct HostRefusalReplayReceipt {
 async fn run_host_storage_refusal_from_fresh_profile(
     inputs: HostRefusalReplayInputs,
 ) -> HostRefusalReplayReceipt {
+    run_host_storage_refusal_with_profiles(inputs, None, None, |_| {}).await
+}
+
+async fn run_host_storage_refusal_with_profiles<F>(
+    inputs: HostRefusalReplayInputs,
+    original_roots: Option<&[tempfile::TempDir]>,
+    nonce_retirements: Option<[Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2]>,
+    on_selected_owners: F,
+) -> HostRefusalReplayReceipt
+where
+    F: FnOnce(&SimulatedEnrollment),
+{
     use aura_app::frontend_primitives::WorkflowHandoffSubmission;
     use aura_app::ui::workflows::invitation::{
         import_device_enrollment_with_terminal_status, EnrollmentImportHostPolicy,
@@ -1242,8 +1297,46 @@ async fn run_host_storage_refusal_from_fresh_profile(
     };
     use aura_core::{effects::StorageCoreEffects, AuraError};
 
-    let (fixture, _roots, broker_supervisor, broker_url, clock) =
-        issued_with_original_vm_broker_from(inputs.seed_base, inputs.selected_physical_ms).await;
+    assert!(
+        original_roots.is_some() || nonce_retirements.is_none(),
+        "retirement scope requires the exact original profile roots"
+    );
+
+    let (fixture, _roots, broker_supervisor, broker_url, clock) = if let Some(roots) =
+        original_roots
+    {
+        use aura_simulator::native_enrollment_fixture::NativeEnrollmentFixture;
+        let clock = Arc::new(ManualPhysicalClock::new(inputs.selected_physical_ms));
+        let profiles = original_vm_profiles(inputs.seed_base, roots);
+        let owner = match nonce_retirements {
+            #[cfg(feature = "simulator-checkpoint")]
+            Some(retirements) => {
+                NativeEnrollmentFixture::prepare_with_nonce_retirement(
+                    profiles,
+                    clock,
+                    "genuine-complete-vm-auth",
+                    retirements,
+                )
+                .await
+            }
+            #[cfg(not(feature = "simulator-checkpoint"))]
+            Some(_) => panic!("simulator retirement feature is absent"),
+            None => {
+                NativeEnrollmentFixture::prepare(profiles, clock, "genuine-complete-vm-auth").await
+            }
+        }
+        .expect("original signed native broker issuance from selected profiles");
+        let url = owner.broker_url().to_owned();
+        (
+            owner.enrollment,
+            Vec::new(),
+            owner.supervisor,
+            url,
+            owner.clock,
+        )
+    } else {
+        issued_with_original_vm_broker_from(inputs.seed_base, inputs.selected_physical_ms).await
+    };
     let issuer = fixture.issuer().clone();
     let recipient = fixture.recipient().clone();
     let app = fixture.recipient_app();
@@ -1353,36 +1446,91 @@ async fn run_host_storage_refusal_from_fresh_profile(
         || aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
         observation.observe_with_host_recovery(),
         Some(&stage_trace),
+        true,
     )
     .await;
     let (subject, device, digest) = host_selector
         .lock()
         .unwrap()
         .expect("actual host refusal follows original verified completion");
-    let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
-    assert_eq!(progress["registration_present"], true);
-    assert_eq!(
-        progress["messages"][0]["stage"],
-        "receiver_acknowledged_retained_frame"
-    );
-    let mut broker_stage_names = {
-        let stages = stage_trace.lock().unwrap();
-        assert!(
-            stages.iter().any(|(_, stage)| stage != "no_message"),
-            "actual broker first-envelope stage was observed"
-        );
-        let mut names = Vec::new();
-        for (_, stage) in stages.iter() {
-            if names.last() != Some(stage) {
-                names.push(stage.clone());
+    let first_message_id = stage_trace
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|(_, message_id, _)| (!message_id.is_empty()).then_some(message_id.clone()))
+        .expect("original first broker message ID was observed");
+    let post_terminal_progress = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut tick = tokio::time::interval(Duration::from_millis(100));
+        loop {
+            fixture
+                .original_startup_window()
+                .remaining_at(&PhysicalTime {
+                    ts_ms: clock.now_ms(),
+                    uncertainty: None,
+                })
+                .expect("post-terminal ACK stays within original selected startup deadline");
+            let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
+            if progress["messages"].as_array().is_some_and(|messages| {
+                messages.iter().any(|message| {
+                    message["message_id"] == first_message_id
+                        && message["stage"] == "receiver_acknowledged_retained_frame"
+                })
+            }) {
+                break progress;
+            }
+            tick.tick().await;
+            let upkeep = aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                &app, &bridge,
+            )
+            .await;
+            if let Err(error) = upkeep {
+                panic!(
+                    "post-terminal original mailbox upkeep failed with typed kind {:?}",
+                    std::mem::discriminant(&error)
+                );
             }
         }
-        names
+    })
+    .await;
+    let progress = match post_terminal_progress {
+        Ok(progress) => progress,
+        Err(_) => {
+            let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
+            let stages: Vec<_> = progress["messages"]
+                .as_array()
+                .expect("typed broker message inventory")
+                .iter()
+                .map(|message| {
+                    (
+                        message["message_id"].as_str().unwrap_or("missing-id"),
+                        message["stage"].as_str().unwrap_or("missing-stage"),
+                    )
+                })
+                .collect();
+            panic!("original receiver ACK missing after bounded upkeep: {stages:?}");
+        }
     };
-    let acknowledged = "receiver_acknowledged_retained_frame".to_string();
-    if broker_stage_names.last() != Some(&acknowledged) {
-        broker_stage_names.push(acknowledged);
-    }
+    assert_eq!(progress["registration_present"], true);
+    assert!(progress["messages"].as_array().is_some_and(|messages| {
+        messages.iter().any(|message| {
+            message["message_id"] == first_message_id
+                && message["stage"] == "receiver_acknowledged_retained_frame"
+        })
+    }));
+    let broker_milestones = {
+        let stages = stage_trace.lock().unwrap();
+        assert!(
+            stages.iter().any(|(_, _, stage)| stage != "no_message"),
+            "actual broker first-envelope stage was observed"
+        );
+        assert!(stages.iter().any(|(_, id, _)| id == &first_message_id));
+        [
+            "registration_present",
+            "original_message_id_observed",
+            "receiver_acknowledged_retained_frame",
+        ]
+        .to_vec()
+    };
     let original = original_storage_source
         .lock()
         .unwrap()
@@ -1432,6 +1580,7 @@ async fn run_host_storage_refusal_from_fresh_profile(
         .collect();
     assert_eq!(terminals, vec![SemanticOperationPhase::Failed]);
     assert!(blocked_directory.path().is_file());
+    on_selected_owners(&fixture);
     drop(bridge);
     drop(app);
     let (reported, stopped) = fixture
@@ -1535,7 +1684,7 @@ async fn run_host_storage_refusal_from_fresh_profile(
         .expect("reopened native owner shutdown");
     HostRefusalReplayReceipt {
         inputs,
-        broker_stage_names,
+        broker_milestones,
         broker_registration: progress["registration_present"] == true,
         broker_first_envelope: progress["messages"]
             .as_array()
@@ -1546,6 +1695,327 @@ async fn run_host_storage_refusal_from_fresh_profile(
         typed_host_failure: "Storage",
         same_profile_reopened: true,
     }
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+struct ProtectedNativeEnrollmentReplay {
+    roots: Vec<tempfile::TempDir>,
+    _artifacts: tempfile::TempDir,
+    checkpoints: [aura_effects::profile_checkpoint::QuiescentFilesystemProfileCheckpoint; 2],
+    revision: [u8; 32],
+    participants: [[u8; 32]; 2],
+    configurations: [[u8; 32]; 2],
+    checkpoint_bindings: [[u8; 32]; 2],
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+impl ProtectedNativeEnrollmentReplay {
+    fn binding(profile: &EnrollmentParticipantProfile) -> ([u8; 32], [u8; 32]) {
+        let participant =
+            aura_core::Hash32::from_value(&(profile.authority, profile.config.device_id))
+                .expect("canonical participant binding")
+                .0;
+        // Broker registration/queue is empty at this pre-issuance boundary.
+        // Each branch binds the same loopback policy and receives a separately
+        // recorded ephemeral port when its fresh broker owner starts.
+        let configuration = aura_core::Hash32::from_value(&(
+            profile.authority,
+            profile.config.device_id,
+            profile.context,
+            profile.seed,
+            "LoopbackOnly/OriginalIssuerAndRecipient",
+            // Configuration requests PlatformCredentialStore, but the
+            // nonproduction runtime selects FilesystemFallback.
+            "FilesystemFallback/runtime-selected",
+        ))
+        .expect("canonical stable fixture configuration")
+        .0;
+        (participant, configuration)
+    }
+
+    async fn capture(inputs: &HostRefusalReplayInputs) -> Self {
+        use aura_effects::profile_checkpoint::QuiescentFilesystemProfileCheckpoint;
+        let roots: Vec<_> = (0..2)
+            .map(|_| tempfile::tempdir().expect("isolated original profile"))
+            .collect();
+        let profiles = original_vm_profiles(inputs.seed_base, &roots);
+        let clock = Arc::new(ManualPhysicalClock::new(inputs.selected_physical_ms));
+        let startup = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: clock.now_ms(),
+                uncertainty: None,
+            },
+            Duration::from_secs(120),
+        )
+        .expect("original selected startup deadline");
+        let selected = SimulatedEnrollment::prepare_quiescent_native_signing_profiles(
+            &profiles, clock, &startup,
+        )
+        .await
+        .expect("original selected owners stop before issuance");
+        let artifacts = tempfile::tempdir().expect("private protected artifacts");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(artifacts.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private checkpoint artifact directory");
+        // The source-bound test artifact identifies this compiled fixture.
+        // A fixed-commit manifest independently binds the complete repository.
+        let revision = aura_core::Hash32::from_bytes(include_bytes!("enrollment_lifecycle.rs")).0;
+        let bindings = profiles.each_ref().map(Self::binding);
+        let participants = bindings.map(|(participant, _)| participant);
+        let configurations = profiles.each_ref().map(|profile| Self::binding(profile).1);
+        let checkpoint_bindings = [0, 1].map(|index| {
+            aura_core::Hash32::from_value(&(participants[index], 0_u64, configurations[index]))
+                .expect("canonical original checkpoint binding")
+                .0
+        });
+        let [issuer_selected, recipient_selected] = selected;
+        #[cfg(unix)]
+        for root in &roots {
+            use std::os::unix::fs::PermissionsExt;
+            for entry in [root.path().to_path_buf(), root.path().join("secure_store")] {
+                let mode = std::fs::metadata(&entry)
+                    .expect("selected profile directory exists")
+                    .permissions()
+                    .mode()
+                    & 0o777;
+                assert_eq!(
+                    mode & 0o077,
+                    0,
+                    "selected profile directory must be private: {entry:?} mode {mode:o}"
+                );
+            }
+        }
+        let checkpoints = [issuer_selected, recipient_selected]
+            .into_iter()
+            .enumerate()
+            .map(|(index, source)| {
+                QuiescentFilesystemProfileCheckpoint::capture(
+                    source,
+                    roots[index].path(),
+                    &artifacts.path().join(format!("profile-{index}.bin")),
+                    revision,
+                    checkpoint_bindings[index],
+                )
+                .expect("effect-owned selected profile capture")
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or_else(|_| panic!("exact original checkpoint inventory"));
+        Self {
+            roots,
+            _artifacts: artifacts,
+            checkpoints,
+            revision,
+            participants,
+            configurations,
+            checkpoint_bindings,
+        }
+    }
+
+    async fn restore(&self) {
+        for index in 0..2 {
+            self.checkpoints[index]
+                .restore(
+                    self.roots[index].path(),
+                    self.revision,
+                    self.checkpoint_bindings[index],
+                )
+                .await
+                .expect("fresh effect owner restores original selected filesystem profile");
+        }
+    }
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+#[tokio::test]
+async fn original_signed_host_refusal_replays_from_protected_selected_profiles() {
+    use aura_simulator::simulator_nonce_retirement::SimulatorNonceRetirementLedger;
+    let inputs = HostRefusalReplayInputs::default();
+    let protected = ProtectedNativeEnrollmentReplay::capture(&inputs).await;
+    let retirement = Arc::new(SimulatorNonceRetirementLedger::default());
+    let branch_retirements =
+        |branch| [0, 1].map(|index| retirement.scoped(protected.participants[index], 0, branch));
+    let captured = run_host_storage_refusal_with_profiles(
+        inputs.clone(),
+        Some(&protected.roots),
+        Some(branch_retirements(1)),
+        |_| {},
+    )
+    .await;
+    assert!(captured.broker_registration && captured.broker_receiver_ack);
+    protected.restore().await;
+    let replayed = run_host_storage_refusal_with_profiles(
+        inputs,
+        Some(&protected.roots),
+        Some(branch_retirements(2)),
+        |_| {},
+    )
+    .await;
+    assert_eq!(
+        captured, replayed,
+        "same typed app/host/ACK outcome after restore"
+    );
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+#[tokio::test]
+async fn restored_original_agent_issues_new_normal_signed_enrollment() {
+    use aura_simulator::simulator_nonce_retirement::SimulatorNonceRetirementLedger;
+    let inputs = HostRefusalReplayInputs::default();
+    let protected = ProtectedNativeEnrollmentReplay::capture(&inputs).await;
+    protected.restore().await;
+    let retirement = Arc::new(SimulatorNonceRetirementLedger::default());
+    let receipt = run_host_storage_refusal_with_profiles(
+        inputs,
+        Some(&protected.roots),
+        Some([0, 1].map(|index| retirement.scoped(protected.participants[index], 0, 1))),
+        |_| {},
+    )
+    .await;
+    assert!(receipt.broker_registration && receipt.broker_receiver_ack);
+    assert!(receipt.same_profile_reopened);
+    assert_eq!(receipt.typed_terminal, SemanticOperationPhase::Failed);
+    assert!(retirement
+        .records_for(protected.participants[0], 0)
+        .is_empty());
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+#[tokio::test]
+async fn selected_replay_refuses_foreign_owner_and_stale_epoch_before_mutation() {
+    use aura_effects::profile_checkpoint::ProfileCheckpointError;
+    let inputs = HostRefusalReplayInputs::default();
+    let protected = ProtectedNativeEnrollmentReplay::capture(&inputs).await;
+    let stale_epoch_binding = aura_core::Hash32::from_value(&(
+        protected.participants[0],
+        1_u64,
+        protected.configurations[0],
+    ))
+    .expect("canonical stale epoch binding")
+    .0;
+    assert!(matches!(
+        protected.checkpoints[0]
+            .restore(
+                protected.roots[0].path(),
+                protected.revision,
+                stale_epoch_binding,
+            )
+            .await,
+        Err(ProfileCheckpointError::ForeignSource)
+    ));
+    assert!(matches!(
+        protected.checkpoints[0]
+            .restore(
+                protected.roots[1].path(),
+                protected.revision,
+                protected.checkpoint_bindings[0],
+            )
+            .await,
+        Err(ProfileCheckpointError::ForeignSource)
+    ));
+    // Failed authentication cannot leave an incomplete marker or replace the
+    // original selected profile: both fresh owners still reacquire normally.
+    protected.restore().await;
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+#[tokio::test]
+async fn protected_selected_profile_replay_benchmarks_three_branches_against_full_setups() {
+    use aura_simulator::simulator_nonce_retirement::SimulatorNonceRetirementLedger;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let inputs = HostRefusalReplayInputs::default();
+    let started = std::time::Instant::now();
+    let protected = ProtectedNativeEnrollmentReplay::capture(&inputs).await;
+    let capture_millis = started.elapsed().as_millis();
+    let retirement = Arc::new(SimulatorNonceRetirementLedger::default());
+    let mut branches = Vec::new();
+    let mut restore_millis = Vec::new();
+    let mut branch_millis = Vec::new();
+    for branch in 0..3 {
+        let restore_started = std::time::Instant::now();
+        protected.restore().await;
+        restore_millis.push(restore_started.elapsed().as_millis());
+        let branch_started = std::time::Instant::now();
+        let receipt = run_host_storage_refusal_with_profiles(
+            inputs.clone(),
+            Some(&protected.roots),
+            Some([0, 1].map(|index| retirement.scoped(protected.participants[index], 0, branch))),
+            |_| {},
+        )
+        .await;
+        assert!(receipt.broker_receiver_ack && receipt.same_profile_reopened);
+        branches.push(receipt);
+        branch_millis.push(branch_started.elapsed().as_millis());
+    }
+    let checkpoint_millis = started.elapsed().as_millis();
+    assert!(branches.windows(2).all(|pair| pair[0] == pair[1]));
+
+    let full_started = std::time::Instant::now();
+    let mut full = Vec::new();
+    let mut full_setup_millis = Vec::new();
+    for _ in 0..3 {
+        let run_started = std::time::Instant::now();
+        full.push(run_host_storage_refusal_from_fresh_profile(inputs.clone()).await);
+        full_setup_millis.push(run_started.elapsed().as_millis());
+    }
+    let full_millis = full_started.elapsed().as_millis();
+    assert!(full.windows(2).all(|pair| pair[0] == pair[1]));
+    assert_eq!(branches[0].typed_terminal, full[0].typed_terminal);
+    assert_eq!(branches[0].typed_host_failure, full[0].typed_host_failure);
+
+    // This artifact contains only fixed identity inputs, enum stage names,
+    // typed status, and elapsed benchmark values. It never receives the
+    // signed code, verifier, broker credential, profile bytes, or nonce state.
+    let artifact_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts");
+    let artifact_metadata =
+        std::fs::symlink_metadata(&artifact_root).expect("worktree artifacts root");
+    assert!(artifact_metadata.file_type().is_dir() && !artifact_metadata.file_type().is_symlink());
+    let receipt_dir = tempfile::Builder::new()
+        .prefix("aura-task449-receipt-")
+        .tempdir_in(&artifact_root)
+        .expect("private benchmark receipt directory");
+    std::fs::set_permissions(receipt_dir.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("owner-only receipt directory");
+    let receipt_path = receipt_dir.path().join("replay.json");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&receipt_path)
+        .expect("new owner-only replay receipt");
+    let redacted = serde_json::json!({
+        "fixture_source_digest": protected.revision.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+        "selected_provider": "runtime-owned-filesystem-fallback",
+        "boundary": "quiescent-pre-issuance-empty-broker",
+        "seed_base": inputs.seed_base,
+        "selected_physical_ms": inputs.selected_physical_ms,
+        "operation_instance": inputs.operation_instance,
+        "owner": inputs.owner,
+        "injected_fault": inputs.injected_fault,
+        "broker_milestones": branches[0].broker_milestones,
+        "first_message_ack": branches[0].broker_receiver_ack,
+        "typed_terminal": format!("{:?}", branches[0].typed_terminal),
+        "typed_host_failure": branches[0].typed_host_failure,
+        "same_profile_reopened": branches[0].same_profile_reopened,
+        "checkpoint_plus_three_restores_and_branches_ms": checkpoint_millis,
+        "checkpoint_capture_ms": capture_millis,
+        "restore_ms": restore_millis,
+        "signed_branch_ms": branch_millis,
+        "three_full_setups_ms": full_millis,
+        "full_setup_ms": full_setup_millis,
+        "network_delivery_asserted": false,
+    });
+    serde_json::to_writer_pretty(&mut file, &redacted).expect("redacted benchmark receipt");
+    use std::io::Write;
+    file.flush().expect("flush receipt");
+    file.sync_all().expect("durable receipt");
+    drop(file);
+    let retained = receipt_dir.keep();
+    println!(
+        "task449 protected replay receipt: {}",
+        retained.join("replay.json").display()
+    );
 }
 
 #[tokio::test]

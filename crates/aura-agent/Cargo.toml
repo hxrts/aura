@@ -94,6 +94,7 @@ web-sys = { workspace = true, features = ["Window", "Location"] }
 default = ["choreo-backend-telltale-machine"]
 real-android-keystore = []
 simulation = ["aura-core/simulation", "aura-journal/simulation", "aura-effects/simulation"]
+simulator-checkpoint = ["simulation", "aura-effects/simulator-checkpoint"]
 transparent_onion = [
     "aura-core/transparent_onion",
     "aura-effects/transparent_onion",

@@ -19,6 +19,8 @@ workspace = true
 [features]
 default = []
 simulation = ["aura-core/simulation"]
+# Test-only protected profile replay. Never enable in deployable targets.
+simulator-checkpoint = ["simulation"]
 telltale-runtime-capability = ["dep:telltale-machine"]
 transparent_onion = ["aura-core/transparent_onion"]
 test-support = []

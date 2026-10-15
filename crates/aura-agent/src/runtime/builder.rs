@@ -81,6 +81,9 @@ pub struct EffectSystemBuilder {
     shared_transport: Option<SharedTransport>,
     selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
     testing_profile_owner: Option<TestingOwnedProfileCapability>,
+    #[cfg(feature = "simulator-checkpoint")]
+    simulator_nonce_retirement:
+        Option<Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>>,
 }
 
 impl EffectSystemBuilder {
@@ -99,6 +102,8 @@ impl EffectSystemBuilder {
             shared_transport: None,
             selected_profile_owner: None,
             testing_profile_owner: None,
+            #[cfg(feature = "simulator-checkpoint")]
+            simulator_nonce_retirement: None,
         }
     }
 
@@ -160,6 +165,8 @@ impl EffectSystemBuilder {
             shared_transport: None,
             selected_profile_owner: None,
             testing_profile_owner: None,
+            #[cfg(feature = "simulator-checkpoint")]
+            simulator_nonce_retirement: None,
         }
     }
 
@@ -178,6 +185,8 @@ impl EffectSystemBuilder {
             shared_transport: None,
             selected_profile_owner: None,
             testing_profile_owner: None,
+            #[cfg(feature = "simulator-checkpoint")]
+            simulator_nonce_retirement: None,
         }
     }
 
@@ -201,6 +210,17 @@ impl EffectSystemBuilder {
         provider: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
     ) -> Self {
         self.physical_time_provider = Some(provider);
+        self
+    }
+
+    /// Inject a fixture-owned retirement ledger outside restored profiles.
+    /// Production-mode assembly refuses this simulator-only control.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub fn with_simulator_nonce_retirement(
+        mut self,
+        retirement: Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>,
+    ) -> Self {
+        self.simulator_nonce_retirement = Some(retirement);
         self
     }
 
@@ -283,6 +303,16 @@ impl EffectSystemBuilder {
                 crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(
                     aura_core::effects::profile_storage::ProfileStorageError::Invalid(
                         "production profile lease supplied to a nonproduction runtime".into(),
+                    ),
+                )),
+            );
+        }
+        #[cfg(feature = "simulator-checkpoint")]
+        if self.execution_mode.is_production() && self.simulator_nonce_retirement.is_some() {
+            return Err(
+                crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(
+                    aura_core::AuraError::invalid(
+                        "simulator nonce retirement cannot enter production runtime",
                     ),
                 )),
             );
@@ -434,6 +464,11 @@ impl EffectSystemBuilder {
         // Configure the actual effect owner before any service retains its clock.
         let effect_system = match self.physical_time_provider {
             Some(provider) => effect_system.with_physical_time_provider(provider),
+            None => effect_system,
+        };
+        #[cfg(feature = "simulator-checkpoint")]
+        let effect_system = match self.simulator_nonce_retirement {
+            Some(retirement) => effect_system.with_simulator_nonce_retirement(retirement),
             None => effect_system,
         };
 

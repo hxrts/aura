@@ -334,6 +334,9 @@ pub struct AuraEffectSystem {
     /// Cryptographic operations subsystem
     crypto: CryptoSubsystem,
     enrollment_generation_gate: Arc<tokio::sync::Mutex<()>>,
+    #[cfg(feature = "simulator-checkpoint")]
+    simulator_nonce_retirement:
+        Option<Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>>,
     /// Facts received from peers and rejected at ingress (see
     /// [`AuraEffectSystem::admit_peer_fact`]).
     rejected_peer_facts: std::sync::atomic::AtomicU64,
@@ -1380,6 +1383,8 @@ impl AuraEffectSystem {
             harness_mode_enabled,
             crypto,
             enrollment_generation_gate: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(feature = "simulator-checkpoint")]
+            simulator_nonce_retirement: None,
             rejected_peer_facts: std::sync::atomic::AtomicU64::new(0),
             amp_send_sequencer: aura_protocol::amp::AmpSendSequencer::default(),
             message_drops: std::sync::Mutex::new(MessageDropLog::default()),
@@ -3485,6 +3490,23 @@ impl AuraEffectSystem {
         self.profile_owner.is_some()
     }
 
+    /// One-use proof from the runtime's actual selected profile-owned fallback
+    /// handler. Configured intent or an old fallback key cannot mint it.
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub fn selected_filesystem_checkpoint_source_for_simulation(
+        &self,
+    ) -> Option<aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource> {
+        if self.profile_owner.is_none() {
+            return None;
+        }
+        match self.crypto.secure_storage().as_ref() {
+            ProductionSecureStorageHandler::ProfileOwned(owned) => {
+                owned.selected_filesystem_checkpoint_source()
+            }
+            _ => None,
+        }
+    }
+
     /// Get composite handler
     pub fn composite(&self) -> &CompositeHandlerAdapter {
         &self.composite
@@ -3502,6 +3524,36 @@ impl AuraEffectSystem {
             .select_physical_time_provider(provider.clone());
         self.time_handler = EnhancedTimeHandler::with_provider(provider);
         self
+    }
+
+    /// Select the fixture-owned ledger for actual transcript nonce retirement.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(crate) fn with_simulator_nonce_retirement(
+        mut self,
+        retirement: Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>,
+    ) -> Self {
+        self.simulator_nonce_retirement = Some(retirement);
+        self
+    }
+
+    pub(crate) fn enrollment_nonce_retirement(
+        &self,
+    ) -> Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement> {
+        #[cfg(feature = "simulator-checkpoint")]
+        if let Some(retirement) = &self.simulator_nonce_retirement {
+            return Arc::clone(retirement);
+        }
+        Arc::new(aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default())
+    }
+
+    pub(crate) fn simulator_nonce_retirement(
+        &self,
+    ) -> Option<&dyn aura_core::crypto::tree_signing::FrostNonceRetirement> {
+        #[cfg(feature = "simulator-checkpoint")]
+        if let Some(retirement) = &self.simulator_nonce_retirement {
+            return Some(retirement.as_ref());
+        }
+        None
     }
 
     /// Corrupt the encrypted backing bytes of an immutable record (fixtures only;

@@ -827,7 +827,19 @@ pub(super) fn recover_references(
     root: &FilesystemLifetimeRoot,
 ) -> Result<Vec<SecretAllocationReference>, AuraError> {
     complete_pending_birth(root)?;
+    quiescent_references(root)
+}
+
+/// Inspect an already-acknowledged original ledger without completing a
+/// pending birth. Simulator reset must not repair live state before it has
+/// authenticated the complete branch inventory and installed its marker.
+pub(super) fn quiescent_references(
+    root: &FilesystemLifetimeRoot,
+) -> Result<Vec<SecretAllocationReference>, AuraError> {
     let index = required_index(root)?;
+    if index.pending.is_some() {
+        return Err(invalid("quiescent allocation lifetime has pending birth"));
+    }
     let names = root
         .directory
         .names_bounded(MAX_PROFILE_ALLOCATION_COUNT + 1)

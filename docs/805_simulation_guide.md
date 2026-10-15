@@ -590,16 +590,59 @@ operation and owners, selected clock inputs and deadlines, broker stage IDs,
 named fault, typed outcome, and exact original-message ACK in a private receipt.
 
 **Current limit:** the genuine signed enrollment branch creates a protected
-allocation-lifetime record in a reserved secure-provider namespace. The generic
-filesystem checkpoint intentionally refuses to remove it, so a complete
-three-branch signed restore is not yet established. That reset requires the
-original allocation-lifetime owner to authenticate and retire its own branch
-state. Do not delete or copy it through ordinary storage or secure-location
-APIs. Post-issuance owners, nonempty broker queues, live capabilities, OS
-keyrings, browser storage, independent processes, and two-host delivery are
-outside this checkpoint contract. A test-keyring service adapter exists for
-separate simulator infrastructure, but it does not substitute for this
-fixture's actual filesystem selection or prove production platform custody.
+allocation-lifetime record in a reserved secure-provider namespace. Its
+simulator-only allocation-lifetime owner authenticates the complete quiescent
+index and exact added birth files, then retires only those branch-created
+records after the durable incomplete-restore marker. The generic checkpoint
+never deletes or copies them through ordinary storage or secure-location APIs.
+The signed fixture exercises this reset, reacquires fresh original owners,
+revalidates normal signed issuance, and checks the original broker message's
+receiver ACK and typed host outcome on each branch. Run its exact inventory:
+
+```bash
+scripts/dev/run-exact-fixtures.sh --root "$PWD" --lane debug \
+  --package aura-simulator --test enrollment_lifecycle \
+  --features simulator-checkpoint --expected-count 4 \
+  --name original_signed_host_refusal_replays_from_protected_selected_profiles \
+  --name restored_original_agent_issues_new_normal_signed_enrollment \
+  --name selected_replay_refuses_foreign_owner_and_stale_epoch_before_mutation \
+  --name protected_selected_profile_replay_benchmarks_three_branches_against_full_setups
+```
+
+The benchmark keeps a redacted 0600 JSON receipt under an owner-only temporary
+directory in the checkout's ignored `artifacts/`. It reports capture plus
+three restores and signed branches beside three independent full setups;
+elapsed wall time is diagnostic, not a CI pass threshold. The build wrapper's
+receipt supplies the full source fingerprint and exact discovered/executed
+inventory. The replay receipt records only a fixture source digest, seed,
+selected clock, operation/owner, named fault, ordered broker milestones,
+typed result, exact first-message ACK, reopen result, and elapsed times.
+
+For actual FROST one-use custody, the separately scoped threshold-service
+fixture injects the same retirement effect into original and restored owners
+and refuses an identical real public commitment in the second owner:
+
+```bash
+scripts/dev/run-exact-fixtures.sh --root "$PWD" --lane debug \
+  --package hxrts-aura-agent --lib --features simulator-checkpoint \
+  --expected-count 1 \
+  --name runtime::services::threshold_signing::device_quorum::tests::injected_original_service_refuses_reused_actual_frost_nonce_across_branches
+```
+
+There is no simulator nonce-counter selector yet, so there is no duplicate
+counter warning or byte-identical crypto replay claim. Reusing an actual
+one-time commitment is a hard refusal. The 1-of-1 enrollment fast path uses
+normal signing but does not exercise FROST retirement. This checkpoint is only
+for quiescent pre-issuance selected filesystem profiles with an empty broker;
+each branch creates its broker registration and queue through the normal issue
+path. Post-issuance owners, nonempty broker queues, live capabilities, OS
+keyrings, browser storage, independent processes, and two-host delivery remain
+outside this checkpoint contract. The runtime-selected filesystem provider
+does not prove production platform keyring custody.
+Before reviewing a deployable change, run
+`nix develop --command bash scripts/check/simulator-checkpoint-reachability.sh`;
+it checks the terminal/RPC, app-host, and web release feature graphs for the
+absence of simulator checkpoint and test-keyring code.
 
 ### Scenario Contract Workflow
 

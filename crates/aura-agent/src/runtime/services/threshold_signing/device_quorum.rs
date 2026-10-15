@@ -325,6 +325,14 @@ pub(crate) fn original_device_quorum_response_matches(
 }
 
 impl ThresholdSigningService {
+    fn device_quorum_nonce_retirement(
+        &self,
+    ) -> &dyn aura_core::crypto::tree_signing::FrostNonceRetirement {
+        self.effects
+            .simulator_nonce_retirement()
+            .unwrap_or(&self.shared.device_quorum.nonce_retirement)
+    }
+
     /// This device's consent policy for co-signing (device-local storage).
     pub(crate) async fn device_signing_consent(&self) -> Result<DeviceSigningConsent, AuraError> {
         let stored = self
@@ -686,9 +694,7 @@ impl ThresholdSigningService {
             share_requests.push(request);
         }
         let mut shares = BTreeMap::new();
-        let nonces = nonces
-            .retire(&self.shared.device_quorum.nonce_retirement)
-            .await?;
+        let nonces = nonces.retire(self.device_quorum_nonce_retirement()).await?;
         shares.insert(
             policy.my_index,
             self.effects
@@ -981,7 +987,7 @@ impl ThresholdSigningService {
                     .nonces
                     .take()
                     .ok_or_else(|| refused(DeviceQuorumError::Phase))?
-                    .retire(&self.shared.device_quorum.nonce_retirement)
+                    .retire(self.device_quorum_nonce_retirement())
                     .await?;
                 let share = self
                     .effects
@@ -1580,7 +1586,7 @@ impl OriginalDeviceQuorumSigningSession {
                 .nonces
                 .take()
                 .ok_or_else(|| refused(DeviceQuorumError::Phase))?
-                .retire(&service.shared.device_quorum.nonce_retirement)
+                .retire(service.device_quorum_nonce_retirement())
                 .await?;
             self.local_signature_share = Some(
                 service
@@ -1684,6 +1690,48 @@ impl ThresholdSigningService {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "simulator-checkpoint")]
+    #[tokio::test]
+    async fn injected_original_service_refuses_reused_actual_frost_nonce_across_branches() {
+        use aura_core::crypto::tree_signing::{FrostNonces, ProcessFrostNonceRetirement};
+        use rand::SeedableRng;
+
+        let retirement = Arc::new(ProcessFrostNonceRetirement::default());
+        let make_service = |label: &str| {
+            let config = crate::core::AgentConfig::default();
+            let effects =
+                AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
+                    &config,
+                    label,
+                    AuthorityId::new_from_entropy([223; 32]),
+                    crate::SharedTransport::new(),
+                )
+                .expect("isolated threshold owner")
+                .with_simulator_nonce_retirement(retirement.clone());
+            ThresholdSigningService::new(Arc::new(effects))
+        };
+        let original = make_service("checkpoint-frost-original");
+        let restored = make_service("checkpoint-frost-restored");
+        let share = frost_ed25519::keys::SigningShare::deserialize([1u8; 32])
+            .expect("valid threshold share");
+        let identifier = frost_ed25519::Identifier::try_from(1u16).expect("participant");
+        let same_nonce = || {
+            let mut rng = rand::rngs::StdRng::from_seed([2u8; 32]);
+            FrostNonces::generate_for_share(identifier, &share, &mut rng).expect("real FROST nonce")
+        };
+        same_nonce()
+            .retire(original.device_quorum_nonce_retirement())
+            .await
+            .expect("first original retirement");
+        assert!(
+            same_nonce()
+                .retire(restored.device_quorum_nonce_retirement())
+                .await
+                .is_err(),
+            "same actual commitment must not sign in a restored branch"
+        );
+    }
 
     fn response_wait_fixture(
         label: &str,

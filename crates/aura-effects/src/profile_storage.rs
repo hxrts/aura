@@ -171,6 +171,19 @@ impl FilesystemProfileStorageHandler {
             let directory = std::fs::File::from(directory);
             directory.sync_all().map_err(io)?;
             let directory = crate::profile_directory::ProfileDirectory::from_file(directory);
+            if directory
+                .read_bounded(
+                    std::path::Path::new(".aura-checkpoint-restore-in-progress"),
+                    false,
+                    32,
+                )
+                .map_err(io)?
+                .is_some()
+            {
+                return Err(ProfileStorageError::Invalid(
+                    "profile checkpoint restoration is incomplete".into(),
+                ));
+            }
             let identity = canonical
                 .to_str()
                 .ok_or_else(|| ProfileStorageError::Invalid("profile path is not UTF-8".into()))?

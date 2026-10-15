@@ -1740,6 +1740,16 @@ actual public cancellation/retry coverage enforce this boundary.
 
 ### Current enrollment identity signing ownership
 
+The dedicated `simulator-checkpoint` feature may inject a fixture-scoped
+`FrostNonceRetirement` into the existing threshold-signing effect owner; normal
+device-quorum and enrollment signing paths still retire actual FROST
+commitments before a share can sign. A quiescent native fixture obtains a
+one-use checkpoint selection proof from its runtime-held profile-owned
+filesystem provider and acknowledges original shutdown before capture. It
+cannot select from configuration defaults or a stale fallback key. No
+checkpoint API or nonce control is exposed by deployable terminal, browser, or
+RPC owners.
+
 Prepared enrollment activation uses one current version-three persisted record
 with required signed epoch fence, original baseline and exact accepted manifest
 digest. Missing or null fields fail canonical decoding before tree installation;

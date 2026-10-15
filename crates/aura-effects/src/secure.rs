@@ -603,6 +603,20 @@ impl ProfileOwnedSecureStorage {
             ProductionSecureStorageHandler::FilesystemFallback(_)
         )
     }
+
+    /// Issue a one-use checkpoint selection proof from the actual retained
+    /// filesystem backend. A stale fallback key file cannot mint this proof.
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub fn selected_filesystem_checkpoint_source(
+        &self,
+    ) -> Option<crate::profile_checkpoint::SelectedFilesystemCheckpointSource> {
+        use aura_core::effects::profile_storage::ProfileStorageLease;
+        self.uses_filesystem_fallback().then(|| {
+            crate::profile_checkpoint::SelectedFilesystemCheckpointSource::from_owned_selection(
+                self._owner.profile_identity().to_owned(),
+            )
+        })
+    }
 }
 
 /// Production secure storage selector.
@@ -853,6 +867,42 @@ impl ProductionSecureStorageHandler {
             backend: std::sync::Arc::new(Self::FilesystemFallback(handler)),
             _owner: owner,
         }))
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub(crate) fn authenticate_checkpoint_branch_record(
+        &self,
+        path: &std::path::Path,
+        bytes: &[u8],
+    ) -> bool {
+        match self {
+            Self::ProfileOwned(owned) => owned
+                .backend
+                .authenticate_checkpoint_branch_record(path, bytes),
+            Self::FilesystemFallback(handler) => {
+                handler.authenticate_checkpoint_branch_record(path, bytes)
+            }
+            _ => false,
+        }
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub(crate) fn prepare_simulator_allocation_branch_reset(
+        &self,
+        captured: &std::collections::HashSet<PathBuf>,
+        observed_added: &[PathBuf],
+    ) -> Result<allocation_lifetime::SimulatorAllocationBranchReset, SecureStorageError> {
+        let Self::ProfileOwned(owned) = self else {
+            return Err(SecureStorageError::invalid(
+                "checkpoint lacks original selected profile owner",
+            ));
+        };
+        allocation_lifetime::prepare_simulator_branch_reset(owned, captured, observed_added)
+            .map_err(|_| {
+                SecureStorageError::invalid(
+                    "selected allocation lifetime branch is not quiescent or authenticated",
+                )
+            })
     }
 
     /// Create explicitly non-production secure storage for tests/simulations.
@@ -1995,6 +2045,62 @@ impl FilesystemFallbackSecureStorageHandler {
             .strip_prefix(&self.base_path)
             .map(std::path::Path::to_path_buf)
             .map_err(|_| SecureStorageError::invalid("secure path escaped provider"))
+    }
+
+    /// Recognize only complete provider-produced branch records before a
+    /// simulator checkpoint owner is allowed to retire new profile entries.
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub(crate) fn checkpoint_branch_location(
+        path: &std::path::Path,
+    ) -> Option<SecureStorageLocation> {
+        use std::path::Component;
+        let components: Vec<_> = path.components().collect();
+        if !(2..=3).contains(&components.len()) {
+            return None;
+        }
+        let decoded = components
+            .iter()
+            .enumerate()
+            .map(|(index, component)| {
+                let Component::Normal(raw) = component else {
+                    return None;
+                };
+                let Some(encoded) = raw.to_str() else {
+                    return None;
+                };
+                if encoded.starts_with(".aura-stage-") {
+                    return None;
+                }
+                let Ok(decoded) = Self::decode_component(encoded) else {
+                    return None;
+                };
+                let label = if index == 0 { "namespace" } else { "key" };
+                (Self::validate_component(label, &decoded).is_ok()
+                    && Self::encode_component(&decoded) == encoded)
+                    .then_some(decoded)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let location = SecureStorageLocation {
+            namespace: decoded[0].clone(),
+            key: decoded[1].clone(),
+            sub_key: decoded.get(2).cloned(),
+        };
+        (Self::validate_location(&location).is_ok()).then_some(location)
+    }
+
+    /// Authenticate a newly produced branch record with this selected
+    /// provider's original wrapping key and exact encoded location.
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub(crate) fn authenticate_checkpoint_branch_record(
+        &self,
+        path: &std::path::Path,
+        bytes: &[u8],
+    ) -> bool {
+        let Some(location) = Self::checkpoint_branch_location(path) else {
+            return false;
+        };
+        self.decrypt_fallback_record_with_protection(&location, bytes)
+            .is_ok()
     }
     /// Provider primitive for a future domain-authorized retirement owner.
     /// Deliberately private: exact bytes and a profile lock do not prove that
@@ -4453,6 +4559,13 @@ mod protected_retirement_primitive_tests {
                 .publish_retirement_birth(&descriptor, b"original bytes")
                 .await?
         );
+        let path = handler.descriptor_path(&location)?;
+        let record = handler
+            .owned_directory()?
+            .read(&path, true)?
+            .expect("published birth");
+        #[cfg(feature = "simulator-checkpoint")]
+        assert!(handler.authenticate_checkpoint_branch_record(&path, &record));
         assert_eq!(
             handler
                 .secure_retrieve(&location, &[SecureStorageCapability::Read])

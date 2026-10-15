@@ -608,6 +608,17 @@ impl SecretLifetimeBackend for FilesystemLifetimeAllocation {
 pub(super) fn selected_profile_channel(
     owned: &ProfileOwnedSecureStorage,
 ) -> Result<ProfileSecretLifetimeRecoveryCapability, AuraError> {
+    let root = selected_profile_root(owned)?;
+    Ok(
+        ProfileSecretLifetimeRecoveryCapability::from_trusted_provider(Box::new(
+            FilesystemLifetimeProvider(root),
+        )),
+    )
+}
+
+fn selected_profile_root(
+    owned: &ProfileOwnedSecureStorage,
+) -> Result<Arc<FilesystemLifetimeRoot>, AuraError> {
     let ProductionSecureStorageHandler::FilesystemFallback(backend) = owned.backend.as_ref() else {
         return Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error());
     };
@@ -658,11 +669,101 @@ pub(super) fn selected_profile_channel(
         provider_identity: owner.lifetime_provider_identity.clone(),
         _profile: owner,
     });
-    Ok(
-        ProfileSecretLifetimeRecoveryCapability::from_trusted_provider(Box::new(
-            FilesystemLifetimeProvider(root),
-        )),
-    )
+    Ok(root)
+}
+
+/// Test-only reset custody for allocations born after a protected quiescent
+/// snapshot. The caller holds the original profile lease and installs its
+/// incomplete-restore marker before committing this plan.
+#[cfg(feature = "simulator-checkpoint")]
+pub(crate) struct SimulatorAllocationBranchReset {
+    root: Arc<FilesystemLifetimeRoot>,
+    added: Vec<PathBuf>,
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+pub(super) fn prepare_simulator_branch_reset(
+    owned: &ProfileOwnedSecureStorage,
+    captured: &std::collections::HashSet<PathBuf>,
+    observed_added: &[PathBuf],
+) -> Result<SimulatorAllocationBranchReset, AuraError> {
+    // A pending publication could otherwise be repaired by normal provider
+    // initialization before the checkpoint marker protects partial reset.
+    let files = owned
+        ._owner
+        .directory
+        .files()
+        .map_err(|source| source_error("inspect quiescent allocation stages", source))?;
+    if files.iter().any(|path| {
+        path.components().any(|component| {
+            component
+                .as_os_str()
+                .to_string_lossy()
+                .starts_with(".aura-stage-")
+                || component
+                    .as_os_str()
+                    .to_string_lossy()
+                    .starts_with(".aura-initial-")
+        })
+    }) {
+        return Err(invalid(
+            "quiescent allocation lifetime has pending publication",
+        ));
+    }
+    let root = selected_profile_root(owned)?;
+    let references = initialization::quiescent_references(&root)?;
+    let mut added = references
+        .iter()
+        .map(FilesystemLifetimeRoot::path)
+        .filter(|path| {
+            !captured.contains(
+                &PathBuf::from(crate::profile_storage::SECURE_PROVIDER_DIRECTORY)
+                    .join(DIRECTORY)
+                    .join(path),
+            )
+        })
+        .collect::<Vec<_>>();
+    added.sort();
+    let mut observed = observed_added
+        .iter()
+        .map(|path| {
+            path.strip_prefix(crate::profile_storage::SECURE_PROVIDER_DIRECTORY)
+                .ok()
+                .and_then(|path| path.strip_prefix(DIRECTORY).ok())
+                .map(std::path::Path::to_path_buf)
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| invalid("branch allocation path is outside selected provider"))?;
+    observed.sort();
+    if observed != added {
+        return Err(invalid(
+            "branch allocation inventory differs from authenticated births",
+        ));
+    }
+    Ok(SimulatorAllocationBranchReset { root, added })
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+impl SimulatorAllocationBranchReset {
+    /// Called only after the original profile's incomplete-restore marker is
+    /// durably acknowledged. Descriptor-relative removal stays with this owner.
+    pub(crate) async fn retire_after_restore_marker(self) -> Result<(), AuraError> {
+        let _owner = self.root.gate.lock().await;
+        for path in self.added {
+            if !self
+                .root
+                .directory
+                .remove(&path)
+                .map_err(|source| source_error("retire simulator branch allocation", source))?
+            {
+                return Err(invalid("authenticated branch allocation disappeared"));
+            }
+        }
+        self.root
+            .directory
+            .acknowledge_entries()
+            .map_err(|source| source_error("acknowledge branch allocation reset", source))
+    }
 }
 
 mod initialization;

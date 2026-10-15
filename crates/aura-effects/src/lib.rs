@@ -105,6 +105,8 @@ pub mod noise;
     target_os = "openbsd"
 ))]
 mod platform_namespace;
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+pub mod profile_checkpoint;
 #[cfg(unix)]
 mod profile_directory;
 pub mod profile_storage;

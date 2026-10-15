@@ -580,6 +580,41 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
 }
 
 impl FilesystemStorageHandler {
+    /// Reverse only the exact ordinary filename encoding owned by this
+    /// handler. Checkpoint validation then authenticates its encrypted value
+    /// through the original selected storage effect before any deletion.
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub(crate) fn checkpoint_semantic_key(path: &Path) -> Option<String> {
+        use std::path::Component;
+        let mut parts = Vec::new();
+        let mut canonical = PathBuf::new();
+        let components: Vec<_> = path.components().collect();
+        if components.is_empty() {
+            return None;
+        }
+        for (index, component) in components.iter().enumerate() {
+            let Component::Normal(raw) = component else {
+                return None;
+            };
+            let encoded = raw.to_str()?;
+            let value = if index + 1 == components.len() {
+                encoded.strip_suffix(".dat")?
+            } else {
+                encoded
+            };
+            let decoded = Self::decode_key_segment(value).ok()?;
+            canonical.push(if index + 1 == components.len() {
+                format!("{}.dat", Self::encode_key_segment(&decoded))
+            } else {
+                Self::encode_key_segment(&decoded)
+            });
+            parts.push(decoded);
+        }
+        let key = parts.join("/");
+        Self::validate_key_segments(&key).ok()?;
+        (canonical == path).then_some(key)
+    }
+
     fn path_for_key(&self, key: &str) -> Result<PathBuf, StorageError> {
         let segments = Self::validate_key_segments(key)?;
         let mut path = self.base_path.clone();

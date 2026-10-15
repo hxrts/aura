@@ -404,8 +404,7 @@ impl OriginalEnrollmentTranscriptActor {
                             // The nonces stay in this task's memory, so the durable
                             // approval record above plus an in-process retirement
                             // log bound them to one share.
-                            let nonce_retirement =
-                            aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+                            let nonce_retirement = effects.enrollment_nonce_retirement();
                             let mut nonces =
                                 Some(effects.frost_generate_nonces(approval.local_share).await?);
                             let mut published_commitment = false;
@@ -488,13 +487,14 @@ impl OriginalEnrollmentTranscriptActor {
                                             let _ = response.send(Err(source.clone()));
                                             return Err(source);
                                         };
-                                        let local = match local.retire(&nonce_retirement).await {
-                                            Ok(local) => local,
-                                            Err(source) => {
-                                                let _ = response.send(Err(source.clone()));
-                                                return Err(source);
-                                            }
-                                        };
+                                        let local =
+                                            match local.retire(nonce_retirement.as_ref()).await {
+                                                Ok(local) => local,
+                                                Err(source) => {
+                                                    let _ = response.send(Err(source.clone()));
+                                                    return Err(source);
+                                                }
+                                            };
                                         let share = match effects
                                             .frost_sign_share_for_message(
                                                 &package,
@@ -751,8 +751,7 @@ impl OriginalEnrollmentTranscriptActor {
                 self.conditional.retirement_readback = Some(readback);
                 self.conditional.nonces =
                     Some(effects.frost_generate_nonces(&material.local_share).await?);
-                let nonce_retirement =
-                    aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+                let nonce_retirement = effects.enrollment_nonce_retirement();
                 loop {
                     request.require_material(material)?;
                     match self
@@ -809,7 +808,7 @@ impl OriginalEnrollmentTranscriptActor {
                                 rejected(EnrollmentTranscriptSigningError::ApprovalConsumed)
                             })?;
                             self.conditional.nonce_consumed = true;
-                            let retired = nonce.retire(&nonce_retirement).await?;
+                            let retired = nonce.retire(nonce_retirement.as_ref()).await?;
                             let share = effects
                                 .frost_sign_share_for_message(
                                     &package,
@@ -1338,8 +1337,7 @@ impl OriginalEnrollmentTranscriptActor {
                             .frost_generate_nonces(&material.local_share)
                             .await?,
                     );
-                    let retirement =
-                        aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+                    let retirement = material.effects.enrollment_nonce_retirement();
                     loop {
                         request.require_material(material, window)?;
                         match self.receiver.recv().await.ok_or_else(|| {
@@ -1403,7 +1401,7 @@ impl OriginalEnrollmentTranscriptActor {
                                         test.release.notified().await;
                                     }
                                 }
-                                let retired = nonce.retire(&retirement).await?;
+                                let retired = nonce.retire(retirement.as_ref()).await?;
                                 let share = material
                                     .effects
                                     .frost_sign_share_for_message(

@@ -296,6 +296,17 @@ and directory ACK. Clearing current plaintext does not prove physical or backup
 erasure while the persistent wrapping root remains. Permanent legacy immutable
 records cannot acquire allocation retirement semantics.
 
+Under the dedicated `simulator-checkpoint` feature, the selected native
+filesystem provider captures an authenticated encrypted quiescent profile
+artifact after the original lease shuts down. Restore reacquires only that
+original profile and validates every branch addition before mutation. The
+allocation-lifetime owner authenticates its complete no-pending birth index
+and exact added leaves, then retires only branch-created leaves after the
+incomplete-restore marker is acknowledged. Ordinary storage and secure-location
+APIs cannot delete these reserved records. A partial reset keeps the marker so
+ordinary acquisition fails closed. This test-only owner exports no OS keyring,
+live capability, or production checkpoint route.
+
 
 ### Original selected-provider migration
 

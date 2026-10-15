@@ -39,6 +39,7 @@ pub struct SimulatedEnrollment {
     clock: Arc<dyn PhysicalTimeEffects>,
     transport: SharedTransport,
     native_broker: bool,
+    nonce_retirements: Option<[Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2]>,
     startup: TimeoutBudget,
     start: DeviceEnrollmentStart,
     invitation: crate::handlers::invitation::Invitation,
@@ -225,7 +226,17 @@ async fn assemble(
     transport: SharedTransport,
     startup: &TimeoutBudget,
     native_broker: bool,
+    nonce_retirement: Option<Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>>,
 ) -> AgentResult<Arc<AuraAgent>> {
+    if nonce_retirement.is_some() && !native_broker {
+        return Err(AgentError::config(
+            "simulator retirement requires the native selected-profile owner",
+        ));
+    }
+    #[cfg(not(feature = "simulator-checkpoint"))]
+    if nonce_retirement.is_some() {
+        return Err(AgentError::config("simulator retirement feature is absent"));
+    }
     let context = aura_core::context::EffectContext::new(
         profile.authority,
         profile.context,
@@ -245,6 +256,10 @@ async fn assemble(
             .with_sync_config(crate::runtime::services::SyncManagerConfig::default());
         if profile.config.bootstrap_broker.enabled {
             builder = builder.with_rendezvous_config(profile.config.rendezvous_config());
+        }
+        #[cfg(feature = "simulator-checkpoint")]
+        if let Some(retirement) = nonce_retirement {
+            builder = builder.with_simulator_nonce_retirement(retirement);
         }
         Arc::new(AuraAgent::new(
             builder.build(&context).await.map_err(AgentError::from)?,
@@ -296,6 +311,52 @@ fn app(agent: Arc<AuraAgent>) -> AgentResult<EnrollmentApp> {
 }
 
 impl SimulatedEnrollment {
+    /// Bootstrap the original selected native signing profiles and stop every
+    /// owner before any enrollment setup, request, or nonce commitment exists.
+    /// The returned one-use proofs authorize a separate effect-owned checkpoint;
+    /// they do not contain shares, credentials, or a live profile lease.
+    #[cfg(all(feature = "simulator-checkpoint", unix))]
+    pub async fn prepare_quiescent_native_signing_profiles(
+        profiles: &[EnrollmentParticipantProfile; 2],
+        clock: Arc<dyn PhysicalTimeEffects>,
+        startup: &TimeoutBudget,
+    ) -> AgentResult<[aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource; 2]>
+    {
+        let transport = SharedTransport::default();
+        let issuer = assemble(
+            &profiles[0],
+            clock.clone(),
+            transport.clone(),
+            startup,
+            true,
+            None,
+        )
+        .await?;
+        let recipient =
+            match assemble(&profiles[1], clock.clone(), transport, startup, true, None).await {
+                Ok(recipient) => recipient,
+                Err(primary) => {
+                    return Err(fail_with_cleanup(primary, &[issuer], &clock, startup).await)
+                }
+            };
+        let proofs = [issuer.as_ref(), recipient.as_ref()].map(|agent| {
+            agent
+                .runtime()
+                .effects()
+                .selected_filesystem_checkpoint_source_for_simulation()
+                .ok_or_else(|| {
+                    AgentError::config("selected filesystem checkpoint source is unavailable")
+                })
+        });
+        let shutdown = cleanup_agents(&[issuer.clone(), recipient.clone()], &clock, startup).await;
+        drop(issuer);
+        drop(recipient);
+        if let Some(failure) = shutdown.into_iter().next() {
+            return Err(failure);
+        }
+        let [issuer_proof, recipient_proof] = proofs;
+        Ok([issuer_proof?, recipient_proof?])
+    }
     /// Assemble native profile owners, export setup and explicitly transfer the
     /// independent pin before canonical original issuer registration.
     pub async fn prepare(
@@ -304,7 +365,7 @@ impl SimulatedEnrollment {
         transport: SharedTransport,
         startup: TimeoutBudget,
     ) -> AgentResult<Self> {
-        Self::prepare_with_mode(profiles, clock, transport, startup, false).await
+        Self::prepare_with_mode(profiles, clock, transport, startup, false, None).await
     }
 
     /// Reuse the complete signed lifecycle with the native guarded transport.
@@ -325,7 +386,28 @@ impl SimulatedEnrollment {
                 "native broker fixture requires both exact participants",
             ));
         }
-        Self::prepare_with_mode(profiles, clock, transport, startup, true).await
+        Self::prepare_with_mode(profiles, clock, transport, startup, true, None).await
+    }
+
+    /// Simulator-only signed issuance with original per-signer retirement
+    /// ledgers retained by the fixture across restored branches.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub async fn prepare_native_broker_with_nonce_retirement(
+        profiles: [EnrollmentParticipantProfile; 2],
+        clock: Arc<dyn PhysicalTimeEffects>,
+        transport: SharedTransport,
+        startup: TimeoutBudget,
+        retirements: [Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2],
+    ) -> AgentResult<Self> {
+        if profiles
+            .iter()
+            .any(|profile| !profile.config.bootstrap_broker.enabled)
+        {
+            return Err(AgentError::config(
+                "native broker fixture requires both exact participants",
+            ));
+        }
+        Self::prepare_with_mode(profiles, clock, transport, startup, true, Some(retirements)).await
     }
 
     async fn prepare_with_mode(
@@ -334,16 +416,22 @@ impl SimulatedEnrollment {
         transport: SharedTransport,
         startup: TimeoutBudget,
         native_broker: bool,
+        retirements: Option<[Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2]>,
     ) -> AgentResult<Self> {
         let mut acquired = Vec::new();
         let mut issued_owner = None;
         let result = async {
+            let [issuer_retirement, recipient_retirement] = match retirements.clone() {
+                Some([issuer, recipient]) => [Some(issuer), Some(recipient)],
+                None => [None, None],
+            };
             let issuer = assemble(
                 &profiles[0],
                 clock.clone(),
                 transport.clone(),
                 &startup,
                 native_broker,
+                issuer_retirement,
             )
             .await?;
             acquired.push(issuer.clone());
@@ -353,6 +441,7 @@ impl SimulatedEnrollment {
                 transport.clone(),
                 &startup,
                 native_broker,
+                recipient_retirement,
             )
             .await?;
             acquired.push(recipient.clone());
@@ -397,6 +486,7 @@ impl SimulatedEnrollment {
                 clock: clock.clone(),
                 transport,
                 native_broker,
+                nonce_retirements: retirements,
                 startup: startup.clone(),
                 start,
                 invitation,
@@ -788,6 +878,7 @@ impl SimulatedEnrollment {
             clock,
             transport,
             native_broker,
+            nonce_retirements,
             startup,
             start,
             invitation,
@@ -804,6 +895,7 @@ impl SimulatedEnrollment {
             profiles,
             clock,
             native_broker,
+            nonce_retirements,
             startup,
             start,
             invitation,
@@ -818,6 +910,7 @@ pub struct StoppedEnrollmentProfiles {
     profiles: [EnrollmentParticipantProfile; 2],
     clock: Arc<dyn PhysicalTimeEffects>,
     native_broker: bool,
+    nonce_retirements: Option<[Arc<dyn aura_core::crypto::tree_signing::FrostNonceRetirement>; 2]>,
     startup: TimeoutBudget,
     start: DeviceEnrollmentStart,
     invitation: crate::handlers::invitation::Invitation,
@@ -895,6 +988,7 @@ impl StoppedEnrollmentProfiles {
                 transport.clone(),
                 &self.startup,
                 self.native_broker,
+                self.nonce_retirements.as_ref().map(|logs| logs[0].clone()),
             )
             .await?;
             acquired.push(issuer.clone());
@@ -904,6 +998,7 @@ impl StoppedEnrollmentProfiles {
                 transport,
                 &self.startup,
                 self.native_broker,
+                self.nonce_retirements.as_ref().map(|logs| logs[1].clone()),
             )
             .await?;
             acquired.push(recipient.clone());
@@ -964,6 +1059,7 @@ impl StoppedEnrollmentProfiles {
                 transport.clone(),
                 &self.startup,
                 self.native_broker,
+                self.nonce_retirements.as_ref().map(|logs| logs[0].clone()),
             )
             .await?;
             acquired.push(issuer.clone());
@@ -973,6 +1069,7 @@ impl StoppedEnrollmentProfiles {
                 transport,
                 &self.startup,
                 self.native_broker,
+                self.nonce_retirements.as_ref().map(|logs| logs[1].clone()),
             )
             .await?;
             acquired.push(recipient.clone());

@@ -800,6 +800,9 @@ impl ProfileDirectory {
             if name == std::ffi::OsStr::new(".aura-profile-owner.lock") {
                 continue;
             }
+            if name == std::ffi::OsStr::new(".aura-checkpoint-restore-in-progress") {
+                continue;
+            }
             if ordinary_root
                 && name == std::ffi::OsStr::new(crate::profile_storage::SECURE_PROVIDER_DIRECTORY)
             {

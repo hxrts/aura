@@ -7,6 +7,10 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = []
+simulator-checkpoint = ["aura-agent/simulator-checkpoint", "aura-effects/simulator-checkpoint"]
+
 [lints]
 workspace = true
 
