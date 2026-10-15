@@ -51,6 +51,7 @@ private_exchange() { # instance method receipt-label < single request JSON
 
 private_wait() { # instance label predicate jq program, expected operation and device
   local instance=$1 label=$2 predicate=$3 expected=$4 expected_device=${5:-} after=null deadline remaining response version request counter=0
+  local mismatch_dir mismatch_receipt
   local wait_seconds=${AURA_E2E_PRIVATE_WAIT_SECONDS:-240}
   [[ "$wait_seconds" =~ ^[1-9][0-9]{0,2}$ ]] || return 2
   (( wait_seconds <= 240 )) || return 2
@@ -79,6 +80,29 @@ private_wait() { # instance label predicate jq program, expected operation and d
         select(.fact.kind=="device_enrollment_accepted" and .fact.device_count==2)]|length)==0' \
       <<< "$response" >/dev/null; then
       echo "device enrollment succeeded without its host acknowledgment; inspect $PRIVATE_RECEIPT" >&2
+      return 1
+    fi
+    if [[ "$label" == accepted ]] && jq -e --arg operation "$expected" --arg device "$expected_device" '
+      .payload.event.snapshot as $s |
+      [ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and
+        .fact.device_count==2 and .fact.device_id!=null) ] as $acks |
+      any($s.operations[]?; .id=="device_enrollment" and
+        .instance_id==$operation and .state=="succeeded") and
+      ($acks|length)>0 and all($acks[]; .fact.device_id!=$device)' <<< "$response" >/dev/null; then
+      mismatch_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+      mismatch_receipt="$mismatch_dir/host-ack-mismatch.json"
+      [[ -d "$mismatch_dir" && ! -L "$mismatch_dir" && -O "$mismatch_dir" &&
+         ! -e "$mismatch_receipt" && ! -L "$mismatch_receipt" ]] || return 1
+      (umask 077; set -C; jq -cn --arg operation "$expected" --arg device "$expected_device" \
+        --argjson observed "$(jq -c '[.payload.event.snapshot.runtime_events[]? |
+          select(.fact.kind=="device_enrollment_accepted" and .fact.device_count==2 and
+          (.fact.device_id|type)=="string" and
+          (.fact.device_id|test("^[0-9a-f-]{36}$"))) |
+          {device_id:.fact.device_id,device_count:.fact.device_count}]' \
+          <<< "$response")" '
+        {schema:1,typed_failure:"host_ack_device_mismatch",operation_instance:$operation,
+         signed_manifest_device:$device,host_acknowledgments:$observed}' > "$mismatch_receipt") || return 1
+      echo "signed manifest device differs from host acknowledgment; inspect $mismatch_receipt" >&2
       return 1
     fi
     if jq -e --arg operation "$expected" --arg device "$expected_device" "$predicate" <<< "$response" >/dev/null; then
@@ -311,6 +335,14 @@ unset broker_token witness_response progress_response progress_candidate
   echo "exact original receiver ACK witness is absent or mismatched; inspect $stage_receipt" >&2
   exit 1
 }
+ack_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+ack_receipt="$ack_dir/broker-ack.json"
+[[ -d "$ack_dir" && ! -L "$ack_dir" && -O "$ack_dir" &&
+   ! -e "$ack_receipt" && ! -L "$ack_receipt" ]] || exit 1
+(umask 077; set -C; jq -cn --arg operation "$import_operation" --arg device "$device" \
+  --argjson witness "$network_witness" --argjson history "$progress_history" '
+  {schema:1,network_delivery_asserted:true,operation_instance:$operation,
+   signed_manifest_device:$device,original_ack:$witness,progress_history:$history}' > "$ack_receipt") || exit 1
 unset latest_progress
 
 private_wait barbara-tui accepted '

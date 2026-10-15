@@ -157,6 +157,11 @@ export FIXTURE_RESTARTED="$fixture/restarted"
 PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/stdout" 2> "$fixture/stderr"
 manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
 jq -e '.assertions.exact_operation_and_host_ack and .assertions.same_device_after_reopen and .transport.network_delivery_asserted==true and .evidence.network_delivery.message_id=="33333333-3333-3333-3333-333333333333"' "$manifest" >/dev/null
+jq -e '.network_delivery_asserted==true and
+  .operation_instance=="tui-op-device_enrollment-2" and
+  .signed_manifest_device=="22222222-2222-2222-2222-222222222222" and
+  .original_ack.message_id=="33333333-3333-3333-3333-333333333333"' \
+  "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/broker-ack.json" >/dev/null
 jq -es '
   [.[]|select(.params.instance_id=="barbara-tui" and
     .method=="submit_semantic_command" and
@@ -184,6 +189,13 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
     echo "paired fixture accepted $failure" >&2; exit 1
   fi
   [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
+  if [[ "$failure" == wrong_host_ack_device ]]; then
+    jq -e '.typed_failure=="host_ack_device_mismatch" and
+      .operation_instance=="tui-op-device_enrollment-2" and
+      .signed_manifest_device=="22222222-2222-2222-2222-222222222222" and
+      .host_acknowledgments==[{device_id:"00000000-0000-4000-8000-000000000003",device_count:2}]' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/host-ack-mismatch.json" >/dev/null
+  fi
   if [[ "$failure" == no_network_ack || "$failure" == no_registration || "$failure" == wrong_network_message_id || "$failure" == wrong_network_digest ]]; then
     stage_receipt="$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/broker-stage.json"
     jq -e '.network_delivery_asserted==false and (.progress_history|length)==1 and
