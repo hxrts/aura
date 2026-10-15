@@ -71,12 +71,17 @@ nix_bin="${AURA_NIX_BIN:-$(command -v nix || printf '/nix/var/nix/profiles/defau
 links=.nix-ship
 aura_bin=target/lan/aura
 repl_bin=target/lan/tool_repl
+case "${AURA_E2E_LAN_HTTP_DEV:-0}" in
+  0) terminal_features=terminal ;;
+  1) terminal_features=terminal,lan-http-dev ;;
+  *) echo 'ship: AURA_E2E_LAN_HTTP_DEV must be 0 or 1' >&2; exit 2 ;;
+esac
 if [ "$build" = 1 ]; then
   mkdir -p "$links"
   # The dev-shell profile is a GC root: the toolchain survives nix-store-gc.
   in_shell=("$nix_bin" develop --profile "$links/devshell" -c)
   "${in_shell[@]}" bash scripts/dev/build-budget.sh --lane lan-ship -- \
-    cargo build --profile lan -p aura-terminal --bin aura --no-default-features --features terminal
+    cargo build --profile lan -p aura-terminal --bin aura --no-default-features --features "$terminal_features"
   "${in_shell[@]}" bash scripts/dev/build-budget.sh --lane lan-ship -- \
     cargo build --profile lan -p aura-harness --bin tool_repl
   AURA_EXPECT_COMMIT="$commit" "${in_shell[@]}" bash "$here/build.sh" web-live

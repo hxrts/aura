@@ -208,6 +208,10 @@ The harness TUI schedules the app-owned runtime maintenance pass while idle.
 It reports a failed pass by typed error category without logging transport
 source text; the app retains the concrete error, and the agent owns enrollment
 mailbox registration, verification, and broker acknowledgment.
+The terminal reads an explicit development-only private-LAN broker client
+opt-in separately from the server bind opt-in. Both default to loopback-only
+plain HTTP. The client exception is compiled only with `lan-http-dev`; the
+ordinary release terminal cannot enable it through environment variables.
 
 ### Inventory
 

@@ -42,6 +42,7 @@ required-features = ["development"]
 default = ["terminal"]
 terminal = []
 testing = ["terminal", "aura-app/app-internals", "aura-agent/simulation"]
+lan-http-dev = ["terminal", "aura-agent/lan-http-dev"]
 development = [
     "terminal",
     "testing",

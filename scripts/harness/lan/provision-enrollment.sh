@@ -58,6 +58,7 @@ render() { # source config, output config, host | client
         printf '  "AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND=true",\n' >> "$output"
       else
         printf '  "AURA_BOOTSTRAP_BROKER_URL=%s",\n' "$broker_url" >> "$output"
+        printf '  "AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP=true",\n' >> "$output"
       fi
     fi
   done < "$source_config"

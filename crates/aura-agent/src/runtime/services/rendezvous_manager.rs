@@ -1327,7 +1327,12 @@ impl RendezvousManager {
                 ))
             })?;
         super::bootstrap_broker::fetch_remote_pending_enrollment_mailbox_registration(
-            base, auth, subject, device, digest,
+            base,
+            auth,
+            subject,
+            device,
+            digest,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)?
@@ -1376,6 +1381,7 @@ impl RendezvousManager {
             base,
             auth,
             &registration,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)
@@ -1421,7 +1427,13 @@ impl RendezvousManager {
                 ))
             })?;
         super::bootstrap_broker::take_remote_pending_enrollment_vm_envelopes(
-            base, auth, subject, device, digest, credential,
+            base,
+            auth,
+            subject,
+            device,
+            digest,
+            credential,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)
@@ -1472,7 +1484,14 @@ impl RendezvousManager {
                 ))
             })?;
         super::bootstrap_broker::acknowledge_remote_pending_enrollment_vm_envelope(
-            base, auth, subject, device, digest, credential, message_id,
+            base,
+            auth,
+            subject,
+            device,
+            digest,
+            credential,
+            message_id,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)
@@ -1541,9 +1560,14 @@ impl RendezvousManager {
             manifest_digest: statement.manifest_digest(),
             envelope,
         };
-        super::bootstrap_broker::send_remote_pending_enrollment_vm_envelope(base, auth, &payload)
-            .await
-            .map_err(RendezvousManagerError::BootstrapBroker)
+        super::bootstrap_broker::send_remote_pending_enrollment_vm_envelope(
+            base,
+            auth,
+            &payload,
+            self.config.bootstrap_broker.client_policy,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
     }
 
     pub(crate) async fn register_original_issuer_return_mailbox(
@@ -1584,9 +1608,14 @@ impl RendezvousManager {
                     "return enrollment broker authorization is absent",
                 ))
             })?;
-        super::bootstrap_broker::register_remote_issuer_return_mailbox(base, auth, &payload)
-            .await
-            .map_err(RendezvousManagerError::BootstrapBroker)
+        super::bootstrap_broker::register_remote_issuer_return_mailbox(
+            base,
+            auth,
+            &payload,
+            self.config.bootstrap_broker.client_policy,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
     }
 
     pub(crate) async fn original_issuer_return_mailbox_registration(
@@ -1638,6 +1667,7 @@ impl RendezvousManager {
             subject,
             issuer_device,
             digest,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)
@@ -1681,9 +1711,14 @@ impl RendezvousManager {
                     "return broker authorization is absent",
                 ))
             })?;
-        super::bootstrap_broker::send_remote_issuer_return_vm_envelope(base, auth, &payload)
-            .await
-            .map_err(RendezvousManagerError::BootstrapBroker)
+        super::bootstrap_broker::send_remote_issuer_return_vm_envelope(
+            base,
+            auth,
+            &payload,
+            self.config.bootstrap_broker.client_policy,
+        )
+        .await
+        .map_err(RendezvousManagerError::BootstrapBroker)
     }
 
     pub(crate) async fn take_original_issuer_return_vm_envelopes(
@@ -1735,6 +1770,7 @@ impl RendezvousManager {
             issuer_device,
             digest,
             credential,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)
@@ -1796,6 +1832,7 @@ impl RendezvousManager {
             digest,
             credential,
             message_id,
+            self.config.bootstrap_broker.client_policy,
         )
         .await
         .map_err(RendezvousManagerError::BootstrapBroker)

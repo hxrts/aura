@@ -263,7 +263,8 @@ pub use runtime::services::bootstrap_broker::StoppedBrokerCheckpointOwner;
 pub use runtime::services::bootstrap_broker::{
     endpoint_is_loopback as bootstrap_broker_endpoint_is_loopback,
     fetch_remote_candidates as fetch_bootstrap_broker_candidates, BootstrapBrokerCandidateRecord,
-    BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy, BootstrapBrokerRegistration,
+    BootstrapBrokerClientPolicy, BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy,
+    BootstrapBrokerRegistration,
 };
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
 pub use runtime::services::bootstrap_broker::{

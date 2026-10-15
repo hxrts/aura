@@ -1174,8 +1174,14 @@ owner-only generated Host A/Host B configs under
 stdin, keeping credentials out of command arguments. The generated configs
 select fixed ports, one shared random broker bearer, and distinct per-instance
 invitation credentials. Only `alex-tui` hosts the broker at Host A's LAN
-address, with the explicit development-only `AllowLanDevOnly` policy; other
-actors use its URL as clients. Pass those generated config paths as
+address, with the explicit development-only `AllowLanDevOnly` bind policy; other
+actors use its URL with a separate development-only private-LAN HTTP client
+opt-in. The native client still refuses public, DNS, malformed, and HTTPS
+endpoints without an authenticated TLS implementation. The client exception is
+absent from the ordinary terminal release binary; for this paired LAN diagnostic,
+build and ship the exact commit with `AURA_E2E_LAN_HTTP_DEV=1` on
+`scripts/harness/lan/ship.sh`, which selects the `lan-http-dev` Cargo feature.
+Pass those generated config paths as
 `AURA_E2E_LOCAL_CONFIG` and `AURA_E2E_REMOTE_CONFIG` to the owned `batch.sh`
 run. This provisions transport only. The ordinary `drv.sh req`/`lib.sh`
 semantic path still places transferred codes in arguments or retained REPL

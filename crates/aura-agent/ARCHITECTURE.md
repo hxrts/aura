@@ -282,7 +282,11 @@ Summary:
   retrieval credentials are transported in headers, compared through the
   constant-time credential helper, and protected by explicit connection and
   request-read limits. Loopback remains the default bind policy; LAN binding is
-  opt-in.
+  opt-in. Native broker clients independently default to loopback-only plain
+  HTTP; an explicit development-only private-LAN client policy permits numeric
+  private IPv4 endpoints for paired-host testing only when the `lan-http-dev`
+  feature is compiled. Neither opt-in permits public
+  HTTP endpoints or changes signed mailbox/verifier custody.
 - Candidate registration and expiry use the broker's selected
   `PhysicalTimeEffects` provider. Missing or backward observations refuse the
   action; the observation and candidate mutation are ordered under one broker

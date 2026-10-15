@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use aura_agent::BootstrapBrokerLanBindPolicy;
+use aura_agent::{BootstrapBrokerClientPolicy, BootstrapBrokerLanBindPolicy};
 
 const AURA_TUI_ALLOW_STDIO: &str = "AURA_TUI_ALLOW_STDIO";
 const AURA_TUI_LOG_PATH: &str = "AURA_TUI_LOG_PATH";
@@ -21,6 +21,9 @@ const AURA_HARNESS_LAN_DISCOVERY_PORT: &str = "AURA_HARNESS_LAN_DISCOVERY_PORT";
 const AURA_BOOTSTRAP_BROKER_BIND: &str = "AURA_BOOTSTRAP_BROKER_BIND";
 const AURA_BOOTSTRAP_BROKER_URL: &str = "AURA_BOOTSTRAP_BROKER_URL";
 const AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND: &str = "AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND";
+#[cfg(feature = "lan-http-dev")]
+const AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP: &str =
+    "AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP";
 const AURA_BOOTSTRAP_BROKER_AUTH_TOKEN: &str = "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN";
 const AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN: &str = "AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN";
 const AURA_RELAY_ADDR: &str = "AURA_RELAY_ADDR";
@@ -60,6 +63,7 @@ pub struct BootstrapBrokerEnv {
     pub bind_addr: Option<String>,
     pub base_url: Option<String>,
     pub lan_bind_policy: BootstrapBrokerLanBindPolicy,
+    pub client_policy: BootstrapBrokerClientPolicy,
     pub auth_token: Option<String>,
     pub invitation_retrieval_token: Option<String>,
 }
@@ -127,6 +131,16 @@ pub fn relay_override() -> Option<RelayEnv> {
 }
 
 pub fn bootstrap_broker_override() -> Option<BootstrapBrokerEnv> {
+    #[cfg(feature = "lan-http-dev")]
+    let client_policy = match non_empty_env(AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP)
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or(false)
+    {
+        true => BootstrapBrokerClientPolicy::AllowPrivateLanDevOnly,
+        false => BootstrapBrokerClientPolicy::LoopbackOnly,
+    };
+    #[cfg(not(feature = "lan-http-dev"))]
+    let client_policy = BootstrapBrokerClientPolicy::LoopbackOnly;
     let override_env = BootstrapBrokerEnv {
         bind_addr: non_empty_env(AURA_BOOTSTRAP_BROKER_BIND),
         base_url: non_empty_env(AURA_BOOTSTRAP_BROKER_URL),
@@ -137,6 +151,7 @@ pub fn bootstrap_broker_override() -> Option<BootstrapBrokerEnv> {
             true => BootstrapBrokerLanBindPolicy::AllowLanDevOnly,
             false => BootstrapBrokerLanBindPolicy::LoopbackOnly,
         },
+        client_policy,
         auth_token: non_empty_env(AURA_BOOTSTRAP_BROKER_AUTH_TOKEN),
         invitation_retrieval_token: non_empty_env(AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN),
     };

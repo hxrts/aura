@@ -37,6 +37,7 @@ mode() {
 rg -q 'AURA_BOOTSTRAP_BROKER_BIND=192.0.2.10:43190' "$local_config"
 rg -q 'AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND=true' "$local_config"
 rg -q 'AURA_BOOTSTRAP_BROKER_URL=http://192.0.2.10:43190' "$remote_config"
+[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP=true' "$remote_config") == 3 ]]
 rg -q '^fixed_ports = true$' "$local_config"
 rg -q '^fixed_ports = true$' "$remote_config"
 [[ $(rg -c 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=' "$local_config") == 3 ]]

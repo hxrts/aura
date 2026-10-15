@@ -102,6 +102,32 @@ pub enum BootstrapBrokerLanBindPolicy {
     AllowLanDevOnly,
 }
 
+/// Native broker client policy. Non-loopback plain HTTP is development-only.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapBrokerClientPolicy {
+    /// Production default: only the local machine may receive plain HTTP.
+    #[default]
+    LoopbackOnly,
+    /// Explicit test/LAN opt-in, restricted to numeric private IPv4 hosts.
+    #[cfg(feature = "lan-http-dev")]
+    AllowPrivateLanDevOnly,
+}
+
+impl BootstrapBrokerClientPolicy {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn allows_private_lan(self) -> bool {
+        #[cfg(feature = "lan-http-dev")]
+        {
+            matches!(self, Self::AllowPrivateLanDevOnly)
+        }
+        #[cfg(not(feature = "lan-http-dev"))]
+        {
+            false
+        }
+    }
+}
+
 /// Broker configuration for mixed native/browser bootstrap discovery.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BootstrapBrokerConfig {
@@ -113,6 +139,9 @@ pub struct BootstrapBrokerConfig {
     /// LAN-visible HTTP brokers are development-only until TLS is added. They
     /// require explicit opt-in plus bearer-token authentication.
     pub lan_bind_policy: BootstrapBrokerLanBindPolicy,
+    /// Explicit development-only opt-in for native clients using private LAN HTTP.
+    #[serde(default)]
+    pub client_policy: BootstrapBrokerClientPolicy,
     /// Broker base URL used by runtimes that act as clients only.
     pub base_url: Option<String>,
     /// Bearer token required by all HTTP broker endpoints.
@@ -131,6 +160,7 @@ impl Default for BootstrapBrokerConfig {
             enabled: false,
             bind_addr: None,
             lan_bind_policy: BootstrapBrokerLanBindPolicy::LoopbackOnly,
+            client_policy: BootstrapBrokerClientPolicy::LoopbackOnly,
             base_url: None,
             auth_token: None,
             invitation_retrieval_token: None,
@@ -147,6 +177,11 @@ impl BootstrapBrokerConfig {
 
     pub fn with_lan_bind_policy(mut self, policy: BootstrapBrokerLanBindPolicy) -> Self {
         self.lan_bind_policy = policy;
+        self
+    }
+
+    pub fn with_client_policy(mut self, policy: BootstrapBrokerClientPolicy) -> Self {
+        self.client_policy = policy;
         self
     }
 
@@ -2488,8 +2523,16 @@ fn require_success_status(status: u16) -> Result<(), aura_core::AuraError> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), test))]
 fn parse_http_endpoint(url: &str) -> Result<(String, String), aura_core::AuraError> {
+    parse_http_endpoint_with_policy(url, BootstrapBrokerClientPolicy::LoopbackOnly)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_http_endpoint_with_policy(
+    url: &str,
+    policy: BootstrapBrokerClientPolicy,
+) -> Result<(String, String), aura_core::AuraError> {
     if url.starts_with("https://") {
         return Err(aura_core::AuraError::invalid(
             "HTTPS client not available in this native build",
@@ -2498,18 +2541,37 @@ fn parse_http_endpoint(url: &str) -> Result<(String, String), aura_core::AuraErr
     let without_scheme = url
         .strip_prefix("http://")
         .ok_or_else(|| aura_core::AuraError::invalid("bootstrap broker URL requires http://"))?;
-    if !endpoint_is_loopback(url) {
-        return Err(aura_core::AuraError::invalid(
-            "plain HTTP bootstrap broker URLs are restricted to loopback endpoints",
-        ));
-    }
     let (host_port, path) = match without_scheme.split_once('/') {
         Some((host_port, path)) => (host_port.to_string(), format!("/{path}")),
         None => (without_scheme.to_string(), "/".to_string()),
     };
-    if host_port.is_empty() {
+    if host_port.is_empty()
+        || host_port.contains('@')
+        || host_port.contains('?')
+        || host_port.contains('#')
+        || path.contains('\r')
+        || path.contains('\n')
+    {
         return Err(aura_core::AuraError::invalid(
-            "bootstrap broker URL missing host",
+            "invalid bootstrap broker endpoint",
+        ));
+    }
+    let socket = host_port.parse::<std::net::SocketAddr>().ok();
+    let localhost_port = host_port
+        .strip_prefix("localhost:")
+        .and_then(|port| port.parse::<u16>().ok())
+        .filter(|port| *port != 0);
+    if socket.is_none_or(|addr| addr.port() == 0) && localhost_port.is_none() {
+        return Err(aura_core::AuraError::invalid(
+            "invalid bootstrap broker endpoint",
+        ));
+    }
+    let loopback = localhost_port.is_some() || socket.is_some_and(|addr| addr.ip().is_loopback());
+    let private_lan =
+        socket.is_some_and(|addr| matches!(addr.ip(), std::net::IpAddr::V4(ip) if ip.is_private()));
+    if !loopback && !(policy.allows_private_lan() && private_lan) {
+        return Err(aura_core::AuraError::invalid(
+            "plain HTTP bootstrap broker URLs are restricted to loopback endpoints",
         ));
     }
     Ok((host_port, path))
@@ -2523,7 +2585,27 @@ async fn send_http_request(
     extra_headers: &[(&str, &str)],
     body: Option<&[u8]>,
 ) -> Result<Vec<u8>, aura_core::AuraError> {
-    let (host_port, path) = parse_http_endpoint(url)?;
+    send_http_request_with_policy(
+        method,
+        url,
+        auth_token,
+        extra_headers,
+        body,
+        BootstrapBrokerClientPolicy::LoopbackOnly,
+    )
+    .await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn send_http_request_with_policy(
+    method: &str,
+    url: &str,
+    auth_token: &str,
+    extra_headers: &[(&str, &str)],
+    body: Option<&[u8]>,
+    policy: BootstrapBrokerClientPolicy,
+) -> Result<Vec<u8>, aura_core::AuraError> {
+    let (host_port, path) = parse_http_endpoint_with_policy(url, policy)?;
     let mut stream = TcpStream::connect(&host_port)
         .await
         .map_err(|source| broker_client_failure("bootstrap broker connect failed", source))?;
@@ -2613,6 +2695,18 @@ async fn send_http_request(
         .map_err(|source| broker_client_failure("bootstrap broker response read failed", source))
 }
 
+#[cfg(target_arch = "wasm32")]
+async fn send_http_request_with_policy(
+    method: &str,
+    url: &str,
+    auth_token: &str,
+    extra_headers: &[(&str, &str)],
+    body: Option<&[u8]>,
+    _policy: BootstrapBrokerClientPolicy,
+) -> Result<Vec<u8>, aura_core::AuraError> {
+    send_http_request(method, url, auth_token, extra_headers, body).await
+}
+
 pub async fn register_remote_candidate(
     base_url: &str,
     auth_token: &str,
@@ -2675,9 +2769,10 @@ pub(crate) async fn register_remote_pending_enrollment_mailbox(
     base_url: &str,
     auth_token: &str,
     registration: &BootstrapPendingEnrollmentMailboxRegistration,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<(), aura_core::AuraError> {
     let body = serde_json::to_vec(registration).map_err(aura_core::AuraError::from)?;
-    send_http_request(
+    send_http_request_with_policy(
         "POST",
         &format!(
             "{}/v2/bootstrap/enrollment-mailbox/register",
@@ -2686,6 +2781,7 @@ pub(crate) async fn register_remote_pending_enrollment_mailbox(
         auth_token,
         &[],
         Some(&body),
+        policy,
     )
     .await?;
     Ok(())
@@ -2697,11 +2793,12 @@ pub(crate) async fn fetch_remote_pending_enrollment_mailbox_registration(
     subject: AuthorityId,
     device: DeviceId,
     manifest_digest: [u8; 32],
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<
     Option<aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxRegistration>,
     aura_core::AuraError,
 > {
-    let body = send_http_request(
+    let body = send_http_request_with_policy(
         "GET",
         &pending_enrollment_mailbox_endpoint(
             base_url,
@@ -2713,6 +2810,7 @@ pub(crate) async fn fetch_remote_pending_enrollment_mailbox_registration(
         auth_token,
         &[],
         None,
+        policy,
     )
     .await?;
     serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
@@ -2722,9 +2820,10 @@ pub(crate) async fn send_remote_pending_enrollment_vm_envelope(
     base_url: &str,
     auth_token: &str,
     payload: &BootstrapPendingEnrollmentMailboxEnvelope,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<(), aura_core::AuraError> {
     let body = serde_json::to_vec(payload).map_err(aura_core::AuraError::from)?;
-    send_http_request(
+    send_http_request_with_policy(
         "POST",
         &format!(
             "{}/v2/bootstrap/enrollment-mailbox/envelopes",
@@ -2733,6 +2832,7 @@ pub(crate) async fn send_remote_pending_enrollment_vm_envelope(
         auth_token,
         &[],
         Some(&body),
+        policy,
     )
     .await?;
     Ok(())
@@ -2745,8 +2845,9 @@ pub(crate) async fn take_remote_pending_enrollment_vm_envelopes(
     device: DeviceId,
     manifest_digest: [u8; 32],
     retrieval_credential: &str,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<Vec<PendingMailboxDelivery>, aura_core::AuraError> {
-    let body = send_http_request(
+    let body = send_http_request_with_policy(
         "GET",
         &pending_enrollment_mailbox_endpoint(
             base_url,
@@ -2758,6 +2859,7 @@ pub(crate) async fn take_remote_pending_enrollment_vm_envelopes(
         auth_token,
         &[(ENROLLMENT_MAILBOX_RETRIEVAL_HEADER, retrieval_credential)],
         None,
+        policy,
     )
     .await?;
     serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
@@ -2771,17 +2873,19 @@ pub(crate) async fn acknowledge_remote_pending_enrollment_vm_envelope(
     manifest_digest: [u8; 32],
     retrieval_credential: &str,
     message_id: &str,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<(), aura_core::AuraError> {
     let body = serde_json::to_vec(&BootstrapPendingEnrollmentMailboxAck {
         message_id: message_id.to_owned(),
     })
     .map_err(aura_core::AuraError::from)?;
-    send_http_request(
+    send_http_request_with_policy(
         "POST",
         &pending_enrollment_mailbox_endpoint(base_url, "ack", subject, device, manifest_digest),
         auth_token,
         &[(ENROLLMENT_MAILBOX_RETRIEVAL_HEADER, retrieval_credential)],
         Some(&body),
+        policy,
     )
     .await?;
     Ok(())
@@ -2791,9 +2895,10 @@ pub(crate) async fn register_remote_issuer_return_mailbox(
     base_url: &str,
     auth_token: &str,
     payload: &BootstrapIssuerReturnMailboxRegistration,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<(), aura_core::AuraError> {
     let body = serde_json::to_vec(payload).map_err(aura_core::AuraError::from)?;
-    send_http_request(
+    send_http_request_with_policy(
         "POST",
         &format!(
             "{}/v2/bootstrap/enrollment-return-mailbox/register",
@@ -2802,6 +2907,7 @@ pub(crate) async fn register_remote_issuer_return_mailbox(
         auth_token,
         &[],
         Some(&body),
+        policy,
     )
     .await?;
     Ok(())
@@ -2813,11 +2919,12 @@ pub(crate) async fn fetch_remote_issuer_return_mailbox_registration(
     subject: AuthorityId,
     issuer_device: DeviceId,
     manifest_digest: [u8; 32],
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<
     Option<aura_invitation::enrollment_mailbox::IssuerEnrollmentReturnRegistration>,
     aura_core::AuraError,
 > {
-    let body = send_http_request(
+    let body = send_http_request_with_policy(
         "GET",
         &issuer_return_mailbox_endpoint(
             base_url,
@@ -2829,6 +2936,7 @@ pub(crate) async fn fetch_remote_issuer_return_mailbox_registration(
         auth_token,
         &[],
         None,
+        policy,
     )
     .await?;
     serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
@@ -2838,9 +2946,10 @@ pub(crate) async fn send_remote_issuer_return_vm_envelope(
     base_url: &str,
     auth_token: &str,
     payload: &BootstrapIssuerReturnMailboxEnvelope,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<(), aura_core::AuraError> {
     let body = serde_json::to_vec(payload).map_err(aura_core::AuraError::from)?;
-    send_http_request(
+    send_http_request_with_policy(
         "POST",
         &format!(
             "{}/v2/bootstrap/enrollment-return-mailbox/envelopes",
@@ -2849,6 +2958,7 @@ pub(crate) async fn send_remote_issuer_return_vm_envelope(
         auth_token,
         &[],
         Some(&body),
+        policy,
     )
     .await?;
     Ok(())
@@ -2861,8 +2971,9 @@ pub(crate) async fn take_remote_issuer_return_vm_envelopes(
     issuer_device: DeviceId,
     manifest_digest: [u8; 32],
     retrieval_credential: &str,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<Vec<IssuerReturnMailboxDelivery>, aura_core::AuraError> {
-    let body = send_http_request(
+    let body = send_http_request_with_policy(
         "GET",
         &issuer_return_mailbox_endpoint(
             base_url,
@@ -2877,6 +2988,7 @@ pub(crate) async fn take_remote_issuer_return_vm_envelopes(
             retrieval_credential,
         )],
         None,
+        policy,
     )
     .await?;
     serde_json::from_slice(&body).map_err(aura_core::AuraError::from)
@@ -2890,12 +3002,13 @@ pub(crate) async fn acknowledge_remote_issuer_return_vm_envelope(
     manifest_digest: [u8; 32],
     retrieval_credential: &str,
     message_id: &str,
+    policy: BootstrapBrokerClientPolicy,
 ) -> Result<(), aura_core::AuraError> {
     let body = serde_json::to_vec(&BootstrapPendingEnrollmentMailboxAck {
         message_id: message_id.to_owned(),
     })
     .map_err(aura_core::AuraError::from)?;
-    send_http_request(
+    send_http_request_with_policy(
         "POST",
         &issuer_return_mailbox_endpoint(base_url, "ack", subject, issuer_device, manifest_digest),
         auth_token,
@@ -2904,6 +3017,7 @@ pub(crate) async fn acknowledge_remote_issuer_return_vm_envelope(
             retrieval_credential,
         )],
         Some(&body),
+        policy,
     )
     .await?;
     Ok(())
@@ -3142,6 +3256,7 @@ mod tests {
             subject,
             issuer_device,
             digest,
+            BootstrapBrokerClientPolicy::LoopbackOnly,
         )
         .await
         .expect_err("missing selected provider must refuse return-mailbox reads");
@@ -3159,6 +3274,7 @@ mod tests {
             subject,
             issuer_device,
             digest,
+            BootstrapBrokerClientPolicy::LoopbackOnly,
         )
         .await
         .expect("selected provider permits a valid empty result")
@@ -3169,6 +3285,7 @@ mod tests {
             subject,
             issuer_device,
             digest,
+            BootstrapBrokerClientPolicy::LoopbackOnly,
         )
         .await
         .expect_err("selected provider must not bypass bearer authorization");
@@ -3981,6 +4098,127 @@ mod tests {
         assert!(error
             .to_string()
             .contains("plain HTTP bootstrap broker URLs are restricted to loopback"));
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "lan-http-dev"))]
+    #[test]
+    fn native_broker_private_lan_http_requires_explicit_client_policy() {
+        use BootstrapBrokerClientPolicy::{AllowPrivateLanDevOnly, LoopbackOnly};
+        let endpoint = "http://192.168.0.199:43190/v2/bootstrap/enrollment-mailbox/register";
+        assert!(parse_http_endpoint_with_policy(endpoint, LoopbackOnly).is_err());
+        assert_eq!(
+            parse_http_endpoint_with_policy(endpoint, AllowPrivateLanDevOnly)
+                .expect("explicit development LAN route"),
+            (
+                "192.168.0.199:43190".into(),
+                "/v2/bootstrap/enrollment-mailbox/register".into()
+            )
+        );
+        for bad in [
+            "http://192.0.2.10:43190/v2/bootstrap",
+            "http://8.8.8.8:43190/v2/bootstrap",
+            "http://broker.example.test:43190/v2/bootstrap",
+            "http://192.168.0.199@evil.test:43190/v2/bootstrap",
+            "http://localhost:bad/v2/bootstrap",
+            "http://192.168.0.199:0/v2/bootstrap",
+            "https://192.168.0.199:43190/v2/bootstrap",
+        ] {
+            assert!(
+                parse_http_endpoint_with_policy(bad, AllowPrivateLanDevOnly).is_err(),
+                "foreign or malformed endpoint accepted"
+            );
+        }
+        assert_eq!(BootstrapBrokerConfig::default().client_policy, LoopbackOnly);
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "lan-http-dev")))]
+    #[test]
+    fn production_broker_client_refuses_private_lan_http() {
+        assert!(parse_http_endpoint_with_policy(
+            "http://192.168.0.199:43190/v2/bootstrap/enrollment-mailbox/register",
+            BootstrapBrokerClientPolicy::LoopbackOnly,
+        )
+        .is_err());
+        assert_eq!(
+            BootstrapBrokerConfig::default().client_policy,
+            BootstrapBrokerClientPolicy::LoopbackOnly
+        );
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "lan-http-dev"))]
+    #[tokio::test]
+    async fn development_client_registers_original_mailbox_over_authenticated_http() {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(120),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("local broker bind")
+        .with_mailbox_time_provider(clock);
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("development_client_registration"));
+        tokio::task::yield_now().await;
+        let subject = AuthorityId::new_from_entropy([11; 32]);
+        let provisional = AuthorityId::new_from_entropy([12; 32]);
+        let device = DeviceId::from_bytes([13; 32]);
+        let manifest_digest = [14u8; 32];
+        let setup_digest = [15u8; 32];
+        let credential = "receiver-scoped-credential-000000000000000000000000".to_owned();
+        let registration = serde_json::from_value(serde_json::json!({
+            "statement": {
+                "version": 1,
+                "invitation": aura_core::InvitationId::new("development-client-invitation"),
+                "ceremony": aura_core::CeremonyId::new("development-client-ceremony"),
+                "manifest_digest": manifest_digest,
+                "setup_digest": setup_digest,
+                "subject": subject,
+                "provisional": provisional,
+                "invitee_device": device,
+                "expires_at_ms": 1000,
+                "retrieval_credential_commitment": aura_core::hash::hash(credential.as_bytes())
+            },
+            "proof": aura_core::threshold::ThresholdSignature::new(
+                vec![0; 64], 1, vec![1], vec![0; 32], 0)
+        }))
+        .expect("transport fixture has canonical untrusted registration shape");
+        let payload = BootstrapPendingEnrollmentMailboxRegistration {
+            registration,
+            retrieval_credential: credential,
+        };
+        let policy = BootstrapBrokerClientPolicy::AllowPrivateLanDevOnly;
+        register_remote_pending_enrollment_mailbox(
+            broker.public_url(),
+            AUTH_TOKEN,
+            &payload,
+            policy,
+        )
+        .await
+        .expect("explicit development policy retains original mailbox registration");
+        let stored = fetch_remote_pending_enrollment_mailbox_registration(
+            broker.public_url(),
+            AUTH_TOKEN,
+            subject,
+            device,
+            [14; 32],
+            policy,
+        )
+        .await
+        .expect("authenticated broker read")
+        .expect("registration was retained");
+        assert_eq!(stored, payload.registration);
+        assert!(fetch_remote_pending_enrollment_mailbox_registration(
+            broker.public_url(),
+            "wrong-bearer",
+            subject,
+            device,
+            [14; 32],
+            policy,
+        )
+        .await
+        .is_err());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
