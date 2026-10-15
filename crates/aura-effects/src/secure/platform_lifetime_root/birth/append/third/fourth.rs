@@ -9,7 +9,17 @@ const MAX_V10_ROSTER_FILE: usize = ROSTER_MAGIC_V10.len()
     + 2
     + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
         * (ROSTER_ENTRY_HEADER_LEN + MAX_SCOPE_BYTES);
+mod generic;
 mod lifecycle;
+
+#[cfg(test)]
+pub(super) fn cleanup_generic_fixture(
+    owned: &ProfileOwnedSecureStorage,
+    root: &RootRecord,
+    service: &str,
+) {
+    generic::cleanup_fixture(owned, root, service);
+}
 
 #[cfg(test)]
 pub(super) fn cleanup_fixture(service: &str, id: &[u8; 32]) {
@@ -380,6 +390,11 @@ fn verify_four(
         ));
     }
     let mut root = read_root(owned, selected)?;
+    if root.generic_phase != GENERIC_UNCLAIMED {
+        return Err(invalid(
+            "platform fourth owner was transferred to generic roster",
+        ));
+    }
     if root.id != four.root || root.tail_next_id != four.fourth {
         return Err(invalid(
             "platform fourth owner has foreign root or allocation",
@@ -415,6 +430,9 @@ async fn promote_borrowed(
         ));
     }
     let mut root = read_root(owned, selected)?;
+    if root.generic_phase != GENERIC_UNCLAIMED {
+        return Err(invalid("platform fourth handoff was already transferred"));
+    }
     if root.id != three.root {
         return Err(invalid("platform fourth handoff has foreign original root"));
     }
@@ -443,6 +461,9 @@ pub(super) async fn recover_four_roster(
     let (selected, owner) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
     let mut root = read_root(owned, selected)?;
+    if root.generic_phase != GENERIC_UNCLAIMED {
+        return Err(invalid("platform fourth roster was already transferred"));
+    }
     let (claim, scope) = prior(owned, selected, &mut root)?;
     replay(owned, selected, &mut root, &claim, &scope, StopAfter::Never)?;
     lifecycle::recover(owned, selected, &mut root)?;

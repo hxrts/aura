@@ -61,7 +61,7 @@ fn publish_marker(
     staged.acknowledge().map_err(io)
 }
 
-fn decision_record(
+pub(super) fn decision_record(
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,
 ) -> Result<Option<DecisionRecord>, AuraError> {
@@ -468,12 +468,12 @@ pub(super) fn recover(
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::secure::platform_lifetime_root::birth::append::third::fourth) mod tests {
     use super::*;
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-    async fn first_four(
+    pub(in crate::secure::platform_lifetime_root::birth::append::third::fourth) async fn first_four(
         fixture: &Fixture,
     ) -> Result<(ProductionSecureStorageHandler, PlatformFourRosterAdmission), AuraError> {
         let (storage, three) = super::super::tests::first_three(fixture).await?;

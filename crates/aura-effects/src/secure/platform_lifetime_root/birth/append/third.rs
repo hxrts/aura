@@ -16,6 +16,15 @@ pub(super) fn cleanup_fourth_fixture(service: &str, id: &[u8; 32]) {
     fourth::cleanup_fixture(service, id);
 }
 
+#[cfg(test)]
+pub(super) fn cleanup_generic_fixture(
+    owned: &ProfileOwnedSecureStorage,
+    root: &RootRecord,
+    service: &str,
+) {
+    fourth::cleanup_generic_fixture(owned, root, service);
+}
+
 fn third_roster(root: &RootRecord, claim: &Claim, scope: &[u8]) -> Result<Vec<u8>, AuraError> {
     let prior = roster(root, claim);
     validate_roster_layout(&prior, root, claim)?;

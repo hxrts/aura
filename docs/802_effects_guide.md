@@ -522,18 +522,27 @@ Build the platform path in reviewable dependencies:
    writer grants no third allocation owner: the selected L6 channel and
    two-entry actor capacity refusal remain in force until per-entry transitions,
    owner handoff and the full 4096-entry contract are proved.
-   The private V11 root keeps a reusable authenticated tail-append slot. For
+   The private V12 root keeps a reusable authenticated tail-append slot. For
    the first transition, it anchors the exact four-entry target roster and
    sealed fourth intent before publishing a new selected credential. Recover
    only that original intent and immutable ACK under the same profile and
    namespace leases; refuse stale three-entry owners after a tail claim.
-   Its parser enforces the 4096-entry wire bound, while this packet accepts
-   only count three to four. The original four-entry owner and selected
+   Its first append accepts count three to four. The original four-entry owner and selected
    namespace lease also authenticate the fourth decision, AEAD-sealed negative-denial
    tombstone, and readback-verified erasure of its selected credential and
    sealed intent. Interrupted transitions replay only root-anchored evidence;
-   the roster marker retains the fourth scope after erasure. V10 roots fail
-   closed without migration. Further entries remain separate from L6 selection.
+   the roster marker retains the fourth scope after erasure. V11 roots fail
+   closed without migration. The private generic ledger authenticates the
+   settled fourth scope and decision/denial/erasure proof through a root-bound
+   manifest of immutable, at-most-64-entry pages. It anchors each
+   fifth-through-4096 birth's sealed intent and exact target manifest before
+   selected credential publication, then publishes only the changed page or
+   split pages. Reopen validates every page digest, original record and scope
+   before one owner transfer. A later manifest refuses a completed root
+   rollback. The maximum-size page/manifest check is a wire and capacity
+   bound, not a timed 4096-credential birth/recovery proof. Generic decision,
+   denial and erasure mutation remain closed, as do L6 selection and OS
+   credential-service durability proof.
    The private V9 root extends this original custody through a three-entry
    owner handoff, exact third decision, authenticated negative tombstone and
    provider-owned third credential erasure. Recover the retained third scope

@@ -29,6 +29,15 @@ pub(super) fn cleanup_fourth_fixture(service: &str, id: &[u8; 32]) {
     third::cleanup_fourth_fixture(service, id);
 }
 
+#[cfg(test)]
+pub(super) fn cleanup_generic_fixture(
+    owned: &ProfileOwnedSecureStorage,
+    root: &RootRecord,
+    service: &str,
+) {
+    third::cleanup_generic_fixture(owned, root, service);
+}
+
 pub(in crate::secure::platform_lifetime_root::birth) struct Claim {
     root: [u8; 32],
     allocation: [u8; 32],

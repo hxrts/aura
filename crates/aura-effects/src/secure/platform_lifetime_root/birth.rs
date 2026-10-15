@@ -37,6 +37,15 @@ pub(super) fn cleanup_fourth_fixture(service: &str, id: &[u8; 32]) {
     append::cleanup_fourth_fixture(service, id);
 }
 
+#[cfg(test)]
+pub(super) fn cleanup_generic_fixture(
+    owned: &ProfileOwnedSecureStorage,
+    root: &RootRecord,
+    service: &str,
+) {
+    append::cleanup_generic_fixture(owned, root, service);
+}
+
 struct BirthIntent {
     root: [u8; 32],
     allocation: [u8; 32],

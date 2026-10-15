@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V11";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V12";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,7 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 20 + 2 + 1 + 2 + 2 + 2;
+const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 24 + 2 + 1 + 2 + 2 + 2 + 1 + 2;
 const MAX_PLAINTEXT_LEN: usize =
     PLAINTEXT_HEADER_LEN + 2 * aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES;
 const SECOND_BIRTH_COMPLETE: u8 = 0;
@@ -59,6 +59,10 @@ const TAIL_TOMBSTONE_PENDING: u8 = 5;
 const TAIL_TOMBSTONE_ACK_ERASURE_PENDING: u8 = 6;
 const TAIL_ERASURE_PENDING: u8 = 7;
 const TAIL_ERASURE_COMPLETE: u8 = 8;
+const GENERIC_UNCLAIMED: u8 = 0;
+const GENERIC_INIT_PENDING: u8 = 1;
+const GENERIC_ACTIVE: u8 = 2;
+const GENERIC_APPEND_PENDING: u8 = 3;
 const MAX_FILE_LEN: usize = 256;
 
 #[derive(Clone)]
@@ -88,6 +92,12 @@ struct RootRecord {
     tail_next_intent_digest: [u8; 32],
     tail_decision_digest: [u8; 32],
     tail_tombstone_digest: [u8; 32],
+    generic_phase: u8,
+    generic_count: u16,
+    generic_current_digest: [u8; 32],
+    generic_target_digest: [u8; 32],
+    generic_next_id: [u8; 32],
+    generic_next_intent_digest: [u8; 32],
     // Retained nonsecret birth scopes survive selected-provider credential
     // erasure. Their bytes are authenticated inside the original root.
     first_scope: Vec<u8>,
@@ -161,6 +171,12 @@ impl RootRecord {
         plain.extend_from_slice(&self.tail_next_intent_digest);
         plain.extend_from_slice(&self.tail_decision_digest);
         plain.extend_from_slice(&self.tail_tombstone_digest);
+        plain.push(self.generic_phase);
+        plain.extend_from_slice(&self.generic_count.to_le_bytes());
+        plain.extend_from_slice(&self.generic_current_digest);
+        plain.extend_from_slice(&self.generic_target_digest);
+        plain.extend_from_slice(&self.generic_next_id);
+        plain.extend_from_slice(&self.generic_next_intent_digest);
         plain.extend_from_slice(&(self.first_scope.len() as u16).to_le_bytes());
         plain.extend_from_slice(&(self.second_scope.len() as u16).to_le_bytes());
         plain.extend_from_slice(&self.first_scope);
@@ -209,9 +225,10 @@ impl RootRecord {
                     Arc::new(source),
                 )
             })?;
-        let first_scope_len = u16::from_le_bytes([plain[646], plain[647]]) as usize;
-        let second_scope_len = u16::from_le_bytes([plain[648], plain[649]]) as usize;
+        let first_scope_len = u16::from_le_bytes([plain[777], plain[778]]) as usize;
+        let second_scope_len = u16::from_le_bytes([plain[779], plain[780]]) as usize;
         let tail_count = u16::from_le_bytes([plain[452], plain[453]]);
+        let generic_count = u16::from_le_bytes([plain[647], plain[648]]);
         if plain.len() != PLAINTEXT_HEADER_LEN + first_scope_len + second_scope_len
             || first_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
             || second_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
@@ -296,6 +313,28 @@ impl RootRecord {
                 && (plain[582..614] == [0; 32] || plain[614..646] != [0; 32]))
             || (plain[451] >= TAIL_TOMBSTONE_PENDING
                 && (plain[582..614] == [0; 32] || plain[614..646] == [0; 32]))
+            || !matches!(plain[646], GENERIC_UNCLAIMED..=GENERIC_APPEND_PENDING)
+            || (plain[646] == GENERIC_UNCLAIMED
+                && (generic_count != 0 || plain[649..777] != [0; 128]))
+            || (plain[646] == GENERIC_INIT_PENDING
+                && (tail_count != 4
+                    || generic_count != 0
+                    || plain[649..681] != [0; 32]
+                    || plain[681..713] == [0; 32]
+                    || plain[713..777] != [0; 64]))
+            || (plain[646] == GENERIC_ACTIVE
+                && (generic_count < 4
+                    || generic_count as usize
+                        > aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
+                    || plain[649..681] == [0; 32]
+                    || plain[681..777] != [0; 96]))
+            || (plain[646] == GENERIC_APPEND_PENDING
+                && (generic_count < 4
+                    || generic_count as usize
+                        >= aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
+                    || plain[649..777]
+                        .chunks_exact(32)
+                        .any(|field| field == [0; 32])))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -325,8 +364,14 @@ impl RootRecord {
             tail_next_intent_digest: fixed_bytes(&plain[550..582])?,
             tail_decision_digest: fixed_bytes(&plain[582..614])?,
             tail_tombstone_digest: fixed_bytes(&plain[614..646])?,
-            first_scope: plain[650..650 + first_scope_len].to_vec(),
-            second_scope: plain[650 + first_scope_len..].to_vec(),
+            generic_phase: plain[646],
+            generic_count,
+            generic_current_digest: fixed_bytes(&plain[649..681])?,
+            generic_target_digest: fixed_bytes(&plain[681..713])?,
+            generic_next_id: fixed_bytes(&plain[713..745])?,
+            generic_next_intent_digest: fixed_bytes(&plain[745..777])?,
+            first_scope: plain[781..781 + first_scope_len].to_vec(),
+            second_scope: plain[781 + first_scope_len..].to_vec(),
         })
     }
 }
@@ -434,6 +479,12 @@ pub(super) async fn admit_empty_root(
                 tail_next_intent_digest: [0; 32],
                 tail_decision_digest: [0; 32],
                 tail_tombstone_digest: [0; 32],
+                generic_phase: GENERIC_UNCLAIMED,
+                generic_count: 0,
+                generic_current_digest: [0; 32],
+                generic_target_digest: [0; 32],
+                generic_next_id: [0; 32],
+                generic_next_intent_digest: [0; 32],
                 first_scope: Vec::new(),
                 second_scope: Vec::new(),
             };
@@ -562,6 +613,9 @@ mod tests {
                         })
                         .and_then(|bytes| RootRecord::decode(selected, &bytes))
                     {
+                        if root.generic_phase != GENERIC_UNCLAIMED {
+                            birth::cleanup_generic_fixture(&owned, &root, &self.service);
+                        }
                         if root.third_phase != THIRD_UNCLAIMED {
                             birth::cleanup_third_fixture(&self.service, &root.third_id);
                             if root.tail_phase != TAIL_IDLE {
@@ -690,6 +744,12 @@ mod tests {
             tail_next_intent_digest: [0; 32],
             tail_decision_digest: [0; 32],
             tail_tombstone_digest: [0; 32],
+            generic_phase: GENERIC_UNCLAIMED,
+            generic_count: 0,
+            generic_current_digest: [0; 32],
+            generic_target_digest: [0; 32],
+            generic_next_id: [0; 32],
+            generic_next_intent_digest: [0; 32],
             first_scope: Vec::new(),
             second_scope: Vec::new(),
         };
@@ -742,7 +802,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn earlier_roots_cannot_be_reinterpreted_as_v11_lifetime_authority() -> TestResult {
+    async fn earlier_roots_cannot_be_reinterpreted_as_v12_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -765,6 +825,7 @@ mod tests {
             b"AURA-PLATFORM-LIFETIME-ROOT-V8".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V9".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V10".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V11".as_slice(),
         ] {
             let current = root.encode(platform)?;
             let mut encoded = old_magic.to_vec();
