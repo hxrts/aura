@@ -368,7 +368,7 @@ host_ack_device=$(jq -er '[.payload.event.snapshot.runtime_events[]? |
 # its owning section after the exact host ACK instead of treating absence from
 # an unrelated screen as missing canonical state.
 private_request barbara-tui submit_semantic_command open-devices \
-  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"Devices"}}}'
+  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"devices"}}}'
 private_wait barbara-tui accepted-devices '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and
@@ -393,7 +393,7 @@ jq -e '.payload.status=="restarted"' <<< "$PRIVATE_RESPONSE" >/dev/null || exit 
 private_wait barbara-tui reopened-ready '
   .payload.event.snapshot.readiness=="ready"' ''
 private_request barbara-tui submit_semantic_command reopen-devices \
-  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"Devices"}}}'
+  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"devices"}}}'
 private_wait barbara-tui reopened '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and $s.readiness=="ready" and

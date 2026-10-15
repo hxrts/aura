@@ -79,7 +79,7 @@ case "$instance:$method:$intent" in
     : > "$FIXTURE_APPROVED"
     echo '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2"}}}}' ;;
   barbara-tui:submit_semantic_command:OpenSettingsSection)
-    jq -e '.params.intent.OpenSettingsSection=="Devices"' <<< "$request" >/dev/null || exit 1
+    jq -e '.params.intent.OpenSettingsSection=="devices"' <<< "$request" >/dev/null || exit 1
     : > "$FIXTURE_DEVICES_OPEN"
     echo '{"status":"ok","payload":{"submission":"accepted"}}' ;;
   barbara-tui:wait_for_ui_snapshot_event:)
@@ -153,6 +153,14 @@ case "${FIXTURE_CASE:-}" in
 esac
 CURL
 chmod +x "$fixture/bin/ssh" "$fixture/bin/driver" "$fixture/bin/git" "$fixture/bin/curl"
+# Keep the fake driver anchored to the actual shared serde contract. The old
+# uppercase spelling passed this fake while real ToolApi rejected it.
+rg -Uq '#\[serde\(rename_all = "snake_case"\)\][[:space:]]+pub enum SettingsSection \{[[:space:]]+Devices' \
+  "$here/../../../crates/aura-app/src/scenario_contract/actions.rs"
+if printf '%s\n' '{"method":"submit_semantic_command","params":{"instance_id":"barbara-tui","intent":{"OpenSettingsSection":"Devices"}}}' |
+    "$fixture/bin/driver" req-private >/dev/null 2>&1; then
+  echo 'fake driver accepted the noncanonical settings variant' >&2; exit 1
+fi
 export FIXTURE_RESTARTED="$fixture/restarted"
 PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/stdout" 2> "$fixture/stderr"
 manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
@@ -165,7 +173,7 @@ jq -e '.network_delivery_asserted==true and
 jq -es '
   [.[]|select(.params.instance_id=="barbara-tui" and
     .method=="submit_semantic_command" and
-    .params.intent.OpenSettingsSection=="Devices")]|length==2' "$FIXTURE_LOG" >/dev/null
+    .params.intent.OpenSettingsSection=="devices")]|length==2' "$FIXTURE_LOG" >/dev/null
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
   ! rg -Fq "$secret" "$fixture/stdout" "$fixture/stderr" "$AURA_E2E_RUN_DIR"
   rg -Fq "$secret" "$FIXTURE_LOG"
