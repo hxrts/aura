@@ -9,6 +9,7 @@ const SECOND_ROSTER_FILE: &str = "platform_lifetime/second-roster.v4";
 const INTENT_PREFIX: &str = "allocation-lifetime-birth-intent:v2:";
 const RECORD_PREFIX: &str = "allocation-lifetime-birth-record:v2:";
 const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
+mod lifecycle;
 
 struct Claim {
     root: [u8; 32],
@@ -81,6 +82,7 @@ pub(super) fn cleanup_fixture(service: &str) {
                             let _ = entry.delete_credential();
                         }
                     }
+                    lifecycle::cleanup_fixture(service, &id);
                 }
             }
         }
@@ -276,7 +278,8 @@ async fn append_inner(
             "platform second birth requires settled first allocation",
         ));
     }
-    if root.roster_digest != aura_core::hash::hash(&inventory_marker(&root))
+    if root.second_phase != SECOND_BIRTH_COMPLETE
+        || root.roster_digest != aura_core::hash::hash(&inventory_marker(&root))
         || claim_present(selected)?
         || marker_state(owned, &[])?
     {
@@ -379,7 +382,10 @@ pub(super) async fn recover_roster(
         let mut verified = root.clone();
         decision::recover_erasure(owned, selected, &mut verified)?;
     }
-    replay(owned, selected, &root, &claim, StopAfter::Never)?;
+    if root.second_phase < SECOND_ERASURE_PENDING {
+        replay(owned, selected, &root, &claim, StopAfter::Never)?;
+    }
+    lifecycle::recover(owned, selected, &mut root.clone(), &claim)?;
     if !marker_state(owned, &roster(&root, &claim))? {
         return Err(invalid("platform whole roster is not acknowledged"));
     }

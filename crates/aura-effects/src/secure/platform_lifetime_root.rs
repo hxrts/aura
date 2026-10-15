@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V4";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V5";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,14 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_LEN: usize = 1 + 32 * 7;
+const PLAINTEXT_LEN: usize = 1 + 32 * 9 + 1;
+const SECOND_BIRTH_COMPLETE: u8 = 0;
+const SECOND_DECISION_PENDING: u8 = 1;
+const SECOND_DECISION_COMPLETE: u8 = 2;
+const SECOND_TOMBSTONE_PENDING: u8 = 3;
+const SECOND_TOMBSTONE_ACK_ERASURE_PENDING: u8 = 4;
+const SECOND_ERASURE_PENDING: u8 = 5;
+const SECOND_ERASURE_COMPLETE: u8 = 6;
 const MAX_FILE_LEN: usize = 256;
 
 #[derive(Clone)]
@@ -44,6 +51,9 @@ struct RootRecord {
     intent_digest: [u8; 32],
     decision_digest: [u8; 32],
     roster_digest: [u8; 32],
+    second_phase: u8,
+    second_decision_digest: [u8; 32],
+    second_tombstone_digest: [u8; 32],
 }
 
 fn invalid(message: &'static str) -> AuraError {
@@ -83,6 +93,9 @@ impl RootRecord {
         plain.extend_from_slice(&self.intent_digest);
         plain.extend_from_slice(&self.decision_digest);
         plain.extend_from_slice(&self.roster_digest);
+        plain.push(self.second_phase);
+        plain.extend_from_slice(&self.second_decision_digest);
+        plain.extend_from_slice(&self.second_tombstone_digest);
         let ciphertext = ChaCha20Poly1305::new((&key).into())
             .encrypt(
                 Nonce::from_slice(&nonce),
@@ -162,6 +175,15 @@ impl RootRecord {
                 || plain[129..161] == [0; 32]
                 || plain[161..193] == [0; 32]
                 || plain[193..225] == [0; 32]))
+            || !matches!(plain[225], 0..=SECOND_ERASURE_COMPLETE)
+            || (plain[225] == SECOND_BIRTH_COMPLETE
+                && (plain[226..258] != [0; 32] || plain[258..290] != [0; 32]))
+            || (matches!(
+                plain[225],
+                SECOND_DECISION_PENDING | SECOND_DECISION_COMPLETE
+            ) && (plain[226..258] == [0; 32] || plain[258..290] != [0; 32]))
+            || (plain[225] >= SECOND_TOMBSTONE_PENDING
+                && (plain[226..258] == [0; 32] || plain[258..290] == [0; 32]))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -180,6 +202,13 @@ impl RootRecord {
             roster_digest: plain[193..225]
                 .try_into()
                 .expect("bounded original roster digest"),
+            second_phase: plain[225],
+            second_decision_digest: plain[226..258]
+                .try_into()
+                .expect("bounded second decision digest"),
+            second_tombstone_digest: plain[258..290]
+                .try_into()
+                .expect("bounded second tombstone digest"),
         })
     }
 }
@@ -270,6 +299,9 @@ pub(super) async fn admit_empty_root(
                 intent_digest: [0; 32],
                 decision_digest: [0; 32],
                 roster_digest: [0; 32],
+                second_phase: SECOND_BIRTH_COMPLETE,
+                second_decision_digest: [0; 32],
+                second_tombstone_digest: [0; 32],
             };
             write_keyring(selected, &record)?;
             record
@@ -444,6 +476,9 @@ mod tests {
             intent_digest: [0; 32],
             decision_digest: [0; 32],
             roster_digest: [0; 32],
+            second_phase: SECOND_BIRTH_COMPLETE,
+            second_decision_digest: [0; 32],
+            second_tombstone_digest: [0; 32],
         };
         {
             let _guard = platform.namespace_owner()?.mutation_guard().await;
@@ -494,7 +529,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v3_root_cannot_be_reinterpreted_as_v4_roster_authority() -> TestResult {
+    async fn v3_and_v4_roots_cannot_be_reinterpreted_as_v5_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -508,9 +543,16 @@ mod tests {
             platform,
             &platform.entry_for_user(KEYRING_USER)?.get_secret()?,
         )?;
+        for old_magic in [
+            b"AURA-PLATFORM-LIFETIME-ROOT-V3".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V4".as_slice(),
+        ] {
+            let mut encoded = root.encode(platform)?;
+            encoded[..KEYRING_MAGIC.len()].copy_from_slice(old_magic);
+            assert!(RootRecord::decode(platform, &encoded).is_err());
+        }
         let mut encoded = root.encode(platform)?;
-        encoded[..KEYRING_MAGIC.len()].copy_from_slice(b"AURA-PLATFORM-LIFETIME-ROOT-V3");
-        assert!(RootRecord::decode(platform, &encoded).is_err());
+        encoded[..KEYRING_MAGIC.len()].copy_from_slice(b"AURA-PLATFORM-LIFETIME-ROOT-V4");
         platform
             .entry_for_user(KEYRING_USER)?
             .set_secret(&encoded)?;

@@ -8,25 +8,25 @@ const DECISION_USER: &str = "allocation-lifetime-first-decision:v1";
 const DECISION_FILE: &str = "platform_lifetime/decision.v1";
 const DECISION_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-DECISION-V1";
 const MARKER_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-DECISION-MARKER-V1";
-const POSITIVE: u8 = 1;
-const NEGATIVE: u8 = 2;
+pub(super) const POSITIVE: u8 = 1;
+pub(super) const NEGATIVE: u8 = 2;
 const HEADER_LEN: usize = 1 + 32 + 32 + 32 + 32 + 4;
 const MAX_RECORD_LEN: usize = DECISION_MAGIC.len() + 12 + HEADER_LEN + MAX_DECISION_BYTES + 16;
 const MAX_MARKER_LEN: usize = 256;
 
 mod negative_denial;
 
-struct DecisionRecord {
-    kind: u8,
-    root: [u8; 32],
-    allocation: [u8; 32],
-    profile: [u8; 32],
-    service: [u8; 32],
-    bytes: Zeroizing<Vec<u8>>,
+pub(super) struct DecisionRecord {
+    pub(super) kind: u8,
+    pub(super) root: [u8; 32],
+    pub(super) allocation: [u8; 32],
+    pub(super) profile: [u8; 32],
+    pub(super) service: [u8; 32],
+    pub(super) bytes: Zeroizing<Vec<u8>>,
 }
 
 impl DecisionRecord {
-    fn marker(&self) -> Vec<u8> {
+    pub(super) fn marker(&self) -> Vec<u8> {
         let mut marker = Vec::with_capacity(MARKER_MAGIC.len() + 129);
         marker.extend_from_slice(MARKER_MAGIC);
         marker.extend_from_slice(&self.root);
@@ -38,7 +38,10 @@ impl DecisionRecord {
         marker
     }
 
-    fn encode(&self, selected: &PlatformSecureStorageHandler) -> Result<Vec<u8>, AuraError> {
+    pub(super) fn encode(
+        &self,
+        selected: &PlatformSecureStorageHandler,
+    ) -> Result<Vec<u8>, AuraError> {
         let key = Zeroizing::new(selected.record_key(false)?);
         let mut plain = Zeroizing::new(Vec::with_capacity(HEADER_LEN + self.bytes.len()));
         plain.push(self.kind);
@@ -72,7 +75,10 @@ impl DecisionRecord {
         Ok(encoded)
     }
 
-    fn decode(selected: &PlatformSecureStorageHandler, encoded: &[u8]) -> Result<Self, AuraError> {
+    pub(super) fn decode(
+        selected: &PlatformSecureStorageHandler,
+        encoded: &[u8],
+    ) -> Result<Self, AuraError> {
         if encoded.len() > MAX_RECORD_LEN
             || encoded.len() < DECISION_MAGIC.len() + 12 + HEADER_LEN + 16
             || !encoded.starts_with(DECISION_MAGIC)
