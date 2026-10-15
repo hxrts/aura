@@ -219,12 +219,12 @@ owned_harness_processes() {
   return 0
 }
 require_no_owned_harness() {
-  local active
+  local phase=${1:-finalization} active
   # Read-only inspection does not own lifecycle mutation. Avoid leaving a
   # descriptor owner in its command-substitution shell if this driver dies.
   active=$(exec 9>&-; owned_harness_processes) || return 1
   [[ -z "$active" ]] || {
-    retain_owned_process_failure "$active" ||
+    retain_owned_process_failure "$active" "$phase" ||
       echo 'could not retain the owned LAN process identity receipt' >&2
     echo "owned LAN harness processes remain ($active); retaining state, inspect their exact ownership before recovery" >&2; return 1;
   }
@@ -235,9 +235,23 @@ require_no_owned_harness() {
 # A fresh owner-only file is retained for each failure rather than replacing an
 # earlier observation of a PID that may subsequently exit or be reused.
 retain_owned_process_failure() {
-  local active=$1 pid comm kind birth binding receipt
-  [[ -d "$PRIVATE_DIR" && ! -L "$D" && ! -L "$PRIVATE_DIR" && -O "$PRIVATE_DIR" ]] || return 1
-  receipt=$(umask 077; mktemp "$PRIVATE_DIR/finalizer-process-failure.XXXXXX") || return 1
+  local active=$1 phase=$2 pid comm kind birth binding receipt receipt_root receipt_label root_mode
+  case "$phase" in
+    prestart)
+      receipt_root=$D
+      receipt_label=prestart-process-failure
+      ;;
+    finalization)
+      receipt_root=$PRIVATE_DIR
+      receipt_label=finalizer-process-failure
+      ;;
+    *) return 2 ;;
+  esac
+  [[ -d "$receipt_root" && ! -L "$D" && ! -L "$receipt_root" && -O "$receipt_root" ]] || return 1
+  root_mode=$(stat -c %a "$receipt_root" 2>/dev/null ||
+    /usr/bin/stat -f %Lp "$receipt_root") || return 1
+  [[ "$root_mode" == 700 ]] || return 1
+  receipt=$(umask 077; mktemp "$receipt_root/$receipt_label.XXXXXX") || return 1
   {
     while IFS= read -r pid; do
       [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
@@ -253,8 +267,8 @@ retain_owned_process_failure() {
         --arg binding "$binding" \
         '{pid:$pid,kind:$kind,birth:$birth,owner_binding:$binding}' || return 1
     done <<< "$active"
-  } | jq -s --arg token "$AURA_E2E_RUN_TOKEN" \
-    '{schema:1,phase:"owned-process-finalization-refusal",run_token:$token,processes:.}' \
+  } | jq -s --arg token "$AURA_E2E_RUN_TOKEN" --arg phase "$phase" \
+    '{schema:1,phase:("owned-process-"+$phase+"-refusal"),run_token:$token,processes:.}' \
     > "$receipt" || { rm -f "$receipt"; return 1; }
   chmod 600 "$receipt" || return 1
   echo "protected owned-process identity: $receipt" >&2
@@ -294,7 +308,7 @@ start)
   (( ${#AURA_E2E_RUN_TOKEN} >= 16 )) || {
     echo 'LAN run token must be at least 16 bytes for the native harness' >&2; exit 2;
   }
-  require_no_owned_harness
+  require_no_owned_harness prestart
   [[ ! -L "$D" ]] || { echo 'LAN run directory is a symlink' >&2; exit 1; }
   mkdir -p "$D"
   [[ -O "$D" ]] || { echo 'LAN run directory is not owned by this user' >&2; exit 1; }

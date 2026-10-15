@@ -1121,6 +1121,8 @@ repeating finalization after verified shutdown is safe for the same outcome.
 If the owned-process inventory is still nonempty, the finalizer retains an
 owner-only process-kind and birth receipt in the run's private directory;
 the live process still blocks completion.
+The same inventory gates the next start; before its private directory exists,
+an owner-only pre-start refusal receipt is kept in the existing run root.
 
 The native `devices` list is a Settings/Devices projection. Typed
 `device_enrollment_accepted` observations may name the signed invitee or the

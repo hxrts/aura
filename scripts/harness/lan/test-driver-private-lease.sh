@@ -13,6 +13,7 @@ cleanup() {
 trap cleanup EXIT
 root="$fixture/checkout"
 mkdir -p "$root/bin" "$root/scripts/dev" "$root/.tmp/e2e/run/host-a/artifacts/runs"
+chmod 700 "$root/.tmp/e2e/run"
 cp "$here/../../dev/retain-e2e-runs.sh" "$root/scripts/dev/retain-e2e-runs.sh"
 cat > "$fixture/tool_repl.c" <<'C'
 #include <signal.h>
@@ -196,4 +197,28 @@ jq -e --arg token "$AURA_E2E_RUN_TOKEN" --argjson pid "$helper_pid" \
 release_helper
 bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed > "$fixture/unleased-recovered.out"
 [[ ! -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
+
+# Before a new token has a private directory, the existing owner-only run root
+# must still retain the exact live-process refusal without beginning that run.
+export AURA_E2E_RUN_TOKEN=driver-prestart-x
+(cd "$root" && exec "$root/bin/tool_repl" --private-request-socket unused \
+  > "$fixture/prestart-helper.out" 2> "$fixture/prestart-helper.err") &
+helper_pid=$!
+IFS= read -r -t 20 ready <&4
+[[ "$ready" == ready ]]
+if bash "$driver" start "$fixture/config.toml" \
+    > "$fixture/prestart.out" 2> "$fixture/prestart.err"; then
+  echo 'driver began a new run with a live same-checkout helper' >&2; exit 1
+fi
+[[ ! -d "$AURA_E2E_RUN_DIR/private-$AURA_E2E_RUN_TOKEN" ]]
+receipt=$(find "$AURA_E2E_RUN_DIR" -maxdepth 1 \
+  -name 'prestart-process-failure.*' -type f -print -quit)
+[[ -n "$receipt" && $(stat -c %a "$receipt" 2>/dev/null || /usr/bin/stat -f %Lp "$receipt") == 600 ]]
+jq -e --arg token "$AURA_E2E_RUN_TOKEN" --argjson pid "$helper_pid" \
+  '.phase=="owned-process-prestart-refusal" and .run_token==$token and
+   any(.processes[]; .pid==$pid and .kind=="tool_repl" and
+     .owner_binding=="same_checkout_cwd" and (.birth|length)>0)' "$receipt" >/dev/null
+release_helper
+start_run "$AURA_E2E_RUN_TOKEN"
+bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed > "$fixture/prestart-recovered.out"
 echo 'LAN private request lifecycle fixture passed'
