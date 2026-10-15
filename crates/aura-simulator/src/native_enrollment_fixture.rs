@@ -165,6 +165,22 @@ impl NativeEnrollmentFixture {
             .map_err(|error| error.to_string())
     }
 
+    /// Inject a named delivery fault by stopping the original HTTP tasks and
+    /// dropping their exact bound listener. This grants no checkpoint owner.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub async fn stop_original_broker_for_delivery_fault(&mut self) -> Result<(), String> {
+        self.supervisor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await
+            .map_err(|error| error.to_string())?;
+        drop(
+            self.original_broker
+                .take()
+                .ok_or_else(|| "original signed broker owner already consumed".to_string())?,
+        );
+        Ok(())
+    }
+
     pub fn broker_url(&self) -> &str {
         &self.broker_url
     }

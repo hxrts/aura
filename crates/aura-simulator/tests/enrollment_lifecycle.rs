@@ -326,9 +326,9 @@ where
                                 uncertainty: None,
                             })
                             .expect("in-flight maintenance remains in original selected window");
-                        let upkeep = tokio::time::timeout(
+                        let upkeep = aura_testkit::infrastructure::time::assertions::assert_completes_within(
                             Duration::from_secs(5),
-                            &mut maintenance,
+                            async { Ok::<_, aura_core::AuraError>((&mut maintenance).await) },
                         )
                         .await
                         .expect("original in-flight mailbox maintenance must settle");
@@ -1459,39 +1459,47 @@ where
         .iter()
         .find_map(|(_, message_id, _)| (!message_id.is_empty()).then_some(message_id.clone()))
         .expect("original first broker message ID was observed");
-    let post_terminal_progress = tokio::time::timeout(Duration::from_secs(5), async {
-        let mut tick = tokio::time::interval(Duration::from_millis(100));
-        loop {
-            fixture
-                .original_startup_window()
-                .remaining_at(&PhysicalTime {
-                    ts_ms: clock.now_ms(),
-                    uncertainty: None,
-                })
-                .expect("post-terminal ACK stays within original selected startup deadline");
-            let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
-            if progress["messages"].as_array().is_some_and(|messages| {
-                messages.iter().any(|message| {
-                    message["message_id"] == first_message_id
-                        && message["stage"] == "receiver_acknowledged_retained_frame"
-                })
-            }) {
-                break progress;
-            }
-            tick.tick().await;
-            let upkeep = aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
-                &app, &bridge,
-            )
-            .await;
-            if let Err(error) = upkeep {
-                panic!(
-                    "post-terminal original mailbox upkeep failed with typed kind {:?}",
-                    std::mem::discriminant(&error)
-                );
-            }
-        }
-    })
-    .await;
+    let post_terminal_progress =
+        aura_testkit::infrastructure::time::assertions::assert_completes_within(
+            Duration::from_secs(5),
+            async {
+                let mut tick = tokio::time::interval(Duration::from_millis(100));
+                loop {
+                    fixture
+                        .original_startup_window()
+                        .remaining_at(&PhysicalTime {
+                            ts_ms: clock.now_ms(),
+                            uncertainty: None,
+                        })
+                        .expect(
+                            "post-terminal ACK stays within original selected startup deadline",
+                        );
+                    let progress =
+                        original_vm_broker_progress(&broker_url, subject, device, digest).await;
+                    if progress["messages"].as_array().is_some_and(|messages| {
+                        messages.iter().any(|message| {
+                            message["message_id"] == first_message_id
+                                && message["stage"] == "receiver_acknowledged_retained_frame"
+                        })
+                    }) {
+                        break Ok(progress);
+                    }
+                    tick.tick().await;
+                    let upkeep =
+                        aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                            &app, &bridge,
+                        )
+                        .await;
+                    if let Err(error) = upkeep {
+                        panic!(
+                            "post-terminal original mailbox upkeep failed with typed kind {:?}",
+                            std::mem::discriminant(&error)
+                        );
+                    }
+                }
+            },
+        )
+        .await;
     let progress = match post_terminal_progress {
         Ok(progress) => progress,
         Err(_) => {
@@ -1894,7 +1902,7 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
     for branch in 0..2 {
         protected.restore().await;
         let clock = Arc::new(ManualPhysicalClock::new(inputs.selected_physical_ms));
-        let owner = NativeEnrollmentFixture::prepare_with_nonce_retirement(
+        let mut owner = NativeEnrollmentFixture::prepare_with_nonce_retirement(
             original_vm_profiles(inputs.seed_base, &protected.roots),
             clock.clone(),
             "genuine-complete-vm-auth",
@@ -1903,8 +1911,7 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
         .await
         .expect("original signed VM and broker registration");
         let broker_url = owner.broker_url().to_owned();
-        let fixture = owner.enrollment;
-        let supervisor = owner.supervisor;
+        let fixture = &owner.enrollment;
         let issuer = fixture.issuer().clone();
         let recipient = fixture.recipient().clone();
         let app = fixture.recipient_app();
@@ -1954,7 +1961,7 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
             .original_mailbox_selector()
             .expect("exact signed mailbox selector");
         let mut issuer_drain = Box::pin(issuer.drain_issuer_return_vm_mailbox());
-        let (message_id, stage) = tokio::time::timeout(Duration::from_secs(10), async {
+        let (message_id, stage) = aura_testkit::infrastructure::time::assertions::assert_completes_within(Duration::from_secs(10), async {
             let mut tick = tokio::time::interval(Duration::from_millis(10));
             loop {
                 tokio::select! {
@@ -1968,7 +1975,7 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
                             assert_eq!(progress["registration_present"], true);
                             let id = message["message_id"].as_str().expect("exact first ID").to_owned();
                             let stage = message["stage"].as_str().expect("typed first stage").to_owned();
-                            break (id, stage);
+                            break Ok((id, stage));
                         }
                         aura_simulator::native_enrollment_fixture::advance_selected_clock_before_frame(&fixture, &clock, false).await;
                     }
@@ -1982,18 +1989,26 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
             "fault follows exact first queue before retrieval"
         );
         assert!(!host_called.load(std::sync::atomic::Ordering::SeqCst));
-        supervisor
-            .shutdown_with_timeout(Duration::from_secs(5))
+        owner
+            .stop_original_broker_for_delivery_fault()
             .await
-            .expect("named broker-owner delivery fault");
+            .expect("named original broker-owner delivery fault closes listener");
         let bridge = recipient.clone().as_runtime_bridge();
-        let delivery_error = tokio::time::timeout(
-            Duration::from_secs(5),
-            aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
-        )
-        .await
-        .expect("original receiver maintenance reports broker fault")
-        .expect_err("original receiver must refuse unavailable broker delivery");
+        let delivery_error =
+            aura_testkit::infrastructure::time::assertions::assert_completes_within(
+                Duration::from_secs(5),
+                async {
+                    Ok::<_, AuraError>(
+                        aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(
+                            &app, &bridge,
+                        )
+                        .await,
+                    )
+                },
+            )
+            .await
+            .expect("original receiver maintenance reports broker fault")
+            .expect_err("original receiver must refuse unavailable broker delivery");
         let mut cause: Option<&(dyn Error + 'static)> = Some(&delivery_error);
         let mut broker_connect = false;
         let mut refused_connection = false;
@@ -2019,38 +2034,41 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
         // Dropping the accepted observer requests cancellation through its
         // real app owner; the host callback must never acknowledge this fault.
         drop(observation);
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let terminals: Vec<_> = app
-                    .read()
-                    .await
-                    .authoritative_semantic_facts()
-                    .iter()
-                    .filter_map(|fact| match fact {
-                        AuthoritativeSemanticFact::OperationStatus {
-                            instance_id,
-                            status,
-                            ..
-                        } if instance_id.as_ref() == Some(&instance)
-                            && matches!(
-                                status.phase,
-                                SemanticOperationPhase::Succeeded
-                                    | SemanticOperationPhase::Failed
-                                    | SemanticOperationPhase::Cancelled
-                            ) =>
-                        {
-                            Some(status.phase)
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                if !terminals.is_empty() {
-                    assert_eq!(terminals, vec![SemanticOperationPhase::Cancelled]);
-                    break;
+        aura_testkit::infrastructure::time::assertions::assert_completes_within(
+            Duration::from_secs(5),
+            async {
+                loop {
+                    let terminals: Vec<_> = app
+                        .read()
+                        .await
+                        .authoritative_semantic_facts()
+                        .iter()
+                        .filter_map(|fact| match fact {
+                            AuthoritativeSemanticFact::OperationStatus {
+                                instance_id,
+                                status,
+                                ..
+                            } if instance_id.as_ref() == Some(&instance)
+                                && matches!(
+                                    status.phase,
+                                    SemanticOperationPhase::Succeeded
+                                        | SemanticOperationPhase::Failed
+                                        | SemanticOperationPhase::Cancelled
+                                ) =>
+                            {
+                                Some(status.phase)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    if !terminals.is_empty() {
+                        assert_eq!(terminals, vec![SemanticOperationPhase::Cancelled]);
+                        break Ok::<(), AuraError>(());
+                    }
+                    tokio::task::yield_now().await;
                 }
-                tokio::task::yield_now().await;
-            }
-        })
+            },
+        )
         .await
         .expect("original app cancellation reaches typed terminal");
         assert!(!message_id.is_empty());
@@ -2058,7 +2076,8 @@ async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
         assert!(prior_events.lock().unwrap().is_empty());
         drop(admission);
         drop(app);
-        let _reported = fixture
+        let _reported = owner
+            .enrollment
             .fail(aura_agent::AgentError::config(
                 "original broker delivery failed and app cancelled",
             ))
