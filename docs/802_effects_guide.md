@@ -522,7 +522,7 @@ Build the platform path in reviewable dependencies:
    writer grants no third allocation owner: the selected L6 channel and
    two-entry actor capacity refusal remain in force until per-entry transitions,
    owner handoff and the full 4096-entry contract are proved.
-   The private V12 root keeps a reusable authenticated tail-append slot. For
+   The private V13 root keeps a reusable authenticated tail-append slot. For
    the first transition, it anchors the exact four-entry target roster and
    sealed fourth intent before publishing a new selected credential. Recover
    only that original intent and immutable ACK under the same profile and
@@ -539,10 +539,16 @@ Build the platform path in reviewable dependencies:
    selected credential publication, then publishes only the changed page or
    split pages. Reopen validates every page digest, original record and scope
    before one owner transfer. A later manifest refuses a completed root
-   rollback. The maximum-size page/manifest check is a wire and capacity
-   bound, not a timed 4096-credential birth/recovery proof. Generic decision,
-   denial and erasure mutation remain closed, as do L6 selection and OS
-   credential-service durability proof.
+   rollback. V13 addresses immutable manifests and changed pages by an
+   authenticated monotonic revision, independent of allocation count. Under
+   the original lease and selected namespace lock, exact generic decisions,
+   AEAD-sealed negative denial, and readback-verified original-credential
+   erasure advance that revision. A pending root authenticates each target
+   before provider mutation; reopen completes only the exact anchored change
+   and refuses missing or changed terminal evidence. V12 roots fail closed
+   without migration. The maximum-size page/manifest check is a wire and
+   capacity bound, not a timed 4096-credential birth/recovery proof. L6
+   selection and OS credential-service durability proof remain open.
    The private V9 root extends this original custody through a three-entry
    owner handoff, exact third decision, authenticated negative tombstone and
    provider-owned third credential erasure. Recover the retained third scope

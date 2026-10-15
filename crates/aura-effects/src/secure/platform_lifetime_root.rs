@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V12";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V13";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,7 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 24 + 2 + 1 + 2 + 2 + 2 + 1 + 2;
+const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 24 + 2 + 1 + 2 + 2 + 2 + 1 + 2 + 2;
 const MAX_PLAINTEXT_LEN: usize =
     PLAINTEXT_HEADER_LEN + 2 * aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES;
 const SECOND_BIRTH_COMPLETE: u8 = 0;
@@ -63,6 +63,11 @@ const GENERIC_UNCLAIMED: u8 = 0;
 const GENERIC_INIT_PENDING: u8 = 1;
 const GENERIC_ACTIVE: u8 = 2;
 const GENERIC_APPEND_PENDING: u8 = 3;
+const GENERIC_DECISION_PENDING: u8 = 4;
+const GENERIC_DENIAL_PENDING: u8 = 5;
+const GENERIC_ERASURE_PENDING: u8 = 6;
+const MAX_GENERIC_REVISION: usize =
+    aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT * 4;
 const MAX_FILE_LEN: usize = 256;
 
 #[derive(Clone)]
@@ -94,6 +99,7 @@ struct RootRecord {
     tail_tombstone_digest: [u8; 32],
     generic_phase: u8,
     generic_count: u16,
+    generic_revision: u16,
     generic_current_digest: [u8; 32],
     generic_target_digest: [u8; 32],
     generic_next_id: [u8; 32],
@@ -173,6 +179,7 @@ impl RootRecord {
         plain.extend_from_slice(&self.tail_tombstone_digest);
         plain.push(self.generic_phase);
         plain.extend_from_slice(&self.generic_count.to_le_bytes());
+        plain.extend_from_slice(&self.generic_revision.to_le_bytes());
         plain.extend_from_slice(&self.generic_current_digest);
         plain.extend_from_slice(&self.generic_target_digest);
         plain.extend_from_slice(&self.generic_next_id);
@@ -225,10 +232,11 @@ impl RootRecord {
                     Arc::new(source),
                 )
             })?;
-        let first_scope_len = u16::from_le_bytes([plain[777], plain[778]]) as usize;
-        let second_scope_len = u16::from_le_bytes([plain[779], plain[780]]) as usize;
+        let first_scope_len = u16::from_le_bytes([plain[779], plain[780]]) as usize;
+        let second_scope_len = u16::from_le_bytes([plain[781], plain[782]]) as usize;
         let tail_count = u16::from_le_bytes([plain[452], plain[453]]);
         let generic_count = u16::from_le_bytes([plain[647], plain[648]]);
+        let generic_revision = u16::from_le_bytes([plain[649], plain[650]]);
         if plain.len() != PLAINTEXT_HEADER_LEN + first_scope_len + second_scope_len
             || first_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
             || second_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
@@ -313,28 +321,41 @@ impl RootRecord {
                 && (plain[582..614] == [0; 32] || plain[614..646] != [0; 32]))
             || (plain[451] >= TAIL_TOMBSTONE_PENDING
                 && (plain[582..614] == [0; 32] || plain[614..646] == [0; 32]))
-            || !matches!(plain[646], GENERIC_UNCLAIMED..=GENERIC_APPEND_PENDING)
+            || !matches!(plain[646], GENERIC_UNCLAIMED..=GENERIC_ERASURE_PENDING)
             || (plain[646] == GENERIC_UNCLAIMED
-                && (generic_count != 0 || plain[649..777] != [0; 128]))
+                && (generic_count != 0 || generic_revision != 0 || plain[651..779] != [0; 128]))
             || (plain[646] == GENERIC_INIT_PENDING
                 && (tail_count != 4
                     || generic_count != 0
-                    || plain[649..681] != [0; 32]
-                    || plain[681..713] == [0; 32]
-                    || plain[713..777] != [0; 64]))
+                    || generic_revision != 0
+                    || plain[651..683] != [0; 32]
+                    || plain[683..715] == [0; 32]
+                    || plain[715..779] != [0; 64]))
             || (plain[646] == GENERIC_ACTIVE
                 && (generic_count < 4
                     || generic_count as usize
                         > aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
-                    || plain[649..681] == [0; 32]
-                    || plain[681..777] != [0; 96]))
-            || (plain[646] == GENERIC_APPEND_PENDING
-                && (generic_count < 4
-                    || generic_count as usize
-                        >= aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
-                    || plain[649..777]
-                        .chunks_exact(32)
-                        .any(|field| field == [0; 32])))
+                    || generic_revision < generic_count
+                    || generic_revision as usize > MAX_GENERIC_REVISION
+                    || plain[651..683] == [0; 32]
+                    || plain[683..779] != [0; 96]))
+            || (matches!(
+                plain[646],
+                GENERIC_APPEND_PENDING
+                    | GENERIC_DECISION_PENDING
+                    | GENERIC_DENIAL_PENDING
+                    | GENERIC_ERASURE_PENDING
+            ) && (generic_count < 4
+                || generic_count as usize
+                    > aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
+                || (plain[646] == GENERIC_APPEND_PENDING
+                    && generic_count as usize
+                        >= aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT)
+                || generic_revision < generic_count
+                || generic_revision as usize >= MAX_GENERIC_REVISION
+                || plain[651..779]
+                    .chunks_exact(32)
+                    .any(|field| field == [0; 32])))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -366,12 +387,13 @@ impl RootRecord {
             tail_tombstone_digest: fixed_bytes(&plain[614..646])?,
             generic_phase: plain[646],
             generic_count,
-            generic_current_digest: fixed_bytes(&plain[649..681])?,
-            generic_target_digest: fixed_bytes(&plain[681..713])?,
-            generic_next_id: fixed_bytes(&plain[713..745])?,
-            generic_next_intent_digest: fixed_bytes(&plain[745..777])?,
-            first_scope: plain[781..781 + first_scope_len].to_vec(),
-            second_scope: plain[781 + first_scope_len..].to_vec(),
+            generic_revision,
+            generic_current_digest: fixed_bytes(&plain[651..683])?,
+            generic_target_digest: fixed_bytes(&plain[683..715])?,
+            generic_next_id: fixed_bytes(&plain[715..747])?,
+            generic_next_intent_digest: fixed_bytes(&plain[747..779])?,
+            first_scope: plain[783..783 + first_scope_len].to_vec(),
+            second_scope: plain[783 + first_scope_len..].to_vec(),
         })
     }
 }
@@ -481,6 +503,7 @@ pub(super) async fn admit_empty_root(
                 tail_tombstone_digest: [0; 32],
                 generic_phase: GENERIC_UNCLAIMED,
                 generic_count: 0,
+                generic_revision: 0,
                 generic_current_digest: [0; 32],
                 generic_target_digest: [0; 32],
                 generic_next_id: [0; 32],
@@ -746,6 +769,7 @@ mod tests {
             tail_tombstone_digest: [0; 32],
             generic_phase: GENERIC_UNCLAIMED,
             generic_count: 0,
+            generic_revision: 0,
             generic_current_digest: [0; 32],
             generic_target_digest: [0; 32],
             generic_next_id: [0; 32],
@@ -802,7 +826,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn earlier_roots_cannot_be_reinterpreted_as_v12_lifetime_authority() -> TestResult {
+    async fn earlier_roots_cannot_be_reinterpreted_as_v13_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -826,6 +850,7 @@ mod tests {
             b"AURA-PLATFORM-LIFETIME-ROOT-V9".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V10".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V11".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V12".as_slice(),
         ] {
             let current = root.encode(platform)?;
             let mut encoded = old_magic.to_vec();

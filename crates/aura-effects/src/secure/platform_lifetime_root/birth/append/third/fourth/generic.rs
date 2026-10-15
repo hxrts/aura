@@ -1,11 +1,12 @@
-//! Private V12 count-bounded tail roster. The selected root authenticates each
-//! immutable generation before a new per-ID credential can be written.
-//! Generic decision/denial/erasure mutation remains closed.
+//! Private V13 revisioned tail roster. The selected root authenticates each
+//! immutable generation before a per-ID credential or transition can be written.
 
 use super::*;
 
-const MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-GENERIC-PAGE-V12";
-const MANIFEST_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-GENERIC-MANIFEST-V12";
+mod lifecycle;
+
+const MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-GENERIC-PAGE-V13";
+const MANIFEST_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-GENERIC-MANIFEST-V13";
 const HEADER: usize = 32 * 3 + 2;
 const ENTRY_HEADER: usize = 32 * 4 + 1 + 2;
 const MAX_COUNT: usize = aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT;
@@ -13,7 +14,7 @@ const PAGE_SIZE: usize = 64;
 const MAX_FILE: usize = MAGIC.len() + HEADER + PAGE_SIZE * (ENTRY_HEADER + MAX_SCOPE_BYTES);
 const REF_LEN: usize = 32 + 32 + 2 + 2;
 const MAX_PAGES: usize = 2 * MAX_COUNT.div_ceil(PAGE_SIZE);
-const MAX_MANIFEST: usize = MANIFEST_MAGIC.len() + HEADER + 2 + MAX_PAGES * REF_LEN;
+const MAX_MANIFEST: usize = MANIFEST_MAGIC.len() + HEADER + 4 + MAX_PAGES * REF_LEN;
 const LIVE: u8 = 0;
 const DECIDED: u8 = 1;
 const DENIED: u8 = 2;
@@ -25,11 +26,11 @@ pub(super) fn cleanup_fixture(owned: &ProfileOwnedSecureStorage, root: &RootReco
     if root.generic_next_id != [0; 32] {
         ids.push(root.generic_next_id);
     }
-    for count in 4..=(root.generic_count as usize + 1).max(4) {
+    for revision in 4..=(root.generic_revision as usize + 1).max(4) {
         if let Ok(Some((bytes, None))) = owned
             ._owner
             .directory
-            .read_private_publication(Path::new(&path(count)), MAX_MANIFEST)
+            .read_private_publication(Path::new(&path(revision)), MAX_MANIFEST)
         {
             if let Ok(manifest) = decode_manifest(root, &bytes) {
                 if let Ok(entries) = read_all(owned, root, &manifest) {
@@ -51,6 +52,7 @@ pub(super) fn cleanup_fixture(owned: &ProfileOwnedSecureStorage, root: &RootReco
                 let _ = entry.delete_credential();
             }
         }
+        lifecycle::cleanup_fixture(service, &id);
     }
 }
 
@@ -64,12 +66,12 @@ struct Entry {
     scope: Vec<u8>,
 }
 
-fn path(count: usize) -> String {
-    format!("platform_lifetime/generic-manifest-{count}.v12")
+fn path(revision: usize) -> String {
+    format!("platform_lifetime/generic-manifest-{revision}.v13")
 }
 
 fn page_path(generation: u16, slot: u16) -> String {
-    format!("platform_lifetime/generic-page-{generation}-{slot}.v12")
+    format!("platform_lifetime/generic-page-{generation}-{slot}.v13")
 }
 
 fn capacity(count: usize) -> Result<(), AuraError> {
@@ -181,6 +183,7 @@ struct PageRef {
 #[derive(Clone)]
 struct Manifest {
     count: usize,
+    revision: u16,
     pages: Vec<PageRef>,
 }
 
@@ -188,24 +191,27 @@ type PagePublication = (PageRef, Vec<Entry>);
 
 fn manifest_bytes(root: &RootRecord, manifest: &Manifest) -> Result<Vec<u8>, AuraError> {
     if !(4..=MAX_COUNT).contains(&manifest.count)
+        || manifest.revision < manifest.count as u16
+        || manifest.revision as usize > MAX_GENERIC_REVISION
         || manifest.pages.is_empty()
         || manifest.pages.len() > MAX_PAGES
     {
         return Err(invalid("platform generic manifest count is invalid"));
     }
     let mut bytes =
-        Vec::with_capacity(MANIFEST_MAGIC.len() + HEADER + 2 + manifest.pages.len() * REF_LEN);
+        Vec::with_capacity(MANIFEST_MAGIC.len() + HEADER + 4 + manifest.pages.len() * REF_LEN);
     bytes.extend_from_slice(MANIFEST_MAGIC);
     bytes.extend_from_slice(&root.id);
     bytes.extend_from_slice(&root.profile);
     bytes.extend_from_slice(&root.service);
     bytes.extend_from_slice(&(manifest.count as u16).to_le_bytes());
+    bytes.extend_from_slice(&manifest.revision.to_le_bytes());
     bytes.extend_from_slice(&(manifest.pages.len() as u16).to_le_bytes());
     let mut prior = None;
     for page in &manifest.pages {
         if page.digest == [0; 32]
             || page.generation < 4
-            || page.generation as usize > manifest.count
+            || page.generation > manifest.revision
             || prior.is_some_and(|id| id >= page.max_id)
         {
             return Err(invalid(
@@ -224,7 +230,7 @@ fn manifest_bytes(root: &RootRecord, manifest: &Manifest) -> Result<Vec<u8>, Aur
 fn decode_manifest(root: &RootRecord, bytes: &[u8]) -> Result<Manifest, AuraError> {
     let base = MANIFEST_MAGIC.len();
     if !bytes.starts_with(MANIFEST_MAGIC)
-        || bytes.len() < base + HEADER + 2
+        || bytes.len() < base + HEADER + 4
         || bytes.len() > MAX_MANIFEST
         || bytes[base..base + 32] != root.id
         || bytes[base + 32..base + 64] != root.profile
@@ -235,12 +241,13 @@ fn decode_manifest(root: &RootRecord, bytes: &[u8]) -> Result<Manifest, AuraErro
         ));
     }
     let count = u16::from_le_bytes([bytes[base + 96], bytes[base + 97]]) as usize;
-    let pages_len = u16::from_le_bytes([bytes[base + 98], bytes[base + 99]]) as usize;
-    if bytes.len() != base + HEADER + 2 + pages_len * REF_LEN {
+    let revision = u16::from_le_bytes([bytes[base + 98], bytes[base + 99]]);
+    let pages_len = u16::from_le_bytes([bytes[base + 100], bytes[base + 101]]) as usize;
+    if bytes.len() != base + HEADER + 4 + pages_len * REF_LEN {
         return Err(invalid("platform generic manifest length differs"));
     }
     let mut pages = Vec::with_capacity(pages_len);
-    let mut cursor = base + HEADER + 2;
+    let mut cursor = base + HEADER + 4;
     for _ in 0..pages_len {
         pages.push(PageRef {
             max_id: fixed_bytes(&bytes[cursor..cursor + 32])?,
@@ -250,7 +257,11 @@ fn decode_manifest(root: &RootRecord, bytes: &[u8]) -> Result<Manifest, AuraErro
         });
         cursor += REF_LEN;
     }
-    let manifest = Manifest { count, pages };
+    let manifest = Manifest {
+        count,
+        revision,
+        pages,
+    };
     if manifest_bytes(root, &manifest)? != bytes {
         return Err(invalid("platform generic manifest is noncanonical"));
     }
@@ -259,13 +270,13 @@ fn decode_manifest(root: &RootRecord, bytes: &[u8]) -> Result<Manifest, AuraErro
 
 fn marker(
     owned: &ProfileOwnedSecureStorage,
-    count: usize,
+    revision: usize,
     expected: &[u8],
 ) -> Result<bool, AuraError> {
     match owned
         ._owner
         .directory
-        .read_private_publication(Path::new(&path(count)), MAX_MANIFEST)
+        .read_private_publication(Path::new(&path(revision)), MAX_MANIFEST)
         .map_err(io)?
     {
         None => Ok(false),
@@ -276,16 +287,16 @@ fn marker(
 
 fn publish(
     owned: &ProfileOwnedSecureStorage,
-    count: usize,
+    revision: usize,
     expected: &[u8],
 ) -> Result<(), AuraError> {
-    if marker(owned, count, expected)? {
+    if marker(owned, revision, expected)? {
         return Ok(());
     }
     let staged = owned
         ._owner
         .directory
-        .prepare_private(Path::new(&path(count)), expected)
+        .prepare_private(Path::new(&path(revision)), expected)
         .map_err(io)?;
     if !staged.publish(true).map_err(io)? {
         return Err(invalid("platform generic roster publication conflicted"));
@@ -357,13 +368,13 @@ fn publish_page(
 fn read_manifest(
     owned: &ProfileOwnedSecureStorage,
     root: &RootRecord,
-    count: usize,
+    revision: u16,
     digest: [u8; 32],
 ) -> Result<Manifest, AuraError> {
     let (bytes, None) = owned
         ._owner
         .directory
-        .read_private_publication(Path::new(&path(count)), MAX_MANIFEST)
+        .read_private_publication(Path::new(&path(revision as usize)), MAX_MANIFEST)
         .map_err(io)?
         .ok_or_else(|| invalid("platform generic manifest is missing"))?
     else {
@@ -373,8 +384,8 @@ fn read_manifest(
         return Err(invalid("platform generic manifest differs from root"));
     }
     let manifest = decode_manifest(root, &bytes)?;
-    if manifest.count != count {
-        return Err(invalid("platform generic manifest count differs"));
+    if manifest.count != root.generic_count as usize || manifest.revision != revision {
+        return Err(invalid("platform generic manifest root revision differs"));
     }
     Ok(manifest)
 }
@@ -410,17 +421,28 @@ fn next_manifest(
     old: &[Entry],
     next: &[Entry],
 ) -> Result<(Manifest, Vec<PagePublication>), AuraError> {
-    if next.len() != old.len() + 1 || current.count != old.len() + 3 {
-        return Err(invalid("platform generic append count differs"));
+    if current.count != old.len() + 3 || current.revision as usize >= MAX_GENERIC_REVISION {
+        return Err(invalid("platform generic revision or count is invalid"));
     }
-    let id = next
+    let changed: Vec<_> = next
         .iter()
-        .find(|entry| {
+        .filter(|entry| {
             old.binary_search_by_key(&entry.id, |prior| prior.id)
+                .ok()
+                .and_then(|i| old.get(i))
+                != Some(*entry)
+        })
+        .collect();
+    if changed.len() != 1
+        || !matches!(next.len(), n if n == old.len() || n == old.len() + 1)
+        || old.iter().any(|entry| {
+            next.binary_search_by_key(&entry.id, |part| part.id)
                 .is_err()
         })
-        .ok_or_else(|| invalid("platform generic append identity is absent"))?
-        .id;
+    {
+        return Err(invalid("platform generic transition must change one entry"));
+    }
+    let id = changed[0].id;
     let index = current
         .pages
         .iter()
@@ -438,23 +460,27 @@ fn next_manifest(
         .binary_search_by_key(&current.pages[index].max_id, |entry| entry.id)
         .map_err(|_| invalid("platform generic changed page boundary is absent"))?
         + 1;
-    let mut changed = old[start..end].to_vec();
-    let inserted = next
+    let mut changed_page = old[start..end].to_vec();
+    let replacement = next
         .iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| invalid("platform generic new entry is missing"))?
         .clone();
-    changed.push(inserted);
-    changed.sort_by_key(|entry| entry.id);
-    let groups: Vec<Vec<Entry>> = if changed.len() <= PAGE_SIZE {
-        vec![changed]
+    if let Some(position) = changed_page.iter().position(|entry| entry.id == id) {
+        changed_page[position] = replacement;
+    } else {
+        changed_page.push(replacement);
+        changed_page.sort_by_key(|entry| entry.id);
+    }
+    let groups: Vec<Vec<Entry>> = if changed_page.len() <= PAGE_SIZE {
+        vec![changed_page]
     } else {
         vec![
-            changed[..changed.len() / 2].to_vec(),
-            changed[changed.len() / 2..].to_vec(),
+            changed_page[..changed_page.len() / 2].to_vec(),
+            changed_page[changed_page.len() / 2..].to_vec(),
         ]
     };
-    let generation = (current.count + 1) as u16;
+    let generation = current.revision + 1;
     let mut pages = current.pages.clone();
     let mut publications = Vec::new();
     for (slot, group) in groups.into_iter().enumerate() {
@@ -474,7 +500,8 @@ fn next_manifest(
         publications.iter().map(|(reference, _)| reference.clone()),
     );
     let manifest = Manifest {
-        count: current.count + 1,
+        count: next.len() + 3,
+        revision: generation,
         pages,
     };
     manifest_bytes(root, &manifest)?;
@@ -528,10 +555,10 @@ fn validate_four(
 ) -> Result<(Entry, [u8; 32]), AuraError> {
     let (claim, scope) = prior(owned, selected, root)?;
     replay(owned, selected, root, &claim, &scope, StopAfter::Never)?;
-    lifecycle::recover(owned, selected, root)?;
+    super::lifecycle::recover(owned, selected, root)?;
     let fourth = original_four(owned, root)?.remove(0);
     if fourth.phase == DECIDED {
-        let decision = lifecycle::decision_record(selected, root)?
+        let decision = super::lifecycle::decision_record(selected, root)?
             .ok_or_else(|| invalid("platform fourth positive decision is missing"))?;
         if decision.kind != super::super::super::super::decision::POSITIVE {
             return Err(invalid("platform fourth negative decision is not terminal"));
@@ -550,7 +577,12 @@ fn read_current(
     if !(4..=MAX_COUNT).contains(&count) {
         return Err(invalid("platform generic root count is invalid"));
     }
-    let manifest = read_manifest(owned, root, count, root.generic_current_digest)?;
+    let manifest = read_manifest(
+        owned,
+        root,
+        root.generic_revision,
+        root.generic_current_digest,
+    )?;
     let entries = read_all(owned, root, &manifest)?;
     if entries.len() != count - 3
         || entries.iter().find(|entry| entry.id == fourth.id) != Some(fourth)
@@ -560,34 +592,17 @@ fn read_current(
         ));
     }
     for entry in entries.iter().filter(|entry| entry.id != fourth.id) {
-        if entry.phase != LIVE
-            || entry.decision_digest != [0; 32]
-            || entry.tombstone_digest != [0; 32]
-        {
-            return Err(invalid(
-                "unsupported generic transition cannot authorize recovery",
-            ));
-        }
-        let intent = read_entry(selected, &user(INTENT_PREFIX, &entry.id))?
-            .ok_or_else(|| invalid("platform generic sealed intent is missing"))?;
-        if aura_core::hash::hash(&intent) != entry.birth_digest
-            || read_entry(selected, &user(RECORD_PREFIX, &entry.id))?.as_deref()
-                != Some(intent.as_slice())
-        {
-            return Err(invalid("platform generic selected credential differs"));
-        }
-        let decoded = BirthIntent::decode(selected, &intent)?;
-        if decoded.root != root.id || decoded.allocation != entry.id || decoded.scope != entry.scope
-        {
-            return Err(invalid("platform generic original scope differs"));
-        }
+        lifecycle::validate_entry(selected, root, entry)?;
     }
     if root.generic_phase == GENERIC_ACTIVE
-        && count < MAX_COUNT
+        && (root.generic_revision as usize) < MAX_GENERIC_REVISION
         && owned
             ._owner
             .directory
-            .read_private_publication(Path::new(&path(count + 1)), MAX_MANIFEST)
+            .read_private_publication(
+                Path::new(&path(root.generic_revision as usize + 1)),
+                MAX_MANIFEST,
+            )
             .map_err(io)?
             .is_some()
     {
@@ -663,7 +678,7 @@ fn complete_append(
     let manifest = read_manifest(
         owned,
         root,
-        root.generic_count as usize,
+        root.generic_revision,
         root.generic_current_digest,
     )?;
     let (target, changed_pages) = next_manifest(root, &manifest, current, &next)?;
@@ -676,7 +691,7 @@ fn complete_append(
     match read_entry(selected, &record_user)? {
         Some(observed) if observed == bytes => {}
         Some(_) => return Err(invalid("platform generic selected record differs")),
-        None if marker(owned, next.len() + 3, &roster)? => {
+        None if marker(owned, target.revision as usize, &roster)? => {
             return Err(invalid("platform generic record lost after ACK"))
         }
         None => write_exact(selected, &record_user, &bytes)?,
@@ -687,12 +702,13 @@ fn complete_append(
     for (reference, entries) in &changed_pages {
         publish_page(owned, root, reference, entries)?;
     }
-    publish(owned, next.len() + 3, &roster)?;
+    publish(owned, target.revision as usize, &roster)?;
     if stop == Stop::Marker {
         return Err(interrupted());
     }
     root.generic_phase = GENERIC_ACTIVE;
     root.generic_count = (next.len() + 3) as u16;
+    root.generic_revision = target.revision;
     root.generic_current_digest = root.generic_target_digest;
     root.generic_target_digest = [0; 32];
     root.generic_next_id = [0; 32];
@@ -728,6 +744,7 @@ fn reconcile_locked(
             root,
             &Manifest {
                 count: 4,
+                revision: 4,
                 pages: vec![reference.clone()],
             },
         )?;
@@ -741,9 +758,16 @@ fn reconcile_locked(
         }
         root.generic_phase = GENERIC_ACTIVE;
         root.generic_count = 4;
+        root.generic_revision = 4;
         root.generic_current_digest = root.generic_target_digest;
         root.generic_target_digest = [0; 32];
         write_keyring(selected, root)?;
+    }
+    if matches!(
+        root.generic_phase,
+        GENERIC_DECISION_PENDING | GENERIC_DENIAL_PENDING | GENERIC_ERASURE_PENDING
+    ) {
+        lifecycle::complete_pending(owned, selected, root, stop)?;
     }
     if root.generic_phase == GENERIC_ACTIVE {
         return read_current(owned, selected, root, &fourth);
@@ -799,6 +823,7 @@ async fn initialize_borrowed(
         &root,
         &Manifest {
             count: 4,
+            revision: 4,
             pages: vec![reference],
         },
     )?;
@@ -922,7 +947,7 @@ async fn append_inner(
     let manifest = read_manifest(
         owned,
         &root,
-        root.generic_count as usize,
+        root.generic_revision,
         root.generic_current_digest,
     )?;
     let (target, _) = next_manifest(&root, &manifest, &current, &next)?;
@@ -953,6 +978,15 @@ pub(super) async fn read_live(
         .ok_or_else(|| invalid("platform generic allocation is not owned"))?;
     if !matches!(entry.phase, LIVE | DECIDED) {
         return Err(invalid("platform generic allocation is not live"));
+    }
+    if entry.phase == DECIDED
+        && lifecycle::decision(selected, &read_root(owned, selected)?, entry)?.is_some_and(
+            |decision| {
+                decision.kind != crate::secure::platform_lifetime_root::birth::decision::POSITIVE
+            },
+        )
+    {
+        return Err(invalid("platform generic allocation has negative decision"));
     }
     let bytes = read_entry(selected, &user(INTENT_PREFIX, id))?
         .ok_or_else(|| invalid("platform generic original intent is missing"))?;
@@ -1032,6 +1066,317 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn generic_two_decisions_advance_revision_without_count_and_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let fifth = append(owned, &owner, b"fifth scope", b"fifth secret").await?;
+        let sixth = append(owned, &owner, b"sixth scope", b"sixth secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let before = read_root(owned, selected)?;
+        lifecycle::decide(owned, &owner, &fifth, true, b"fifth approval").await?;
+        lifecycle::decide(owned, &owner, &sixth, false, b"sixth denial").await?;
+        let after = read_root(owned, selected)?;
+        assert_eq!(after.generic_count, before.generic_count);
+        assert_eq!(after.generic_revision, before.generic_revision + 2);
+        assert_eq!(&**read_live(owned, &owner, &fifth).await?, b"fifth secret");
+        assert!(read_live(owned, &owner, &sixth).await.is_err());
+        assert!(
+            lifecycle::decide(owned, &owner, &fifth, false, b"contradiction")
+                .await
+                .is_err()
+        );
+        drop(owner);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let recovered = recover_generic(owned).await?;
+        assert_eq!(
+            &**read_live(owned, &recovered, &fifth).await?,
+            b"fifth secret"
+        );
+        assert!(read_live(owned, &recovered, &sixth).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_negative_denial_and_erasure_retain_scope_and_refuse_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let id = append(owned, &owner, b"retained scope", b"sensitive secret").await?;
+        lifecycle::decide(owned, &owner, &id, false, b"exact refusal").await?;
+        assert!(
+            lifecycle::acknowledge_negative(owned, &owner, &id, b"wrong refusal")
+                .await
+                .is_err()
+        );
+        lifecycle::acknowledge_negative(owned, &owner, &id, b"exact refusal").await?;
+        assert!(read_live(owned, &owner, &id).await.is_err());
+        lifecycle::erase(owned, &owner, &id).await?;
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        assert!(read_entry(selected, &user(INTENT_PREFIX, &id))?.is_none());
+        assert!(read_entry(selected, &user(RECORD_PREFIX, &id))?.is_none());
+        let entries = read_current(
+            owned,
+            selected,
+            &root,
+            &original_four(owned, &root)?.remove(0),
+        )?;
+        let retired = entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .expect("retained entry");
+        assert_eq!(retired.phase, ERASED);
+        assert_eq!(retired.scope, b"retained scope");
+        drop(owner);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let recovered = recover_generic(owned).await?;
+        assert!(read_live(owned, &recovered, &id).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_decision_crash_replays_only_root_anchored_selected_record() -> TestResult {
+        for stop in [Stop::Root, Stop::Record, Stop::Marker] {
+            let fixture = Fixture::new()?;
+            let (storage, owner) = initial(&fixture).await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+                unreachable!()
+            };
+            let id = append(owned, &owner, b"original scope", b"secret").await?;
+            assert!(
+                lifecycle::decide_inner(owned, &owner, &id, true, b"approval", stop)
+                    .await
+                    .is_err()
+            );
+            drop(owner);
+            drop(storage);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            if stop == Stop::Root {
+                assert!(
+                    recover_generic(owned).await.is_err(),
+                    "no invented decision after root-only crash"
+                );
+            } else {
+                let recovered = recover_generic(owned).await?;
+                assert_eq!(&**read_live(owned, &recovered, &id).await?, b"secret");
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_denial_and_erasure_crash_replay_original_scope() -> TestResult {
+        for stop in [Stop::Root, Stop::Record, Stop::Marker] {
+            let fixture = Fixture::new()?;
+            let (storage, owner) = initial(&fixture).await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+                unreachable!()
+            };
+            let id = append(owned, &owner, b"original scope", b"secret").await?;
+            lifecycle::decide(owned, &owner, &id, false, b"denial").await?;
+            assert!(lifecycle::deny_inner(owned, &owner, &id, b"denial", stop)
+                .await
+                .is_err());
+            drop(owner);
+            drop(storage);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let recovered = recover_generic(owned).await?;
+            assert!(read_live(owned, &recovered, &id).await.is_err());
+            lifecycle::erase(owned, &recovered, &id).await?;
+        }
+        for stop in [Stop::Root, Stop::Record, Stop::Intent, Stop::Marker] {
+            let fixture = Fixture::new()?;
+            let (storage, owner) = initial(&fixture).await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+                unreachable!()
+            };
+            let id = append(owned, &owner, b"original scope", b"secret").await?;
+            lifecycle::decide(owned, &owner, &id, false, b"denial").await?;
+            lifecycle::acknowledge_negative(owned, &owner, &id, b"denial").await?;
+            assert!(lifecycle::erase_inner(owned, &owner, &id, stop)
+                .await
+                .is_err());
+            drop(owner);
+            drop(storage);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let recovered = recover_generic(owned).await?;
+            assert!(read_live(owned, &recovered, &id).await.is_err());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_selected_provider_256_births_recover_across_pages() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let mut ids = Vec::new();
+        for index in 0..256u32 {
+            let mut id = [0u8; 32];
+            id[28..].copy_from_slice(&(index + 1).to_be_bytes());
+            ids.push(
+                append_inner(
+                    owned,
+                    &owner,
+                    b"measured scope",
+                    b"measured secret",
+                    Some(id),
+                    Stop::Never,
+                )
+                .await?,
+            );
+        }
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        assert_eq!(root.generic_count, 260);
+        assert_eq!(root.generic_revision, 260);
+        let manifest = read_manifest(
+            owned,
+            &root,
+            root.generic_revision,
+            root.generic_current_digest,
+        )?;
+        assert!(manifest.pages.len() >= 4);
+        drop(owner);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let recovered = recover_generic(owned).await?;
+        for id in ids {
+            assert_eq!(
+                &**read_live(owned, &recovered, &id).await?,
+                b"measured secret"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_missing_sealed_denial_refuses_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let id = append(owned, &owner, b"scope", b"secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        lifecycle::decide(owned, &owner, &id, false, b"denial").await?;
+        lifecycle::acknowledge_negative(owned, &owner, &id, b"denial").await?;
+        let root = read_root(owned, selected)?;
+        let entries = read_current(
+            owned,
+            selected,
+            &root,
+            &original_four(owned, &root)?.remove(0),
+        )?;
+        let sealed = entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .expect("denied entry");
+        assert_ne!(sealed.tombstone_digest, [0; 32]);
+        let tombstone_user = user("allocation-lifetime-generic-tombstone:v13:", &id);
+        let ciphertext = read_entry(selected, &tombstone_user)?.expect("sealed tombstone");
+        for private in [root.id.as_slice(), id.as_slice(), b"scope".as_slice()] {
+            assert!(!ciphertext
+                .windows(private.len())
+                .any(|window| window == private));
+        }
+        selected
+            .entry_for_user(&tombstone_user)?
+            .delete_credential()?;
+        drop(owner);
+        assert!(
+            recover_generic(owned).await.is_err(),
+            "missing sealed denial"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_transition_refuses_foreign_owner_and_changed_decision() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let id = append(owned, &owner, b"scope", b"secret").await?;
+        let foreign = tempfile::tempdir()?;
+        let foreign_storage = crate::secure::platform_lifetime_root::tests::selected(
+            foreign.path(),
+            &fixture.service,
+        )?;
+        let ProductionSecureStorageHandler::ProfileOwned(foreign_owned) = &foreign_storage else {
+            unreachable!()
+        };
+        assert!(
+            lifecycle::decide(foreign_owned, &owner, &id, true, b"approval")
+                .await
+                .is_err()
+        );
+        lifecycle::decide(owned, &owner, &id, true, b"approval").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let decision_user = user("allocation-lifetime-generic-decision:v13:", &id);
+        let mut ciphertext = read_entry(selected, &decision_user)?.expect("decision");
+        *ciphertext.last_mut().expect("ciphertext") ^= 1;
+        write_exact(selected, &decision_user, &ciphertext)?;
+        drop(owner);
+        assert!(
+            recover_generic(owned).await.is_err(),
+            "changed sealed decision"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_same_count_revision_rollback_refuses_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let id = append(owned, &owner, b"scope", b"secret").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let before = read_root(owned, selected)?;
+        lifecycle::decide(owned, &owner, &id, true, b"approval").await?;
+        let after = read_root(owned, selected)?;
+        assert_eq!(before.generic_count, after.generic_count);
+        assert_eq!(before.generic_revision + 1, after.generic_revision);
+        drop(owner);
+        write_keyring(selected, &before)?;
+        assert!(
+            recover_generic(owned).await.is_err(),
+            "immutable later revision rejects root rollback"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn generic_codec_accepts_maximum_and_refuses_max_plus_one() -> TestResult {
         let fixture = Fixture::new()?;
         let (storage, generic) = initial(&fixture).await?;
@@ -1081,6 +1426,7 @@ mod tests {
         }
         let manifest = Manifest {
             count: MAX_COUNT,
+            revision: MAX_COUNT as u16,
             pages,
         };
         let bytes = manifest_bytes(&root, &manifest)?;
@@ -1107,6 +1453,20 @@ mod tests {
         assert_eq!(read_all(owned, &root, &manifest)?, current);
         assert!(capacity(MAX_COUNT - 1).is_ok());
         assert!(capacity(MAX_COUNT).is_err());
+        let exhausted = Manifest {
+            revision: MAX_GENERIC_REVISION as u16,
+            ..manifest.clone()
+        };
+        assert!(manifest_bytes(&root, &exhausted).is_ok());
+        assert!(next_manifest(&root, &exhausted, &current, &current).is_err());
+        assert!(manifest_bytes(
+            &root,
+            &Manifest {
+                revision: MAX_GENERIC_REVISION as u16 + 1,
+                ..manifest.clone()
+            }
+        )
+        .is_err());
         current.push(Entry {
             id: [255; 32],
             birth_digest: [1; 32],
@@ -1120,6 +1480,7 @@ mod tests {
             &root,
             &Manifest {
                 count: MAX_COUNT + 1,
+                revision: MAX_COUNT as u16,
                 pages: manifest.pages
             }
         )
@@ -1285,6 +1646,7 @@ mod tests {
         let second = old[PAGE_SIZE / 2..].to_vec();
         let manifest = Manifest {
             count: old.len() + 3,
+            revision: (old.len() + 3) as u16,
             pages: [first, second]
                 .into_iter()
                 .enumerate()
@@ -1351,6 +1713,7 @@ mod tests {
         assert_eq!(old.len(), PAGE_SIZE);
         let manifest = Manifest {
             count: PAGE_SIZE + 3,
+            revision: (PAGE_SIZE + 3) as u16,
             pages: vec![PageRef {
                 max_id: old.last().expect("page").id,
                 digest: aura_core::hash::hash(&encode(&root, &old)?),
@@ -1389,7 +1752,12 @@ mod tests {
         append(owned, &generic, b"fifth", b"secret").await?;
         let (selected, _) = selected_owner(owned)?;
         let root = read_root(owned, selected)?;
-        let manifest = read_manifest(owned, &root, 5, root.generic_current_digest)?;
+        let manifest = read_manifest(
+            owned,
+            &root,
+            root.generic_revision,
+            root.generic_current_digest,
+        )?;
         drop(generic);
         drop(storage);
         for file in [
