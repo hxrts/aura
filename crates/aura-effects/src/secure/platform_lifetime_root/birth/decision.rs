@@ -380,6 +380,71 @@ fn decide_locked(
     Ok(())
 }
 
+/// Reopen completes only the authenticated original first decision.
+#[allow(dead_code)]
+pub(super) async fn recover(
+    owned: &ProfileOwnedSecureStorage,
+    birth: &PlatformBirthAdmission,
+) -> Result<Option<(bool, Zeroizing<Vec<u8>>)>, AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, _intent) = verify_birth(owned, selected, birth)?;
+    if let Some(record) = read_record(selected, &root)? {
+        let record = finish_original(owned, selected, root, record)?;
+        Ok(Some((record.kind == POSITIVE, record.bytes)))
+    } else if owned
+        ._owner
+        .directory
+        .read_private_publication(Path::new(DECISION_FILE), MAX_MARKER_LEN)
+        .map_err(io)?
+        .is_some()
+    {
+        Err(invalid("platform decision marker lacks original intent"))
+    } else {
+        Ok(None)
+    }
+}
+
+pub(super) fn require_live_read(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    root: &RootRecord,
+) -> Result<(), AuraError> {
+    if let Some(record) = read_record(selected, root)? {
+        let marker = marker_state(owned, &record)?;
+        if matches!(
+            root.phase,
+            DECISION_COMPLETE
+                | TOMBSTONE_PENDING
+                | TOMBSTONE_ACK_ERASURE_PENDING
+                | ERASURE_PENDING
+                | ERASURE_COMPLETE
+        ) && !marker
+        {
+            return Err(invalid("completed platform decision marker is missing"));
+        }
+        if matches!(
+            root.phase,
+            TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
+        ) && record.kind != NEGATIVE
+        {
+            return Err(invalid("platform denial lacks original negative decision"));
+        }
+        if record.kind == NEGATIVE || root.phase == DECISION_PENDING {
+            return Err(invalid("platform live read denied by first decision"));
+        }
+    } else if owned
+        ._owner
+        .directory
+        .read_private_publication(Path::new(DECISION_FILE), MAX_MARKER_LEN)
+        .map_err(io)?
+        .is_some()
+    {
+        return Err(invalid("platform decision marker lacks original intent"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,69 +791,4 @@ mod tests {
         assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
         Ok(())
     }
-}
-
-/// Reopen completes only the authenticated original first decision.
-#[allow(dead_code)]
-pub(super) async fn recover(
-    owned: &ProfileOwnedSecureStorage,
-    birth: &PlatformBirthAdmission,
-) -> Result<Option<(bool, Zeroizing<Vec<u8>>)>, AuraError> {
-    let (selected, _) = selected_owner(owned)?;
-    let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (root, _intent) = verify_birth(owned, selected, birth)?;
-    if let Some(record) = read_record(selected, &root)? {
-        let record = finish_original(owned, selected, root, record)?;
-        Ok(Some((record.kind == POSITIVE, record.bytes)))
-    } else if owned
-        ._owner
-        .directory
-        .read_private_publication(Path::new(DECISION_FILE), MAX_MARKER_LEN)
-        .map_err(io)?
-        .is_some()
-    {
-        Err(invalid("platform decision marker lacks original intent"))
-    } else {
-        Ok(None)
-    }
-}
-
-pub(super) fn require_live_read(
-    owned: &ProfileOwnedSecureStorage,
-    selected: &PlatformSecureStorageHandler,
-    root: &RootRecord,
-) -> Result<(), AuraError> {
-    if let Some(record) = read_record(selected, root)? {
-        let marker = marker_state(owned, &record)?;
-        if matches!(
-            root.phase,
-            DECISION_COMPLETE
-                | TOMBSTONE_PENDING
-                | TOMBSTONE_ACK_ERASURE_PENDING
-                | ERASURE_PENDING
-                | ERASURE_COMPLETE
-        ) && !marker
-        {
-            return Err(invalid("completed platform decision marker is missing"));
-        }
-        if matches!(
-            root.phase,
-            TOMBSTONE_PENDING | TOMBSTONE_ACK_ERASURE_PENDING
-        ) && record.kind != NEGATIVE
-        {
-            return Err(invalid("platform denial lacks original negative decision"));
-        }
-        if record.kind == NEGATIVE || root.phase == DECISION_PENDING {
-            return Err(invalid("platform live read denied by first decision"));
-        }
-    } else if owned
-        ._owner
-        .directory
-        .read_private_publication(Path::new(DECISION_FILE), MAX_MARKER_LEN)
-        .map_err(io)?
-        .is_some()
-    {
-        return Err(invalid("platform decision marker lacks original intent"));
-    }
-    Ok(())
 }
