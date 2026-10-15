@@ -16,6 +16,10 @@ replace the agent's signed enrollment owner.
 With `simulator-checkpoint`, it retains the original broker handle through
 signed issuance and can consume it for an opaque stop acknowledgment after
 observing the original registration. It cannot export or restore broker state.
+The separate feature-only handoff fixture obtains a capture witness from the
+original issuer's retained control, revalidated signed baseline/setup and
+selected filesystem provider; the stopped broker must hold those exact signed
+registration bytes before sealing. Reopen does not restore an issuer VM.
 The lifecycle test's 30-second diagnostic watchdog is testkit-owned and does
 not advance the selected physical clock or decide protocol completion.
 The `simulator-checkpoint` feature reuses that signed native fixture from a

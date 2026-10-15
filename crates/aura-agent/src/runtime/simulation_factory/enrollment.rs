@@ -540,6 +540,51 @@ impl SimulatedEnrollment {
                 )
             })
     }
+    /// Capture-only proof from the original issuer's retained control and its
+    /// revalidated signed manifest in the selected secure profile.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+    pub async fn issuer_broker_checkpoint_witness(
+        &self,
+    ) -> AgentResult<crate::runtime::services::bootstrap_broker::IssuerBrokerCheckpointWitness>
+    {
+        use crate::handlers::invitation::enrollment_trust::RequiredIssuedEnrollmentSelectorCapability;
+        use crate::runtime::services::bootstrap_broker::IssuerBrokerCheckpointWitness;
+        let effects = self.issuer.runtime().effects().clone();
+        let session = aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(
+            &self.invitation.invitation_id,
+        );
+        let control = effects.original_mailbox_issuer(session).ok_or_else(|| {
+            source_error(std::io::Error::other(
+                "original issuer control is unavailable",
+            ))
+        })?;
+        let selector = RequiredIssuedEnrollmentSelectorCapability::load(
+            effects.clone(),
+            &control.manifest().ceremony,
+        )
+        .await?;
+        selector.require_control(&control)?;
+        let registration_digest =
+            crate::core::agent::issuer_return_mailbox::checkpoint_original_registration_digest(
+                effects.clone(),
+                &control,
+            )
+            .await?;
+        let selected = effects
+            .selected_filesystem_checkpoint_source_for_simulation()
+            .ok_or_else(|| {
+                source_error(std::io::Error::other(
+                    "selected filesystem profile is unavailable",
+                ))
+            })?;
+        IssuerBrokerCheckpointWitness::from_original_issuer(
+            &selector,
+            selected,
+            self.profiles[0].config.storage.base_path.clone(),
+            registration_digest,
+        )
+        .map_err(source_error)
+    }
     /// The original selected physical-time provider.
     pub fn selected_clock(&self) -> &Arc<dyn PhysicalTimeEffects> {
         &self.clock

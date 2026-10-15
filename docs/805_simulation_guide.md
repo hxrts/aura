@@ -713,18 +713,23 @@ inventory and authenticates payload kind/version, owner, epoch, fixture
 configuration, selected physical-clock observation, source revision and
 profile identity before restoration. The V1 restore path refuses V2 artifacts,
 and the V2 path refuses V1 or missing payloads. The stopped original broker
-can consume its real selected filesystem source proof to seal the quiescent
-registration codec into this V2 artifact. A one-use simulator owner authenticates
+seals the quiescent registration codec only with an opaque witness minted by
+the original issuer runtime. It reloads the immutable return registration,
+revalidates the protected signed manifest, approved baseline and setup proof,
+and runs the admitted-original return verifier. Exact broker registration bytes
+must match that verified original. The witness retains the selected filesystem
+source and signed pending epoch, but cannot authorize a fresh issuer. A one-use
+simulator owner authenticates
 the profile and broker bytes through the effect before installing them in an
 empty, unstarted fresh broker with the same retention policy and a nonbackward
 selected clock. Genuine signed issuer registration is read back there. Foreign
 owner or epoch context and stale selected time refuse before profile mutation;
 the effect owner authenticates changed artifact bytes and source revision.
 The original profile path is fixed in the sealed handle; a different path is
-refused. The only supported epoch value is zero, meaning no verified epoch
-claim. Neither the broker registration nor the selected filesystem proof
-contains a common retained issuer verifier/epoch witness, so cross-profile or
-verified-epoch restore remains unsupported.
+refused. Capture binds the original verified pending epoch; restore remains
+limited to the same original selected-profile context because a fresh issuer
+does not yet rederive that approval witness. Cross-profile or fresh-issuer
+continuation restore remains unsupported.
 This does not restore an app or VM continuation. An older valid artifact with
 the same context cannot be detected without a separate monotonic anchor. Do
 not use fixture bearer tokens as encryption keys or count this as full replay.

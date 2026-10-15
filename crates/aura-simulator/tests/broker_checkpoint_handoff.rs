@@ -98,13 +98,11 @@ async fn original_signed_broker_registration_stops_same_owned_broker() {
         registration.is_object(),
         "original signed return registration retained"
     );
-    let selected = owner
+    let witness = owner
         .enrollment
-        .issuer()
-        .runtime()
-        .effects()
-        .selected_filesystem_checkpoint_source_for_simulation()
-        .expect("original issuer selected filesystem profile");
+        .issuer_broker_checkpoint_witness()
+        .await
+        .expect("original signed issuer and selected filesystem profile");
     let stopped = owner
         .stop_original_broker_for_checkpoint()
         .await
@@ -124,18 +122,19 @@ async fn original_signed_broker_registration_stops_same_owned_broker() {
     let participant = aura_core::Hash32::from_value(&(subject, issuer_device, digest))
         .expect("original signed participant binding")
         .0;
-    let owner_id = aura_core::Hash32::from_value(&(subject, issuer_device, digest, authority))
-        .expect("original stopped broker owner binding")
-        .0;
+    let owner_id = witness.owner();
     let fixture = aura_core::Hash32::from_value(&(participant, "signed-original-loopback"))
         .expect("signed fixture binding")
         .0;
-    let context =
-        StoppedBrokerCheckpointOwner::context_for_simulator(owner_id, 0, fixture, clock.now_ms());
+    let context = StoppedBrokerCheckpointOwner::context_for_simulator(
+        owner_id,
+        witness.epoch(),
+        fixture,
+        clock.now_ms(),
+    );
     let mut sealed = stopped
         .seal_with_selected_profile(
-            selected,
-            roots[0].path(),
+            witness,
             &artifact_root.path().join("broker-v2.bin"),
             revision,
             participant,

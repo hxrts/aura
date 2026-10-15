@@ -388,6 +388,57 @@ pub struct StoppedBrokerCheckpointOwner {
     retention: Duration,
 }
 
+/// Capture-time proof retained by the original issuer runtime. This is not a
+/// fresh-owner credential: it cannot be serialized or reconstructed on reopen.
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+pub struct IssuerBrokerCheckpointWitness {
+    selected: aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource,
+    original_profile: PathBuf,
+    subject: AuthorityId,
+    issuer_device: DeviceId,
+    manifest_digest: [u8; 32],
+    registration_digest: [u8; 32],
+    pending_epoch: u64,
+    owner: [u8; 32],
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+impl IssuerBrokerCheckpointWitness {
+    pub(crate) fn from_original_issuer(
+        selector: &crate::handlers::invitation::enrollment_trust::RequiredIssuedEnrollmentSelectorCapability,
+        selected: aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource,
+        original_profile: PathBuf,
+        registration_digest: [u8; 32],
+    ) -> Result<Self, BrokerCheckpointRestoreError> {
+        let manifest = selector.manifest();
+        let owner = aura_core::Hash32::from_value(&(
+            manifest.subject,
+            manifest.initiator_device,
+            selector.digest(),
+            &manifest.ceremony,
+        ))
+        .map_err(|_| BrokerCheckpointRestoreError::InvalidState)?
+        .0;
+        Ok(Self {
+            selected,
+            original_profile,
+            subject: manifest.subject,
+            issuer_device: manifest.initiator_device,
+            manifest_digest: selector.digest(),
+            registration_digest,
+            pending_epoch: manifest.pending_epoch,
+            owner,
+        })
+    }
+
+    pub fn owner(&self) -> [u8; 32] {
+        self.owner
+    }
+    pub fn epoch(&self) -> u64 {
+        self.pending_epoch
+    }
+}
+
 /// A one-use simulator artifact owned by the selected filesystem provider.
 /// The broker bytes cannot be installed without the effect-owned V2 restore.
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
@@ -435,7 +486,6 @@ impl SealedBrokerCheckpoint {
         if expected != self.context
             || expected.kind != BROKER_AUXILIARY_KIND
             || expected.version != 1
-            || expected.epoch != 0
             || expected_original_profile != self.original_profile.as_path()
         {
             return Err(Refusal::InvalidState);
@@ -542,15 +592,36 @@ impl StoppedBrokerCheckpointOwner {
     /// quiescent profile selected by its real runtime provider.
     pub fn seal_with_selected_profile(
         self,
-        selected: aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource,
-        original_profile: &Path,
+        witness: IssuerBrokerCheckpointWitness,
         artifact: &Path,
         revision: [u8; 32],
         participant: [u8; 32],
         context: aura_effects::profile_checkpoint::AuxiliaryCheckpointContext,
     ) -> Result<SealedBrokerCheckpoint, BrokerCheckpointRestoreError> {
         use aura_effects::profile_checkpoint::QuiescentFilesystemProfileCheckpoint;
-        if context.kind != BROKER_AUXILIARY_KIND || context.version != 1 || context.epoch != 0 {
+        if context.kind != BROKER_AUXILIARY_KIND
+            || context.version != 1
+            || context.epoch != witness.pending_epoch
+            || context.owner != witness.owner
+        {
+            return Err(BrokerCheckpointRestoreError::InvalidState);
+        }
+        let registrations = self
+            ._state
+            .enrollment_return_mailboxes
+            .quiescent_registrations()
+            .ok_or(BrokerCheckpointRestoreError::InvalidState)?;
+        if registrations.len() != 1
+            || !registrations.iter().any(|entry| {
+                let statement = &entry.registration.statement;
+                statement.subject() == witness.subject
+                    && statement.issuer_device() == witness.issuer_device
+                    && statement.manifest_digest() == witness.manifest_digest
+                    && aura_core::util::serialization::to_vec(&entry.registration).is_ok_and(
+                        |bytes| aura_core::hash::hash(&bytes) == witness.registration_digest,
+                    )
+            })
+        {
             return Err(BrokerCheckpointRestoreError::InvalidState);
         }
         let retention = self.retention;
@@ -558,8 +629,8 @@ impl StoppedBrokerCheckpointOwner {
             .into_unsealed_registrations()
             .map_err(|_| BrokerCheckpointRestoreError::InvalidState)?;
         let profile = QuiescentFilesystemProfileCheckpoint::capture_with_auxiliary(
-            selected,
-            original_profile,
+            witness.selected,
+            &witness.original_profile,
             artifact,
             revision,
             participant,
@@ -568,7 +639,7 @@ impl StoppedBrokerCheckpointOwner {
         )?;
         Ok(SealedBrokerCheckpoint {
             profile,
-            original_profile: original_profile.to_owned(),
+            original_profile: witness.original_profile,
             revision,
             participant,
             context,

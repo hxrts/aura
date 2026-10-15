@@ -336,6 +336,46 @@ async fn verify_original_owner(
     Ok((selected, setup))
 }
 
+/// Capture-only digest of the original immutable issuer registration. The
+/// broker cannot mint this from its self-certified copy: selected issuer
+/// storage, retained VM control, approved baseline and setup all participate.
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+pub(crate) async fn checkpoint_original_registration_digest(
+    effects: Arc<crate::runtime::AuraEffectSystem>,
+    control: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+) -> AgentResult<[u8; 32]> {
+    let selector = RequiredIssuedEnrollmentSelectorCapability::load(
+        effects.clone(),
+        &control.manifest().ceremony,
+    )
+    .await?;
+    selector.require_control(control)?;
+    let manifest = selector.manifest();
+    let location = SecureStorageLocation::new(
+        REGISTRATION_NAMESPACE,
+        format!(
+            "{}:{}:{}",
+            manifest.subject,
+            manifest.invitation,
+            hex::encode(selector.digest())
+        ),
+    );
+    let bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(boundary)?;
+    let registration: IssuerEnrollmentReturnRegistration =
+        aura_core::util::serialization::from_slice(&bytes).map_err(boundary)?;
+    let (selected, setup) = verify_original_owner(effects.clone(), &registration).await?;
+    selected.require_control(control)?;
+    let baseline = selected.verified_baseline_for_checkpoint().await?;
+    registration
+        .verify_for_admitted_original(effects.as_ref(), &baseline, &setup)
+        .await
+        .map_err(boundary)?;
+    Ok(aura_core::hash::hash(&bytes))
+}
+
 async fn verify_delivery(
     effects: &crate::runtime::AuraEffectSystem,
     registration: &IssuerEnrollmentReturnRegistration,

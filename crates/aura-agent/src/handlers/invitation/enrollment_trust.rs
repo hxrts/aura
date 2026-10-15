@@ -2241,6 +2241,59 @@ impl RequiredIssuedEnrollmentSelectorCapability {
         self.digest
     }
 
+    /// Revalidate the original signed baseline under the selected issuer
+    /// profile for simulator-only broker capture. A changed live tree refuses
+    /// capture instead of reconstructing approval from broker bytes.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+    pub(crate) async fn verified_baseline_for_checkpoint(
+        &self,
+    ) -> AgentResult<aura_invitation::enrollment_manifest::VerifiedEnrollmentBaseline> {
+        use aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest;
+        let key = issued_manifest_location(self.manifest.subject, &self.manifest.ceremony);
+        let bytes = self
+            .runtime_owner
+            .secure_retrieve(&key, &[SecureStorageCapability::Read])
+            .await?;
+        let stored: StoredIssuedEnrollmentManifest =
+            serde_json::from_slice(&bytes).map_err(EnrollmentVerifierError::Codec)?;
+        if verify_stored_issued_manifest(
+            &self.runtime_owner,
+            &stored,
+            self.manifest.subject,
+            &self.manifest.ceremony,
+        )
+        .await?
+            != self.digest
+        {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        }
+        let signed =
+            SignedEnrollmentTrustManifest::decode(&stored.signed_code).map_err(manifest_error)?;
+        let baseline = self
+            .runtime_owner
+            .export_tree_ops()
+            .await?
+            .iter()
+            .map(aura_core::util::serialization::to_vec)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(aura_core::AuraError::from)?;
+        let verified = signed
+            .manifest
+            .verify_signature(
+                self.runtime_owner.as_ref(),
+                &stored.confirmation_verifier,
+                &signed.signature,
+            )
+            .await
+            .map_err(manifest_error)?
+            .verify_baseline(&baseline)
+            .map_err(manifest_error)?;
+        if verified.manifest_digest() != self.digest {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        }
+        Ok(verified)
+    }
+
     pub(crate) fn require_control(&self, control: &RetainedEnrollmentVmControl) -> AgentResult<()> {
         control.require_runtime_owner(&self.runtime_owner)?;
         if control.digest() != self.digest
