@@ -293,7 +293,8 @@ impl Scope<'_> {
     }
     fn provider_issuer(&self) -> bool {
         (self.path == "crates/aura-effects/src/secure/allocation_lifetime.rs"
-            || self.path == "crates/aura-effects/src/secure/browser_allocation_lifetime.rs")
+            || self.path == "crates/aura-effects/src/secure/browser_allocation_lifetime.rs"
+            || self.path == "crates/aura-effects/src/secure/platform_lifetime_root/birth/provider_adapter.rs")
             && self.implementation.is_none()
             && self
                 .signature
@@ -465,6 +466,33 @@ mod tests {
             analyze("crates/aura-effects/src/secure/unrelated.rs", source)
                 .expect("foreign path")
                 .len(),
+            1
+        );
+    }
+    #[test]
+    fn private_platform_provider_issuer_requires_exact_path_and_declaration() {
+        let path =
+            "crates/aura-effects/src/secure/platform_lifetime_root/birth/provider_adapter.rs";
+        let source = "#[aura_macros::capability_boundary(category = \"capability_gated\", capability = \"ProfileSecretLifetimeRecoveryCapability\", family = \"proof_issuer\")] #[aura_macros::authoritative_source(kind = \"proof_issuer\")] fn selected_profile_channel(owned: &ProfileOwnedSecureStorage) -> Result<ProfileSecretLifetimeRecoveryCapability,AuraError> { Alias::from_trusted_provider(backend); }";
+        assert!(analyze(path, source)
+            .expect("private platform issuer")
+            .is_empty());
+        assert_eq!(
+            analyze(
+                "crates/aura-effects/src/secure/platform_lifetime_root/birth/unrelated.rs",
+                source
+            )
+            .expect("foreign path")
+            .len(),
+            1
+        );
+        assert_eq!(
+            analyze(
+                path,
+                &source.replace("kind = \"proof_issuer\"", "kind = \"selector\"")
+            )
+            .expect("foreign declaration")
+            .len(),
             1
         );
     }

@@ -195,6 +195,8 @@ Under the recovered V6 roster owner, first-entry negative denial and local erasu
 
 The private V6 selected-keyring root retains each bounded original birth scope as authenticated nonsecret metadata before publishing its credential. It checks those retained bytes against the still-present sealed birth intent during recovery; after erasure, the root remains the authenticated source of the original scope while the secret-bearing intent and credential are absent. A V5 root has no retained scopes and is refused without a proved migration. Missing root evidence or scope mismatch refuses owner transfer. A live first owner can append and consume its original token into complete-roster custody under the same profile and namespace lease after verifying both entries; refusal returns that same token, and the already claimed root cannot be recovered as a second owner. The bounded root size currently covers two births; extending the roster and production adapter remains separate.
 
+A private selected-platform lifetime actor now keeps that original profile lease and selected provider through empty, one-birth, and two-birth recovery. It reconciles an interrupted root-anchored birth before returning an allocation owner, maps references to the immutable V6 retained scopes, and refuses a third birth with a typed capacity cause. Its first-owner token remains held across the awaited append handoff so cancellation cannot silently lose custody. The actor is not selected by L6; two-birth capacity, native host acceptance, and actual OS credential-service durability remain distinct production requirements.
+
 ### Filesystem replacement durability
 
 `StorageCoreEffects::store` publishes complete sibling staging files using an

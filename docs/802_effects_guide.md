@@ -503,6 +503,11 @@ Build the platform path in reviewable dependencies:
    credential. Recovery compares that scope with the sealed intent while it
    exists; after erasure, the root remains the authenticated scope source.
    V5 roots lack this evidence and fail closed pending a proved migration.
+   The private native adapter retains the original selected profile lease while
+   reconciling empty, one-birth, and two-birth states. It returns owners only
+   for the original authenticated V6 scopes and refuses a third birth with a
+   typed capacity cause. Keep this channel unselected in L6 until capacity,
+   host handoff, and native credential-service evidence are complete.
 3. Specify an acknowledged transaction across the credential store and the
    inventory for each transition. A durable intent must name the exact
    allocation and desired phase before a credential write. Read and verify the

@@ -9,9 +9,9 @@ pub(super) const SECOND_ROSTER_FILE: &str = "platform_lifetime/second-roster.v4"
 const INTENT_PREFIX: &str = "allocation-lifetime-birth-intent:v2:";
 const RECORD_PREFIX: &str = "allocation-lifetime-birth-record:v2:";
 const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
-mod lifecycle;
+pub(super) mod lifecycle;
 
-struct Claim {
+pub(in crate::secure::platform_lifetime_root::birth) struct Claim {
     root: [u8; 32],
     allocation: [u8; 32],
     intent_digest: [u8; 32],
@@ -353,8 +353,8 @@ pub(super) async fn reconcile_second(owned: &ProfileOwnedSecureStorage) -> Resul
 /// profile lease is retained, never reopened as an independent storage owner.
 #[allow(dead_code)]
 pub(super) struct PlatformRosterAdmission {
-    root: [u8; 32],
-    allocations: [[u8; 32]; 2],
+    pub(super) root: [u8; 32],
+    pub(super) allocations: [[u8; 32]; 2],
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
 
@@ -429,27 +429,31 @@ pub(super) async fn promote_after_append(
     owned: &ProfileOwnedSecureStorage,
     first: PlatformBirthAdmission,
 ) -> Result<PlatformRosterAdmission, (AuraError, PlatformBirthAdmission)> {
-    let result = async {
-        let (selected, owner) = selected_owner(owned)?;
-        let _guard = selected.namespace_owner()?.mutation_guard().await;
-        if !Arc::ptr_eq(&first._owner, owner)
-            || !owner.lifetime_root_claimed.load(Ordering::Acquire)
-        {
-            return Err(invalid(
-                "platform roster handoff lacks original first owner",
-            ));
-        }
-        let expected = read_root(owned, selected)?;
-        if first.root != expected.id || first.allocation != expected.birth_id {
-            return Err(invalid(
-                "platform roster handoff differs from original first birth",
-            ));
-        }
-        let (root, claim) = validate_complete_roster(owned, selected)?;
-        Ok(owner_from_roster(&root, &claim, owner))
-    }
-    .await;
+    let result = promote_borrowed(owned, &first).await;
     result.map_err(|error| (error, first))
+}
+
+/// The actor keeps first custody in its state across this await. It replaces
+/// that token only after verification succeeds, so cancellation can retry.
+pub(super) async fn promote_borrowed(
+    owned: &ProfileOwnedSecureStorage,
+    first: &PlatformBirthAdmission,
+) -> Result<PlatformRosterAdmission, AuraError> {
+    let (selected, owner) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    if !Arc::ptr_eq(&first._owner, owner) || !owner.lifetime_root_claimed.load(Ordering::Acquire) {
+        return Err(invalid(
+            "platform roster handoff lacks original first owner",
+        ));
+    }
+    let expected = read_root(owned, selected)?;
+    if first.root != expected.id || first.allocation != expected.birth_id {
+        return Err(invalid(
+            "platform roster handoff differs from original first birth",
+        ));
+    }
+    let (root, claim) = validate_complete_roster(owned, selected)?;
+    Ok(owner_from_roster(&root, &claim, owner))
 }
 
 /// Write the second birth under the held first owner, then consume that owner

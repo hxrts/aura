@@ -62,7 +62,7 @@ fn publish_marker(
     staged.acknowledge().map_err(io)
 }
 
-fn decision_record(
+pub(in crate::secure::platform_lifetime_root::birth) fn decision_record(
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,
     claim: &Claim,
@@ -123,7 +123,7 @@ enum DecisionStop {
 }
 
 #[allow(dead_code)]
-pub(super) async fn decide(
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide(
     owned: &ProfileOwnedSecureStorage,
     roster: &PlatformRosterAdmission,
     positive: bool,
@@ -198,7 +198,7 @@ async fn decide_inner(
     Ok(())
 }
 
-pub(super) fn bound_claim(
+pub(in crate::secure::platform_lifetime_root::birth) fn bound_claim(
     owned: &ProfileOwnedSecureStorage,
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,
@@ -329,7 +329,7 @@ enum DenialStop {
 }
 
 #[allow(dead_code)]
-pub(super) async fn acknowledge_negative(
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_negative(
     owned: &ProfileOwnedSecureStorage,
     roster: &PlatformRosterAdmission,
     exact_decision: &[u8],
@@ -468,7 +468,7 @@ fn finish_erasure(
 }
 
 #[allow(dead_code)]
-pub(super) async fn erase(
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase(
     owned: &ProfileOwnedSecureStorage,
     roster: &PlatformRosterAdmission,
 ) -> Result<(), AuraError> {

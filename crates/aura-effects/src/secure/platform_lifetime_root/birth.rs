@@ -1,6 +1,7 @@
-//! One original platform allocation birth under the selected namespace.
-//! This remains private until decision, retirement and whole-profile inventory
-//! support are complete. In particular a second birth is refused.
+//! Original platform allocation births under the selected namespace.
+//! The private provider adapter retains one original lease across an empty,
+//! one-birth, or two-birth roster. L6 selection remains closed until the full
+//! production provider and host evidence is complete.
 
 use super::*;
 use aura_core::effects::secret_lifetime::{MAX_SCOPE_BYTES, MAX_SECRET_BYTES};
@@ -10,6 +11,7 @@ pub(super) const INTENT_USER: &str = "allocation-lifetime-birth-intent:v1";
 pub(super) const RECORD_USER: &str = "allocation-lifetime-birth-record:v1";
 mod append;
 mod decision;
+mod provider_adapter;
 const INVENTORY_FILE: &str = "platform_lifetime/inventory.v4";
 const INVENTORY_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-INVENTORY-V4";
 const INTENT_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-BIRTH-V1";

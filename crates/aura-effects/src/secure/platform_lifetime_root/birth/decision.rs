@@ -14,7 +14,7 @@ const HEADER_LEN: usize = 1 + 32 + 32 + 32 + 32 + 4;
 const MAX_RECORD_LEN: usize = DECISION_MAGIC.len() + 12 + HEADER_LEN + MAX_DECISION_BYTES + 16;
 const MAX_MARKER_LEN: usize = 256;
 
-mod negative_denial;
+pub(super) mod negative_denial;
 
 pub(super) struct DecisionRecord {
     pub(super) kind: u8,
@@ -167,7 +167,7 @@ fn publish_marker(
     staged.acknowledge().map_err(io)
 }
 
-fn read_record(
+pub(super) fn read_record(
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,
 ) -> Result<Option<DecisionRecord>, AuraError> {

@@ -10,7 +10,7 @@ const TOMBSTONE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-TOMBSTONE-V1";
 const MARKER_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-TOMBSTONE-MARKER-V1";
 const NONCE_DOMAIN: &[u8] = b"aura/platform-lifetime/tombstone-nonce/v1";
 const MAX_MARKER_LEN: usize = 256;
-mod erasure;
+pub(in crate::secure::platform_lifetime_root::birth) mod erasure;
 
 fn sealed_tombstone(
     selected: &PlatformSecureStorageHandler,
@@ -186,7 +186,7 @@ fn finish_original(
 /// Acknowledge the exact original negative decision under the selected owner.
 /// This denies live reads; original birth credentials remain pending erasure.
 #[allow(dead_code)]
-pub(super) async fn acknowledge_negative_denial(
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_negative_denial(
     owned: &ProfileOwnedSecureStorage,
     birth: &PlatformBirthAdmission,
     negative_decision: &[u8],
@@ -209,7 +209,7 @@ async fn acknowledge_inner(
 /// The same first-entry denial, authorized by complete roster custody after
 /// append. The earlier single-birth token cannot authorize this path.
 #[allow(dead_code)]
-pub(super) async fn acknowledge_roster(
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_roster(
     owned: &ProfileOwnedSecureStorage,
     roster: &append::PlatformRosterAdmission,
     negative_decision: &[u8],

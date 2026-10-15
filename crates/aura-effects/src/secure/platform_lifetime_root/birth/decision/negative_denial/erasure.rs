@@ -89,7 +89,7 @@ pub(super) fn recover(
 /// Transition from acknowledged negative denial to local credential erasure.
 /// No caller supplies record addresses or replacement bytes.
 #[allow(dead_code)]
-pub(super) async fn erase_original(
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_original(
     owned: &ProfileOwnedSecureStorage,
     birth: &PlatformBirthAdmission,
 ) -> Result<(), AuraError> {
@@ -119,7 +119,7 @@ async fn erase_inner(
 /// After append, only the recovered complete-roster owner may erase the first
 /// allocation. The selected provider and namespace lock remain unchanged.
 #[allow(dead_code)]
-pub(super) async fn erase_roster(
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_roster(
     owned: &ProfileOwnedSecureStorage,
     roster: &append::PlatformRosterAdmission,
 ) -> Result<(), AuraError> {

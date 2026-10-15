@@ -580,7 +580,9 @@ Selected allocation lifetime factories and provider identities originate only
 from the actual exclusive physical profile owner. The syntax fence names the
 native profile acquisition and selected-profile issuer plus their browser Web
 Locks/IndexedDB counterparts exactly; no adjacent browser helper may mint
-either capability. Native crypto retirement
+either capability. The private native platform provider issuer has its own exact
+proof-issuer declaration and path; it does not enable L6 selection or establish
+OS credential-service durability. Native crypto retirement
 requires the held original negative decision capability; positive sealing
 requires the original activation capability. A serialized allocation locator
 is observation, never recovery or retirement authority. Trusted custom effect
