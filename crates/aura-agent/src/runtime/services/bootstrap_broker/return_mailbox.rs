@@ -44,6 +44,15 @@ struct ReturnMailboxEntry {
     acknowledged: HashMap<String, [u8; 32]>,
 }
 
+#[cfg(feature = "simulator-checkpoint")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct QuiescentReturnRegistration {
+    pub registration: IssuerEnrollmentReturnRegistration,
+    pub credential_commitment: [u8; 32],
+    pub retention_ends_at_ms: u64,
+}
+
 #[derive(Debug)]
 pub(super) struct EnrollmentReturnMailboxes {
     entries: HashMap<ReturnMailboxKey, ReturnMailboxEntry>,
@@ -54,10 +63,87 @@ pub(super) struct EnrollmentReturnMailboxes {
 
 impl EnrollmentReturnMailboxes {
     #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn quiescent_registrations(&self) -> Option<Vec<QuiescentReturnRegistration>> {
+        if self.has_unsettled_delivery() || self.has_uncheckpointable_state() {
+            return None;
+        }
+        let mut entries: Vec<_> = self
+            .entries
+            .values()
+            .map(|entry| QuiescentReturnRegistration {
+                registration: entry.registration.clone(),
+                credential_commitment: entry.credential_commitment,
+                retention_ends_at_ms: entry.retention_ends_at_ms,
+            })
+            .collect();
+        entries.sort_by_key(|entry| serde_json::to_vec(&entry.registration).unwrap_or_default());
+        Some(entries)
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn from_quiescent_registrations(
+        retention: Duration,
+        entries: Vec<QuiescentReturnRegistration>,
+        now_ms: u64,
+    ) -> Option<Self> {
+        if entries.len() > MAX_REGISTRATIONS {
+            return None;
+        }
+        let mut result = Self::new(retention);
+        for entry in entries {
+            let statement = &entry.registration.statement;
+            if statement.retrieval_credential_commitment() != entry.credential_commitment
+                || now_ms >= entry.retention_ends_at_ms
+                || entry.retention_ends_at_ms > statement.expires_at_ms()
+            {
+                return None;
+            }
+            let key = ReturnMailboxKey::new(
+                statement.subject(),
+                statement.issuer_device(),
+                statement.manifest_digest(),
+            );
+            if result
+                .entries
+                .insert(
+                    key,
+                    ReturnMailboxEntry {
+                        registration: entry.registration,
+                        credential_commitment: entry.credential_commitment,
+                        retention_ends_at_ms: entry.retention_ends_at_ms,
+                        envelopes: Vec::new(),
+                        acknowledged: HashMap::new(),
+                    },
+                )
+                .is_some()
+            {
+                return None;
+            }
+        }
+        Some(result)
+    }
+    #[cfg(feature = "simulator-checkpoint")]
     pub(super) fn has_unsettled_delivery(&self) -> bool {
         self.entries
             .values()
             .any(|entry| !entry.envelopes.is_empty())
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn has_uncheckpointable_state(&self) -> bool {
+        self.entries
+            .values()
+            .any(|entry| !entry.acknowledged.is_empty())
+            || {
+                #[cfg(test)]
+                {
+                    self.fail_next_ack
+                }
+                #[cfg(not(test))]
+                {
+                    false
+                }
+            }
     }
 
     pub(super) fn new(retention: Duration) -> Self {

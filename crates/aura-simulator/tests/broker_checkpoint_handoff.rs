@@ -2,7 +2,7 @@
 
 #![cfg(feature = "simulator-checkpoint")]
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use aura_agent::{AgentConfig, EnrollmentParticipantProfile};
 use aura_core::{AuthorityId, ContextId, DeviceId};
@@ -89,10 +89,17 @@ async fn original_signed_broker_registration_stops_same_owned_broker() {
         registration.is_object(),
         "original signed return registration retained"
     );
-    owner
+    let stopped = owner
         .stop_original_broker_for_checkpoint()
         .await
         .expect("exact original broker task group disposed");
+    let bytes = stopped
+        .into_unsealed_registrations()
+        .expect("original signed registration codec");
+    let snapshot: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("versioned broker codec");
+    assert_eq!(snapshot["version"], 1);
+    assert_eq!(snapshot["returns"].as_array().map(Vec::len), Some(1));
     assert!(owner.supervisor.active_tasks().is_empty());
     assert!(owner.stop_original_broker_for_checkpoint().await.is_err());
     let _ = owner

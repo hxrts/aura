@@ -98,6 +98,15 @@ struct PendingMailboxEntry {
     acknowledged: HashMap<String, [u8; 32]>,
 }
 
+#[cfg(feature = "simulator-checkpoint")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct QuiescentPendingRegistration {
+    pub registration: PendingEnrollmentMailboxRegistration,
+    pub credential_commitment: [u8; 32],
+    pub retention_ends_at_ms: u64,
+}
+
 /// Broker-local availability bound. Signed expiry is checked by each real
 /// runtime's selected physical provider; monotonic age here only attenuates
 /// storage retention and cannot establish distributed ordering.
@@ -111,10 +120,93 @@ pub(super) struct PendingEnrollmentMailboxes {
 
 impl PendingEnrollmentMailboxes {
     #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn quiescent_registrations(&self) -> Option<Vec<QuiescentPendingRegistration>> {
+        if self.has_unsettled_delivery() || self.has_uncheckpointable_state() {
+            return None;
+        }
+        let mut entries: Vec<_> = self
+            .entries
+            .values()
+            .map(|entry| QuiescentPendingRegistration {
+                registration: entry.registration.clone(),
+                credential_commitment: entry.credential_commitment,
+                retention_ends_at_ms: entry.retention_ends_at_ms,
+            })
+            .collect();
+        entries.sort_by_key(|entry| serde_json::to_vec(&entry.registration).unwrap_or_default());
+        Some(entries)
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn from_quiescent_registrations(
+        retention: Duration,
+        entries: Vec<QuiescentPendingRegistration>,
+        now_ms: u64,
+    ) -> Option<Self> {
+        if entries.len() > MAX_REGISTRATIONS {
+            return None;
+        }
+        let mut result = Self::new(retention);
+        for entry in entries {
+            let statement = &entry.registration.statement;
+            if statement.version()
+                != aura_invitation::enrollment_mailbox::PendingEnrollmentMailboxStatement::VERSION
+                || statement.retrieval_credential_commitment() != entry.credential_commitment
+                || now_ms >= entry.retention_ends_at_ms
+                || entry.retention_ends_at_ms > statement.expires_at_ms()
+            {
+                return None;
+            }
+            let key = PendingMailboxKey::new(
+                statement.subject(),
+                statement.invitee_device(),
+                statement.manifest_digest(),
+            );
+            if result
+                .entries
+                .insert(
+                    key,
+                    PendingMailboxEntry {
+                        registration: entry.registration,
+                        credential_commitment: entry.credential_commitment,
+                        retention_ends_at_ms: entry.retention_ends_at_ms,
+                        envelopes: Vec::new(),
+                        first_message_id: None,
+                        served: HashSet::new(),
+                        acknowledged: HashMap::new(),
+                    },
+                )
+                .is_some()
+            {
+                return None;
+            }
+        }
+        Some(result)
+    }
+    #[cfg(feature = "simulator-checkpoint")]
     pub(super) fn has_unsettled_delivery(&self) -> bool {
         self.entries
             .values()
             .any(|entry| !entry.envelopes.is_empty() || !entry.served.is_empty())
+    }
+
+    /// ACK witnesses and one-shot fault state cannot be silently omitted from
+    /// a future registration-only broker checkpoint.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn has_uncheckpointable_state(&self) -> bool {
+        self.entries
+            .values()
+            .any(|entry| entry.first_message_id.is_some() || !entry.acknowledged.is_empty())
+            || {
+                #[cfg(test)]
+                {
+                    self.fail_next_ack
+                }
+                #[cfg(not(test))]
+                {
+                    false
+                }
+            }
     }
 
     pub(super) fn new(retention: Duration) -> Self {

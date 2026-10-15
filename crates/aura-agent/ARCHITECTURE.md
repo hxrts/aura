@@ -291,8 +291,11 @@ Summary:
   Under the simulator-checkpoint feature, a private stop gate seals the original
   broker task group, waits for its disposal, and refuses foreign tasks, live
   connection owners, queued invitations, and unsettled receiver/return envelopes.
-  The gate exports no broker bytes or restore authority; authenticated broker
-  co-checkpoint and canonical signed-mailbox refusal fixtures remain open.
+  A simulator-only versioned registration codec exports unsealed candidate and
+  receiver/return registration bytes after the stop gate refuses credential
+  residue, ACK history and nonserializable one-shot hooks. It grants no restore
+  authority; effect-owned sealing, fresh-owner import and signed-mailbox
+  refusal fixtures remain open.
   A simulator-only rendezvous actor handoff takes its original broker child
   group and refuses any retained service clone before invoking that stop gate.
   The normal rendezvous command and cleanup tasks remain under their parent

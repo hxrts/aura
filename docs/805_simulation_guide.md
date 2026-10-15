@@ -692,14 +692,18 @@ Before reviewing a deployable change, run
 it checks the terminal/RPC, app-host, and web release feature graphs for the
 absence of simulator checkpoint and test-keyring code.
 
-The local broker has a private simulator-checkpoint stop gate. It seals admission,
-stops and awaits its original task group, and refuses live owners or unsettled
-delivery. The three broker fixtures cover original-group disposal, missing or
-repeated start, foreign tasks, and a queued invitation. This gate has no export,
-import, or replay authority. Receiver and return mailbox refusal predicates
-remain fail-closed, but their signed-envelope fixtures require the canonical
-signed setup driver in a later effect-owned protected co-checkpoint. The fixture
-authorization token is never a checkpoint encryption key.
+The local broker has a simulator-checkpoint stop gate. It seals admission,
+stops and awaits its original task group, and refuses live owners, unsettled
+delivery, retained credential residue, ACK replay metadata, and test-only
+one-shot hooks. A versioned registration-only codec can encode this stopped
+owner's candidates and receiver/return registrations, including their original
+retention deadlines and selected-time high-water mark. Private decoding rejects
+duplicates, malformed scope, expiry, backward time, noncanonical bytes and versions.
+The canonical signed setup fixture confirms its original return registration
+appears in that codec. The bytes are **unsealed** and confer no restore
+authority: valid-state byte substitution needs the later effect-owned AEAD
+binding. There is no fresh broker owner import, broker artifact, or replay
+route yet. The fixture authorization token is never a checkpoint encryption key.
 The next simulator-only prerequisite preserves the original native broker
 handle through signed setup and permits a one-shot stop acknowledgment. The
 canonical rendezvous manager likewise takes its broker child through its actor
@@ -711,8 +715,8 @@ channel. It encrypts one bounded opaque payload with the original profile
 inventory and authenticates payload kind/version, owner, epoch, fixture
 configuration, selected physical-clock observation, source revision and
 profile identity before restoration. The V1 restore path refuses V2 artifacts,
-and the V2 path refuses V1 or missing payloads. Broker state has no approved
-codec or fresh-owner restoration yet, and an older valid artifact with the
+and the V2 path refuses V1 or missing payloads. The broker codec is not yet
+sealed into this auxiliary channel or accepted by a fresh owner. An older valid artifact with the
 same context cannot be detected without a separate monotonic anchor. Do not
 use fixture bearer tokens as encryption keys or count this channel as a
 complete broker co-checkpoint.

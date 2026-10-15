@@ -19,8 +19,12 @@ mod mailbox;
 mod return_mailbox;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::time::PhysicalTimeEffects;
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+use mailbox::QuiescentPendingRegistration;
 #[cfg(not(target_arch = "wasm32"))]
 use mailbox::{PendingEnrollmentMailboxes, PendingMailboxKey};
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+use return_mailbox::QuiescentReturnRegistration;
 #[cfg(not(target_arch = "wasm32"))]
 use return_mailbox::{EnrollmentReturnMailboxes, ReturnMailboxKey};
 
@@ -344,6 +348,94 @@ pub struct LocalBootstrapBrokerService {
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
 pub struct StoppedBrokerCheckpointOwner {
     _state: BootstrapBrokerState,
+    retention: Duration,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuiescentBrokerRegistrationsV1 {
+    version: u8,
+    candidates: Vec<BootstrapBrokerCandidateRecord>,
+    pending: Vec<QuiescentPendingRegistration>,
+    returns: Vec<QuiescentReturnRegistration>,
+    candidate_time_high_water_ms: Option<u64>,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+impl StoppedBrokerCheckpointOwner {
+    /// Encode only the original stopped owner's quiescent availability data.
+    /// The bytes confer no restore authority and must be sealed by the selected
+    /// profile checkpoint owner before any fresh broker accepts them.
+    pub fn into_unsealed_registrations(self) -> Result<Vec<u8>, BrokerCheckpointQuiescenceError> {
+        let state = self._state;
+        let mut candidates: Vec<_> = state.candidates.into_values().collect();
+        candidates.sort_by(|left, right| left.authority_id.cmp(&right.authority_id));
+        let pending = state
+            .pending_enrollment_mailboxes
+            .quiescent_registrations()
+            .ok_or(BrokerCheckpointQuiescenceError::UnsupportedState)?;
+        let returns = state
+            .enrollment_return_mailboxes
+            .quiescent_registrations()
+            .ok_or(BrokerCheckpointQuiescenceError::UnsupportedState)?;
+        let bytes = serde_json::to_vec(&QuiescentBrokerRegistrationsV1 {
+            version: 1,
+            candidates,
+            pending,
+            returns,
+            candidate_time_high_water_ms: state.candidate_time_high_water_ms,
+        })
+        .map_err(|_| BrokerCheckpointQuiescenceError::UnsupportedState)?;
+        if decode_quiescent_broker_registrations(&bytes, self.retention, 0).is_none() {
+            return Err(BrokerCheckpointQuiescenceError::UnsupportedState);
+        }
+        Ok(bytes)
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+fn decode_quiescent_broker_registrations(
+    bytes: &[u8],
+    retention: Duration,
+    now_ms: u64,
+) -> Option<BootstrapBrokerState> {
+    if bytes.len() > 256 * 1024 {
+        return None;
+    }
+    let snapshot: QuiescentBrokerRegistrationsV1 = serde_json::from_slice(bytes).ok()?;
+    if snapshot.version != 1
+        || snapshot.candidates.len() > MAX_BOOTSTRAP_CANDIDATES
+        || (now_ms != 0
+            && snapshot
+                .candidate_time_high_water_ms
+                .is_some_and(|observed| now_ms < observed))
+        || serde_json::to_vec(&snapshot).ok()? != bytes
+    {
+        return None;
+    }
+    let mut state = BootstrapBrokerState::with_retention(retention);
+    for candidate in snapshot.candidates {
+        let key = candidate.authority_id.clone();
+        if candidate.authority_id().is_none()
+            || (now_ms != 0 && candidate.discovered_at_ms > now_ms)
+            || state.candidates.insert(key, candidate).is_some()
+        {
+            return None;
+        }
+    }
+    state.pending_enrollment_mailboxes = PendingEnrollmentMailboxes::from_quiescent_registrations(
+        retention,
+        snapshot.pending,
+        now_ms,
+    )?;
+    state.enrollment_return_mailboxes = EnrollmentReturnMailboxes::from_quiescent_registrations(
+        retention,
+        snapshot.returns,
+        now_ms,
+    )?;
+    state.candidate_time_high_water_ms = snapshot.candidate_time_high_water_ms;
+    Some(state)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
@@ -367,6 +459,8 @@ pub enum BrokerCheckpointQuiescenceError {
     LiveOwner,
     #[error("broker checkpoint has unsettled invitation or mailbox delivery")]
     UnsettledDelivery,
+    #[error("broker checkpoint retains state outside its quiescent registration contract")]
+    UnsupportedState,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -912,7 +1006,31 @@ impl LocalBootstrapBrokerService {
         {
             return Err(Refusal::UnsettledDelivery);
         }
-        Ok(StoppedBrokerCheckpointOwner { _state: state })
+        if !state.invitation_credentials.is_empty()
+            || state
+                .pending_enrollment_mailboxes
+                .has_uncheckpointable_state()
+            || state
+                .enrollment_return_mailboxes
+                .has_uncheckpointable_state()
+            || {
+                #[cfg(test)]
+                {
+                    state.pending_registration_miss.is_some()
+                        || state.pending_registration_pause.is_some()
+                }
+                #[cfg(not(test))]
+                {
+                    false
+                }
+            }
+        {
+            return Err(Refusal::UnsupportedState);
+        }
+        Ok(StoppedBrokerCheckpointOwner {
+            _state: state,
+            retention: self.registration_ttl,
+        })
     }
 }
 
@@ -2678,6 +2796,52 @@ mod tests {
             .expect("original broker subtree disposed");
         assert!(group.active_tasks().is_empty());
         assert!(stopped._state.invitations.is_empty());
+        let bytes = stopped
+            .into_unsealed_registrations()
+            .expect("bounded quiescent codec");
+        let decoded = decode_quiescent_broker_registrations(&bytes, Duration::from_secs(60), 1)
+            .expect("fresh private state reconstruction");
+        assert!(decoded.candidates.is_empty());
+        assert!(
+            decode_quiescent_broker_registrations(&bytes, Duration::from_secs(60), 0).is_some()
+        );
+        let mut changed = bytes.clone();
+        changed[0] ^= 1;
+        assert!(
+            decode_quiescent_broker_registrations(&changed, Duration::from_secs(60), 1).is_none()
+        );
+        let mut version: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        version["version"] = serde_json::json!(2);
+        assert!(decode_quiescent_broker_registrations(
+            &serde_json::to_vec(&version).unwrap(),
+            Duration::from_secs(60),
+            1
+        )
+        .is_none());
+
+        let mut stale: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        stale["candidate_time_high_water_ms"] = serde_json::json!(42);
+        assert!(decode_quiescent_broker_registrations(
+            &serde_json::to_vec(&stale).unwrap(),
+            Duration::from_secs(60),
+            41
+        )
+        .is_none());
+        let candidate = BootstrapBrokerCandidateRecord {
+            authority_id: AuthorityId::new_from_entropy([4; 32]).to_string(),
+            device_id: DeviceId::from_bytes([5; 32]),
+            address: "127.0.0.1:5000".to_owned(),
+            nickname_suggestion: None,
+            discovered_at_ms: 1,
+        };
+        let mut duplicate: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        duplicate["candidates"] = serde_json::json!([candidate.clone(), candidate]);
+        assert!(decode_quiescent_broker_registrations(
+            &serde_json::to_vec(&duplicate).unwrap(),
+            Duration::from_secs(60),
+            2
+        )
+        .is_none());
     }
 
     #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
@@ -2737,6 +2901,58 @@ mod tests {
                 .stop_for_simulator_checkpoint(Duration::from_secs(5))
                 .await,
             Err(BrokerCheckpointQuiescenceError::UnsettledDelivery)
+        ));
+        assert!(group.active_tasks().is_empty());
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn simulator_broker_quiescence_refuses_unserializable_owner_state() {
+        let broker = checkpoint_broker().await;
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("checkpoint_unserializable_owner");
+        broker.start(&group);
+        broker.shared.write().await.invitation_credentials.insert(
+            (
+                "orphaned credential".to_owned(),
+                DeviceId::from_bytes([3; 32]),
+            ),
+            "private token".to_owned(),
+        );
+        assert!(matches!(
+            broker
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::UnsupportedState)
+        ));
+        assert!(group.active_tasks().is_empty());
+
+        let broker = checkpoint_broker().await;
+        let group = supervisor.group("checkpoint_unserializable_mailbox");
+        broker.start(&group);
+        broker
+            .shared
+            .write()
+            .await
+            .pending_enrollment_mailboxes
+            .fail_next_ack_for_test();
+        assert!(matches!(
+            broker
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::UnsupportedState)
+        ));
+        assert!(group.active_tasks().is_empty());
+
+        let broker = checkpoint_broker().await;
+        let group = supervisor.group("checkpoint_unserializable_pause");
+        broker.start(&group);
+        let (_entered, _release) = broker.pause_next_pending_registration_for_test().await;
+        assert!(matches!(
+            broker
+                .stop_for_simulator_checkpoint(Duration::from_secs(5))
+                .await,
+            Err(BrokerCheckpointQuiescenceError::UnsupportedState)
         ));
         assert!(group.active_tasks().is_empty());
     }
