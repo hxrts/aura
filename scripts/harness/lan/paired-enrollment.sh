@@ -33,8 +33,9 @@ jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "
 }
 
 private_exchange() { # instance method receipt-label < single request JSON
-  local instance=$1 method=$2 label=$3 transport_timeout=90
-  [[ "$method" != wait_for_ui_snapshot_event ]] || transport_timeout=300
+  local instance=$1 method=$2 label=$3 transport_timeout=${4:-90}
+  [[ "$method" != wait_for_ui_snapshot_event || $# -ge 4 ]] || transport_timeout=300
+  [[ "$transport_timeout" =~ ^[1-9][0-9]{0,2}$ && "$transport_timeout" -le 300 ]] || return 2
   PRIVATE_RESPONSE=$(req_private "$instance" "$transport_timeout") || {
     echo "private $method transport failed for $instance" >&2; return 1;
   }
@@ -91,9 +92,9 @@ private_wait() { # instance label predicate jq program, expected operation and d
   return 1
 }
 
-private_request() { # instance method label, static request JSON
-  local instance=$1 method=$2 label=$3 request=$4
-  private_exchange "$instance" "$method" "$label" <<< "$request"
+private_request() { # instance method label, static request JSON, optional timeout
+  local instance=$1 method=$2 label=$3 request=$4 timeout=${5:-90}
+  private_exchange "$instance" "$method" "$label" "$timeout" <<< "$request"
 }
 
 private_request barbara-tui prepare_device_enrollment_setup setup \
@@ -227,9 +228,24 @@ unset broker_token witness_response progress_response progress_candidate
   [[ -d "$stage_dir" && ! -L "$stage_dir" && -O "$stage_dir" &&
      ! -e "$stage_receipt" && ! -L "$stage_receipt" ]] || exit 1
   [[ -n "$latest_progress" ]] || latest_progress='null'
+  # The broker's bounded retention can expire after a valid ACK. Observe the
+  # original operation and host acknowledgment through the private ToolApi
+  # before concluding which independent-process hop is missing.
+  PRIVATE_RECEIPT=''
+  private_request barbara-tui ui_state no-ack-owner-state \
+    '{"method":"ui_state","params":{}}' 5 || :
+  owner_observation='null'
+  if [[ -n "${PRIVATE_RECEIPT:-}" && -f "$PRIVATE_RECEIPT" && ! -L "$PRIVATE_RECEIPT" ]]; then
+    owner_observation=$(jq -ce --arg operation "$import_operation" '
+      {status,operation:([.operations[]|select(.id=="device_enrollment" and
+        .instance_id==$operation)]|last // null),
+       host_acknowledgments:[.host_acknowledgments[]|select(.device_id!=null)]}
+    ' "$PRIVATE_RECEIPT") || exit 1
+  fi
   (umask 077; set -C; jq -cn --argjson progress "$latest_progress" \
-    --argjson history "$progress_history" \
-    '{schema:1,network_delivery_asserted:false,progress:$progress,progress_history:$history}' > "$stage_receipt") || exit 1
+    --argjson history "$progress_history" --argjson owner "$owner_observation" \
+    '{schema:1,network_delivery_asserted:false,progress:$progress,
+     progress_history:$history,owner_observation:$owner}' > "$stage_receipt") || exit 1
   echo "exact original receiver ACK witness is absent or mismatched; inspect $stage_receipt" >&2
   exit 1
 }

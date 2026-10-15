@@ -14,6 +14,7 @@ export AURA_E2E_REMOTE=fixture-host AURA_E2E_REMOTE_ROOT=fixture-root
 export AURA_E2E_HOST_ADDR=192.0.2.10 AURA_E2E_BOOTSTRAP=paired-enrollment
 export AURA_E2E_DRV="$fixture/bin/driver" FIXTURE_LOG="$fixture/requests"
 export FIXTURE_DEVICES_OPEN="$fixture/devices-open"
+export FIXTURE_APPROVED="$fixture/approved"
 export AURA_E2E_PRIVATE_WAIT_SECONDS=2
 export AURA_E2E_AURA_BIN="$fixture/bin/aura" AURA_E2E_TOOL_REPL="$fixture/bin/tool_repl"
 export AURA_E2E_WEB_INDEX="$fixture/web-index.html"
@@ -68,9 +69,14 @@ case "$instance:$method:$intent" in
       echo '{"status":"ok","payload":{"event":{"version":2,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-1","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-secret","fact":{"kind":"device_enrollment_code_ready","code":"issued-code-secret","manifest_transfer":{"manifest_code":"signed-manifest-secret","initiator_verifier_code":"retained-verifier-secret"}}}]}}}}'
     fi ;;
   barbara-tui:ui_state:)
+    if [[ "${FIXTURE_CASE:-}" == no_network_ack && -e "$FIXTURE_APPROVED" ]]; then
+      echo '{"status":"ok","payload":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"failed","failure":{"domain":"ceremony","code":"operation_timed_out"}}],"runtime_events":[]}}'
+      exit 0
+    fi
     echo '{"status":"ok","payload":{"screen":"neighborhood","readiness":"ready","operations":[],"runtime_events":[]}}' ;;
   barbara-tui:submit_semantic_command:ImportDeviceEnrollmentCode)
     jq -e '.params.intent.ImportDeviceEnrollmentCode=={code:"issued-code-secret",manifest_transfer:{manifest_code:"signed-manifest-secret",initiator_verifier_code:"retained-verifier-secret"}}' <<< "$request" >/dev/null || exit 1
+    : > "$FIXTURE_APPROVED"
     echo '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2"}}}}' ;;
   barbara-tui:submit_semantic_command:OpenSettingsSection)
     jq -e '.params.intent.OpenSettingsSection=="Devices"' <<< "$request" >/dev/null || exit 1
@@ -149,7 +155,7 @@ for secret in signed-setup-secret issued-code-secret signed-manifest-secret reta
   rg -Fq "$secret" "$FIXTURE_LOG"
 done
 for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_authority wrong_reopen_device no_network_ack wrong_network_digest; do
-  rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN"
+  rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
   bad_dir="$fixture/$failure"
   mkdir -m 700 "$bad_dir"
   printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$bad_dir/repl.identity.json"
@@ -165,6 +171,12 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
       .progress.messages[0].stage=="retrieval_selected_for_receiver_credential" and
       (.progress_history|length)==1 and
       .progress_history[0]==.progress' "$stage_receipt" >/dev/null
+    if [[ "$failure" == no_network_ack ]]; then
+      jq -e '.owner_observation.operation.instance_id=="tui-op-device_enrollment-2" and
+        .owner_observation.operation.state=="failed" and
+        .owner_observation.operation.failure=={domain:"ceremony",code:"operation_timed_out"} and
+        .owner_observation.host_acknowledgments==[]' "$stage_receipt" >/dev/null
+    fi
     [[ $(stat -c '%a' "$stage_receipt" 2>/dev/null || stat -f '%Lp' "$stage_receipt") == 600 ]]
   fi
   for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
