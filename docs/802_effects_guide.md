@@ -522,6 +522,14 @@ Build the platform path in reviewable dependencies:
    writer grants no third allocation owner: the selected L6 channel and
    two-entry actor capacity refusal remain in force until per-entry transitions,
    owner handoff and the full 4096-entry contract are proved.
+   The private V10 root keeps a reusable authenticated tail-append slot. For
+   the first transition, it anchors the exact four-entry target roster and
+   sealed fourth intent before publishing a new selected credential. Recover
+   only that original intent and immutable ACK under the same profile and
+   namespace leases; refuse stale three-entry owners after a tail claim.
+   Its parser enforces the 4096-entry wire bound, while this packet accepts
+   only count three to four. V9 roots fail closed without migration. Further
+   entries and fourth-entry decision/erasure remain separate from L6 selection.
    The private V9 root extends this original custody through a three-entry
    owner handoff, exact third decision, authenticated negative tombstone and
    provider-owned third credential erasure. Recover the retained third scope

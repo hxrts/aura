@@ -3,11 +3,17 @@
 use super::*;
 
 const THIRD_ROSTER_FILE: &str = "platform_lifetime/third-roster.v8";
+mod fourth;
 mod lifecycle;
 
 #[cfg(test)]
 pub(super) fn cleanup_fixture(service: &str, id: &[u8; 32]) {
     lifecycle::cleanup_fixture(service, id);
+}
+
+#[cfg(test)]
+pub(super) fn cleanup_fourth_fixture(service: &str, id: &[u8; 32]) {
+    fourth::cleanup_fixture(service, id);
 }
 
 fn third_roster(root: &RootRecord, claim: &Claim, scope: &[u8]) -> Result<Vec<u8>, AuraError> {
@@ -209,6 +215,8 @@ fn replay(
     }
     if root.third_phase == THIRD_BIRTH_PENDING {
         root.third_phase = THIRD_BIRTH_COMPLETE;
+        root.tail_count = 3;
+        root.tail_roster_digest = root.third_roster_digest;
         write_keyring(selected, root)?;
     }
     Ok(())
@@ -375,7 +383,12 @@ fn verify_owner(
         ));
     }
     let mut root = read_root(owned, selected)?;
-    if root.id != three.root || root.third_phase < THIRD_BIRTH_COMPLETE {
+    if root.id != three.root
+        || root.third_phase < THIRD_BIRTH_COMPLETE
+        || root.tail_phase != TAIL_IDLE
+        || root.tail_count != 3
+        || root.tail_roster_digest != root.third_roster_digest
+    {
         return Err(invalid(
             "platform third transition lacks acknowledged birth",
         ));
@@ -413,7 +426,10 @@ async fn promote_borrowed(
         ));
     }
     let mut root = read_root(owned, selected)?;
-    if two.root != root.id || root.third_phase < THIRD_BIRTH_COMPLETE {
+    if two.root != root.id
+        || root.third_phase < THIRD_BIRTH_COMPLETE
+        || root.tail_phase != TAIL_IDLE
+    {
         return Err(invalid(
             "platform third handoff lacks completed original birth",
         ));
@@ -446,6 +462,9 @@ pub(super) async fn recover_three_roster(
     }
     let claim = prior_claim(owned, selected, &mut root)?;
     recover(owned, selected, &mut root, &claim)?;
+    if root.tail_phase != TAIL_IDLE || root.tail_count != 3 {
+        return Err(invalid("platform three-entry owner has later append claim"));
+    }
     owner
         .lifetime_root_claimed
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)

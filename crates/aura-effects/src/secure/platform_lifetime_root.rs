@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V9";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V10";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,7 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 14 + 2 + 2 + 2;
+const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 18 + 2 + 1 + 2 + 2 + 2;
 const MAX_PLAINTEXT_LEN: usize =
     PLAINTEXT_HEADER_LEN + 2 * aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES;
 const SECOND_BIRTH_COMPLETE: u8 = 0;
@@ -50,6 +50,9 @@ const THIRD_TOMBSTONE_PENDING: u8 = 5;
 const THIRD_TOMBSTONE_ACK_ERASURE_PENDING: u8 = 6;
 const THIRD_ERASURE_PENDING: u8 = 7;
 const THIRD_ERASURE_COMPLETE: u8 = 8;
+const TAIL_IDLE: u8 = 0;
+const TAIL_APPEND_PENDING: u8 = 1;
+const TAIL_APPEND_COMPLETE: u8 = 2;
 const MAX_FILE_LEN: usize = 256;
 
 #[derive(Clone)]
@@ -71,6 +74,12 @@ struct RootRecord {
     third_roster_digest: [u8; 32],
     third_decision_digest: [u8; 32],
     third_tombstone_digest: [u8; 32],
+    tail_phase: u8,
+    tail_count: u16,
+    tail_roster_digest: [u8; 32],
+    tail_target_digest: [u8; 32],
+    tail_next_id: [u8; 32],
+    tail_next_intent_digest: [u8; 32],
     // Retained nonsecret birth scopes survive selected-provider credential
     // erasure. Their bytes are authenticated inside the original root.
     first_scope: Vec<u8>,
@@ -136,6 +145,12 @@ impl RootRecord {
         plain.extend_from_slice(&self.third_roster_digest);
         plain.extend_from_slice(&self.third_decision_digest);
         plain.extend_from_slice(&self.third_tombstone_digest);
+        plain.push(self.tail_phase);
+        plain.extend_from_slice(&self.tail_count.to_le_bytes());
+        plain.extend_from_slice(&self.tail_roster_digest);
+        plain.extend_from_slice(&self.tail_target_digest);
+        plain.extend_from_slice(&self.tail_next_id);
+        plain.extend_from_slice(&self.tail_next_intent_digest);
         plain.extend_from_slice(&(self.first_scope.len() as u16).to_le_bytes());
         plain.extend_from_slice(&(self.second_scope.len() as u16).to_le_bytes());
         plain.extend_from_slice(&self.first_scope);
@@ -184,8 +199,9 @@ impl RootRecord {
                     Arc::new(source),
                 )
             })?;
-        let first_scope_len = u16::from_le_bytes([plain[451], plain[452]]) as usize;
-        let second_scope_len = u16::from_le_bytes([plain[453], plain[454]]) as usize;
+        let first_scope_len = u16::from_le_bytes([plain[582], plain[583]]) as usize;
+        let second_scope_len = u16::from_le_bytes([plain[584], plain[585]]) as usize;
+        let tail_count = u16::from_le_bytes([plain[452], plain[453]]);
         if plain.len() != PLAINTEXT_HEADER_LEN + first_scope_len + second_scope_len
             || first_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
             || second_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
@@ -249,6 +265,22 @@ impl RootRecord {
                 && (plain[387..419] == [0; 32] || plain[419..451] != [0; 32]))
             || (plain[290] >= THIRD_TOMBSTONE_PENDING
                 && (plain[387..419] == [0; 32] || plain[419..451] == [0; 32]))
+            || !matches!(plain[451], TAIL_IDLE..=TAIL_APPEND_COMPLETE)
+            || (plain[451] == TAIL_IDLE
+                && (plain[486..582] != [0; 96]
+                    || !((tail_count == 0 && plain[454..486] == [0; 32])
+                        || (tail_count == 3 && plain[454..486] == plain[355..387]))))
+            || (plain[451] == TAIL_APPEND_PENDING
+                && (tail_count != 3
+                    || plain[454..486] != plain[355..387]
+                    || plain[486..518] == [0; 32]
+                    || plain[518..550] == [0; 32]
+                    || plain[550..582] == [0; 32]))
+            || (plain[451] == TAIL_APPEND_COMPLETE
+                && (tail_count != 4
+                    || plain[454..486] != plain[486..518]
+                    || plain[518..550] == [0; 32]
+                    || plain[550..582] == [0; 32]))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -270,8 +302,14 @@ impl RootRecord {
             third_roster_digest: fixed_bytes(&plain[355..387])?,
             third_decision_digest: fixed_bytes(&plain[387..419])?,
             third_tombstone_digest: fixed_bytes(&plain[419..451])?,
-            first_scope: plain[455..455 + first_scope_len].to_vec(),
-            second_scope: plain[455 + first_scope_len..].to_vec(),
+            tail_phase: plain[451],
+            tail_count,
+            tail_roster_digest: fixed_bytes(&plain[454..486])?,
+            tail_target_digest: fixed_bytes(&plain[486..518])?,
+            tail_next_id: fixed_bytes(&plain[518..550])?,
+            tail_next_intent_digest: fixed_bytes(&plain[550..582])?,
+            first_scope: plain[586..586 + first_scope_len].to_vec(),
+            second_scope: plain[586 + first_scope_len..].to_vec(),
         })
     }
 }
@@ -371,6 +409,12 @@ pub(super) async fn admit_empty_root(
                 third_roster_digest: [0; 32],
                 third_decision_digest: [0; 32],
                 third_tombstone_digest: [0; 32],
+                tail_phase: TAIL_IDLE,
+                tail_count: 0,
+                tail_roster_digest: [0; 32],
+                tail_target_digest: [0; 32],
+                tail_next_id: [0; 32],
+                tail_next_intent_digest: [0; 32],
                 first_scope: Vec::new(),
                 second_scope: Vec::new(),
             };
@@ -501,6 +545,9 @@ mod tests {
                     {
                         if root.third_phase != THIRD_UNCLAIMED {
                             birth::cleanup_third_fixture(&self.service, &root.third_id);
+                            if root.tail_phase != TAIL_IDLE {
+                                birth::cleanup_fourth_fixture(&self.service, &root.tail_next_id);
+                            }
                             for name in [
                                 format!(
                                     "allocation-lifetime-birth-intent:v2:{}",
@@ -616,6 +663,12 @@ mod tests {
             third_roster_digest: [0; 32],
             third_decision_digest: [0; 32],
             third_tombstone_digest: [0; 32],
+            tail_phase: TAIL_IDLE,
+            tail_count: 0,
+            tail_roster_digest: [0; 32],
+            tail_target_digest: [0; 32],
+            tail_next_id: [0; 32],
+            tail_next_intent_digest: [0; 32],
             first_scope: Vec::new(),
             second_scope: Vec::new(),
         };
@@ -668,7 +721,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn earlier_roots_cannot_be_reinterpreted_as_v9_lifetime_authority() -> TestResult {
+    async fn earlier_roots_cannot_be_reinterpreted_as_v10_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -689,13 +742,16 @@ mod tests {
             b"AURA-PLATFORM-LIFETIME-ROOT-V6".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V7".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V8".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V9".as_slice(),
         ] {
-            let mut encoded = root.encode(platform)?;
-            encoded[..KEYRING_MAGIC.len()].copy_from_slice(old_magic);
+            let current = root.encode(platform)?;
+            let mut encoded = old_magic.to_vec();
+            encoded.extend_from_slice(&current[KEYRING_MAGIC.len()..]);
             assert!(RootRecord::decode(platform, &encoded).is_err());
         }
-        let mut encoded = root.encode(platform)?;
-        encoded[..KEYRING_MAGIC.len()].copy_from_slice(b"AURA-PLATFORM-LIFETIME-ROOT-V4");
+        let current = root.encode(platform)?;
+        let mut encoded = b"AURA-PLATFORM-LIFETIME-ROOT-V4".to_vec();
+        encoded.extend_from_slice(&current[KEYRING_MAGIC.len()..]);
         platform
             .entry_for_user(KEYRING_USER)?
             .set_secret(&encoded)?;
