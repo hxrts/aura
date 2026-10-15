@@ -105,17 +105,17 @@ impl DecisionRecord {
         if plain.len() < HEADER_LEN || !matches!(plain[0], POSITIVE | NEGATIVE) {
             return Err(invalid("platform decision kind is invalid"));
         }
-        let len = u32::from_le_bytes(plain[129..133].try_into().expect("bounded length")) as usize;
+        let len = u32::from_le_bytes(fixed_bytes(&plain[129..133])?) as usize;
         if len == 0 || len > MAX_DECISION_BYTES || plain.len() != HEADER_LEN + len {
             return Err(invalid("platform decision length is invalid"));
         }
         let bytes = Zeroizing::new(plain.split_off(HEADER_LEN));
         Ok(Self {
             kind: plain[0],
-            root: plain[1..33].try_into().expect("bounded root"),
-            allocation: plain[33..65].try_into().expect("bounded allocation"),
-            profile: plain[65..97].try_into().expect("bounded profile"),
-            service: plain[97..129].try_into().expect("bounded service"),
+            root: fixed_bytes(&plain[1..33])?,
+            allocation: fixed_bytes(&plain[33..65])?,
+            profile: fixed_bytes(&plain[65..97])?,
+            service: fixed_bytes(&plain[97..129])?,
             bytes,
         })
     }

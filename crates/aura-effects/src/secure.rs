@@ -365,7 +365,7 @@ fn publish_private_file_immutable_at(
 /// exposing the assembled runtime to callers.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
-struct SelectedSecureClock(Arc<std::sync::RwLock<Arc<dyn PhysicalTimeEffects>>>);
+struct SelectedSecureClock(tokio::sync::watch::Sender<Arc<dyn PhysicalTimeEffects>>);
 
 #[cfg(not(target_arch = "wasm32"))]
 impl std::fmt::Debug for SelectedSecureClock {
@@ -377,27 +377,21 @@ impl std::fmt::Debug for SelectedSecureClock {
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for SelectedSecureClock {
     fn default() -> Self {
-        Self(Arc::new(std::sync::RwLock::new(Arc::new(
+        let (sender, _) = tokio::sync::watch::channel(Arc::new(
             crate::time::PhysicalTimeHandler::new(),
-        ))))
+        ) as Arc<dyn PhysicalTimeEffects>);
+        Self(sender)
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl SelectedSecureClock {
     fn select(&self, provider: Arc<dyn PhysicalTimeEffects>) {
-        *self
-            .0
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = provider;
+        self.0.send_replace(provider);
     }
 
     async fn now_ms(&self) -> Result<u64, SecureStorageError> {
-        let provider = self
-            .0
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let provider = self.0.subscribe().borrow().clone();
         provider
             .physical_time()
             .await

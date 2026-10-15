@@ -65,6 +65,12 @@ struct RootRecord {
 fn invalid(message: &'static str) -> AuraError {
     AuraError::invalid(message)
 }
+
+fn fixed_bytes<const N: usize>(bytes: &[u8]) -> Result<[u8; N], AuraError> {
+    bytes
+        .try_into()
+        .map_err(|_| invalid("selected platform lifetime field length is invalid"))
+}
 fn io(source: std::io::Error) -> AuraError {
     AuraError::Storage {
         message: "selected platform lifetime root publication failed".into(),
@@ -214,26 +220,16 @@ impl RootRecord {
         }
         Ok(Self {
             phase: plain[0],
-            id: plain[1..33].try_into().expect("bounded root id"),
-            profile: plain[33..65].try_into().expect("bounded profile binding"),
-            service: plain[65..97].try_into().expect("bounded service binding"),
-            birth_id: plain[97..129].try_into().expect("bounded birth identity"),
-            intent_digest: plain[129..161]
-                .try_into()
-                .expect("bounded birth intent digest"),
-            decision_digest: plain[161..193]
-                .try_into()
-                .expect("bounded decision intent digest"),
-            roster_digest: plain[193..225]
-                .try_into()
-                .expect("bounded original roster digest"),
+            id: fixed_bytes(&plain[1..33])?,
+            profile: fixed_bytes(&plain[33..65])?,
+            service: fixed_bytes(&plain[65..97])?,
+            birth_id: fixed_bytes(&plain[97..129])?,
+            intent_digest: fixed_bytes(&plain[129..161])?,
+            decision_digest: fixed_bytes(&plain[161..193])?,
+            roster_digest: fixed_bytes(&plain[193..225])?,
             second_phase: plain[225],
-            second_decision_digest: plain[226..258]
-                .try_into()
-                .expect("bounded second decision digest"),
-            second_tombstone_digest: plain[258..290]
-                .try_into()
-                .expect("bounded second tombstone digest"),
+            second_decision_digest: fixed_bytes(&plain[226..258])?,
+            second_tombstone_digest: fixed_bytes(&plain[258..290])?,
             first_scope: plain[294..294 + first_scope_len].to_vec(),
             second_scope: plain[294 + first_scope_len..].to_vec(),
         })

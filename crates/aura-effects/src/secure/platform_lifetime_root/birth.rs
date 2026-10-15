@@ -108,8 +108,8 @@ impl BirthIntent {
         }
         let secret = Zeroizing::new(plain.split_off(68 + scope_len));
         Ok(Self {
-            root: plain[0..32].try_into().expect("bounded root"),
-            allocation: plain[32..64].try_into().expect("bounded allocation"),
+            root: fixed_bytes(&plain[0..32])?,
+            allocation: fixed_bytes(&plain[32..64])?,
             scope: plain[68..68 + scope_len].to_vec(),
             secret,
         })
@@ -132,11 +132,9 @@ fn validate_roster(bytes: &[u8], root: &RootRecord) -> Result<(), AuraError> {
     if !bytes.starts_with(INVENTORY_MAGIC) || bytes.len() < INVENTORY_MAGIC.len() + 2 {
         return Err(invalid("platform roster version is invalid"));
     }
-    let count = u16::from_le_bytes(
-        bytes[INVENTORY_MAGIC.len()..INVENTORY_MAGIC.len() + 2]
-            .try_into()
-            .expect("bounded roster count"),
-    ) as usize;
+    let count = u16::from_le_bytes(fixed_bytes(
+        &bytes[INVENTORY_MAGIC.len()..INVENTORY_MAGIC.len() + 2],
+    )?) as usize;
     if count == 0
         || count > aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
         || bytes.len() != INVENTORY_MAGIC.len() + 2 + count * ROSTER_ENTRY_LEN
@@ -326,7 +324,7 @@ pub(super) struct PlatformBirthAdmission {
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
 
-fn verify_birth<'a>(
+fn verify_birth(
     owned: &ProfileOwnedSecureStorage,
     selected: &PlatformSecureStorageHandler,
     birth: &PlatformBirthAdmission,

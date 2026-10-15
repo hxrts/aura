@@ -37,19 +37,11 @@ impl Claim {
         }
         let offset = CLAIM_MAGIC.len();
         let claim = Self {
-            root: bytes[offset..offset + 32].try_into().expect("bounded root"),
-            allocation: bytes[offset + 32..offset + 64]
-                .try_into()
-                .expect("bounded ID"),
-            intent_digest: bytes[offset + 64..offset + 96]
-                .try_into()
-                .expect("bounded digest"),
-            profile: bytes[offset + 96..offset + 128]
-                .try_into()
-                .expect("bounded profile"),
-            service: bytes[offset + 128..offset + 160]
-                .try_into()
-                .expect("bounded service"),
+            root: fixed_bytes(&bytes[offset..offset + 32])?,
+            allocation: fixed_bytes(&bytes[offset + 32..offset + 64])?,
+            intent_digest: fixed_bytes(&bytes[offset + 64..offset + 96])?,
+            profile: fixed_bytes(&bytes[offset + 96..offset + 128])?,
+            service: fixed_bytes(&bytes[offset + 128..offset + 160])?,
         };
         if claim.root != root.id
             || claim.allocation == root.birth_id

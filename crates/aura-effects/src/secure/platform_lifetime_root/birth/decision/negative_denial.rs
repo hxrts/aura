@@ -161,7 +161,7 @@ fn finish_original(
     match read_entry(selected, TOMBSTONE_USER)? {
         Some(observed) if observed == expected => {}
         None if root.phase == TOMBSTONE_PENDING => {
-            write_exact(selected, TOMBSTONE_USER, &expected)?
+            write_exact(selected, TOMBSTONE_USER, &expected)?;
         }
         _ => return Err(invalid("platform denial tombstone is missing or different")),
     }
