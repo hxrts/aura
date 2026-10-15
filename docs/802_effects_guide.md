@@ -515,6 +515,13 @@ Build the platform path in reviewable dependencies:
    checks that refusal and same-profile reopen. Extend the authenticated roster
    before attempting L6 selection; the test keyring fixture is separate from
    actual OS credential-service durability.
+   The private V8 root now anchors a third birth's original identity, sealed
+   intent and candidate three-entry roster before writing its selected
+   credential. Recovery verifies the prior two-entry ACK and only the exact
+   third intent, record and ACK. V7 roots fail closed without migration. This
+   writer grants no third allocation owner: the selected L6 channel and
+   two-entry actor capacity refusal remain in force until per-entry transitions,
+   owner handoff and the full 4096-entry contract are proved.
 3. Specify an acknowledged transaction across the credential store and the
    inventory for each transition. A durable intent must name the exact
    allocation and desired phase before a credential write. Read and verify the

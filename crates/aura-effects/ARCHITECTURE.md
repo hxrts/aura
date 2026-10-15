@@ -199,6 +199,8 @@ A private selected-platform lifetime actor now keeps that original profile lease
 
 The runtime contract admits up to 4096 profile allocations. Because this private actor supports two, the production selected-platform handoff still returns typed `UnsupportedSelectedProvider` before claiming its root or writing a birth. An exact same-profile host fixture guards that refusal and unchanged selected keyring state. The authenticated roster must scale before L6 can select it; OS credential-service durability remains a separate requirement.
 
+The private V8 root adds an authenticated third-birth claim: the original two-entry roster digest remains fixed, while the root anchors the third identity, sealed-intent digest, exact candidate three-entry roster digest, and pending/acknowledged phase before any third per-ID credential is written. The third scope is authenticated through the candidate roster and recovered only from the original sealed intent. Reopen can finish an interrupted exact third record and ACK; missing or foreign intent, changed record, or a missing ACK after completion refuses recovery. V7 roots fail closed pending migration. This private writer issues no third allocation owner, and the two-entry decision/erasure owner refuses use after a third claim. Generalized third-entry decisions, erasure, owner handoff and 4096-entry capacity remain separate dependencies; L6 selection stays closed.
+
 ### Filesystem replacement durability
 
 `StorageCoreEffects::store` publishes complete sibling staging files using an

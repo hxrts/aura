@@ -206,6 +206,7 @@ pub(in crate::secure::platform_lifetime_root::birth) fn bound_claim(
 ) -> Result<Claim, AuraError> {
     if !Arc::ptr_eq(&roster._owner, &owned._owner)
         || roster.root != root.id
+        || root.third_phase != THIRD_UNCLAIMED
         || !owned._owner.lifetime_root_claimed.load(Ordering::Acquire)
     {
         return Err(invalid(

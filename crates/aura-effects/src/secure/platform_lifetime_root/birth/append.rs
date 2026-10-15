@@ -17,6 +17,7 @@ const INTENT_PREFIX: &str = "allocation-lifetime-birth-intent:v2:";
 const RECORD_PREFIX: &str = "allocation-lifetime-birth-record:v2:";
 const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
 pub(super) mod lifecycle;
+mod third;
 
 pub(in crate::secure::platform_lifetime_root::birth) struct Claim {
     root: [u8; 32],
@@ -462,6 +463,9 @@ pub(super) fn verify_roster_owner(
     roster: &PlatformRosterAdmission,
 ) -> Result<RootRecord, AuraError> {
     let mut root = read_root(owned, selected)?;
+    if root.third_phase != THIRD_UNCLAIMED {
+        return Err(invalid("platform two-entry owner has a third birth claim"));
+    }
     let claim = lifecycle::bound_claim(owned, selected, &root, roster)?;
     validate_roster_layout(&self::roster(&root, &claim), &root, &claim)?;
     verify_first(owned, selected, &root)?;
@@ -477,6 +481,9 @@ fn validate_complete_roster(
     selected: &PlatformSecureStorageHandler,
 ) -> Result<(RootRecord, Claim), AuraError> {
     let root = read_root(owned, selected)?;
+    if root.third_phase != THIRD_UNCLAIMED {
+        return Err(invalid("platform two-entry owner has a third birth claim"));
+    }
     let bytes = read_entry(selected, CLAIM_USER)?
         .ok_or_else(|| invalid("platform whole roster lacks second claim"))?;
     let claim = Claim::decode(&bytes, &root)?;
@@ -745,9 +752,9 @@ mod tests {
             reanchored.roster_digest = aura_core::hash::hash(&changed);
             assert!(validate_roster_layout(&changed, &reanchored, &claim).is_err());
         }
-        let mut changed = original.clone();
+        let mut changed = original;
         changed[ROSTER_MAGIC.len()] = 3;
-        let mut reanchored = root.clone();
+        let mut reanchored = root;
         reanchored.roster_digest = aura_core::hash::hash(&changed);
         assert!(validate_roster_layout(&changed, &reanchored, &claim).is_err());
         Ok(())
