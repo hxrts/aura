@@ -595,6 +595,25 @@ pub(super) async fn read_live_secret(
     Ok(intent.secret)
 }
 
+#[allow(dead_code)]
+async fn read_roster_first_secret(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let root = append::verify_roster_owner(owned, selected, roster)?;
+    if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
+        return Err(invalid("platform first roster read denied by erasure"));
+    }
+    let (bytes, intent) = read_intent(selected, &root)?;
+    if read_entry(selected, RECORD_USER)?.as_deref() != Some(bytes.as_slice()) {
+        return Err(invalid("platform first roster credential differs"));
+    }
+    decision::require_live_read(owned, selected, &root)?;
+    Ok(intent.secret)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

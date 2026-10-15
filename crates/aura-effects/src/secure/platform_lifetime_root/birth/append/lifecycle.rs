@@ -198,7 +198,7 @@ async fn decide_inner(
     Ok(())
 }
 
-fn bound_claim(
+pub(super) fn bound_claim(
     owned: &ProfileOwnedSecureStorage,
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,

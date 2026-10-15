@@ -364,6 +364,32 @@ pub(super) struct PlatformRosterAdmission {
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
 
+#[allow(dead_code)]
+pub(super) async fn read_roster_second_secret(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &PlatformRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    lifecycle::read_live_secret(owned, roster).await
+}
+
+/// Verify the already transferred whole-roster owner under its namespace
+/// guard. First-entry transitions must use this owner after append rather
+/// than reviving the earlier single-birth token.
+pub(super) fn verify_roster_owner(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    roster: &PlatformRosterAdmission,
+) -> Result<RootRecord, AuraError> {
+    let mut root = read_root(owned, selected)?;
+    let claim = lifecycle::bound_claim(owned, selected, &root, roster)?;
+    verify_first(owned, selected, &root)?;
+    lifecycle::recover(owned, selected, &mut root, &claim)?;
+    if !marker_state(owned, &self::roster(&root, &claim))? {
+        return Err(invalid("platform whole roster marker is missing"));
+    }
+    Ok(root)
+}
+
 /// Recover both exact birth records under the selected namespace lock before
 /// transferring the original profile's lifetime root once. A partial append
 /// may be reconciled only from its root-anchored claim and sealed intent.

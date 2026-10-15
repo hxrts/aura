@@ -291,12 +291,49 @@ async fn decide_inner(
     bytes: &[u8],
     stop: StopAfter,
 ) -> Result<(), AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, _intent) = verify_birth(owned, selected, birth)?;
+    decide_locked(owned, selected, root, positive, bytes, stop)
+}
+
+/// First decision after a second allocation exists. The original first-birth
+/// token is deliberately insufficient; only the recovered whole-roster owner
+/// can authorize this same immutable first decision transaction.
+#[allow(dead_code)]
+pub(super) async fn decide_roster(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_roster_inner(owned, roster, positive, bytes, StopAfter::Never).await
+}
+
+async fn decide_roster_inner(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+    stop: StopAfter,
+) -> Result<(), AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let root = append::verify_roster_owner(owned, selected, roster)?;
+    decide_locked(owned, selected, root, positive, bytes, stop)
+}
+
+fn decide_locked(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    mut root: RootRecord,
+    positive: bool,
+    bytes: &[u8],
+    stop: StopAfter,
+) -> Result<(), AuraError> {
     if bytes.is_empty() || bytes.len() > MAX_DECISION_BYTES {
         return Err(invalid("platform decision size is invalid"));
     }
-    let (selected, _) = selected_owner(owned)?;
-    let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (mut root, _intent) = verify_birth(owned, selected, birth)?;
     let kind = if positive { POSITIVE } else { NEGATIVE };
     if let Some(existing) = read_record(selected, &root)? {
         if existing.kind != kind || existing.bytes.as_slice() != bytes {
@@ -560,6 +597,133 @@ mod tests {
                 &b"second refusal"[..]
             }
         );
+        Ok(())
+    }
+
+    async fn two_birth_roster() -> Result<
+        (
+            Fixture,
+            ProductionSecureStorageHandler,
+            append::PlatformRosterAdmission,
+        ),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let birth = allocate_one(owned, &empty, b"first scope", b"first secret").await?;
+        append::append_second(owned, &birth, b"second scope", b"second secret").await?;
+        assert!(decide(owned, &birth, true, b"stale owner").await.is_err());
+        drop(birth);
+        drop(empty);
+        drop(first);
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let roster = append::recover_roster(owned).await?;
+        Ok((fixture, selected, roster))
+    }
+
+    #[tokio::test]
+    async fn first_roster_decision_is_exact_and_reopens_with_both_entries() -> TestResult {
+        let (fixture, selected, roster) = two_birth_roster().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        decide_roster(owned, &roster, true, b"original approval").await?;
+        decide_roster(owned, &roster, true, b"original approval").await?;
+        assert!(decide_roster(owned, &roster, false, b"original approval")
+            .await
+            .is_err());
+        assert!(decide_roster(owned, &roster, true, b"replacement approval")
+            .await
+            .is_err());
+        assert_eq!(
+            &**read_roster_first_secret(owned, &roster).await?,
+            b"first secret"
+        );
+        assert_eq!(
+            &**append::read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        drop(roster);
+        drop(selected);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let roster = append::recover_roster(owned).await?;
+        assert_eq!(
+            &**read_roster_first_secret(owned, &roster).await?,
+            b"first secret"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_roster_decision_interruptions_retain_original_intent() -> TestResult {
+        for stop in [StopAfter::RootIntent, StopAfter::Intent, StopAfter::Marker] {
+            let (fixture, selected, roster) = two_birth_roster().await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+                unreachable!()
+            };
+            assert!(decide_roster_inner(owned, &roster, false, b"refusal", stop)
+                .await
+                .is_err());
+            drop(roster);
+            drop(selected);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let result = append::recover_roster(owned).await;
+            assert_eq!(result.is_ok(), stop != StopAfter::RootIntent, "{stop:?}");
+            if let Ok(roster) = result {
+                decide_roster(owned, &roster, false, b"refusal").await?;
+                assert!(read_roster_first_secret(owned, &roster).await.is_err());
+                assert_eq!(
+                    read_root(owned, selected_owner(owned)?.0)?.phase,
+                    DECISION_COMPLETE
+                );
+            } else {
+                assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_roster_decision_refuses_foreign_owner_and_lost_evidence() -> TestResult {
+        let (fixture, selected, roster) = two_birth_roster().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let foreign = tempfile::tempdir()?;
+        let foreign_selected =
+            super::super::super::tests::selected(foreign.path(), &fixture.service)?;
+        let ProductionSecureStorageHandler::ProfileOwned(foreign_owned) = &foreign_selected else {
+            unreachable!()
+        };
+        assert!(decide_roster(foreign_owned, &roster, true, b"approval")
+            .await
+            .is_err());
+        decide_roster(owned, &roster, true, b"approval").await?;
+        let platform = selected_owner(owned)?.0;
+        platform
+            .entry_for_user(DECISION_USER)?
+            .delete_credential()?;
+        drop(roster);
+        drop(selected);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert!(append::recover_roster(owned).await.is_err());
+        assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
         Ok(())
     }
 }
