@@ -1107,22 +1107,28 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
-The native `devices` list is a Settings/Devices projection. After the exact
-approval operation and host ACK, the paired checklist opens that section
-through the semantic command plane before checking the signed device ID in the
-two-item list. It opens the section again after restart. Absence of the list on
-an onboarding or other settings section is not evidence that the canonical
-device record is missing.
+The native `devices` list is a Settings/Devices projection. Its
+`device_enrollment_accepted` observation names whichever peer device first
+appears in that projection; its ID need not equal the signed invitee device ID.
+After the exact approval operation succeeds and the two-device host
+observation appears, the paired checklist opens Settings/Devices through the
+semantic command plane. Both the signed invitee and observed peer IDs must be
+distinct entries in the canonical two-item list, before and after same-profile
+restart. Absence of the list on an onboarding or other settings section is not
+evidence that the canonical device record is missing.
 
 When a paired batch lacks the exact receiver ACK, retain the owner-only
 `broker-stage.json` receipt from the paired run. Its authenticated broker
 progress witness is scoped to the signed manifest subject, invitee device and
-digest. It distinguishes no stored registration, queued first message, a
-message selected for an authorized receiver retrieval, and a receiver ACK after
+digest. The broker records the first successfully queued message ID in insertion
+order, so later issuer retries cannot be mistaken for the original envelope.
+The checklist observes within the original 120-second registration lifetime
+and stops at the first missing registration, queue, receiver selection or exact
+ACK stage. The receipt distinguishes no stored registration, a queued first
+message, a message selected for authorized receiver retrieval, and an ACK after
 verified immutable retention. Retrieval selection does not prove HTTP delivery
 or receiver admission; only the exact ACK can satisfy the network-delivery
-assertion. The receipt
-contains message IDs and envelope digests, never mailbox credentials or
+assertion. The receipt contains message IDs and envelope digests, never mailbox credentials or
 envelope bytes, and remains diagnostic evidence when the run fails.
 
 `scripts/harness/lan/provision-enrollment.sh <fresh-run-token>` prepares the

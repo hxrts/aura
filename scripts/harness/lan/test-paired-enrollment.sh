@@ -96,18 +96,18 @@ case "$instance:$method:$intent" in
       exit 0
     fi
     if [[ "${FIXTURE_CASE:-}" == missing_accepted_list && -e "$FIXTURE_DEVICES_OPEN" && ! -e "$FIXTURE_RESTARTED" ]]; then
-      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"22222222-2222-2222-2222-222222222222","device_count":2}}],"lists":[]}}}}'
+      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000001","device_count":2}}],"lists":[]}}}}'
       exit 0
     fi
     if [[ -e "$FIXTURE_DEVICES_OPEN" ]]; then
-      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"22222222-2222-2222-2222-222222222222","device_count":2}}],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"22222222-2222-2222-2222-222222222222"}]}]}}}}'
+      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000001","device_count":2}}],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"22222222-2222-2222-2222-222222222222"}]}]}}}}'
       exit 0
     fi
     if [[ "${FIXTURE_CASE:-}" == wrong_host_ack_device ]]; then
       echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000003","device_count":2}}],"lists":[]}}}}'
       exit 0
     fi
-    echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"22222222-2222-2222-2222-222222222222","device_count":2}}],"lists":[]}}}}' ;;
+    echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000001","device_count":2}}],"lists":[]}}}}' ;;
   barbara-tui:get_authority_id:)
     if [[ "${FIXTURE_CASE:-}" == wrong_authority ]]; then
       echo '{"status":"ok","payload":{"authority_id":"other-authority","source":"backend"}}'
@@ -190,11 +190,13 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
   fi
   [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
   if [[ "$failure" == wrong_host_ack_device ]]; then
-    jq -e '.typed_failure=="host_ack_device_mismatch" and
+    jq -e '.typed_failure=="canonical_device_binding_mismatch" and
+      .stage=="accepted-devices" and
       .operation_instance=="tui-op-device_enrollment-2" and
       .signed_manifest_device=="22222222-2222-2222-2222-222222222222" and
-      .host_acknowledgments==[{device_id:"00000000-0000-4000-8000-000000000003",device_count:2}]' \
-      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/host-ack-mismatch.json" >/dev/null
+      .host_ack_device=="00000000-0000-4000-8000-000000000003" and
+      (.canonical_device_ids|sort)==["00000000-0000-4000-8000-000000000001","22222222-2222-2222-2222-222222222222"]' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/accepted-devices-list-mismatch.json" >/dev/null
   fi
   if [[ "$failure" == no_network_ack || "$failure" == no_registration || "$failure" == wrong_network_message_id || "$failure" == wrong_network_digest ]]; then
     stage_receipt="$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/broker-stage.json"
