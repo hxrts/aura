@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V8";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V9";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,7 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 12 + 2 + 2 + 2;
+const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 14 + 2 + 2 + 2;
 const MAX_PLAINTEXT_LEN: usize =
     PLAINTEXT_HEADER_LEN + 2 * aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES;
 const SECOND_BIRTH_COMPLETE: u8 = 0;
@@ -44,6 +44,12 @@ const SECOND_ERASURE_COMPLETE: u8 = 6;
 const THIRD_UNCLAIMED: u8 = 0;
 const THIRD_BIRTH_PENDING: u8 = 1;
 const THIRD_BIRTH_COMPLETE: u8 = 2;
+const THIRD_DECISION_PENDING: u8 = 3;
+const THIRD_DECISION_COMPLETE: u8 = 4;
+const THIRD_TOMBSTONE_PENDING: u8 = 5;
+const THIRD_TOMBSTONE_ACK_ERASURE_PENDING: u8 = 6;
+const THIRD_ERASURE_PENDING: u8 = 7;
+const THIRD_ERASURE_COMPLETE: u8 = 8;
 const MAX_FILE_LEN: usize = 256;
 
 #[derive(Clone)]
@@ -63,6 +69,8 @@ struct RootRecord {
     third_id: [u8; 32],
     third_intent_digest: [u8; 32],
     third_roster_digest: [u8; 32],
+    third_decision_digest: [u8; 32],
+    third_tombstone_digest: [u8; 32],
     // Retained nonsecret birth scopes survive selected-provider credential
     // erasure. Their bytes are authenticated inside the original root.
     first_scope: Vec<u8>,
@@ -126,6 +134,8 @@ impl RootRecord {
         plain.extend_from_slice(&self.third_id);
         plain.extend_from_slice(&self.third_intent_digest);
         plain.extend_from_slice(&self.third_roster_digest);
+        plain.extend_from_slice(&self.third_decision_digest);
+        plain.extend_from_slice(&self.third_tombstone_digest);
         plain.extend_from_slice(&(self.first_scope.len() as u16).to_le_bytes());
         plain.extend_from_slice(&(self.second_scope.len() as u16).to_le_bytes());
         plain.extend_from_slice(&self.first_scope);
@@ -174,8 +184,8 @@ impl RootRecord {
                     Arc::new(source),
                 )
             })?;
-        let first_scope_len = u16::from_le_bytes([plain[387], plain[388]]) as usize;
-        let second_scope_len = u16::from_le_bytes([plain[389], plain[390]]) as usize;
+        let first_scope_len = u16::from_le_bytes([plain[451], plain[452]]) as usize;
+        let second_scope_len = u16::from_le_bytes([plain[453], plain[454]]) as usize;
         if plain.len() != PLAINTEXT_HEADER_LEN + first_scope_len + second_scope_len
             || first_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
             || second_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
@@ -226,13 +236,19 @@ impl RootRecord {
             ) && (plain[226..258] == [0; 32] || plain[258..290] != [0; 32]))
             || (plain[225] >= SECOND_TOMBSTONE_PENDING
                 && (plain[226..258] == [0; 32] || plain[258..290] == [0; 32]))
-            || !matches!(plain[290], THIRD_UNCLAIMED..=THIRD_BIRTH_COMPLETE)
-            || (plain[290] == THIRD_UNCLAIMED && plain[291..387] != [0; 96])
+            || !matches!(plain[290], THIRD_UNCLAIMED..=THIRD_ERASURE_COMPLETE)
+            || (plain[290] == THIRD_UNCLAIMED && plain[291..451] != [0; 160])
             || (plain[290] != THIRD_UNCLAIMED
                 && (plain[291..323] == [0; 32]
                     || plain[323..355] == [0; 32]
                     || plain[355..387] == [0; 32]
                     || plain[291..323] == plain[97..129]))
+            || (plain[290] <= THIRD_BIRTH_COMPLETE
+                && (plain[387..419] != [0; 32] || plain[419..451] != [0; 32]))
+            || (matches!(plain[290], THIRD_DECISION_PENDING | THIRD_DECISION_COMPLETE)
+                && (plain[387..419] == [0; 32] || plain[419..451] != [0; 32]))
+            || (plain[290] >= THIRD_TOMBSTONE_PENDING
+                && (plain[387..419] == [0; 32] || plain[419..451] == [0; 32]))
         {
             return Err(invalid("selected platform lifetime root phase is invalid"));
         }
@@ -252,8 +268,10 @@ impl RootRecord {
             third_id: fixed_bytes(&plain[291..323])?,
             third_intent_digest: fixed_bytes(&plain[323..355])?,
             third_roster_digest: fixed_bytes(&plain[355..387])?,
-            first_scope: plain[391..391 + first_scope_len].to_vec(),
-            second_scope: plain[391 + first_scope_len..].to_vec(),
+            third_decision_digest: fixed_bytes(&plain[387..419])?,
+            third_tombstone_digest: fixed_bytes(&plain[419..451])?,
+            first_scope: plain[455..455 + first_scope_len].to_vec(),
+            second_scope: plain[455 + first_scope_len..].to_vec(),
         })
     }
 }
@@ -351,6 +369,8 @@ pub(super) async fn admit_empty_root(
                 third_id: [0; 32],
                 third_intent_digest: [0; 32],
                 third_roster_digest: [0; 32],
+                third_decision_digest: [0; 32],
+                third_tombstone_digest: [0; 32],
                 first_scope: Vec::new(),
                 second_scope: Vec::new(),
             };
@@ -480,6 +500,7 @@ mod tests {
                         .and_then(|bytes| RootRecord::decode(selected, &bytes))
                     {
                         if root.third_phase != THIRD_UNCLAIMED {
+                            birth::cleanup_third_fixture(&self.service, &root.third_id);
                             for name in [
                                 format!(
                                     "allocation-lifetime-birth-intent:v2:{}",
@@ -593,6 +614,8 @@ mod tests {
             third_id: [0; 32],
             third_intent_digest: [0; 32],
             third_roster_digest: [0; 32],
+            third_decision_digest: [0; 32],
+            third_tombstone_digest: [0; 32],
             first_scope: Vec::new(),
             second_scope: Vec::new(),
         };
@@ -645,7 +668,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn earlier_roots_cannot_be_reinterpreted_as_v8_lifetime_authority() -> TestResult {
+    async fn earlier_roots_cannot_be_reinterpreted_as_v9_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -665,6 +688,7 @@ mod tests {
             b"AURA-PLATFORM-LIFETIME-ROOT-V5".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V6".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V7".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V8".as_slice(),
         ] {
             let mut encoded = root.encode(platform)?;
             encoded[..KEYRING_MAGIC.len()].copy_from_slice(old_magic);

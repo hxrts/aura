@@ -19,6 +19,11 @@ const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
 pub(super) mod lifecycle;
 mod third;
 
+#[cfg(test)]
+pub(super) fn cleanup_third_fixture(service: &str, id: &[u8; 32]) {
+    third::cleanup_fixture(service, id);
+}
+
 pub(in crate::secure::platform_lifetime_root::birth) struct Claim {
     root: [u8; 32],
     allocation: [u8; 32],

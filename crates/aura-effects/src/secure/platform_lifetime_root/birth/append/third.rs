@@ -3,6 +3,12 @@
 use super::*;
 
 const THIRD_ROSTER_FILE: &str = "platform_lifetime/third-roster.v8";
+mod lifecycle;
+
+#[cfg(test)]
+pub(super) fn cleanup_fixture(service: &str, id: &[u8; 32]) {
+    lifecycle::cleanup_fixture(service, id);
+}
 
 fn third_roster(root: &RootRecord, claim: &Claim, scope: &[u8]) -> Result<Vec<u8>, AuraError> {
     let prior = roster(root, claim);
@@ -50,6 +56,57 @@ fn third_roster(root: &RootRecord, claim: &Claim, scope: &[u8]) -> Result<Vec<u8
     Ok(bytes)
 }
 
+fn retained_scope(
+    owned: &ProfileOwnedSecureStorage,
+    root: &RootRecord,
+    claim: &Claim,
+) -> Result<Vec<u8>, AuraError> {
+    let (bytes, None) = owned
+        ._owner
+        .directory
+        .read_private_publication(Path::new(THIRD_ROSTER_FILE), MAX_ROSTER_FILE)
+        .map_err(io)?
+        .ok_or_else(|| invalid("platform third roster ACK is missing"))?
+    else {
+        return Err(invalid("platform third roster publication is incomplete"));
+    };
+    if bytes.len() < ROSTER_MAGIC.len() + 2
+        || !bytes.starts_with(ROSTER_MAGIC)
+        || bytes[ROSTER_MAGIC.len()..ROSTER_MAGIC.len() + 2] != 3u16.to_le_bytes()
+        || aura_core::hash::hash(&bytes) != root.third_roster_digest
+    {
+        return Err(invalid(
+            "platform third roster differs from original root anchor",
+        ));
+    }
+    let mut cursor = ROSTER_MAGIC.len() + 2;
+    let mut scope = None;
+    for _ in 0..3 {
+        let header_end = cursor
+            .checked_add(ROSTER_ENTRY_HEADER_LEN)
+            .ok_or_else(|| invalid("platform third roster length overflow"))?;
+        if header_end > bytes.len() {
+            return Err(invalid("platform third roster entry is truncated"));
+        }
+        let len = u16::from_le_bytes([bytes[cursor + 161], bytes[cursor + 162]]) as usize;
+        let end = header_end
+            .checked_add(len)
+            .ok_or_else(|| invalid("platform third roster scope overflow"))?;
+        if end > bytes.len() || len == 0 || len > MAX_SCOPE_BYTES {
+            return Err(invalid("platform third roster scope is invalid"));
+        }
+        if bytes[cursor + 32..cursor + 64] == root.third_id {
+            scope = Some(bytes[header_end..end].to_vec());
+        }
+        cursor = end;
+    }
+    let scope = scope.ok_or_else(|| invalid("platform third roster lacks original entry"))?;
+    if cursor != bytes.len() || third_roster(root, claim, &scope)? != bytes {
+        return Err(invalid("platform third roster has foreign original scope"));
+    }
+    Ok(scope)
+}
+
 fn marker_state(owned: &ProfileOwnedSecureStorage, expected: &[u8]) -> Result<bool, AuraError> {
     match owned
         ._owner
@@ -80,7 +137,7 @@ fn publish_marker(owned: &ProfileOwnedSecureStorage, bytes: &[u8]) -> Result<(),
 fn prior_claim(
     owned: &ProfileOwnedSecureStorage,
     selected: &PlatformSecureStorageHandler,
-    root: &RootRecord,
+    root: &mut RootRecord,
 ) -> Result<Claim, AuraError> {
     let bytes = read_entry(selected, CLAIM_USER)?
         .ok_or_else(|| invalid("platform third birth lacks original second claim"))?;
@@ -88,7 +145,7 @@ fn prior_claim(
     let prior = roster(root, &claim);
     validate_roster_layout(&prior, root, &claim)?;
     verify_first(owned, selected, root)?;
-    lifecycle::recover(owned, selected, &mut root.clone(), &claim)?;
+    super::lifecycle::recover(owned, selected, root, &claim)?;
     if !super::marker_state(owned, &prior)? {
         return Err(invalid("platform third birth lacks second roster ACK"));
     }
@@ -133,7 +190,7 @@ fn replay(
         Some(observed) if observed == bytes => {}
         Some(_) => return Err(invalid("platform third record differs from sealed intent")),
         None if marker => return Err(invalid("platform third record is missing after ACK")),
-        None if root.third_phase == THIRD_BIRTH_COMPLETE => {
+        None if root.third_phase >= THIRD_BIRTH_COMPLETE => {
             return Err(invalid("completed platform third record is missing"));
         }
         None => write_exact(selected, &record_user, &bytes)?,
@@ -142,7 +199,7 @@ fn replay(
         return Err(interrupted());
     }
     if !marker {
-        if root.third_phase == THIRD_BIRTH_COMPLETE {
+        if root.third_phase >= THIRD_BIRTH_COMPLETE {
             return Err(invalid("completed platform third ACK is missing"));
         }
         publish_marker(owned, &expected)?;
@@ -187,7 +244,7 @@ async fn append_inner(
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
     let mut root = verify_roster_owner(owned, selected, roster_owner)?;
-    let claim = prior_claim(owned, selected, &root)?;
+    let claim = prior_claim(owned, selected, &mut root)?;
     if marker_state(owned, &[])? {
         return Err(invalid("platform third birth already acknowledged"));
     }
@@ -276,8 +333,130 @@ pub(super) async fn reconcile_third(owned: &ProfileOwnedSecureStorage) -> Result
     if root.third_phase == THIRD_UNCLAIMED {
         return Err(invalid("platform third birth has no root-anchored claim"));
     }
-    let claim = prior_claim(owned, selected, &root)?;
-    replay(owned, selected, &mut root, &claim, StopAfter::Never)
+    let claim = prior_claim(owned, selected, &mut root)?;
+    recover(owned, selected, &mut root, &claim).map(|_| ())
+}
+
+fn recover(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    root: &mut RootRecord,
+    claim: &Claim,
+) -> Result<Vec<u8>, AuraError> {
+    if root.third_phase < THIRD_ERASURE_PENDING {
+        replay(owned, selected, root, claim, StopAfter::Never)?;
+    }
+    let scope = retained_scope(owned, root, claim)?;
+    lifecycle::recover(owned, selected, root, &scope)?;
+    Ok(scope)
+}
+
+/// Opaque custody of the original three-entry roster. The original profile
+/// lease remains retained through interrupted third-entry transitions.
+#[allow(dead_code)]
+pub(super) struct PlatformThreeRosterAdmission {
+    root: [u8; 32],
+    allocations: [[u8; 32]; 3],
+    _owner: Arc<crate::profile_storage::OwnedProfileLease>,
+}
+
+fn verify_owner(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    three: &PlatformThreeRosterAdmission,
+) -> Result<(RootRecord, Claim, Vec<u8>), AuraError> {
+    let (original_selected, owner) = selected_owner(owned)?;
+    if !std::ptr::eq(original_selected, selected)
+        || !Arc::ptr_eq(owner, &three._owner)
+        || !owner.lifetime_root_claimed.load(Ordering::Acquire)
+    {
+        return Err(invalid(
+            "platform third transition lacks original profile owner",
+        ));
+    }
+    let mut root = read_root(owned, selected)?;
+    if root.id != three.root || root.third_phase < THIRD_BIRTH_COMPLETE {
+        return Err(invalid(
+            "platform third transition lacks acknowledged birth",
+        ));
+    }
+    let claim = prior_claim(owned, selected, &mut root)?;
+    let mut expected = [root.birth_id, claim.allocation, root.third_id];
+    expected.sort();
+    if expected != three.allocations {
+        return Err(invalid("platform third transition has foreign roster"));
+    }
+    let scope = recover(owned, selected, &mut root, &claim)?;
+    Ok((root, claim, scope))
+}
+
+/// Consume the previous owner only after all three original entries and the
+/// third ACK have been verified under the selected namespace lock.
+#[allow(dead_code)]
+pub(super) async fn promote_after_third(
+    owned: &ProfileOwnedSecureStorage,
+    two: PlatformRosterAdmission,
+) -> Result<PlatformThreeRosterAdmission, (AuraError, PlatformRosterAdmission)> {
+    let result = promote_borrowed(owned, &two).await;
+    result.map_err(|error| (error, two))
+}
+
+async fn promote_borrowed(
+    owned: &ProfileOwnedSecureStorage,
+    two: &PlatformRosterAdmission,
+) -> Result<PlatformThreeRosterAdmission, AuraError> {
+    let (selected, owner) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    if !Arc::ptr_eq(&two._owner, owner) || !owner.lifetime_root_claimed.load(Ordering::Acquire) {
+        return Err(invalid(
+            "platform third handoff lacks original two-entry owner",
+        ));
+    }
+    let mut root = read_root(owned, selected)?;
+    if two.root != root.id || root.third_phase < THIRD_BIRTH_COMPLETE {
+        return Err(invalid(
+            "platform third handoff lacks completed original birth",
+        ));
+    }
+    let claim = prior_claim(owned, selected, &mut root)?;
+    let mut first_two = [root.birth_id, claim.allocation];
+    first_two.sort();
+    if two.allocations != first_two {
+        return Err(invalid("platform third handoff has foreign prior roster"));
+    }
+    recover(owned, selected, &mut root, &claim)?;
+    let mut allocations = [root.birth_id, claim.allocation, root.third_id];
+    allocations.sort();
+    Ok(PlatformThreeRosterAdmission {
+        root: root.id,
+        allocations,
+        _owner: owner.clone(),
+    })
+}
+
+#[allow(dead_code)]
+pub(super) async fn recover_three_roster(
+    owned: &ProfileOwnedSecureStorage,
+) -> Result<PlatformThreeRosterAdmission, AuraError> {
+    let (selected, owner) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let mut root = read_root(owned, selected)?;
+    if root.third_phase == THIRD_UNCLAIMED {
+        return Err(invalid("platform third roster has no root-anchored birth"));
+    }
+    let claim = prior_claim(owned, selected, &mut root)?;
+    recover(owned, selected, &mut root, &claim)?;
+    owner
+        .lifetime_root_claimed
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| invalid("platform third roster root already transferred"))?;
+    let mut allocations = [root.birth_id, claim.allocation, root.third_id];
+    allocations.sort();
+    Ok(PlatformThreeRosterAdmission {
+        root: root.id,
+        allocations,
+        _owner: owner.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -286,7 +465,7 @@ mod tests {
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-    async fn first_two(
+    pub(super) async fn first_two(
         fixture: &Fixture,
     ) -> Result<(ProductionSecureStorageHandler, PlatformRosterAdmission), AuraError> {
         let storage = fixture.selected()?;
@@ -310,9 +489,9 @@ mod tests {
         };
         append_third(owned, &roster, b"third scope", b"third secret").await?;
         let (selected, _) = selected_owner(owned)?;
-        let root = read_root(owned, selected)?;
+        let mut root = read_root(owned, selected)?;
         assert_eq!(root.third_phase, THIRD_BIRTH_COMPLETE);
-        let claim = prior_claim(owned, selected, &root)?;
+        let claim = prior_claim(owned, selected, &mut root)?;
         let expected = third_roster(&root, &claim, b"third scope")?;
         assert!(marker_state(owned, &expected)?);
         assert_eq!(
@@ -464,6 +643,44 @@ mod tests {
         .await
         .is_err());
         assert_eq!(read_root(owned, selected)?.third_phase, THIRD_UNCLAIMED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn third_owner_handoff_retains_original_scope_and_reopens_once() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, two) = first_two(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        append_third(owned, &two, b"third retained scope", b"third secret").await?;
+        let three = promote_after_third(owned, two)
+            .await
+            .map_err(|(error, _)| error)?;
+        assert_eq!(
+            &**lifecycle::read_live_secret(owned, &three).await?,
+            b"third secret"
+        );
+        let (selected, _) = selected_owner(owned)?;
+        let mut root = read_root(owned, selected)?;
+        let claim = prior_claim(owned, selected, &mut root)?;
+        assert_eq!(
+            retained_scope(owned, &root, &claim)?,
+            b"third retained scope"
+        );
+        assert!(recover_three_roster(owned).await.is_err(), "one root owner");
+        drop(three);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let recovered = recover_three_roster(owned).await?;
+        assert_eq!(
+            &**lifecycle::read_live_secret(owned, &recovered).await?,
+            b"third secret"
+        );
+        assert!(recover_three_roster(owned).await.is_err(), "one transfer");
         Ok(())
     }
 }

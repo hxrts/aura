@@ -522,6 +522,13 @@ Build the platform path in reviewable dependencies:
    writer grants no third allocation owner: the selected L6 channel and
    two-entry actor capacity refusal remain in force until per-entry transitions,
    owner handoff and the full 4096-entry contract are proved.
+   The private V9 root extends this original custody through a three-entry
+   owner handoff, exact third decision, authenticated negative tombstone and
+   provider-owned third credential erasure. Recover the retained third scope
+   from its root-authenticated roster after erasure, while refusing missing
+   terminal markers or changed selected credentials. V8 roots fail closed
+   without migration. This private three-entry evidence does not enable L6
+   selection or satisfy the 4096-entry runtime contract.
 3. Specify an acknowledged transaction across the credential store and the
    inventory for each transition. A durable intent must name the exact
    allocation and desired phase before a credential write. Read and verify the

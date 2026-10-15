@@ -27,6 +27,11 @@ pub(super) fn cleanup_append_fixture(service: &str) {
     append::cleanup_fixture(service);
 }
 
+#[cfg(test)]
+pub(super) fn cleanup_third_fixture(service: &str, id: &[u8; 32]) {
+    append::cleanup_third_fixture(service, id);
+}
+
 struct BirthIntent {
     root: [u8; 32],
     allocation: [u8; 32],
