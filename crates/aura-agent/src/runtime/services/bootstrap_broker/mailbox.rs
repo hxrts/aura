@@ -114,8 +114,8 @@ pub(super) struct QuiescentPendingRegistration {
 pub(super) struct PendingEnrollmentMailboxes {
     entries: HashMap<PendingMailboxKey, PendingMailboxEntry>,
     retention: Duration,
-    #[cfg(test)]
-    fail_next_ack: bool,
+    #[cfg(any(test, feature = "simulator-checkpoint"))]
+    fail_next_ack: Option<String>,
 }
 
 impl PendingEnrollmentMailboxes {
@@ -202,11 +202,11 @@ impl PendingEnrollmentMailboxes {
             .values()
             .any(|entry| entry.first_message_id.is_some() || !entry.acknowledged.is_empty())
             || {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "simulator-checkpoint"))]
                 {
-                    self.fail_next_ack
+                    self.fail_next_ack.is_some()
                 }
-                #[cfg(not(test))]
+                #[cfg(not(any(test, feature = "simulator-checkpoint")))]
                 {
                     false
                 }
@@ -217,14 +217,31 @@ impl PendingEnrollmentMailboxes {
         Self {
             entries: HashMap::new(),
             retention,
-            #[cfg(test)]
-            fail_next_ack: false,
+            #[cfg(any(test, feature = "simulator-checkpoint"))]
+            fail_next_ack: None,
         }
     }
 
     #[cfg(test)]
     pub(super) fn fail_next_ack_for_test(&mut self) {
-        self.fail_next_ack = true;
+        self.fail_next_ack = Some(String::new());
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn fail_next_exact_ack_for_checkpoint(&mut self, message_id: String) -> bool {
+        if message_id.is_empty()
+            || self.fail_next_ack.is_some()
+            || !self.entries.values().any(|entry| {
+                entry
+                    .envelopes
+                    .iter()
+                    .any(|pending| pending.delivery.message_id == message_id)
+            })
+        {
+            return false;
+        }
+        self.fail_next_ack = Some(message_id);
+        true
     }
 
     fn prune_expired(&mut self, now_ms: u64) {
@@ -484,8 +501,13 @@ impl PendingEnrollmentMailboxes {
         if !constant_time_eq(&candidate, &entry.credential_commitment) {
             return Err("pending mailbox retrieval credential rejected");
         }
-        #[cfg(test)]
-        if std::mem::take(&mut self.fail_next_ack) {
+        #[cfg(any(test, feature = "simulator-checkpoint"))]
+        if self
+            .fail_next_ack
+            .as_ref()
+            .is_some_and(|expected| expected.is_empty() || expected == message_id)
+        {
+            self.fail_next_ack = None;
             return Err("injected pending mailbox ACK interruption");
         }
         if entry.acknowledged.contains_key(message_id) {

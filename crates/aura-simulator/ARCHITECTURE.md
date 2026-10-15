@@ -20,6 +20,9 @@ The separate feature-only handoff fixture obtains a capture witness from the
 original issuer's retained control, revalidated signed baseline/setup and
 selected filesystem provider; the stopped broker must hold those exact signed
 registration bytes before sealing. Reopen does not restore an issuer VM.
+The same original broker owner refuses checkpoint after a genuine signed
+receiver frame is queued, retrieval-selected, or ACKed. A simulator-only
+one-shot fault binds the served case to the exact original queued message ID.
 The lifecycle test's 30-second diagnostic watchdog is testkit-owned and does
 not advance the selected physical clock or decide protocol completion.
 The `simulator-checkpoint` feature reuses that signed native fixture from a

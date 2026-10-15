@@ -730,6 +730,12 @@ refused. Capture binds the original verified pending epoch; restore remains
 limited to the same original selected-profile context because a fresh issuer
 does not yet rederive that approval witness. Cross-profile or fresh-issuer
 continuation restore remains unsupported.
+The signed broker handoff fixture also reaches a real receiver envelope through
+the public app workflow and checks that the stopped original broker refuses
+queued, retrieval-selected, and retained receiver-ACK history. The served
+branch injects a simulator-only, one-shot ACK failure for the exact queued
+message ID after the recipient's genuine retrieval. These are negative
+checkpoint gates, not a restorable VM continuation or a speedup result.
 This does not restore an app or VM continuation. An older valid artifact with
 the same context cannot be detected without a separate monotonic anchor. Do
 not use fixture bearer tokens as encryption keys or count this as full replay.

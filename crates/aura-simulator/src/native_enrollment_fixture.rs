@@ -156,13 +156,22 @@ impl NativeEnrollmentFixture {
     #[cfg(feature = "simulator-checkpoint")]
     pub async fn stop_original_broker_for_checkpoint(
         &mut self,
-    ) -> Result<aura_agent::StoppedBrokerCheckpointOwner, String> {
+    ) -> Result<aura_agent::StoppedBrokerCheckpointOwner, aura_agent::BrokerCheckpointQuiescenceError>
+    {
         self.original_broker
             .take()
-            .ok_or_else(|| "original signed broker owner already consumed".to_string())?
+            .ok_or(aura_agent::BrokerCheckpointQuiescenceError::NotStarted)?
             .stop_for_simulator_checkpoint(Duration::from_secs(5))
             .await
-            .map_err(|error| error.to_string())
+    }
+
+    /// Interrupt the ACK of an exact frame already queued by the original
+    /// signed execution. Only the retained original broker owner can arm it.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub fn interrupt_original_pending_ack_for_checkpoint(&self, message_id: String) -> bool {
+        self.original_broker
+            .as_ref()
+            .is_some_and(|broker| broker.interrupt_exact_pending_ack_for_checkpoint(message_id))
     }
 
     /// Inject a named delivery fault by stopping the original HTTP tasks and

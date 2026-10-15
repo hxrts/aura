@@ -268,7 +268,7 @@ pub use runtime::services::bootstrap_broker::{
 };
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
 pub use runtime::services::bootstrap_broker::{
-    BrokerCheckpointRestoreError, SealedBrokerCheckpoint,
+    BrokerCheckpointQuiescenceError, BrokerCheckpointRestoreError, SealedBrokerCheckpoint,
 };
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{

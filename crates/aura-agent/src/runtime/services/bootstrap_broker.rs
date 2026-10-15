@@ -1010,6 +1010,19 @@ impl LocalBootstrapBrokerService {
             .fail_next_ack_for_test();
     }
 
+    /// Simulator-only named interruption of the original broker's next exact
+    /// pending-mailbox ACK. The frame must already be queued by signed runtime
+    /// execution; this does not manufacture a mailbox delivery.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub fn interrupt_exact_pending_ack_for_checkpoint(&self, message_id: String) -> bool {
+        let Ok(mut state) = self.shared.try_write() else {
+            return false;
+        };
+        state
+            .pending_enrollment_mailboxes
+            .fail_next_exact_ack_for_checkpoint(message_id)
+    }
+
     pub(crate) async fn register_issuer_return_mailbox(
         &self,
         payload: BootstrapIssuerReturnMailboxRegistration,
