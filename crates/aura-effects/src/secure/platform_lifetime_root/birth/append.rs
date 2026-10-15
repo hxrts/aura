@@ -5,7 +5,7 @@ use super::*;
 
 const CLAIM_USER: &str = "allocation-lifetime-second-birth-claim:v1";
 const CLAIM_MAGIC: &[u8] = b"AURA-PLATFORM-SECOND-BIRTH-CLAIM-V1";
-const SECOND_ROSTER_FILE: &str = "platform_lifetime/second-roster.v4";
+pub(super) const SECOND_ROSTER_FILE: &str = "platform_lifetime/second-roster.v4";
 const INTENT_PREFIX: &str = "allocation-lifetime-birth-intent:v2:";
 const RECORD_PREFIX: &str = "allocation-lifetime-birth-record:v2:";
 const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
@@ -404,16 +404,16 @@ pub(super) async fn recover_roster(
         .ok_or_else(|| invalid("platform whole roster lacks second claim"))?;
     let claim = Claim::decode(&bytes, &root)?;
     verify_first(owned, selected, &root)?;
-    if root.phase == ERASURE_COMPLETE {
-        let mut verified = root.clone();
-        decision::recover_erasure(owned, selected, &mut verified)?;
-    }
     if root.second_phase < SECOND_ERASURE_PENDING {
         replay(owned, selected, &root, &claim, StopAfter::Never)?;
     }
     lifecycle::recover(owned, selected, &mut root.clone(), &claim)?;
     if !marker_state(owned, &roster(&root, &claim))? {
         return Err(invalid("platform whole roster is not acknowledged"));
+    }
+    if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
+        let mut verified = read_root(owned, selected)?;
+        decision::recover_erasure(owned, selected, &mut verified)?;
     }
     owner
         .lifetime_root_claimed

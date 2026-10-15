@@ -202,7 +202,40 @@ async fn acknowledge_inner(
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (mut root, _intent) = verify_birth(owned, selected, birth)?;
+    let (root, _intent) = verify_birth(owned, selected, birth)?;
+    acknowledge_locked(owned, selected, root, negative_decision, stop)
+}
+
+/// The same first-entry denial, authorized by complete roster custody after
+/// append. The earlier single-birth token cannot authorize this path.
+#[allow(dead_code)]
+pub(super) async fn acknowledge_roster(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+    negative_decision: &[u8],
+) -> Result<(), AuraError> {
+    acknowledge_roster_inner(owned, roster, negative_decision, StopAfter::Never).await
+}
+
+async fn acknowledge_roster_inner(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+    negative_decision: &[u8],
+    stop: StopAfter,
+) -> Result<(), AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let root = append::verify_roster_owner(owned, selected, roster)?;
+    acknowledge_locked(owned, selected, root, negative_decision, stop)
+}
+
+fn acknowledge_locked(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    mut root: RootRecord,
+    negative_decision: &[u8],
+    stop: StopAfter,
+) -> Result<(), AuraError> {
     super::validate_recovery(owned, selected, &root)?;
     let decision = read_record(selected, &root)?
         .ok_or_else(|| invalid("platform denial lacks original first decision"))?;
@@ -254,6 +287,103 @@ mod tests {
     use super::*;
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    pub(super) async fn denied_roster() -> Result<
+        (
+            Fixture,
+            ProductionSecureStorageHandler,
+            append::PlatformRosterAdmission,
+        ),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let fixture = Fixture::new()?;
+        let first = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &first else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let birth = allocate_one(owned, &empty, b"first", b"first secret").await?;
+        append::append_second(owned, &birth, b"second", b"second secret").await?;
+        drop(birth);
+        drop(empty);
+        drop(first);
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let roster = append::recover_roster(owned).await?;
+        decide_roster(owned, &roster, false, b"first refusal").await?;
+        Ok((fixture, selected, roster))
+    }
+
+    #[tokio::test]
+    async fn first_roster_denial_preserves_second_and_retains_erasure_pending() -> TestResult {
+        let (fixture, selected, roster) = denied_roster().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        assert!(acknowledge_roster(owned, &roster, b"wrong refusal")
+            .await
+            .is_err());
+        acknowledge_roster(owned, &roster, b"first refusal").await?;
+        assert!(read_roster_first_secret(owned, &roster).await.is_err());
+        assert_eq!(
+            &**append::read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        let platform = selected_owner(owned)?.0;
+        assert_eq!(
+            read_root(owned, platform)?.phase,
+            TOMBSTONE_ACK_ERASURE_PENDING
+        );
+        assert!(read_entry(platform, INTENT_USER)?.is_some());
+        assert!(read_entry(platform, RECORD_USER)?.is_some());
+        drop(roster);
+        drop(selected);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let roster = append::recover_roster(owned).await?;
+        assert!(read_roster_first_secret(owned, &roster).await.is_err());
+        assert_eq!(
+            &**append::read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_roster_denial_interruptions_recover_exact_tombstone() -> TestResult {
+        for stop in [
+            StopAfter::RootIntent,
+            StopAfter::Tombstone,
+            StopAfter::Marker,
+        ] {
+            let (fixture, selected, roster) = denied_roster().await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+                unreachable!()
+            };
+            assert!(
+                acknowledge_roster_inner(owned, &roster, b"first refusal", stop)
+                    .await
+                    .is_err()
+            );
+            drop(roster);
+            drop(selected);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let roster = append::recover_roster(owned).await?;
+            acknowledge_roster(owned, &roster, b"first refusal").await?;
+            assert_eq!(
+                read_root(owned, selected_owner(owned)?.0)?.phase,
+                TOMBSTONE_ACK_ERASURE_PENDING
+            );
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn original_negative_denial_is_exact_and_reopens_with_erasure_pending() -> TestResult {

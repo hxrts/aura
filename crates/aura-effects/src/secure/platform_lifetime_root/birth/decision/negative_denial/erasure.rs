@@ -106,13 +106,43 @@ async fn erase_inner(
     if !Arc::ptr_eq(&birth._owner, &owned._owner) {
         return Err(invalid("platform erasure belongs to another profile owner"));
     }
-    let mut root = read_root(owned, selected)?;
+    let root = read_root(owned, selected)?;
     if root.id != birth.root || root.birth_id != birth.allocation {
         return Err(invalid("platform erasure differs from original allocation"));
     }
     if verify_inventory(owned, &root)?.is_none() {
         return Err(invalid("platform erasure original inventory is missing"));
     }
+    erase_locked(owned, selected, root, stop)
+}
+
+/// After append, only the recovered complete-roster owner may erase the first
+/// allocation. The selected provider and namespace lock remain unchanged.
+#[allow(dead_code)]
+pub(super) async fn erase_roster(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_roster_inner(owned, roster, StopAfter::Never).await
+}
+
+async fn erase_roster_inner(
+    owned: &ProfileOwnedSecureStorage,
+    roster: &append::PlatformRosterAdmission,
+    stop: StopAfter,
+) -> Result<(), AuraError> {
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let root = append::verify_roster_owner(owned, selected, roster)?;
+    erase_locked(owned, selected, root, stop)
+}
+
+fn erase_locked(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    mut root: RootRecord,
+    stop: StopAfter,
+) -> Result<(), AuraError> {
     super::super::validate_recovery(owned, selected, &root)?;
     if root.phase == TOMBSTONE_ACK_ERASURE_PENDING {
         // The original birth record must still be complete before an intent
@@ -141,6 +171,101 @@ mod tests {
     use super::*;
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    #[tokio::test]
+    async fn first_roster_erasure_preserves_second_and_reopens() -> TestResult {
+        let (fixture, selected, roster) = super::super::tests::denied_roster().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        acknowledge_roster(owned, &roster, b"first refusal").await?;
+        erase_roster(owned, &roster).await?;
+        erase_roster(owned, &roster).await?;
+        let platform = selected_owner(owned)?.0;
+        assert_eq!(read_root(owned, platform)?.phase, ERASURE_COMPLETE);
+        assert!(read_entry(platform, INTENT_USER)?.is_none());
+        assert!(read_entry(platform, RECORD_USER)?.is_none());
+        assert!(read_roster_first_secret(owned, &roster).await.is_err());
+        assert_eq!(
+            &**append::read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        drop(roster);
+        drop(selected);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let roster = append::recover_roster(owned).await?;
+        assert!(read_roster_first_secret(owned, &roster).await.is_err());
+        assert_eq!(
+            &**append::read_roster_second_secret(owned, &roster).await?,
+            b"second secret"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_roster_erasure_interruptions_recover_before_handoff() -> TestResult {
+        for stop in [
+            StopAfter::RootIntent,
+            StopAfter::RecordDelete,
+            StopAfter::IntentDelete,
+        ] {
+            let (fixture, selected, roster) = super::super::tests::denied_roster().await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+                unreachable!()
+            };
+            acknowledge_roster(owned, &roster, b"first refusal").await?;
+            assert!(erase_roster_inner(owned, &roster, stop).await.is_err());
+            drop(roster);
+            drop(selected);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let roster = append::recover_roster(owned).await?;
+            let platform = selected_owner(owned)?.0;
+            assert_eq!(read_root(owned, platform)?.phase, ERASURE_COMPLETE);
+            assert!(read_entry(platform, INTENT_USER)?.is_none());
+            assert!(read_entry(platform, RECORD_USER)?.is_none());
+            assert_eq!(
+                &**append::read_roster_second_secret(owned, &roster).await?,
+                b"second secret"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_roster_erasure_refuses_foreign_owner_and_lost_second_marker() -> TestResult {
+        let (fixture, selected, roster) = super::super::tests::denied_roster().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        acknowledge_roster(owned, &roster, b"first refusal").await?;
+        let foreign = tempfile::tempdir()?;
+        let foreign_selected = crate::secure::platform_lifetime_root::tests::selected(
+            foreign.path(),
+            &fixture.service,
+        )?;
+        let ProductionSecureStorageHandler::ProfileOwned(foreign_owned) = &foreign_selected else {
+            unreachable!()
+        };
+        assert!(erase_roster(foreign_owned, &roster).await.is_err());
+        let platform = selected_owner(owned)?.0;
+        let original_intent = read_entry(platform, INTENT_USER)?;
+        let original_record = read_entry(platform, RECORD_USER)?;
+        std::fs::remove_file(fixture.profile.path().join(append::SECOND_ROSTER_FILE))?;
+        assert!(erase_roster(owned, &roster).await.is_err());
+        assert_eq!(
+            read_root(owned, platform)?.phase,
+            TOMBSTONE_ACK_ERASURE_PENDING
+        );
+        assert_eq!(read_entry(platform, INTENT_USER)?, original_intent);
+        assert_eq!(read_entry(platform, RECORD_USER)?, original_record);
+        Ok(())
+    }
 
     async fn denied_birth(
         owned: &ProfileOwnedSecureStorage,
