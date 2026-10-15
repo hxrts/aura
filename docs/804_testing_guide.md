@@ -1123,6 +1123,11 @@ owner-only process-kind and birth receipt in the run's private directory;
 the live process still blocks completion.
 The same inventory gates the next start; before its private directory exists,
 an owner-only pre-start refusal receipt is kept in the existing run root.
+The single-host two-process diagnostic starts the local issuer before its
+receiver peer and disposes the peer before the issuer. That keeps the strict
+same-checkout process inventory meaningful when both owners use one native
+binary: a live peer must not be mistaken for a prior local orphan at admission
+or still be present when the local finalizer checks its inventory.
 
 The native `devices` list is a Settings/Devices projection. Typed
 `device_enrollment_accepted` observations may name the signed invitee or the

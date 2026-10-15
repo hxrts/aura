@@ -66,9 +66,6 @@ source "$here/lib.sh"
 local_started=0 peer_started=0 outcome=failed
 finish() {
   local status=$? local_disposed=false peer_disposed=false disposal_dir disposal_tmp
-  if (( local_started )); then
-    if "$AURA_E2E_DRV" finalize "$token" "$outcome"; then local_disposed=true; else status=1; fi
-  fi
   if (( peer_started )); then
     if env AURA_E2E_ROOT="$peer" AURA_E2E_RUN_DIR="$peer_run" AURA_E2E_RUN_TOKEN="$token" \
       "$peer/scripts/harness/lan/drv.sh" finalize "$token" "$outcome"; then
@@ -76,6 +73,9 @@ finish() {
     else
       status=1
     fi
+  fi
+  if (( local_started )); then
+    if "$AURA_E2E_DRV" finalize "$token" "$outcome"; then local_disposed=true; else status=1; fi
   fi
   disposal_dir="$local_run/private-enrollment-$token"
   if [[ -d "$disposal_dir" && ! -L "$disposal_dir" && -O "$disposal_dir" ]]; then
@@ -93,12 +93,12 @@ finish() {
   exit "$status"
 }
 trap finish EXIT
+local_started=1
+"$AURA_E2E_DRV" start "$local_provision/host-a.toml" >/dev/null
 peer_started=1
 env AURA_E2E_ROOT="$peer" AURA_E2E_RUN_DIR="$peer_run" AURA_E2E_RUN_TOKEN="$token" \
   AURA_E2E_TOOL_REPL="$tool" AURA_E2E_AURA_BIN="$aura" \
   "$peer/scripts/harness/lan/drv.sh" start "$peer_provision/host-b.toml" >/dev/null
-local_started=1
-"$AURA_E2E_DRV" start "$local_provision/host-a.toml" >/dev/null
 onboard alex-tui Alex >/dev/null
 onboard barbara-tui Barbara >/dev/null
 bash "$here/paired-enrollment.sh"
