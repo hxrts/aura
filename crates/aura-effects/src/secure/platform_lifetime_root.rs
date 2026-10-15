@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V6";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V7";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -585,7 +585,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v3_v4_and_v5_roots_cannot_be_reinterpreted_as_v6_lifetime_authority() -> TestResult {
+    async fn earlier_roots_cannot_be_reinterpreted_as_v7_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -603,6 +603,7 @@ mod tests {
             b"AURA-PLATFORM-LIFETIME-ROOT-V3".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V4".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V5".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V6".as_slice(),
         ] {
             let mut encoded = root.encode(platform)?;
             encoded[..KEYRING_MAGIC.len()].copy_from_slice(old_magic);

@@ -498,14 +498,14 @@ Build the platform path in reviewable dependencies:
    conflicting identities and an unexplained credential fail closed. Preserve
    a separate completed-handoff marker so lost inventory is not read as an
    empty new profile.
-   The private two-birth native V6 dependency retains each bounded scope inside
+   The private two-birth native V7 dependency retains each bounded scope inside
    the selected keyring's authenticated root before writing its birth
    credential. Recovery compares that scope with the sealed intent while it
    exists; after erasure, the root remains the authenticated scope source.
-   V5 roots lack this evidence and fail closed pending a proved migration.
+   V5 roots lack retained scopes; V6 roots lack the V7 birth-roster layout. Both fail closed pending a proved migration.
    The private native adapter retains the original selected profile lease while
    reconciling empty, one-birth, and two-birth states. It returns owners only
-   for the original authenticated V6 scopes and refuses a third birth with a
+   for the original authenticated V7 scopes and refuses a third birth with a
    typed capacity cause. Keep this channel unselected in L6 until capacity,
    host handoff, and native credential-service evidence are complete.
    The runtime contract admits up to 4096 original profile allocations; this

@@ -1,11 +1,18 @@
 //! Private second-birth append. No second allocation owner is issued here.
-//! The V4 root anchors the desired two-entry roster before any per-ID secret.
+//! The V7 root anchors the desired two-entry birth roster before any per-ID secret.
 
 use super::*;
 
 const CLAIM_USER: &str = "allocation-lifetime-second-birth-claim:v1";
 const CLAIM_MAGIC: &[u8] = b"AURA-PLATFORM-SECOND-BIRTH-CLAIM-V1";
-pub(super) const SECOND_ROSTER_FILE: &str = "platform_lifetime/second-roster.v4";
+pub(super) const SECOND_ROSTER_FILE: &str = "platform_lifetime/second-roster.v7";
+const ROSTER_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-BIRTH-ROSTER-V7";
+const BIRTH_ACKNOWLEDGED: u8 = 1;
+const ROSTER_ENTRY_HEADER_LEN: usize = ROSTER_ENTRY_LEN + 1 + 2;
+const MAX_ROSTER_FILE: usize = ROSTER_MAGIC.len()
+    + 2
+    + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
+        * (ROSTER_ENTRY_HEADER_LEN + MAX_SCOPE_BYTES);
 const INTENT_PREFIX: &str = "allocation-lifetime-birth-intent:v2:";
 const RECORD_PREFIX: &str = "allocation-lifetime-birth-record:v2:";
 const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
@@ -95,17 +102,96 @@ fn roster(root: &RootRecord, claim: &Claim) -> Vec<u8> {
     second.extend_from_slice(&claim.intent_digest);
     second.extend_from_slice(&root.profile);
     second.extend_from_slice(&root.service);
-    let mut bytes = Vec::with_capacity(INVENTORY_MAGIC.len() + 2 + 2 * ROSTER_ENTRY_LEN);
-    bytes.extend_from_slice(INVENTORY_MAGIC);
+    let mut bytes = Vec::with_capacity(
+        ROSTER_MAGIC.len()
+            + 2
+            + 2 * ROSTER_ENTRY_HEADER_LEN
+            + root.first_scope.len()
+            + root.second_scope.len(),
+    );
+    bytes.extend_from_slice(ROSTER_MAGIC);
     bytes.extend_from_slice(&2u16.to_le_bytes());
     if root.birth_id < claim.allocation {
-        bytes.extend_from_slice(first_entry);
-        bytes.extend_from_slice(&second);
+        append_roster_entry(&mut bytes, first_entry, &root.first_scope);
+        append_roster_entry(&mut bytes, &second, &root.second_scope);
     } else {
-        bytes.extend_from_slice(&second);
-        bytes.extend_from_slice(first_entry);
+        append_roster_entry(&mut bytes, &second, &root.second_scope);
+        append_roster_entry(&mut bytes, first_entry, &root.first_scope);
     }
     bytes
+}
+
+fn append_roster_entry(bytes: &mut Vec<u8>, identity: &[u8], scope: &[u8]) {
+    bytes.extend_from_slice(identity);
+    bytes.push(BIRTH_ACKNOWLEDGED);
+    bytes.extend_from_slice(&(scope.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(scope);
+}
+
+/// Parse the entire bounded V7 birth roster before accepting the root anchor.
+/// Current production-private custody supports two entries; the wire bound
+/// reserves room for the runtime's 4096-entry inventory without admitting an
+/// unverified third credential or confusing birth state with decision state.
+fn validate_roster_layout(bytes: &[u8], root: &RootRecord, claim: &Claim) -> Result<(), AuraError> {
+    if bytes.len() > MAX_ROSTER_FILE
+        || !bytes.starts_with(ROSTER_MAGIC)
+        || bytes.len() < ROSTER_MAGIC.len() + 2
+    {
+        return Err(invalid(
+            "platform birth roster version or length is invalid",
+        ));
+    }
+    let count_offset = ROSTER_MAGIC.len();
+    let count = u16::from_le_bytes([bytes[count_offset], bytes[count_offset + 1]]) as usize;
+    if count != 2 {
+        return Err(invalid(
+            "platform birth roster has unverified allocation count",
+        ));
+    }
+    let mut cursor = count_offset + 2;
+    let mut previous: Option<[u8; 32]> = None;
+    for _ in 0..count {
+        let header_end = cursor
+            .checked_add(ROSTER_ENTRY_HEADER_LEN)
+            .ok_or_else(|| invalid("platform birth roster length overflow"))?;
+        if header_end > bytes.len() {
+            return Err(invalid("platform birth roster entry is truncated"));
+        }
+        let identity = &bytes[cursor..cursor + ROSTER_ENTRY_LEN];
+        let allocation: [u8; 32] = fixed_bytes(&identity[32..64])?;
+        let scope_len = u16::from_le_bytes([bytes[cursor + 161], bytes[cursor + 162]]) as usize;
+        let scope_end = header_end
+            .checked_add(scope_len)
+            .ok_or_else(|| invalid("platform birth roster scope length overflow"))?;
+        let expected = if allocation == root.birth_id {
+            (&root.intent_digest, root.first_scope.as_slice())
+        } else if allocation == claim.allocation {
+            (&claim.intent_digest, root.second_scope.as_slice())
+        } else {
+            return Err(invalid("platform birth roster has foreign allocation"));
+        };
+        if scope_len == 0
+            || scope_len > MAX_SCOPE_BYTES
+            || scope_end > bytes.len()
+            || previous.is_some_and(|prior| prior >= allocation)
+            || identity[0..32] != root.id
+            || identity[64..96] != *expected.0
+            || identity[96..128] != root.profile
+            || identity[128..160] != root.service
+            || bytes[cursor + 160] != BIRTH_ACKNOWLEDGED
+            || &bytes[header_end..scope_end] != expected.1
+        {
+            return Err(invalid(
+                "platform birth roster entry differs from original birth",
+            ));
+        }
+        previous = Some(allocation);
+        cursor = scope_end;
+    }
+    if cursor != bytes.len() || aura_core::hash::hash(bytes) != root.roster_digest {
+        return Err(invalid("platform birth roster differs from root anchor"));
+    }
+    Ok(())
 }
 
 fn verify_first(
@@ -137,7 +223,7 @@ fn marker_state(owned: &ProfileOwnedSecureStorage, expected: &[u8]) -> Result<bo
     match owned
         ._owner
         .directory
-        .read_private_publication(Path::new(SECOND_ROSTER_FILE), MAX_INVENTORY_FILE)
+        .read_private_publication(Path::new(SECOND_ROSTER_FILE), MAX_ROSTER_FILE)
         .map_err(io)?
     {
         None => Ok(false),
@@ -177,6 +263,7 @@ fn replay(
     stop: StopAfter,
 ) -> Result<(), AuraError> {
     let expected = roster(root, claim);
+    validate_roster_layout(&expected, root, claim)?;
     if aura_core::hash::hash(&expected) != root.roster_digest {
         return Err(invalid(
             "platform second roster differs from original root anchor",
@@ -322,8 +409,8 @@ async fn append_inner(
             "platform second birth found existing per-ID credential",
         ));
     }
-    root.roster_digest = aura_core::hash::hash(&roster(&root, &claim));
     root.second_scope = scope.to_vec();
+    root.roster_digest = aura_core::hash::hash(&roster(&root, &claim));
     write_keyring(selected, &root)?;
     if stop == StopAfter::RootAnchor {
         return Err(interrupted());
@@ -376,6 +463,7 @@ pub(super) fn verify_roster_owner(
 ) -> Result<RootRecord, AuraError> {
     let mut root = read_root(owned, selected)?;
     let claim = lifecycle::bound_claim(owned, selected, &root, roster)?;
+    validate_roster_layout(&self::roster(&root, &claim), &root, &claim)?;
     verify_first(owned, selected, &root)?;
     lifecycle::recover(owned, selected, &mut root, &claim)?;
     if !marker_state(owned, &self::roster(&root, &claim))? {
@@ -392,6 +480,7 @@ fn validate_complete_roster(
     let bytes = read_entry(selected, CLAIM_USER)?
         .ok_or_else(|| invalid("platform whole roster lacks second claim"))?;
     let claim = Claim::decode(&bytes, &root)?;
+    validate_roster_layout(&roster(&root, &claim), &root, &claim)?;
     verify_first(owned, selected, &root)?;
     if root.second_phase < SECOND_ERASURE_PENDING {
         replay(owned, selected, &root, &claim, StopAfter::Never)?;
@@ -621,6 +710,46 @@ mod tests {
             assert!(recover_roster(owned).await.is_err());
             assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v7_birth_roster_refuses_reanchored_foreign_scope_state_and_count() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let empty = admit_empty_root(owned).await?;
+        let first = allocate_one(owned, &empty, b"first", b"first secret").await?;
+        append_second(owned, &first, b"second", b"second secret").await?;
+        let (platform, _) = selected_owner(owned)?;
+        let root = read_root(owned, platform)?;
+        let claim = Claim::decode(&read_entry(platform, CLAIM_USER)?.expect("claim"), &root)?;
+        let original = roster(&root, &claim);
+        validate_roster_layout(&original, &root, &claim)?;
+        let offset = ROSTER_MAGIC.len() + 2;
+        for (index, replacement) in [
+            (offset, 0xA5),       // foreign root
+            (offset + 160, 0),    // unacknowledged birth
+            (offset + 161, 0),    // empty scope
+            (offset + 163, 0xA5), // changed retained scope
+        ] {
+            let mut changed = original.clone();
+            changed[index] = if index == offset {
+                !changed[index]
+            } else {
+                replacement
+            };
+            let mut reanchored = root.clone();
+            reanchored.roster_digest = aura_core::hash::hash(&changed);
+            assert!(validate_roster_layout(&changed, &reanchored, &claim).is_err());
+        }
+        let mut changed = original.clone();
+        changed[ROSTER_MAGIC.len()] = 3;
+        let mut reanchored = root.clone();
+        reanchored.roster_digest = aura_core::hash::hash(&changed);
+        assert!(validate_roster_layout(&changed, &reanchored, &claim).is_err());
         Ok(())
     }
 

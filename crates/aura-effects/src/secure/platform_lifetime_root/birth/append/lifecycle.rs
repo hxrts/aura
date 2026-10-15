@@ -217,8 +217,9 @@ pub(in crate::secure::platform_lifetime_root::birth) fn bound_claim(
     let claim = Claim::decode(&bytes, root)?;
     let mut expected = [root.birth_id, claim.allocation];
     expected.sort();
-    if roster.allocations != expected
-        || aura_core::hash::hash(&roster_bytes(root, &claim)) != root.roster_digest
+    let birth_roster = roster_bytes(root, &claim);
+    super::validate_roster_layout(&birth_roster, root, &claim)?;
+    if roster.allocations != expected || aura_core::hash::hash(&birth_roster) != root.roster_digest
     {
         return Err(invalid("platform second transition has foreign roster"));
     }
@@ -684,6 +685,34 @@ mod tests {
         )?;
         drop(roster);
         drop(reopened);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert!(recover_roster(owned).await.is_err());
+        assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn erased_second_entry_refuses_reanchored_missing_retained_scope() -> TestResult {
+        let (fixture, selected, roster) = two_births().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        decide(owned, &roster, false, b"original refusal").await?;
+        acknowledge_negative(owned, &roster, b"original refusal").await?;
+        erase(owned, &roster).await?;
+        let (platform, _) = selected_owner(owned)?;
+        let mut root = read_root(owned, platform)?;
+        let claim = Claim::decode(&read_entry(platform, CLAIM_USER)?.expect("claim"), &root)?;
+        root.second_scope.clear();
+        let changed = super::roster(&root, &claim);
+        root.roster_digest = aura_core::hash::hash(&changed);
+        write_keyring(platform, &root)?;
+        std::fs::write(fixture.profile.path().join(SECOND_ROSTER_FILE), changed)?;
+        drop(roster);
+        drop(selected);
         let reopened = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
             unreachable!()
