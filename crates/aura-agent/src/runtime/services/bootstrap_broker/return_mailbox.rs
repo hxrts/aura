@@ -63,6 +63,10 @@ pub(super) struct EnrollmentReturnMailboxes {
 
 impl EnrollmentReturnMailboxes {
     #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    #[cfg(feature = "simulator-checkpoint")]
     pub(super) fn quiescent_registrations(&self) -> Option<Vec<QuiescentReturnRegistration>> {
         if self.has_unsettled_delivery() || self.has_uncheckpointable_state() {
             return None;

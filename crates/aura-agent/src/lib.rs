@@ -265,6 +265,10 @@ pub use runtime::services::bootstrap_broker::{
     fetch_remote_candidates as fetch_bootstrap_broker_candidates, BootstrapBrokerCandidateRecord,
     BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy, BootstrapBrokerRegistration,
 };
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+pub use runtime::services::bootstrap_broker::{
+    BrokerCheckpointRestoreError, SealedBrokerCheckpoint,
+};
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
     CoverTrafficGenerator, CoverTrafficGeneratorConfig, LocalHealthObserver,

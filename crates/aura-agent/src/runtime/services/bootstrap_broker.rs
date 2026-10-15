@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::IpAddr;
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -351,6 +353,98 @@ pub struct StoppedBrokerCheckpointOwner {
     retention: Duration,
 }
 
+/// A one-use simulator artifact owned by the selected filesystem provider.
+/// The broker bytes cannot be installed without the effect-owned V2 restore.
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+pub struct SealedBrokerCheckpoint {
+    profile: aura_effects::profile_checkpoint::QuiescentFilesystemProfileCheckpoint,
+    original_profile: PathBuf,
+    revision: [u8; 32],
+    participant: [u8; 32],
+    context: aura_effects::profile_checkpoint::AuxiliaryCheckpointContext,
+    retention: Duration,
+    used: bool,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+#[derive(Debug, thiserror::Error)]
+pub enum BrokerCheckpointRestoreError {
+    #[error("broker checkpoint selected profile failed: {0}")]
+    Profile(#[from] aura_effects::profile_checkpoint::ProfileCheckpointError),
+    #[error("broker checkpoint fresh owner is already active or has state")]
+    Busy,
+    #[error("broker checkpoint selected clock is missing, stale, or moved backward")]
+    Clock,
+    #[error("broker checkpoint authenticated registration state is invalid")]
+    InvalidState,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+const BROKER_AUXILIARY_KIND: [u8; 16] = *b"aura-broker-v1\0\0";
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+impl SealedBrokerCheckpoint {
+    /// Only the original sealed artifact can install broker state, and only
+    /// into a new unstarted owner. An attempted effect restore consumes the
+    /// handle even on failure; context/clock preflight can be corrected.
+    pub async fn restore_into_fresh_broker(
+        &mut self,
+        broker: LocalBootstrapBrokerService,
+        expected: aura_effects::profile_checkpoint::AuxiliaryCheckpointContext,
+        expected_original_profile: &Path,
+    ) -> Result<LocalBootstrapBrokerService, BrokerCheckpointRestoreError> {
+        use BrokerCheckpointRestoreError as Refusal;
+        if self.used {
+            return Err(Refusal::Busy);
+        }
+        if expected != self.context
+            || expected.kind != BROKER_AUXILIARY_KIND
+            || expected.version != 1
+            || expected.epoch != 0
+            || expected_original_profile != self.original_profile.as_path()
+        {
+            return Err(Refusal::InvalidState);
+        }
+        if broker.checkpoint_group.get().is_some()
+            || Arc::strong_count(&broker.shared) != 1
+            || Arc::strong_count(&broker.listener) != 1
+            || broker.registration_ttl != self.retention
+        {
+            return Err(Refusal::Busy);
+        }
+        let now_ms = broker.mailbox_now_ms().await.map_err(|_| Refusal::Clock)?;
+        if now_ms < expected.selected_clock_ms {
+            return Err(Refusal::Clock);
+        }
+        {
+            let state = broker.shared.read().await;
+            if !state.candidates.is_empty()
+                || !state.invitations.is_empty()
+                || !state.invitation_credentials.is_empty()
+                || state.candidate_time_high_water_ms.is_some()
+                || !state.pending_enrollment_mailboxes.is_empty()
+                || !state.enrollment_return_mailboxes.is_empty()
+            {
+                return Err(Refusal::Busy);
+            }
+        }
+        self.used = true;
+        let bytes = self
+            .profile
+            .restore_with_auxiliary(
+                &self.original_profile,
+                self.revision,
+                self.participant,
+                expected,
+            )
+            .await?;
+        let restored = decode_quiescent_broker_registrations(&bytes, self.retention, now_ms)
+            .ok_or(Refusal::InvalidState)?;
+        *broker.shared.write().await = restored;
+        Ok(broker)
+    }
+}
+
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -364,10 +458,26 @@ struct QuiescentBrokerRegistrationsV1 {
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
 impl StoppedBrokerCheckpointOwner {
+    /// Fixed broker payload domain; caller metadata never chooses the codec.
+    pub fn context_for_simulator(
+        owner: [u8; 32],
+        epoch: u64,
+        fixture: [u8; 32],
+        selected_clock_ms: u64,
+    ) -> aura_effects::profile_checkpoint::AuxiliaryCheckpointContext {
+        aura_effects::profile_checkpoint::AuxiliaryCheckpointContext {
+            kind: BROKER_AUXILIARY_KIND,
+            version: 1,
+            owner,
+            epoch,
+            fixture,
+            selected_clock_ms,
+        }
+    }
     /// Encode only the original stopped owner's quiescent availability data.
     /// The bytes confer no restore authority and must be sealed by the selected
     /// profile checkpoint owner before any fresh broker accepts them.
-    pub fn into_unsealed_registrations(self) -> Result<Vec<u8>, BrokerCheckpointQuiescenceError> {
+    fn into_unsealed_registrations(self) -> Result<Vec<u8>, BrokerCheckpointQuiescenceError> {
         let state = self._state;
         let mut candidates: Vec<_> = state.candidates.into_values().collect();
         candidates.sort_by(|left, right| left.authority_id.cmp(&right.authority_id));
@@ -391,6 +501,45 @@ impl StoppedBrokerCheckpointOwner {
             return Err(BrokerCheckpointQuiescenceError::UnsupportedState);
         }
         Ok(bytes)
+    }
+
+    /// Capture the stopped original broker together with an exclusively
+    /// quiescent profile selected by its real runtime provider.
+    pub fn seal_with_selected_profile(
+        self,
+        selected: aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource,
+        original_profile: &Path,
+        artifact: &Path,
+        revision: [u8; 32],
+        participant: [u8; 32],
+        context: aura_effects::profile_checkpoint::AuxiliaryCheckpointContext,
+    ) -> Result<SealedBrokerCheckpoint, BrokerCheckpointRestoreError> {
+        use aura_effects::profile_checkpoint::QuiescentFilesystemProfileCheckpoint;
+        if context.kind != BROKER_AUXILIARY_KIND || context.version != 1 || context.epoch != 0 {
+            return Err(BrokerCheckpointRestoreError::InvalidState);
+        }
+        let retention = self.retention;
+        let bytes = self
+            .into_unsealed_registrations()
+            .map_err(|_| BrokerCheckpointRestoreError::InvalidState)?;
+        let profile = QuiescentFilesystemProfileCheckpoint::capture_with_auxiliary(
+            selected,
+            original_profile,
+            artifact,
+            revision,
+            participant,
+            context,
+            &bytes,
+        )?;
+        Ok(SealedBrokerCheckpoint {
+            profile,
+            original_profile: original_profile.to_owned(),
+            revision,
+            participant,
+            context,
+            retention,
+            used: false,
+        })
     }
 }
 

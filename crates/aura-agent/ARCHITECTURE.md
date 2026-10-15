@@ -294,8 +294,14 @@ Summary:
   A simulator-only versioned registration codec exports unsealed candidate and
   receiver/return registration bytes after the stop gate refuses credential
   residue, ACK history and nonserializable one-shot hooks. It grants no restore
-  authority; effect-owned sealing, fresh-owner import and signed-mailbox
-  refusal fixtures remain open.
+  authority. A separate simulator-only one-use owner consumes the original
+  selected filesystem source proof, seals those bytes in the effect-owned V2
+  profile artifact, and accepts authenticated bytes only into an empty,
+  unstarted fresh broker with the selected clock. The canonical signed setup
+  fixture proves same-original-profile restored registration readback. Only
+  unverified epoch zero is accepted; cross-profile and verified-epoch restore
+  need an opaque issuer-runtime verifier witness. VM continuation and complete
+  signed-mailbox refusal fixtures remain open.
   A simulator-only rendezvous actor handoff takes its original broker child
   group and refuses any retained service clone before invoking that stop gate.
   The normal rendezvous command and cleanup tasks remain under their parent

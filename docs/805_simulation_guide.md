@@ -700,26 +700,34 @@ owner's candidates and receiver/return registrations, including their original
 retention deadlines and selected-time high-water mark. Private decoding rejects
 duplicates, malformed scope, expiry, backward time, noncanonical bytes and versions.
 The canonical signed setup fixture confirms its original return registration
-appears in that codec. The bytes are **unsealed** and confer no restore
-authority: valid-state byte substitution needs the later effect-owned AEAD
-binding. There is no fresh broker owner import, broker artifact, or replay
-route yet. The fixture authorization token is never a checkpoint encryption key.
-The next simulator-only prerequisite preserves the original native broker
-handle through signed setup and permits a one-shot stop acknowledgment. The
-canonical rendezvous manager likewise takes its broker child through its actor
-and refuses outstanding clones. This is still no protected broker artifact,
-fresh-owner restore, VM continuation replay, or measured speedup.
+appears in that codec. Raw bytes confer no restore authority; only the V2
+effect-owned artifact below can supply bytes to a fresh broker. The original
+native broker handle survives signed setup for one-shot stop acknowledgment.
+The canonical rendezvous manager likewise takes its broker child through its
+actor and refuses outstanding clones. The fixture authorization token is never
+a checkpoint encryption key.
 
 The selected filesystem checkpoint also has a simulator-only V2 auxiliary
 channel. It encrypts one bounded opaque payload with the original profile
 inventory and authenticates payload kind/version, owner, epoch, fixture
 configuration, selected physical-clock observation, source revision and
 profile identity before restoration. The V1 restore path refuses V2 artifacts,
-and the V2 path refuses V1 or missing payloads. The broker codec is not yet
-sealed into this auxiliary channel or accepted by a fresh owner. An older valid artifact with the
-same context cannot be detected without a separate monotonic anchor. Do not
-use fixture bearer tokens as encryption keys or count this channel as a
-complete broker co-checkpoint.
+and the V2 path refuses V1 or missing payloads. The stopped original broker
+can consume its real selected filesystem source proof to seal the quiescent
+registration codec into this V2 artifact. A one-use simulator owner authenticates
+the profile and broker bytes through the effect before installing them in an
+empty, unstarted fresh broker with the same retention policy and a nonbackward
+selected clock. Genuine signed issuer registration is read back there. Foreign
+owner or epoch context and stale selected time refuse before profile mutation;
+the effect owner authenticates changed artifact bytes and source revision.
+The original profile path is fixed in the sealed handle; a different path is
+refused. The only supported epoch value is zero, meaning no verified epoch
+claim. Neither the broker registration nor the selected filesystem proof
+contains a common retained issuer verifier/epoch witness, so cross-profile or
+verified-epoch restore remains unsupported.
+This does not restore an app or VM continuation. An older valid artifact with
+the same context cannot be detected without a separate monotonic anchor. Do
+not use fixture bearer tokens as encryption keys or count this as full replay.
 
 ### Scenario Contract Workflow
 
