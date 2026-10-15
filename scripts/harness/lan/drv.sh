@@ -224,8 +224,40 @@ require_no_owned_harness() {
   # descriptor owner in its command-substitution shell if this driver dies.
   active=$(exec 9>&-; owned_harness_processes) || return 1
   [[ -z "$active" ]] || {
+    retain_owned_process_failure "$active" ||
+      echo 'could not retain the owned LAN process identity receipt' >&2
     echo "owned LAN harness processes remain ($active); retaining state, inspect their exact ownership before recovery" >&2; return 1;
   }
+}
+
+# Failure evidence contains process identity and the already-verified ownership
+# class, never argv, environment, socket paths, open-file names, or requests.
+# A fresh owner-only file is retained for each failure rather than replacing an
+# earlier observation of a PID that may subsequently exit or be reused.
+retain_owned_process_failure() {
+  local active=$1 pid comm kind birth binding receipt
+  [[ -d "$PRIVATE_DIR" && ! -L "$D" && ! -L "$PRIVATE_DIR" && -O "$PRIVATE_DIR" ]] || return 1
+  receipt=$(umask 077; mktemp "$PRIVATE_DIR/finalizer-process-failure.XXXXXX") || return 1
+  {
+    while IFS= read -r pid; do
+      [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+      comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
+      kind=${comm##*/}
+      birth=$(process_birth "$pid" || true)
+      if [[ "$kind" == aura ]]; then
+        binding=owned_run_open_file
+      else
+        binding=same_checkout_cwd
+      fi
+      jq -cn --argjson pid "$pid" --arg kind "$kind" --arg birth "$birth" \
+        --arg binding "$binding" \
+        '{pid:$pid,kind:$kind,birth:$birth,owner_binding:$binding}' || return 1
+    done <<< "$active"
+  } | jq -s --arg token "$AURA_E2E_RUN_TOKEN" \
+    '{schema:1,phase:"owned-process-finalization-refusal",run_token:$token,processes:.}' \
+    > "$receipt" || { rm -f "$receipt"; return 1; }
+  chmod 600 "$receipt" || return 1
+  echo "protected owned-process identity: $receipt" >&2
 }
 
 retention_root_for_config() {

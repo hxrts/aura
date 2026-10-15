@@ -1118,6 +1118,9 @@ private ToolApi helpers release their shared leases. It then stops the original
 REPL and requires the same-checkout owned-process inventory to be empty before
 recording success. A held helper or live child retains the run for inspection;
 repeating finalization after verified shutdown is safe for the same outcome.
+If the owned-process inventory is still nonempty, the finalizer retains an
+owner-only process-kind and birth receipt in the run's private directory;
+the live process still blocks completion.
 
 The native `devices` list is a Settings/Devices projection. Typed
 `device_enrollment_accepted` observations may name the signed invitee or the

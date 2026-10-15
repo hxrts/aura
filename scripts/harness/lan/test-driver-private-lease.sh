@@ -172,4 +172,28 @@ bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed > "$fixture/stale-finalize.
 [[ ! -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
 jq -e '.state=="completed" and .outcome=="failed"' \
   "$root/.tmp/e2e/run/host-a/artifacts/runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json" >/dev/null
+
+# An unleased same-checkout helper is still live after the REPL stops. The
+# finalizer must fail and retain a private process-kind/birth receipt; only the
+# exact owner may finish after that helper exits.
+start_run driver-diag-held
+(cd "$root" && exec "$root/bin/tool_repl" --private-request-socket unused \
+  > "$fixture/unleased.out" 2> "$fixture/unleased.err") &
+helper_pid=$!
+IFS= read -r -t 20 ready <&4
+[[ "$ready" == ready ]]
+if bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed \
+    > "$fixture/unleased-finalize.out" 2> "$fixture/unleased-finalize.err"; then
+  echo 'finalizer accepted a live unleased helper' >&2; exit 1
+fi
+receipt=$(find "$AURA_E2E_RUN_DIR/private-$AURA_E2E_RUN_TOKEN" -maxdepth 1 \
+  -name 'finalizer-process-failure.*' -type f -print -quit)
+[[ -n "$receipt" && $(stat -c %a "$receipt" 2>/dev/null || /usr/bin/stat -f %Lp "$receipt") == 600 ]]
+jq -e --arg token "$AURA_E2E_RUN_TOKEN" --argjson pid "$helper_pid" \
+  '.phase=="owned-process-finalization-refusal" and .run_token==$token and
+   any(.processes[]; .pid==$pid and .kind=="tool_repl" and
+     .owner_binding=="same_checkout_cwd" and (.birth|length)>0)' "$receipt" >/dev/null
+release_helper
+bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed > "$fixture/unleased-recovered.out"
+[[ ! -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
 echo 'LAN private request lifecycle fixture passed'
