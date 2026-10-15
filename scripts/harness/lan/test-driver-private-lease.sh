@@ -221,4 +221,31 @@ jq -e --arg token "$AURA_E2E_RUN_TOKEN" --argjson pid "$helper_pid" \
 release_helper
 start_run "$AURA_E2E_RUN_TOKEN"
 bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed > "$fixture/prestart-recovered.out"
+
+# Shipping a clean checkout may find no active run for the default token. Stop
+# must be idempotent without creating a private lease, but must still refuse
+# stale owner identity and a live same-checkout process.
+export AURA_E2E_RUN_TOKEN=driver-no-active-stop
+private_dir="$AURA_E2E_RUN_DIR/private-$AURA_E2E_RUN_TOKEN"
+[[ ! -e "$private_dir" && ! -L "$private_dir" ]]
+bash "$driver" stop > "$fixture/idempotent-stop.out"
+[[ ! -e "$private_dir" && ! -L "$private_dir" ]]
+printf '{}\n' > "$AURA_E2E_RUN_DIR/repl.identity.json"
+if bash "$driver" stop > "$fixture/stale-id-stop.out" 2> "$fixture/stale-id-stop.err"; then
+  echo 'idempotent stop accepted stale owner identity' >&2; exit 1
+fi
+[[ -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
+rm "$AURA_E2E_RUN_DIR/repl.identity.json"
+(cd "$root" && exec "$root/bin/tool_repl" --private-request-socket unused \
+  > "$fixture/no-active-helper.out" 2> "$fixture/no-active-helper.err") &
+helper_pid=$!
+IFS= read -r -t 20 ready <&4
+[[ "$ready" == ready ]]
+if bash "$driver" stop > "$fixture/live-helper-stop.out" 2> "$fixture/live-helper-stop.err"; then
+  echo 'idempotent stop accepted a live same-checkout helper' >&2; exit 1
+fi
+[[ ! -e "$private_dir" && ! -L "$private_dir" ]]
+release_helper
+bash "$driver" stop > "$fixture/idempotent-stop-again.out"
+[[ ! -e "$private_dir" && ! -L "$private_dir" ]]
 echo 'LAN private request lifecycle fixture passed'

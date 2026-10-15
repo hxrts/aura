@@ -1118,6 +1118,11 @@ private ToolApi helpers release their shared leases. It then stops the original
 REPL and requires the same-checkout owned-process inventory to be empty before
 recording success. A held helper or live child retains the run for inspection;
 repeating finalization after verified shutdown is safe for the same outcome.
+For a clean checkout with no active run and no private request lease, `drv.sh
+stop` succeeds idempotently only while the persistent lifecycle lock is held,
+no PID or launch identity remains, and the same-checkout process inventory is
+empty. It does not create a private lease merely to acknowledge that state;
+stale identity or a live helper still refuses the ship.
 If the owned-process inventory is still nonempty, the finalizer retains an
 owner-only process-kind and birth receipt in the run's private directory;
 the live process still blocks completion.

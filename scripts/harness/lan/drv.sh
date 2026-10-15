@@ -409,6 +409,22 @@ inspect-enrollment-manifest)
   exec "$AURA_E2E_TOOL_REPL" --inspect-enrollment-manifest
   ;;
 stop)
+  # A clean checkout can have no current run, especially before a fixed-commit
+  # ship. The lifecycle lock above excludes concurrent start/finalize owners.
+  # Do not create a private request lease merely to acknowledge an empty stop.
+  if [[ ! -e "$PRIVATE_REQUEST_LOCK" && ! -L "$PRIVATE_REQUEST_LOCK" &&
+        ! -e "$PIDF" && ! -L "$PIDF" && ! -e "$IDENTITY" && ! -L "$IDENTITY" ]]; then
+    [[ -d "$D" && ! -L "$D" && -O "$D" && ! -L "$PRIVATE_DIR" ]] || exit 1
+    if [[ -e "$PRIVATE_DIR" ]]; then
+      [[ -d "$PRIVATE_DIR" && -O "$PRIVATE_DIR" ]] || exit 1
+      dir_mode=$(stat -c %a "$PRIVATE_DIR" 2>/dev/null ||
+        /usr/bin/stat -f %Lp "$PRIVATE_DIR") || exit 1
+      [[ "$dir_mode" == 700 ]] || exit 1
+    fi
+    require_no_owned_harness prestart || exit 1
+    echo stopped
+    exit 0
+  fi
   private_request_lease exclusive || exit 1
   stop_owned_run
   ;;

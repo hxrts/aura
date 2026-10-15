@@ -58,8 +58,10 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - The LAN driver signals only a REPL whose retained birth, executable, config
   and checkout identity match the live process. Missing or mismatched identity
   and surviving checkout-owned harness IPC fail closed without discarding run
-  evidence. TERM enters the REPL's existing owned shutdown; arbitrary child
-  process signalling is forbidden.
+  evidence. An empty-run stop holds the persistent lifecycle lock and checks
+  the same-checkout process inventory without creating a private request lease;
+  stale launch identity or a live helper still refuses. TERM enters the REPL's
+  existing owned shutdown; arbitrary child process signalling is forbidden.
 
 - Paired enrollment transfers use the same ToolApi owner over its owner-only
   Unix socket. The LAN driver verifies the existing REPL process identity
