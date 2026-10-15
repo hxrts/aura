@@ -624,6 +624,24 @@ inventories costs roughly 0.5–0.9 seconds per branch, so this fixture does
 not yet establish a speedup. Preserve the effect owner's authenticated
 inventory, exclusive lease, and incomplete-restore marker when optimizing it.
 
+Use the receipt's `checkpoint_capture_ms`, `restore_ms`, `signed_branch_ms`,
+and `full_setup_ms` to calculate the break-even branch count for the same
+compiled fixture. For `n` branches, compare `capture + n × (restore + branch)`
+with `n × full_setup`, using representative phase timings from repeated runs.
+If `restore + branch >= full_setup`, this checkpoint has no positive
+break-even count. Recent unoptimized receipts have representative phases of
+about 0.54 seconds capture, 0.73 seconds restore, 1.70 seconds signed branch,
+and 2.31 seconds full setup; the per-branch checkpoint path is slower even
+before capture. An unmerged exact-byte retention experiment reduced restore
+time, but its four-run median total was still about 7.65 seconds versus
+7.02 seconds for three fresh setups. Its phase medians suggest a tentative
+break-even near twelve branches, too variable to make it a default speed
+lane. Prefer a genuinely quiescent boundary after a more expensive signed
+setup or a workflow needing many branches, and remeasure capture, restore,
+branch, and full setup on one fixed source. Restore only through fresh canonical
+owners when their durable continuation and broker state can be authenticated;
+fail closed if that later boundary cannot be recovered.
+
 The named `BrokerOwnerShutdownAfterFirstQueue` branch reuses the same protected
 quiescent profiles. It starts the ordinary signed VM/app/broker owners,
 observes the original first envelope in the authenticated broker queue, and
