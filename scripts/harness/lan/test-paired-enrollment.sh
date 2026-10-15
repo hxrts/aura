@@ -109,13 +109,15 @@ case "$instance:$method:$intent" in
     fi
     echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-accepted","fact":{"kind":"device_enrollment_accepted","device_id":"00000000-0000-4000-8000-000000000001","device_count":2}}],"lists":[]}}}}' ;;
   barbara-tui:get_authority_id:)
-    if [[ "${FIXTURE_CASE:-}" == wrong_authority ]]; then
-      echo '{"status":"ok","payload":{"authority_id":"other-authority","source":"backend"}}'
-      exit 0
-    fi
-    echo '{"status":"ok","payload":{"authority_id":"authority-shared","source":"backend"}}' ;;
+    if [[ ! -e "$FIXTURE_RESTARTED" ]]; then
+      echo '{"status":"ok","payload":{"authority_id":"authority-99999999-9999-9999-9999-999999999999","source":"backend"}}'
+    elif [[ "${FIXTURE_CASE:-}" == wrong_authority ]]; then
+      echo '{"status":"ok","payload":{"authority_id":"authority-88888888-8888-8888-8888-888888888888","source":"backend"}}'
+    else
+      echo '{"status":"ok","payload":{"authority_id":"authority-11111111-1111-1111-1111-111111111111","source":"backend"}}'
+    fi ;;
   alex-tui:get_authority_id:)
-    echo '{"status":"ok","payload":{"authority_id":"authority-shared","source":"backend"}}' ;;
+    echo '{"status":"ok","payload":{"authority_id":"authority-11111111-1111-1111-1111-111111111111","source":"backend"}}' ;;
   barbara-tui:restart:)
     jq -e '.params.expected_operation_instance==null' <<< "$request" >/dev/null || exit 1
     : > "$FIXTURE_RESTARTED"

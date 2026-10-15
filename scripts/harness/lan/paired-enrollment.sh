@@ -382,9 +382,9 @@ issuer_authority=$PRIVATE_RESPONSE
 private_request barbara-tui get_authority_id accepted-authority '{"method":"get_authority_id","params":{}}'
 accepted_authority=$PRIVATE_RESPONSE
 printf '%s\n%s\n' "$issuer_authority" "$accepted_authority" |
-  jq -es '.[0].payload.authority_id==.[1].payload.authority_id and
-    (.[0].payload.authority_id|type=="string" and length>0)' >/dev/null || {
-  echo 'adopted authority differs from issuer' >&2; exit 1;
+  jq -es --arg subject "$subject" '.[0].payload.authority_id==$subject and
+    (.[1].payload.authority_id|type=="string" and length>0)' >/dev/null || {
+  echo 'issuer authority differs from signed manifest or recipient authority is absent' >&2; exit 1;
 }
 
 restart_request='{"method":"restart","params":{"expected_operation_instance":null}}'
@@ -404,9 +404,10 @@ reopened_event=$PRIVATE_RESPONSE
 reopened_receipt=$PRIVATE_RECEIPT
 private_request barbara-tui get_authority_id reopened-authority '{"method":"get_authority_id","params":{}}'
 reopened_authority=$PRIVATE_RESPONSE
-printf '%s\n%s\n' "$accepted_authority" "$reopened_authority" |
-  jq -es '.[0].payload.authority_id==.[1].payload.authority_id' >/dev/null || {
-  echo 'reopened authority differs from accepted authority' >&2; exit 1;
+printf '%s\n%s\n' "$issuer_authority" "$reopened_authority" |
+  jq -es --arg subject "$subject" '.[0].payload.authority_id==$subject and
+    .[1].payload.authority_id==$subject' >/dev/null || {
+  echo 'reopened authority differs from signed issuer subject' >&2; exit 1;
 }
 printf '%s\n%s\n' "$accepted_event" "$reopened_event" | jq -es '
   (.[0].payload.event.snapshot.runtime_events |

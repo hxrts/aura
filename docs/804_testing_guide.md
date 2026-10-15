@@ -1124,6 +1124,11 @@ restart. The shared `SettingsSection::Devices` semantic value serializes as
 `"devices"` in ToolApi requests. Absence of the list on an onboarding or
 other settings section is not evidence that the canonical device record is
 missing.
+The recipient's hot authority selection may still name its provisional
+authority after host acknowledgment. Treat the canonical two-device readback
+as the pre-shutdown persistence witness; after same-profile restart, require
+the reopened authority to equal the signed manifest's issuer subject. The
+hot provisional authority is not evidence of durable adoption.
 
 When a paired batch lacks the exact receiver ACK, retain the owner-only
 `broker-stage.json` receipt from the paired run. Its authenticated broker
