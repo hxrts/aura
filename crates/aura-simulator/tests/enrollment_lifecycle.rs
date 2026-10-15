@@ -1738,6 +1738,11 @@ impl ProtectedNativeEnrollmentReplay {
         let roots: Vec<_> = (0..2)
             .map(|_| tempfile::tempdir().expect("isolated original profile"))
             .collect();
+        use std::os::unix::fs::PermissionsExt;
+        for root in &roots {
+            std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private original profile root");
+        }
         let profiles = original_vm_profiles(inputs.seed_base, &roots);
         let clock = Arc::new(ManualPhysicalClock::new(inputs.selected_physical_ms));
         let startup = TimeoutBudget::from_start_and_timeout(
@@ -1754,7 +1759,6 @@ impl ProtectedNativeEnrollmentReplay {
         .await
         .expect("original selected owners stop before issuance");
         let artifacts = tempfile::tempdir().expect("private protected artifacts");
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(artifacts.path(), std::fs::Permissions::from_mode(0o700))
             .expect("private checkpoint artifact directory");
         // The source-bound test artifact identifies this compiled fixture.
@@ -1813,16 +1817,23 @@ impl ProtectedNativeEnrollmentReplay {
     }
 
     async fn restore(&self) {
-        for index in 0..2 {
-            self.checkpoints[index]
-                .restore(
-                    self.roots[index].path(),
-                    self.revision,
-                    self.checkpoint_bindings[index],
-                )
-                .await
-                .expect("fresh effect owner restores original selected filesystem profile");
-        }
+        // The two original profiles have disjoint roots and independent
+        // exclusive leases. Restore both under fresh effect owners while
+        // preserving each owner's full pre-mutation inventory validation.
+        let issuer = self.checkpoints[0].restore(
+            self.roots[0].path(),
+            self.revision,
+            self.checkpoint_bindings[0],
+        );
+        let recipient = self.checkpoints[1].restore(
+            self.roots[1].path(),
+            self.revision,
+            self.checkpoint_bindings[1],
+        );
+        let (issuer, recipient) = tokio::join!(issuer, recipient);
+        issuer.expect("fresh issuer effect owner restores original selected filesystem profile");
+        recipient
+            .expect("fresh recipient effect owner restores original selected filesystem profile");
     }
 }
 
@@ -1854,6 +1865,287 @@ async fn original_signed_host_refusal_replays_from_protected_selected_profiles()
     assert_eq!(
         captured, replayed,
         "same typed app/host/ACK outcome after restore"
+    );
+}
+
+#[cfg(all(feature = "simulator-checkpoint", unix))]
+#[tokio::test]
+async fn protected_original_broker_delivery_fault_retains_cause_and_cancels() {
+    use aura_app::frontend_primitives::WorkflowHandoffSubmission;
+    use aura_app::ui::workflows::invitation::{
+        import_device_enrollment_with_terminal_status, EnrollmentImportHostPolicy,
+    };
+    use aura_app::ui_contract::{
+        AuthoritativeSemanticFact, OperationId, OperationInstanceId, SemanticOperationKind,
+        SemanticOperationPhase,
+    };
+    use aura_core::AuraError;
+    use aura_simulator::native_enrollment_fixture::NativeEnrollmentFixture;
+    use aura_simulator::simulator_nonce_retirement::SimulatorNonceRetirementLedger;
+
+    let inputs = HostRefusalReplayInputs {
+        injected_fault: "BrokerOwnerShutdownAfterFirstQueue",
+        operation_instance: "genuine-public-app-broker-delivery-fault",
+        ..Default::default()
+    };
+    let protected = ProtectedNativeEnrollmentReplay::capture(&inputs).await;
+    let retirement = Arc::new(SimulatorNonceRetirementLedger::default());
+    let mut receipts = Vec::new();
+    for branch in 0..2 {
+        protected.restore().await;
+        let clock = Arc::new(ManualPhysicalClock::new(inputs.selected_physical_ms));
+        let owner = NativeEnrollmentFixture::prepare_with_nonce_retirement(
+            original_vm_profiles(inputs.seed_base, &protected.roots),
+            clock.clone(),
+            "genuine-complete-vm-auth",
+            [0, 1].map(|index| retirement.scoped(protected.participants[index], 0, branch)),
+        )
+        .await
+        .expect("original signed VM and broker registration");
+        let broker_url = owner.broker_url().to_owned();
+        let fixture = owner.enrollment;
+        let supervisor = owner.supervisor;
+        let issuer = fixture.issuer().clone();
+        let recipient = fixture.recipient().clone();
+        let app = fixture.recipient_app();
+        aura_app::AppCore::init_signals_with_hooks(&app)
+            .await
+            .expect("original recipient app signals");
+        let admission = app
+            .read()
+            .await
+            .enrollment_import_admission()
+            .cloned()
+            .expect("original app admission");
+        let transfer = fixture
+            .start()
+            .manifest_transfer
+            .as_ref()
+            .expect("original signed transfer");
+        let host_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed_host = host_called.clone();
+        let instance = OperationInstanceId(inputs.operation_instance.into());
+        let prior_events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let prior = WorkflowHandoffSubmission::submit_with_instance_unpublished(
+            PublicAppSubmission(prior_events.clone()),
+            OperationId::device_enrollment(),
+            SemanticOperationKind::ImportDeviceEnrollmentCode,
+            instance.clone(),
+        );
+        let mut observation = import_device_enrollment_with_terminal_status(
+            &app,
+            &admission,
+            fixture.start().enrollment_code.clone(),
+            Some(aura_app::ui_contract::EnrollmentManifestTransferInput {
+                manifest_code: transfer.manifest_code.clone(),
+                initiator_verifier_code: transfer.initiator_verifier_code.clone(),
+            }),
+            Some(instance.clone()),
+            EnrollmentImportHostPolicy::Finalize(Arc::new(move |_| {
+                observed_host.store(true, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async { Err(AuraError::invalid("withheld delivery reached host")) })
+            })),
+        )
+        .unwrap_or_else(|refusal| panic!("original import admission: {}", refusal.source_error()));
+        observation
+            .accept_handoff(prior)
+            .unwrap_or_else(|_| panic!("original workflow handoff"));
+        let (subject, device, digest) = fixture
+            .original_mailbox_selector()
+            .expect("exact signed mailbox selector");
+        let mut issuer_drain = Box::pin(issuer.drain_issuer_return_vm_mailbox());
+        let (message_id, stage) = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut tick = tokio::time::interval(Duration::from_millis(10));
+            loop {
+                tokio::select! {
+                    drain = &mut issuer_drain => {
+                        drain.expect("original issuer registration and send drain");
+                        issuer_drain = Box::pin(issuer.drain_issuer_return_vm_mailbox());
+                    }
+                    _ = tick.tick() => {
+                        let progress = original_vm_broker_progress(&broker_url, subject, device, digest).await;
+                        if let Some(message) = progress["messages"].as_array().and_then(|messages| messages.first()) {
+                            assert_eq!(progress["registration_present"], true);
+                            let id = message["message_id"].as_str().expect("exact first ID").to_owned();
+                            let stage = message["stage"].as_str().expect("typed first stage").to_owned();
+                            break (id, stage);
+                        }
+                        aura_simulator::native_enrollment_fixture::advance_selected_clock_before_frame(&fixture, &clock, false).await;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("original first envelope queues before delivery fault");
+        assert_eq!(
+            stage, "queued",
+            "fault follows exact first queue before retrieval"
+        );
+        assert!(!host_called.load(std::sync::atomic::Ordering::SeqCst));
+        supervisor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await
+            .expect("named broker-owner delivery fault");
+        let bridge = recipient.clone().as_runtime_bridge();
+        let delivery_error = tokio::time::timeout(
+            Duration::from_secs(5),
+            aura_app::ui::workflows::runtime::run_harness_runtime_maintenance_pass(&app, &bridge),
+        )
+        .await
+        .expect("original receiver maintenance reports broker fault")
+        .expect_err("original receiver must refuse unavailable broker delivery");
+        let mut cause: Option<&(dyn Error + 'static)> = Some(&delivery_error);
+        let mut broker_connect = false;
+        let mut refused_connection = false;
+        while let Some(current) = cause {
+            if let Some(AuraError::Network { message, .. }) = current.downcast_ref::<AuraError>() {
+                broker_connect |= message == "bootstrap broker connect failed";
+            }
+            if let Some(io) = current.downcast_ref::<std::io::Error>() {
+                refused_connection |= io.kind() == std::io::ErrorKind::ConnectionRefused;
+            }
+            cause = current.source();
+        }
+        assert!(broker_connect && refused_connection, "original typed broker connection refusal survives receiver maintenance: broker_connect={broker_connect} refused_connection={refused_connection} top={:?}", std::mem::discriminant(&delivery_error));
+        let delivery_kind = match delivery_error {
+            AuraError::Network { .. } => "Network",
+            AuraError::Internal { .. } => "Internal",
+            other => panic!(
+                "original receiver reported unexpected typed broker failure {:?}",
+                std::mem::discriminant(&other)
+            ),
+        };
+        drop(bridge);
+        // Dropping the accepted observer requests cancellation through its
+        // real app owner; the host callback must never acknowledge this fault.
+        drop(observation);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let terminals: Vec<_> = app
+                    .read()
+                    .await
+                    .authoritative_semantic_facts()
+                    .iter()
+                    .filter_map(|fact| match fact {
+                        AuthoritativeSemanticFact::OperationStatus {
+                            instance_id,
+                            status,
+                            ..
+                        } if instance_id.as_ref() == Some(&instance)
+                            && matches!(
+                                status.phase,
+                                SemanticOperationPhase::Succeeded
+                                    | SemanticOperationPhase::Failed
+                                    | SemanticOperationPhase::Cancelled
+                            ) =>
+                        {
+                            Some(status.phase)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if !terminals.is_empty() {
+                    assert_eq!(terminals, vec![SemanticOperationPhase::Cancelled]);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("original app cancellation reaches typed terminal");
+        assert!(!message_id.is_empty());
+        assert!(!host_called.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(prior_events.lock().unwrap().is_empty());
+        drop(admission);
+        drop(app);
+        let _reported = fixture
+            .fail(aura_agent::AgentError::config(
+                "original broker delivery failed and app cancelled",
+            ))
+            .await;
+        assert!(issuer.runtime().tasks().active_tasks().is_empty());
+        assert!(recipient.runtime().tasks().active_tasks().is_empty());
+        drop(issuer_drain);
+        drop(issuer);
+        drop(recipient);
+        receipts.push((
+            inputs.injected_fault,
+            vec![
+                "registration_present",
+                "first_envelope_queued",
+                "broker_owner_stopped_before_receiver_ack",
+            ],
+            SemanticOperationPhase::Cancelled,
+            delivery_kind,
+        ));
+    }
+    assert_eq!(
+        receipts[0], receipts[1],
+        "same typed cancelled replay milestones"
+    );
+    protected.restore().await;
+    let reopened = NativeEnrollmentFixture::prepare(
+        original_vm_profiles(inputs.seed_base, &protected.roots),
+        Arc::new(ManualPhysicalClock::new(inputs.selected_physical_ms)),
+        "genuine-complete-vm-auth",
+    )
+    .await
+    .expect("same original profiles reopen under fresh signed runtime owners");
+    reopened
+        .enrollment
+        .fail(aura_agent::AgentError::config("reopened owner disposition"))
+        .await;
+    reopened
+        .supervisor
+        .shutdown_with_timeout(Duration::from_secs(5))
+        .await
+        .expect("reopened broker owner acknowledges shutdown");
+
+    // The retained receipt is stage-only. Neither the signed transfer nor
+    // broker credentials, envelope bytes, and native error text are exported.
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let artifact_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts");
+    if !artifact_root.exists() {
+        std::fs::create_dir(&artifact_root).expect("private receipt artifact root");
+    }
+    let metadata = std::fs::symlink_metadata(&artifact_root).expect("receipt artifact root");
+    assert!(metadata.file_type().is_dir() && !metadata.file_type().is_symlink());
+    let receipt_dir = tempfile::Builder::new()
+        .prefix("aura-task449-delivery-")
+        .tempdir_in(&artifact_root)
+        .expect("new protected delivery receipt directory");
+    std::fs::set_permissions(receipt_dir.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("private delivery receipt directory");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(receipt_dir.path().join("replay.json"))
+        .expect("new owner-only delivery replay receipt");
+    let redacted = serde_json::json!({
+        "fixture_source_digest": protected.revision.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+        "boundary": "quiescent-pre-issuance-empty-broker",
+        "selected_provider": "runtime-owned-filesystem-fallback",
+        "seed_base": inputs.seed_base,
+        "selected_physical_ms": inputs.selected_physical_ms,
+        "operation_instance": inputs.operation_instance,
+        "owner": inputs.owner,
+        "injected_fault": inputs.injected_fault,
+        "broker_milestones": receipts[0].1,
+        "typed_native_cause": "BrokerNetwork/ConnectionRefused",
+        "typed_app_terminal": "Cancelled",
+        "same_profile_reopened": true,
+        "compared_branches": receipts.len(),
+        "network_delivery_asserted": false,
+    });
+    serde_json::to_writer_pretty(&mut file, &redacted).expect("redacted delivery receipt");
+    file.flush().expect("flush delivery receipt");
+    file.sync_all().expect("durable delivery receipt");
+    let retained = receipt_dir.keep();
+    println!(
+        "task449 protected delivery receipt: {}",
+        retained.join("replay.json").display()
     );
 }
 
@@ -1925,7 +2217,7 @@ async fn protected_selected_profile_replay_benchmarks_three_branches_against_ful
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
     let inputs = HostRefusalReplayInputs::default();
-    let started = std::time::Instant::now();
+    let started = aura_effects::time::monotonic_now();
     let protected = ProtectedNativeEnrollmentReplay::capture(&inputs).await;
     let capture_millis = started.elapsed().as_millis();
     let retirement = Arc::new(SimulatorNonceRetirementLedger::default());
@@ -1933,10 +2225,10 @@ async fn protected_selected_profile_replay_benchmarks_three_branches_against_ful
     let mut restore_millis = Vec::new();
     let mut branch_millis = Vec::new();
     for branch in 0..3 {
-        let restore_started = std::time::Instant::now();
+        let restore_started = aura_effects::time::monotonic_now();
         protected.restore().await;
         restore_millis.push(restore_started.elapsed().as_millis());
-        let branch_started = std::time::Instant::now();
+        let branch_started = aura_effects::time::monotonic_now();
         let receipt = run_host_storage_refusal_with_profiles(
             inputs.clone(),
             Some(&protected.roots),
@@ -1951,11 +2243,11 @@ async fn protected_selected_profile_replay_benchmarks_three_branches_against_ful
     let checkpoint_millis = started.elapsed().as_millis();
     assert!(branches.windows(2).all(|pair| pair[0] == pair[1]));
 
-    let full_started = std::time::Instant::now();
+    let full_started = aura_effects::time::monotonic_now();
     let mut full = Vec::new();
     let mut full_setup_millis = Vec::new();
     for _ in 0..3 {
-        let run_started = std::time::Instant::now();
+        let run_started = aura_effects::time::monotonic_now();
         full.push(run_host_storage_refusal_from_fresh_profile(inputs.clone()).await);
         full_setup_millis.push(run_started.elapsed().as_millis());
     }

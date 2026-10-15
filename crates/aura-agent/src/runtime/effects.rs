@@ -3496,9 +3496,7 @@ impl AuraEffectSystem {
     pub fn selected_filesystem_checkpoint_source_for_simulation(
         &self,
     ) -> Option<aura_effects::profile_checkpoint::SelectedFilesystemCheckpointSource> {
-        if self.profile_owner.is_none() {
-            return None;
-        }
+        self.profile_owner.as_ref()?;
         match self.crypto.secure_storage().as_ref() {
             ProductionSecureStorageHandler::ProfileOwned(owned) => {
                 owned.selected_filesystem_checkpoint_source()

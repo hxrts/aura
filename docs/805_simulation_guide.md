@@ -617,6 +617,36 @@ receipt supplies the full source fingerprint and exact discovered/executed
 inventory. The replay receipt records only a fixture source digest, seed,
 selected clock, operation/owner, named fault, ordered broker milestones,
 typed result, exact first-message ACK, reopen result, and elapsed times.
+The current three-branch benchmark is diagnostic: recent local runs measured
+roughly 7.8–8.0 seconds with checkpoint capture and three restores against
+6.9–7.2 seconds for three fresh setups. Restore of the two original profile
+inventories costs roughly 0.5–0.9 seconds per branch, so this fixture does
+not yet establish a speedup. Preserve the effect owner's authenticated
+inventory, exclusive lease, and incomplete-restore marker when optimizing it.
+
+The named `BrokerOwnerShutdownAfterFirstQueue` branch reuses the same protected
+quiescent profiles. It starts the ordinary signed VM/app/broker owners,
+observes the original first envelope in the authenticated broker queue, and
+stops that broker before receiver retrieval. The shared app maintenance pass
+retains the native broker connection-refusal source through its typed runtime
+bridge call. Dropping the accepted app observer then requests its real
+cancellation; the host callback remains uncalled. The fixture compares two
+restored branches' ordered stage names and typed terminal result, checks
+strict shutdown, and reacquires the same profiles under fresh owners. Its
+private 0600 receipt records only stage names, typed cause and terminal
+categories, the selected clock input, fixture binding, and reopen result:
+
+```bash
+scripts/dev/run-exact-fixtures.sh --root "$PWD" --lane debug \
+  --package aura-simulator --test enrollment_lifecycle \
+  --features simulator-checkpoint --expected-count 1 \
+  --name protected_original_broker_delivery_fault_retains_cause_and_cancels
+```
+
+This branch proves a local broker-owner failure and app cancellation before
+receiver ACK; it does not claim that an independent process or host delivered
+the first envelope. The `HostPathIsFile` branch above remains the genuine
+required host-write refusal after exact receiver ACK and same-profile reopen.
 
 For actual FROST one-use custody, the separately scoped threshold-service
 fixture injects the same retirement effect into original and restored owners

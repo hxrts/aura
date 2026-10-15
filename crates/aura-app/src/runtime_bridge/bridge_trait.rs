@@ -444,6 +444,20 @@ pub trait RuntimeBridge: Send + Sync {
     /// ingest ceremony commit messages before signal-backed state can converge.
     async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError>;
 
+    /// Process the same owned inbox while retaining the original native cause
+    /// for required maintenance and enrollment convergence. Bridges without a
+    /// native cause retain their existing typed intent error as the source.
+    async fn process_ceremony_messages_with_source(
+        &self,
+    ) -> Result<CeremonyProcessingOutcome, aura_core::AuraError> {
+        self.process_ceremony_messages()
+            .await
+            .map_err(|source| aura_core::AuraError::Internal {
+                message: "ceremony processing failed".into(),
+                source: Some(Arc::new(source)),
+            })
+    }
+
     /// Sync with a specific peer by ID
     ///
     /// Initiates targeted synchronization with the specified peer.

@@ -11,11 +11,13 @@ use aura_core::{
     AuraError,
 };
 
+type RetiredCommitments = HashMap<([u8; 32], u64, FrostNonceRetirementRecord), u64>;
+
 /// The original fixture owns this ledger across every restored branch. It is
 /// deliberately not checkpointed or made reachable from deployable facades.
 #[derive(Default)]
 pub struct SimulatorNonceRetirementLedger {
-    retired: Mutex<HashMap<([u8; 32], u64, FrostNonceRetirementRecord), u64>>,
+    retired: Mutex<RetiredCommitments>,
 }
 
 impl SimulatorNonceRetirementLedger {

@@ -1917,6 +1917,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         sync::process_ceremony_messages(self).await
     }
 
+    async fn process_ceremony_messages_with_source(
+        &self,
+    ) -> Result<CeremonyProcessingOutcome, aura_core::AuraError> {
+        sync::process_ceremony_messages_with_source(self).await
+    }
+
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
         sync::sync_with_peer(self, peer_id).await
     }

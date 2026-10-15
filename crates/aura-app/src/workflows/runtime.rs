@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use async_lock::RwLock;
 
-use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::{
@@ -494,13 +493,16 @@ async fn converge_runtime_cycle(
     budget: &TimeoutBudget,
     step_timeout: Duration,
 ) -> Result<(), AuraError> {
-    async fn run_step<T>(
+    async fn run_step<T, E>(
         runtime: &Arc<dyn RuntimeBridge>,
         parent: &TimeoutBudget,
         requested: Duration,
         operation: &'static str,
-        future: impl Future<Output = Result<T, IntentError>>,
-    ) -> Result<(), AuraError> {
+        future: impl Future<Output = Result<T, E>>,
+    ) -> Result<(), AuraError>
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
         let child = workflow_child_timeout_budget(runtime, parent, requested).await?;
         execute_with_runtime_timeout_budget(runtime, &child, || future)
             .await
@@ -526,7 +528,7 @@ async fn converge_runtime_cycle(
         budget,
         step_timeout,
         "converge ceremony inbox",
-        runtime.process_ceremony_messages(),
+        runtime.process_ceremony_messages_with_source(),
     )
     .await?;
     cooperative_yield().await;
@@ -587,7 +589,7 @@ pub async fn run_harness_runtime_maintenance_pass(
             "harness_runtime_maintenance",
             "process_enrollment_mailboxes_before_sync",
             Duration::from_millis(step_ms),
-            || runtime.process_ceremony_messages(),
+            || runtime.process_ceremony_messages_with_source(),
         )
         .await?
         .map_err(|error| {
@@ -640,7 +642,7 @@ pub async fn run_harness_runtime_mailbox_pass(
             "web_harness_transport_tick",
             "process_ceremony_messages",
             Duration::from_secs(3),
-            || runtime.process_ceremony_messages(),
+            || runtime.process_ceremony_messages_with_source(),
         )
         .await?
         .map_err(|error| {

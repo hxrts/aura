@@ -8,6 +8,8 @@ Native delegation and VM diagnostics box bulky concrete causes while retaining t
 
 Production runtime composition and effect system assembly for authority-based identity management. Owns structured concurrency, service lifecycle, session ownership, effect registry, builder infrastructure, and choreography adapters.
 
+The native runtime bridge processes original enrollment mailbox and other ceremony work through one owned pass. Its source-preserving maintenance result retains the agent error, broker network category, and native I/O cause through the app bridge. The legacy intent-error projection is presentation-only and must not replace this source-bearing call on required maintenance paths.
+
 `SimulationSharedInbox` carries canonical frames and reserved return capacity
 across runtimes sharing one simulation inbox. A borrowed `InboundEnvelopeLease`
 retains the original frame and position until explicit consumption or

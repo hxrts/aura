@@ -10,7 +10,9 @@ use aura_app::runtime_bridge::{
 use aura_app::IntentError;
 use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::AuraError;
 use aura_core::DeviceId;
+use std::sync::Arc;
 
 const RUNTIME_BRIDGE_SYNC_STATUS_QUERY_CAPABILITY: &str = "runtime_bridge_sync_status_query";
 const RUNTIME_BRIDGE_SYNC_PEER_ONLINE_QUERY_CAPABILITY: &str =
@@ -211,6 +213,24 @@ pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), Inte
 pub(super) async fn process_ceremony_messages(
     bridge: &AgentRuntimeBridge,
 ) -> Result<CeremonyProcessingOutcome, IntentError> {
+    process_ceremony_messages_with_source(bridge)
+        .await
+        .map_err(|error| bridge_internal("Process ceremony messages failed", error))
+}
+
+fn ceremony_failure(
+    operation: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> AuraError {
+    AuraError::Internal {
+        message: operation.into(),
+        source: Some(Arc::new(source)),
+    }
+}
+
+pub(super) async fn process_ceremony_messages_with_source(
+    bridge: &AgentRuntimeBridge,
+) -> Result<CeremonyProcessingOutcome, AuraError> {
     let _ = RUNTIME_BRIDGE_SYNC_CEREMONY_PROCESSING_CAPABILITY;
     // This runtime owner is shared by native and browser frontends. The
     // receiver registers and drains its original mailbox here; the issuer
@@ -220,29 +240,29 @@ pub(super) async fn process_ceremony_messages(
         .agent
         .drain_pending_enrollment_vm_mailbox()
         .await
-        .map_err(|e| bridge_internal("Process original pending enrollment mailbox failed", e))?;
+        .map_err(|e| ceremony_failure("Process original pending enrollment mailbox failed", e))?;
     let issuer_return_frames = bridge
         .agent
         .drain_issuer_return_vm_mailbox()
         .await
-        .map_err(|e| bridge_internal("Process original issuer return mailbox failed", e))?;
+        .map_err(|e| ceremony_failure("Process original issuer return mailbox failed", e))?;
     let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
         crate::core::AuthorityContext::new_with_device(
             bridge.agent.authority_id(),
             bridge.agent.runtime().device_id(),
         ),
     )
-    .map_err(|e| bridge_internal("Create invitation handler for inbox processing failed", e))?;
+    .map_err(|e| ceremony_failure("Create invitation handler for inbox processing failed", e))?;
     let processed_contact_messages = invitation_handler
         .process_contact_invitation_acceptances(bridge.agent.runtime().effects())
         .await
-        .map_err(|e| bridge_internal("Process contact/chat envelopes failed", e))?;
+        .map_err(|e| ceremony_failure("Process contact/chat envelopes failed", e))?;
     let processed_handshakes = if let Some(rendezvous_manager) = bridge.agent.runtime().rendezvous()
     {
         let authority = bridge.agent.context().clone();
         let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
             .map_err(|e| {
-                bridge_internal(
+                ceremony_failure(
                     "Create rendezvous handler for handshake processing failed",
                     e,
                 )
@@ -251,7 +271,7 @@ pub(super) async fn process_ceremony_messages(
         handler
             .process_handshake_envelopes(bridge.agent.runtime().effects())
             .await
-            .map_err(|e| bridge_internal("Process rendezvous handshakes failed", e))?
+            .map_err(|e| ceremony_failure("Process rendezvous handshakes failed", e))?
     } else {
         0
     };

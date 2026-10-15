@@ -6,6 +6,8 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 Portable, platform-agnostic application core containing pure business logic (intents, reducers, views) without runtime dependencies. Enables dependency inversion through the `RuntimeBridge` trait.
 
+Required ceremony upkeep uses the source-preserving `RuntimeBridge::process_ceremony_messages_with_source` call. Native bridges retain the original mailbox and transport error chain through app maintenance; offline and mock bridges wrap their existing typed intent error. The presentation-oriented `IntentError` method remains available for other callers, but it cannot serve as proof that a native failure source survived.
+
 ## Scope
 
 Workflow handoff may require synchronous recipient acceptance before the prior
