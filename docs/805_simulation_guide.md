@@ -700,6 +700,11 @@ import, or replay authority. Receiver and return mailbox refusal predicates
 remain fail-closed, but their signed-envelope fixtures require the canonical
 signed setup driver in a later effect-owned protected co-checkpoint. The fixture
 authorization token is never a checkpoint encryption key.
+The next simulator-only prerequisite preserves the original native broker
+handle through signed setup and permits a one-shot stop acknowledgment. The
+canonical rendezvous manager likewise takes its broker child through its actor
+and refuses outstanding clones. This is still no protected broker artifact,
+fresh-owner restore, VM continuation replay, or measured speedup.
 
 ### Scenario Contract Workflow
 

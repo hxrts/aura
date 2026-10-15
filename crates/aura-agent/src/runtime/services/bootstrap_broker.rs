@@ -342,13 +342,13 @@ pub struct LocalBootstrapBrokerService {
 /// Private stopped broker owner; it cannot authorize a profile or restore a
 /// continuation. Only a later effect-owned co-checkpoint may consume its state.
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
-pub(crate) struct StoppedBrokerCheckpointOwner {
+pub struct StoppedBrokerCheckpointOwner {
     _state: BootstrapBrokerState,
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum BrokerCheckpointQuiescenceError {
+pub enum BrokerCheckpointQuiescenceError {
     #[error("broker checkpoint requires its original started task group")]
     NotStarted,
     #[error("broker checkpoint original task group was started more than once")]
@@ -868,7 +868,7 @@ impl LocalBootstrapBrokerService {
     /// simulator checkpoint can inspect it. No bytes or restore authority leave
     /// this private method. A failure consumes the service and remains closed.
     #[cfg(feature = "simulator-checkpoint")]
-    pub(crate) async fn stop_for_simulator_checkpoint(
+    pub async fn stop_for_simulator_checkpoint(
         self,
         timeout: Duration,
     ) -> Result<StoppedBrokerCheckpointOwner, BrokerCheckpointQuiescenceError> {

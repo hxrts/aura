@@ -253,6 +253,10 @@ enum RendezvousCommand {
     ClearBootstrapBroker {
         reply: oneshot::Sender<()>,
     },
+    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+    TakeBootstrapBrokerForCheckpoint {
+        reply: oneshot::Sender<Option<Arc<LocalBootstrapBrokerService>>>,
+    },
     PruneLanPeers {
         now_ms: u64,
         max_age_ms: u64,
@@ -523,6 +527,10 @@ impl RendezvousManager {
                         state.bootstrap_broker = None;
                         let _ = reply.send(());
                     }
+                    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+                    RendezvousCommand::TakeBootstrapBrokerForCheckpoint { reply } => {
+                        let _ = reply.send(state.bootstrap_broker.take());
+                    }
                     RendezvousCommand::PruneLanPeers {
                         now_ms,
                         max_age_ms,
@@ -634,7 +642,10 @@ impl RendezvousManager {
         if self.config.bootstrap_broker.enabled
             && self.config.bootstrap_broker.resolved_bind_addr().is_some()
         {
-            if let Err(error) = self.start_bootstrap_broker(service_tasks.clone()).await {
+            if let Err(error) = self
+                .start_bootstrap_broker(service_tasks.group("bootstrap_broker"))
+                .await
+            {
                 self.shared.owner.take_commands().await;
                 self.shared
                     .owner
@@ -1236,6 +1247,31 @@ impl RendezvousManager {
                 .request(|reply| RendezvousCommand::ClearBootstrapBroker { reply })
                 .await;
         }
+    }
+
+    /// Consume the canonical manager's original broker owner only for a
+    /// simulator checkpoint. A retained snapshot or in-flight caller clone
+    /// refuses the handoff; the private broker gate then disposes its exact
+    /// dedicated task group. No production import/export is exposed.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+    pub(crate) async fn stop_original_bootstrap_broker_for_simulation(
+        &self,
+        timeout: Duration,
+    ) -> Result<super::bootstrap_broker::StoppedBrokerCheckpointOwner, String> {
+        let broker = self
+            .command_handle()
+            .await
+            .map_err(|_| "original broker command owner unavailable".to_string())?
+            .request(|reply| RendezvousCommand::TakeBootstrapBrokerForCheckpoint { reply })
+            .await
+            .map_err(|_| "original broker handoff failed".to_string())?
+            .ok_or_else(|| "original broker owner already stopped or absent".to_string())?;
+        let broker = Arc::try_unwrap(broker)
+            .map_err(|_| "original broker retains another live owner".to_string())?;
+        broker
+            .stop_for_simulator_checkpoint(timeout)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2712,6 +2748,61 @@ mod tests {
 
         RuntimeService::stop(&manager).await.unwrap();
         assert!(!manager.is_running().await);
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn simulator_checkpoint_takes_original_broker_child_without_stopping_manager() {
+        let config = RendezvousManagerConfig::for_testing().with_bootstrap_broker(
+            BootstrapBrokerConfig::default()
+                .enabled(true)
+                .with_auth_token("private-fixture-auth"),
+        );
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
+        let context = test_service_context().await;
+        RuntimeService::start(&manager, &context)
+            .await
+            .expect("manager start");
+        assert!(manager.local_bootstrap_broker().await.is_some());
+        manager
+            .stop_original_bootstrap_broker_for_simulation(Duration::from_secs(5))
+            .await
+            .expect("original child disposed");
+        assert!(manager.is_running().await);
+        assert!(manager.local_bootstrap_broker().await.is_none());
+        assert!(manager
+            .stop_original_bootstrap_broker_for_simulation(Duration::from_secs(5))
+            .await
+            .is_err());
+        RuntimeService::stop(&manager).await.expect("manager stop");
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn simulator_checkpoint_refuses_live_broker_clone() {
+        let config = RendezvousManagerConfig::for_testing().with_bootstrap_broker(
+            BootstrapBrokerConfig::default()
+                .enabled(true)
+                .with_auth_token("private-fixture-auth"),
+        );
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
+        let context = test_service_context().await;
+        RuntimeService::start(&manager, &context)
+            .await
+            .expect("manager start");
+        let retained = manager
+            .local_bootstrap_broker()
+            .await
+            .expect("live original clone");
+        let refusal = manager
+            .stop_original_bootstrap_broker_for_simulation(Duration::from_secs(5))
+            .await
+            .err()
+            .expect("in-flight clone must refuse checkpoint");
+        assert!(refusal.contains("another live owner"));
+        assert!(manager.local_bootstrap_broker().await.is_none());
+        drop(retained);
+        RuntimeService::stop(&manager).await.expect("manager stop");
     }
 
     /// LAN discovery feeds bootstrap candidates: an authenticated peer is

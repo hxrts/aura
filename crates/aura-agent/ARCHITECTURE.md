@@ -293,6 +293,10 @@ Summary:
   connection owners, queued invitations, and unsettled receiver/return envelopes.
   The gate exports no broker bytes or restore authority; authenticated broker
   co-checkpoint and canonical signed-mailbox refusal fixtures remain open.
+  A simulator-only rendezvous actor handoff takes its original broker child
+  group and refuses any retained service clone before invoking that stop gate.
+  The normal rendezvous command and cleanup tasks remain under their parent
+  group; release feature graphs do not include this handoff.
 - The authenticated pending-enrollment progress witness reports only exact
   selector, message ID, envelope digest, and broker custody stage. Retrieval
   selection does not prove HTTP delivery. The broker retains the first

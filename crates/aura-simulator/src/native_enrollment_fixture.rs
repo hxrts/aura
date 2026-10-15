@@ -51,6 +51,8 @@ pub struct NativeEnrollmentFixture {
     pub clock: Arc<ManualPhysicalClock>,
     broker_url: String,
     auth_token: String,
+    #[cfg(feature = "simulator-checkpoint")]
+    original_broker: Option<LocalBootstrapBrokerService>,
 }
 
 impl NativeEnrollmentFixture {
@@ -144,7 +146,23 @@ impl NativeEnrollmentFixture {
             clock,
             broker_url,
             auth_token: auth_token.to_owned(),
+            #[cfg(feature = "simulator-checkpoint")]
+            original_broker: Some(broker),
         })
+    }
+
+    /// Consume the exact broker that handled this original signed setup.
+    /// The opaque result carries no export or restore API.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub async fn stop_original_broker_for_checkpoint(
+        &mut self,
+    ) -> Result<aura_agent::StoppedBrokerCheckpointOwner, String> {
+        self.original_broker
+            .take()
+            .ok_or_else(|| "original signed broker owner already consumed".to_string())?
+            .stop_for_simulator_checkpoint(Duration::from_secs(5))
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub fn broker_url(&self) -> &str {

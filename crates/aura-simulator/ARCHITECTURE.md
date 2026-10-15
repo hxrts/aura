@@ -13,6 +13,9 @@ signed issuer path. It binds the loopback broker, retains the selected physical
 clock and broker supervisor, and drives mailbox upkeep without advancing time
 after the first authenticated broker frame. It does not issue credentials or
 replace the agent's signed enrollment owner.
+With `simulator-checkpoint`, it retains the original broker handle through
+signed issuance and can consume it for an opaque stop acknowledgment after
+observing the original registration. It cannot export or restore broker state.
 The lifecycle test's 30-second diagnostic watchdog is testkit-owned and does
 not advance the selected physical clock or decide protocol completion.
 The `simulator-checkpoint` feature reuses that signed native fixture from a

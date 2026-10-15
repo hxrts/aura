@@ -252,6 +252,13 @@ pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceMana
     feature = "choreo-backend-telltale-machine"
 ))]
 pub use runtime::services::bootstrap_broker::LocalBootstrapBrokerService;
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    feature = "simulation",
+    feature = "simulator-checkpoint",
+    feature = "choreo-backend-telltale-machine"
+))]
+pub use runtime::services::bootstrap_broker::StoppedBrokerCheckpointOwner;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::bootstrap_broker::{
     endpoint_is_loopback as bootstrap_broker_endpoint_is_loopback,
