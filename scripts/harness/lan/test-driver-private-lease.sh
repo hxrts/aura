@@ -153,4 +153,23 @@ finalizer_pid=
 ! kill -0 "$repl_pid" 2>/dev/null
 [[ ! -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
 bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" success > "$fixture/wait-again.out"
+
+# Simulate interruption after the exact owner has stopped but before its
+# identity files are removed. A different token cannot reclaim this state;
+# the original run can be classified only after the empty process inventory.
+start_run driver-stale-own
+cp "$AURA_E2E_RUN_DIR/repl.pid" "$fixture/stale.pid"
+cp "$AURA_E2E_RUN_DIR/repl.identity.json" "$fixture/stale.identity.json"
+bash "$driver" stop > "$fixture/stale-stop.out"
+[[ ! -f "$AURA_E2E_RUN_DIR/repl.pid" ]]
+cp "$fixture/stale.pid" "$AURA_E2E_RUN_DIR/repl.pid"
+cp "$fixture/stale.identity.json" "$AURA_E2E_RUN_DIR/repl.identity.json"
+if bash "$driver" finalize driver-private-other failed > "$fixture/stale-foreign.out" 2>&1; then
+  echo 'foreign token reclaimed a stopped LAN owner' >&2; exit 1
+fi
+[[ -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
+bash "$driver" finalize "$AURA_E2E_RUN_TOKEN" failed > "$fixture/stale-finalize.out"
+[[ ! -f "$AURA_E2E_RUN_DIR/repl.identity.json" ]]
+jq -e '.state=="completed" and .outcome=="failed"' \
+  "$root/.tmp/e2e/run/host-a/artifacts/runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json" >/dev/null
 echo 'LAN private request lifecycle fixture passed'
