@@ -182,7 +182,10 @@ mod tests {
         erase_roster(owned, &roster).await?;
         erase_roster(owned, &roster).await?;
         let platform = selected_owner(owned)?.0;
-        assert_eq!(read_root(owned, platform)?.phase, ERASURE_COMPLETE);
+        let root = read_root(owned, platform)?;
+        assert_eq!(root.phase, ERASURE_COMPLETE);
+        assert_eq!(root.first_scope, b"first");
+        assert_eq!(root.second_scope, b"second");
         assert!(read_entry(platform, INTENT_USER)?.is_none());
         assert!(read_entry(platform, RECORD_USER)?.is_none());
         assert!(read_roster_first_secret(owned, &roster).await.is_err());
@@ -197,11 +200,35 @@ mod tests {
             unreachable!()
         };
         let roster = append::recover_roster(owned).await?;
+        let root = read_root(owned, selected_owner(owned)?.0)?;
+        assert_eq!(root.first_scope, b"first");
+        assert_eq!(root.second_scope, b"second");
         assert!(read_roster_first_secret(owned, &roster).await.is_err());
         assert_eq!(
             &**append::read_roster_second_secret(owned, &roster).await?,
             b"second secret"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn erased_first_scope_refuses_missing_root_on_reopen() -> TestResult {
+        let (fixture, selected, roster) = super::super::tests::denied_roster().await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        acknowledge_roster(owned, &roster, b"first refusal").await?;
+        erase_roster(owned, &roster).await?;
+        let platform = selected_owner(owned)?.0;
+        platform.entry_for_user(KEYRING_USER)?.delete_credential()?;
+        drop(roster);
+        drop(selected);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert!(append::recover_roster(owned).await.is_err());
+        assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
         Ok(())
     }
 

@@ -270,7 +270,10 @@ fn read_intent(
         return Err(invalid("platform birth intent differs from original root"));
     }
     let intent = BirthIntent::decode(selected, &bytes)?;
-    if intent.root != root.id || intent.allocation != root.birth_id {
+    if intent.root != root.id
+        || intent.allocation != root.birth_id
+        || intent.scope != root.first_scope
+    {
         return Err(invalid(
             "platform birth intent has foreign original identity",
         ));
@@ -443,6 +446,7 @@ async fn allocate_one_inner(
     root.phase = BIRTH_PENDING;
     root.birth_id = allocation;
     root.intent_digest = aura_core::hash::hash(&bytes);
+    root.first_scope = scope.to_vec();
     root.roster_digest = aura_core::hash::hash(&inventory_marker(&root));
     write_keyring(selected, &root)?;
     if stop == StopAfter::RootIntent {

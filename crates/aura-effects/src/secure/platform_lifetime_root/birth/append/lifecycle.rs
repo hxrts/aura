@@ -673,10 +673,10 @@ mod tests {
         let roster = recover_roster(owned).await?;
         assert!(read_live_secret(owned, &roster).await.is_err());
         let (platform, _) = selected_owner(owned)?;
-        assert_eq!(
-            read_root(owned, platform)?.second_phase,
-            SECOND_ERASURE_COMPLETE
-        );
+        let root = read_root(owned, platform)?;
+        assert_eq!(root.first_scope, b"first scope");
+        assert_eq!(root.second_scope, b"second scope");
+        assert_eq!(root.second_phase, SECOND_ERASURE_COMPLETE);
         write_exact(
             platform,
             &user(RECORD_PREFIX, &claim.allocation),

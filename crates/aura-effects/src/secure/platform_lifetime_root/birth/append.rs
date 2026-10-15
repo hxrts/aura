@@ -198,7 +198,10 @@ fn replay(
         return Err(invalid("platform second birth original intent differs"));
     }
     let intent = BirthIntent::decode(selected, &bytes)?;
-    if intent.root != root.id || intent.allocation != claim.allocation {
+    if intent.root != root.id
+        || intent.allocation != claim.allocation
+        || intent.scope != root.second_scope
+    {
         return Err(invalid(
             "platform second birth original intent has foreign identity",
         ));
@@ -328,6 +331,7 @@ async fn append_inner(
         ));
     }
     root.roster_digest = aura_core::hash::hash(&roster(&root, &claim));
+    root.second_scope = scope.to_vec();
     write_keyring(selected, &root)?;
     if stop == StopAfter::RootAnchor {
         return Err(interrupted());
@@ -433,6 +437,38 @@ mod tests {
     use super::*;
     use crate::secure::platform_lifetime_root::tests::Fixture;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    #[tokio::test]
+    async fn retained_roster_scope_mismatch_refuses_recovered_owner() -> TestResult {
+        for change_first in [true, false] {
+            let fixture = Fixture::new()?;
+            let selected = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+                unreachable!()
+            };
+            let empty = admit_empty_root(owned).await?;
+            let first = allocate_one(owned, &empty, b"first", b"first secret").await?;
+            append_second(owned, &first, b"second", b"second secret").await?;
+            let platform = selected_owner(owned)?.0;
+            let mut root = read_root(owned, platform)?;
+            if change_first {
+                root.first_scope = b"foreign first".to_vec();
+            } else {
+                root.second_scope = b"foreign second".to_vec();
+            }
+            write_keyring(platform, &root)?;
+            drop(first);
+            drop(empty);
+            drop(selected);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            assert!(recover_roster(owned).await.is_err());
+            assert!(!owned._owner.lifetime_root_claimed.load(Ordering::Acquire));
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn second_birth_uses_root_anchored_sorted_roster_and_per_id_records() -> TestResult {

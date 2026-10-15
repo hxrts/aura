@@ -19,7 +19,7 @@ mod birth;
 
 const KEYRING_USER: &str = "allocation-lifetime-empty-root:v1";
 const FILE_PATH: &str = "platform_lifetime/root.v1";
-const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V5";
+const KEYRING_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-ROOT-V6";
 const FILE_MAGIC: &[u8] = b"AURA-PLATFORM-LIFETIME-FILE-V1";
 const PENDING: u8 = 0;
 const COMPLETE: u8 = 1;
@@ -31,7 +31,9 @@ const TOMBSTONE_PENDING: u8 = 6;
 const TOMBSTONE_ACK_ERASURE_PENDING: u8 = 7;
 const ERASURE_PENDING: u8 = 8;
 const ERASURE_COMPLETE: u8 = 9;
-const PLAINTEXT_LEN: usize = 1 + 32 * 9 + 1;
+const PLAINTEXT_HEADER_LEN: usize = 1 + 32 * 9 + 1 + 2 + 2;
+const MAX_PLAINTEXT_LEN: usize =
+    PLAINTEXT_HEADER_LEN + 2 * aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES;
 const SECOND_BIRTH_COMPLETE: u8 = 0;
 const SECOND_DECISION_PENDING: u8 = 1;
 const SECOND_DECISION_COMPLETE: u8 = 2;
@@ -54,6 +56,10 @@ struct RootRecord {
     second_phase: u8,
     second_decision_digest: [u8; 32],
     second_tombstone_digest: [u8; 32],
+    // Retained nonsecret birth scopes survive selected-provider credential
+    // erasure. Their bytes are authenticated inside the original root.
+    first_scope: Vec<u8>,
+    second_scope: Vec<u8>,
 }
 
 fn invalid(message: &'static str) -> AuraError {
@@ -84,7 +90,14 @@ impl RootRecord {
             .map_err(|source| {
                 AuraError::crypto_with_source("platform lifetime root entropy", Arc::new(source))
             })?;
-        let mut plain = Vec::with_capacity(PLAINTEXT_LEN);
+        if self.first_scope.len() > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
+            || self.second_scope.len() > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
+        {
+            return Err(invalid("platform lifetime scope exceeds root bound"));
+        }
+        let mut plain = Vec::with_capacity(
+            PLAINTEXT_HEADER_LEN + self.first_scope.len() + self.second_scope.len(),
+        );
         plain.push(self.phase);
         plain.extend_from_slice(&self.id);
         plain.extend_from_slice(&self.profile);
@@ -96,6 +109,10 @@ impl RootRecord {
         plain.push(self.second_phase);
         plain.extend_from_slice(&self.second_decision_digest);
         plain.extend_from_slice(&self.second_tombstone_digest);
+        plain.extend_from_slice(&(self.first_scope.len() as u16).to_le_bytes());
+        plain.extend_from_slice(&(self.second_scope.len() as u16).to_le_bytes());
+        plain.extend_from_slice(&self.first_scope);
+        plain.extend_from_slice(&self.second_scope);
         let ciphertext = ChaCha20Poly1305::new((&key).into())
             .encrypt(
                 Nonce::from_slice(&nonce),
@@ -116,7 +133,8 @@ impl RootRecord {
 
     fn decode(selected: &PlatformSecureStorageHandler, bytes: &[u8]) -> Result<Self, AuraError> {
         if !bytes.starts_with(KEYRING_MAGIC)
-            || bytes.len() != KEYRING_MAGIC.len() + 12 + PLAINTEXT_LEN + 16
+            || bytes.len() < KEYRING_MAGIC.len() + 12 + PLAINTEXT_HEADER_LEN + 16
+            || bytes.len() > KEYRING_MAGIC.len() + 12 + MAX_PLAINTEXT_LEN + 16
         {
             return Err(invalid(
                 "selected platform lifetime root encoding is invalid",
@@ -139,7 +157,14 @@ impl RootRecord {
                     Arc::new(source),
                 )
             })?;
-        if plain.len() != PLAINTEXT_LEN
+        let first_scope_len = u16::from_le_bytes([plain[290], plain[291]]) as usize;
+        let second_scope_len = u16::from_le_bytes([plain[292], plain[293]]) as usize;
+        if plain.len() != PLAINTEXT_HEADER_LEN + first_scope_len + second_scope_len
+            || first_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
+            || second_scope_len > aura_core::effects::secret_lifetime::MAX_SCOPE_BYTES
+            || (matches!(plain[0], PENDING | COMPLETE)
+                && (first_scope_len != 0 || second_scope_len != 0))
+            || (!matches!(plain[0], PENDING | COMPLETE) && first_scope_len == 0)
             || !matches!(
                 plain[0],
                 PENDING
@@ -209,6 +234,8 @@ impl RootRecord {
             second_tombstone_digest: plain[258..290]
                 .try_into()
                 .expect("bounded second tombstone digest"),
+            first_scope: plain[294..294 + first_scope_len].to_vec(),
+            second_scope: plain[294 + first_scope_len..].to_vec(),
         })
     }
 }
@@ -302,6 +329,8 @@ pub(super) async fn admit_empty_root(
                 second_phase: SECOND_BIRTH_COMPLETE,
                 second_decision_digest: [0; 32],
                 second_tombstone_digest: [0; 32],
+                first_scope: Vec::new(),
+                second_scope: Vec::new(),
             };
             write_keyring(selected, &record)?;
             record
@@ -479,6 +508,8 @@ mod tests {
             second_phase: SECOND_BIRTH_COMPLETE,
             second_decision_digest: [0; 32],
             second_tombstone_digest: [0; 32],
+            first_scope: Vec::new(),
+            second_scope: Vec::new(),
         };
         {
             let _guard = platform.namespace_owner()?.mutation_guard().await;
@@ -529,7 +560,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v3_and_v4_roots_cannot_be_reinterpreted_as_v5_lifetime_authority() -> TestResult {
+    async fn v3_v4_and_v5_roots_cannot_be_reinterpreted_as_v6_lifetime_authority() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -546,6 +577,7 @@ mod tests {
         for old_magic in [
             b"AURA-PLATFORM-LIFETIME-ROOT-V3".as_slice(),
             b"AURA-PLATFORM-LIFETIME-ROOT-V4".as_slice(),
+            b"AURA-PLATFORM-LIFETIME-ROOT-V5".as_slice(),
         ] {
             let mut encoded = root.encode(platform)?;
             encoded[..KEYRING_MAGIC.len()].copy_from_slice(old_magic);

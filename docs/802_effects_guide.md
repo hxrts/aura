@@ -498,6 +498,11 @@ Build the platform path in reviewable dependencies:
    conflicting identities and an unexplained credential fail closed. Preserve
    a separate completed-handoff marker so lost inventory is not read as an
    empty new profile.
+   The private two-birth native V6 dependency retains each bounded scope inside
+   the selected keyring's authenticated root before writing its birth
+   credential. Recovery compares that scope with the sealed intent while it
+   exists; after erasure, the root remains the authenticated scope source.
+   V5 roots lack this evidence and fail closed pending a proved migration.
 3. Specify an acknowledged transaction across the credential store and the
    inventory for each transition. A durable intent must name the exact
    allocation and desired phase before a credential write. Read and verify the
