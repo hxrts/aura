@@ -1113,11 +1113,13 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
-The native `devices` list is a Settings/Devices projection. Its
-`device_enrollment_accepted` observation names whichever peer device first
-appears in that projection; its ID need not equal the signed invitee device ID.
+The native `devices` list is a Settings/Devices projection. Typed
+`device_enrollment_accepted` observations may name the signed invitee or the
+other peer at `device_count=2`; event count and ordering do not identify the
+device. Require the observed set to contain the signed invitee and one
+distinct peer, with a two-device acknowledgment.
 After the exact approval operation succeeds and the two-device host
-observation appears, the paired checklist opens Settings/Devices through the
+observations appear, the paired checklist opens Settings/Devices through the
 semantic command plane. Both the signed invitee and observed peer IDs must be
 distinct entries in the canonical two-item list, before and after same-profile
 restart. The shared `SettingsSection::Devices` semantic value serializes as

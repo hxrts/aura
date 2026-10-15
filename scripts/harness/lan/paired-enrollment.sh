@@ -349,19 +349,20 @@ private_wait barbara-tui accepted '
   .payload.event.snapshot as $s |
   ([ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and
     .fact.device_count==2 and (.fact.device_id|type)=="string" and
-    (.fact.device_id|test("^[0-9a-f-]{36}$"))) ] | last) as $ack |
+    (.fact.device_id|test("^[0-9a-f-]{36}$"))) ] | length) as $complete |
+  ([ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and
+    (.fact.device_id|type)=="string" and
+    (.fact.device_id|test("^[0-9a-f-]{36}$"))) | .fact.device_id ] | unique) as $ids |
   if any($s.operations[]?; .id=="device_enrollment" and .instance_id==$operation and .state=="succeeded")
-  then $ack!=null
+  then $complete>0 and ($ids|length)==2 and ($ids|index($device))!=null
   else false end' "$import_operation" "$device"
 accepted_event=$PRIVATE_RESPONSE
-host_ack_device=$(jq -er '[.payload.event.snapshot.runtime_events[]? |
-  select(.fact.kind=="device_enrollment_accepted" and .fact.device_count==2 and
+host_ack_device=$(jq -er --arg device "$device" '[.payload.event.snapshot.runtime_events[]? |
+  select(.fact.kind=="device_enrollment_accepted" and
     (.fact.device_id|type)=="string" and
-    (.fact.device_id|test("^[0-9a-f-]{36}$"))) ] | last | .fact.device_id' \
+    (.fact.device_id|test("^[0-9a-f-]{36}$")) and .fact.device_id!=$device) |
+  .fact.device_id] | unique | if length==1 then .[0] else empty end' \
   <<< "$accepted_event") || exit 1
-[[ "$host_ack_device" != "$device" ]] || {
-  echo 'host acknowledgment did not identify the distinct peer device' >&2; exit 1;
-}
 
 # The canonical devices list is a Settings/Devices projection. Enrollment can
 # succeed during onboarding while that section is not selected; observe it in
@@ -409,10 +410,8 @@ printf '%s\n%s\n' "$issuer_authority" "$reopened_authority" |
     .[1].payload.authority_id==$subject' >/dev/null || {
   echo 'reopened authority differs from signed issuer subject' >&2; exit 1;
 }
-printf '%s\n%s\n' "$accepted_event" "$reopened_event" | jq -es '
-  (.[0].payload.event.snapshot.runtime_events |
-    [ .[]|select(.fact.kind=="device_enrollment_accepted" and .fact.device_count==2) ]|last|.fact.device_id) as $device |
-  [.[1].payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device)]|length==1' >/dev/null || {
+printf '%s\n' "$reopened_event" | jq -e --arg peer "$host_ack_device" '
+  [ .payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?|select(.id==$peer)]|length==1' >/dev/null || {
   echo 'original accepted device is absent after reopen' >&2; exit 1;
 }
 
