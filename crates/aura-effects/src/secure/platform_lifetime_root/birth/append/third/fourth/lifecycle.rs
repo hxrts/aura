@@ -8,6 +8,7 @@ use aura_core::effects::secret_lifetime::MAX_DECISION_BYTES;
 const DECISION_PREFIX: &str = "allocation-lifetime-fourth-decision:v11:";
 const TOMBSTONE_PREFIX: &str = "allocation-lifetime-fourth-tombstone:v11:";
 const TOMBSTONE_MAGIC: &[u8] = b"AURA-PLATFORM-FOURTH-TOMBSTONE-V11";
+const TOMBSTONE_NONCE_DOMAIN: &[u8] = b"aura/platform-fourth-tombstone-nonce/v11";
 const MAX_MARKER_LEN: usize = 256;
 
 fn decision_file(id: &[u8; 32]) -> String {
@@ -188,16 +189,40 @@ async fn decide_inner(
     Ok(())
 }
 
-fn tombstone(root: &RootRecord) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(TOMBSTONE_MAGIC.len() + 192);
-    bytes.extend_from_slice(TOMBSTONE_MAGIC);
-    bytes.extend_from_slice(&root.id);
-    bytes.extend_from_slice(&root.tail_next_id);
-    bytes.extend_from_slice(&root.tail_decision_digest);
-    bytes.extend_from_slice(&root.tail_next_intent_digest);
-    bytes.extend_from_slice(&root.profile);
-    bytes.extend_from_slice(&root.service);
-    bytes
+fn sealed_tombstone(
+    selected: &PlatformSecureStorageHandler,
+    root: &RootRecord,
+) -> Result<Vec<u8>, AuraError> {
+    let key = Zeroizing::new(selected.record_key(false)?);
+    let mut nonce_input = Vec::with_capacity(TOMBSTONE_NONCE_DOMAIN.len() + 96);
+    nonce_input.extend_from_slice(TOMBSTONE_NONCE_DOMAIN);
+    nonce_input.extend_from_slice(&root.id);
+    nonce_input.extend_from_slice(&root.tail_next_id);
+    nonce_input.extend_from_slice(&root.tail_decision_digest);
+    let digest = aura_core::hash::hash(&nonce_input);
+    let mut plain = Zeroizing::new(Vec::with_capacity(192));
+    plain.extend_from_slice(&root.id);
+    plain.extend_from_slice(&root.tail_next_id);
+    plain.extend_from_slice(&root.tail_decision_digest);
+    plain.extend_from_slice(&root.tail_next_intent_digest);
+    plain.extend_from_slice(&root.profile);
+    plain.extend_from_slice(&root.service);
+    let ciphertext = ChaCha20Poly1305::new((&*key).into())
+        .encrypt(
+            Nonce::from_slice(&digest[..12]),
+            Payload {
+                msg: &plain,
+                aad: TOMBSTONE_MAGIC,
+            },
+        )
+        .map_err(|source| {
+            AuraError::crypto_with_source("platform fourth tombstone encryption", Arc::new(source))
+        })?;
+    let mut encoded = Vec::with_capacity(TOMBSTONE_MAGIC.len() + 12 + ciphertext.len());
+    encoded.extend_from_slice(TOMBSTONE_MAGIC);
+    encoded.extend_from_slice(&digest[..12]);
+    encoded.extend_from_slice(&ciphertext);
+    Ok(encoded)
 }
 
 fn tombstone_marker(root: &RootRecord, bytes: &[u8]) -> Vec<u8> {
@@ -220,7 +245,7 @@ fn finish_tombstone(
     if decision.kind != NEGATIVE {
         return Err(invalid("platform fourth denial lacks negative decision"));
     }
-    let bytes = tombstone(root);
+    let bytes = sealed_tombstone(selected, root)?;
     if aura_core::hash::hash(&bytes) != root.tail_tombstone_digest {
         return Err(invalid(
             "platform fourth tombstone differs from root intent",
@@ -276,7 +301,7 @@ async fn deny_inner(
     }
     if root.tail_phase == TAIL_DECISION_COMPLETE {
         root.tail_phase = TAIL_TOMBSTONE_PENDING;
-        root.tail_tombstone_digest = aura_core::hash::hash(&tombstone(&root));
+        root.tail_tombstone_digest = aura_core::hash::hash(&sealed_tombstone(selected, &root)?);
         write_keyring(selected, &root)?;
         if stop == Stop::RootIntent {
             return Err(interrupted());
@@ -291,12 +316,12 @@ async fn deny_inner(
         write_exact(
             selected,
             &user(TOMBSTONE_PREFIX, &root.tail_next_id),
-            &tombstone(&root),
+            &sealed_tombstone(selected, &root)?,
         )?;
         return Err(interrupted());
     }
     if stop == Stop::Marker {
-        let bytes = tombstone(&root);
+        let bytes = sealed_tombstone(selected, &root)?;
         write_exact(
             selected,
             &user(TOMBSTONE_PREFIX, &root.tail_next_id),
@@ -620,6 +645,48 @@ mod tests {
             .delete_credential()?;
         assert!(recover_four_roster(owned).await.is_err());
         assert!(erase(owned, &four).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fourth_tombstone_seals_identity_and_refuses_changed_ciphertext_on_reopen() -> TestResult
+    {
+        let fixture = Fixture::new()?;
+        let (storage, four) = first_four(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        decide(owned, &four, false, b"fourth denial").await?;
+        acknowledge_negative(owned, &four, b"fourth denial").await?;
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        let user = user(TOMBSTONE_PREFIX, &root.tail_next_id);
+        let exact = read_entry(selected, &user)?.expect("sealed tombstone");
+        assert_eq!(exact, sealed_tombstone(selected, &root)?);
+        assert!(exact.starts_with(TOMBSTONE_MAGIC));
+        for field in [
+            root.id,
+            root.tail_next_id,
+            root.profile,
+            root.service,
+            root.tail_decision_digest,
+            root.tail_next_intent_digest,
+        ] {
+            assert!(!exact.windows(field.len()).any(|window| window == field));
+        }
+        let mut foreign = root.clone();
+        foreign.tail_next_id = [71; 32];
+        assert_ne!(sealed_tombstone(selected, &foreign)?, exact);
+        let mut changed = exact.clone();
+        *changed.last_mut().expect("ciphertext") ^= 1;
+        write_exact(selected, &user, &changed)?;
+        drop(four);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert!(recover_four_roster(owned).await.is_err());
         Ok(())
     }
 }

@@ -529,7 +529,7 @@ Build the platform path in reviewable dependencies:
    namespace leases; refuse stale three-entry owners after a tail claim.
    Its parser enforces the 4096-entry wire bound, while this packet accepts
    only count three to four. The original four-entry owner and selected
-   namespace lease also authenticate the fourth decision, negative-denial
+   namespace lease also authenticate the fourth decision, AEAD-sealed negative-denial
    tombstone, and readback-verified erasure of its selected credential and
    sealed intent. Interrupted transitions replay only root-anchored evidence;
    the roster marker retains the fourth scope after erasure. V10 roots fail
