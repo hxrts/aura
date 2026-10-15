@@ -162,7 +162,9 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
   if [[ "$failure" == no_network_ack || "$failure" == wrong_network_digest ]]; then
     stage_receipt="$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/broker-stage.json"
     jq -e '.network_delivery_asserted==false and .progress.registration_present==true and
-      .progress.messages[0].stage=="retrieval_selected_for_receiver_credential"' "$stage_receipt" >/dev/null
+      .progress.messages[0].stage=="retrieval_selected_for_receiver_credential" and
+      (.progress_history|length)==1 and
+      .progress_history[0]==.progress' "$stage_receipt" >/dev/null
     [[ $(stat -c '%a' "$stage_receipt" 2>/dev/null || stat -f '%Lp' "$stage_receipt") == 600 ]]
   fi
   for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do

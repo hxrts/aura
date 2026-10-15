@@ -172,6 +172,7 @@ witness_url="$broker_url/v2/bootstrap/enrollment-mailbox/ack-witness/$subject/$d
 progress_url="$broker_url/v2/bootstrap/enrollment-mailbox/progress-witness/$subject/$device/$digest"
 network_witness=''
 latest_progress=''
+progress_history='[]'
 witness_timeout=${AURA_E2E_NETWORK_WITNESS_TIMEOUT:-240}
 [[ "$witness_timeout" =~ ^[1-9][0-9]{0,2}$ && "$witness_timeout" -le 240 ]] || exit 2
 deadline=$((SECONDS + witness_timeout))
@@ -197,7 +198,16 @@ while (( SECONDS < deadline )); do
       {subject,device,manifest_digest,registration_present,
        messages:[.messages[]|{message_id,envelope_digest,stage}]}' \
       <<< "$progress_response") || progress_candidate=''
-    [[ -z "$progress_candidate" ]] || latest_progress=$progress_candidate
+    if [[ -n "$progress_candidate" ]]; then
+      latest_progress=$progress_candidate
+      # Retain only changed, authenticated stage snapshots. The broker may
+      # retire a registration before the final query, so a final empty result
+      # alone cannot identify the first missing delivery hop.
+      progress_history=$(jq -cn --argjson history "$progress_history" \
+        --argjson progress "$progress_candidate" '
+        if ($history | last) == $progress then $history
+        else ($history + [$progress])[-16:] end') || exit 1
+    fi
   fi
   network_witness=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" '
     select(type=="array" and length==1) | .[0] |
@@ -218,7 +228,8 @@ unset broker_token witness_response progress_response progress_candidate
      ! -e "$stage_receipt" && ! -L "$stage_receipt" ]] || exit 1
   [[ -n "$latest_progress" ]] || latest_progress='null'
   (umask 077; set -C; jq -cn --argjson progress "$latest_progress" \
-    '{schema:1,network_delivery_asserted:false,progress:$progress}' > "$stage_receipt") || exit 1
+    --argjson history "$progress_history" \
+    '{schema:1,network_delivery_asserted:false,progress:$progress,progress_history:$history}' > "$stage_receipt") || exit 1
   echo "exact original receiver ACK witness is absent or mismatched; inspect $stage_receipt" >&2
   exit 1
 }
