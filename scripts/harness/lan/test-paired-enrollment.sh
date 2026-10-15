@@ -3,7 +3,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 fixture=$(mktemp -d)
-trap 'rm -rf "$fixture"' EXIT
+trap '[[ "${KEEP_FIXTURE:-0}" == 1 ]] || rm -rf "$fixture"' EXIT
 mkdir -m 700 "$fixture/evidence"
 mkdir "$fixture/bin"
 export AURA_E2E_ROOT="$fixture/checkout"
@@ -132,10 +132,14 @@ config=$(cat)
 [[ "$config" == *'/enrollment-mailbox/'*'/authority-11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'* ]] || exit 2
 if [[ "$config" == *'/progress-witness/'* ]]; then
   if [[ "${FIXTURE_CASE:-}" == no_registration ]]; then
-    echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":false,"messages":[]}'
+    echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":false,"first_message_id":null,"messages":[]}'
     exit 0
   fi
-  echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":true,"messages":[{"message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"retrieval_selected_for_receiver_credential"}]}'
+  if [[ "${FIXTURE_CASE:-}" == multi_message ]]; then
+    echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":true,"first_message_id":"33333333-3333-3333-3333-333333333333","messages":[{"message_id":"11111111-1111-1111-1111-111111111111","envelope_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","stage":"receiver_acknowledged_retained_frame"},{"message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"retrieval_selected_for_receiver_credential"}]}'
+    exit 0
+  fi
+  echo '{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","registration_present":true,"first_message_id":"33333333-3333-3333-3333-333333333333","messages":[{"message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"retrieval_selected_for_receiver_credential"}]}'
   exit 0
 fi
 [[ "$config" == *'/ack-witness/'* ]] || exit 2
@@ -143,6 +147,7 @@ case "${FIXTURE_CASE:-}" in
   no_network_ack) echo '[]';;
   no_registration) echo '[]';;
   wrong_network_message_id) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"44444444-4444-4444-4444-444444444444","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
+  multi_message) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"11111111-1111-1111-1111-111111111111","envelope_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","stage":"receiver_acknowledged_retained_frame"},{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
   wrong_network_digest) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
   *) echo '[{"subject":"authority-11111111-1111-1111-1111-111111111111","device":"22222222-2222-2222-2222-222222222222","manifest_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message_id":"33333333-3333-3333-3333-333333333333","envelope_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","stage":"receiver_acknowledged_retained_frame"}]';;
 esac
@@ -160,6 +165,14 @@ for secret in signed-setup-secret issued-code-secret signed-manifest-secret reta
   ! rg -Fq "$secret" "$fixture/stdout" "$fixture/stderr" "$AURA_E2E_RUN_DIR"
   rg -Fq "$secret" "$FIXTURE_LOG"
 done
+multi_dir="$fixture/multi-message"
+mkdir -m 700 "$multi_dir"
+printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$multi_dir/repl.identity.json"
+FIXTURE_CASE=multi_message AURA_E2E_RUN_DIR="$multi_dir" PATH="$fixture/bin:$PATH" \
+  bash "$here/paired-enrollment.sh" > "$fixture/multi.stdout" 2> "$fixture/multi.stderr"
+jq -e '.evidence.network_delivery.message_id=="33333333-3333-3333-3333-333333333333" and
+  .transport.network_delivery_asserted==true' \
+  "$multi_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" >/dev/null
 for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_authority wrong_reopen_device no_network_ack no_registration wrong_network_message_id wrong_network_digest; do
   rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
   bad_dir="$fixture/$failure"
@@ -184,7 +197,7 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
         .original_message_id=="33333333-3333-3333-3333-333333333333"' "$stage_receipt" >/dev/null
     fi
     if [[ "$failure" == wrong_network_message_id ]]; then
-      jq -e '.first_missing_stage=="exact_first_message_ack"' "$stage_receipt" >/dev/null
+      jq -e '.first_missing_stage=="receiver_ack"' "$stage_receipt" >/dev/null
     fi
     if [[ "$failure" == no_network_ack ]]; then
       jq -e '.owner_observation.operation.instance_id=="tui-op-device_enrollment-2" and

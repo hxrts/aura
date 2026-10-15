@@ -46,6 +46,8 @@ pub(super) struct PendingMailboxProgressWitness {
     pub subject: String,
     pub device: String,
     pub registration_present: bool,
+    /// First successfully queued guarded envelope, in broker insertion order.
+    pub first_message_id: Option<String>,
     pub messages: Vec<PendingMailboxMessageProgress>,
 }
 
@@ -91,6 +93,7 @@ struct PendingMailboxEntry {
     credential_commitment: [u8; 32],
     retention_ends_at_ms: u64,
     envelopes: Vec<PendingEnvelope>,
+    first_message_id: Option<String>,
     served: HashSet<String>,
     acknowledged: HashMap<String, [u8; 32]>,
 }
@@ -175,6 +178,7 @@ impl PendingEnrollmentMailboxes {
                 registration,
                 retention_ends_at_ms,
                 envelopes: Vec::new(),
+                first_message_id: None,
                 served: HashSet::new(),
                 acknowledged: HashMap::new(),
             },
@@ -277,6 +281,9 @@ impl PendingEnrollmentMailboxes {
         {
             return Err("pending mailbox envelope limit reached");
         }
+        if entry.first_message_id.is_none() {
+            entry.first_message_id = Some(message_id.clone());
+        }
         entry.envelopes.push(PendingEnvelope {
             delivery: PendingMailboxDelivery {
                 message_id,
@@ -325,12 +332,14 @@ impl PendingEnrollmentMailboxes {
             subject: key.subject.to_string(),
             device: key.device.to_string(),
             registration_present: false,
+            first_message_id: None,
             messages: Vec::new(),
         };
         let Some(entry) = self.entries.get(&key) else {
             return Ok(witness);
         };
         witness.registration_present = true;
+        witness.first_message_id.clone_from(&entry.first_message_id);
         witness.messages = progress_messages(&entry.envelopes, &entry.served, &entry.acknowledged)?;
         Ok(witness)
     }

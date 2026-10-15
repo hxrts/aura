@@ -285,9 +285,11 @@ Summary:
   opt-in.
 - The authenticated pending-enrollment progress witness reports only exact
   selector, message ID, envelope digest, and broker custody stage. Retrieval
-  selection does not prove HTTP delivery; only the credential-holder ACK
-  follows verification and immutable custody. The witness never serializes
-  envelope bytes or retrieval credentials.
+  selection does not prove HTTP delivery. The broker retains the first
+  successfully queued message ID in insertion order so a diagnostic can pin
+  the original envelope when issuer retries have different IDs. A
+  credential-holder ACK follows verification and immutable custody. The
+  witness never serializes envelope bytes or retrieval credentials.
 - The actor-owned runtime service set includes rendezvous descriptor selection for `Establish`, the bounded `MoveManager` for current movement queues, replay suppression, flush scheduling, and congestion state, and the `HoldManager` for shared custody, selector rotation, bounded holder residency, local GC, and verified-only accountability updates.
 - Adaptive privacy runtime-owned services include `SelectionManager`, `LocalHealthObserver`, `CoverTrafficGenerator`, and `AnonymousPathManager`; they own local health smoothing, weighted selection, cover planning, and anonymous established-path lifecycle inside `aura-agent`.
 - `src/adaptive_privacy_control.rs` owns the Telltale-native protocol

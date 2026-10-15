@@ -2261,6 +2261,7 @@ mod tests {
                 )
                 .await.unwrap();
             assert_eq!(missing_progress["registration_present"], false);
+            assert!(missing_progress["first_message_id"].is_null());
             assert_eq!(missing_progress["messages"].as_array().unwrap().len(), 0);
             let (registration_entered, release_registration) =
                 broker.pause_next_pending_registration_for_test().await;
@@ -2356,6 +2357,7 @@ mod tests {
                 .expect("broker message has exact digest");
             assert_eq!(hex::decode(first_digest).unwrap().len(), 32);
             assert_eq!(first_progress["registration_present"], true);
+            assert_eq!(first_progress["first_message_id"], first_message_id);
             assert_eq!(
                 first_progress["messages"][0]["message_id"],
                 first_message_id
@@ -2395,6 +2397,7 @@ mod tests {
                 .await
                 .expect("authorized nonmatching selector has no broker custody");
                 assert_eq!(mismatched["registration_present"], false);
+                assert!(mismatched["first_message_id"].is_null());
                 assert_eq!(mismatched["messages"].as_array().unwrap().len(), 0);
             }
             use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
@@ -2408,7 +2411,7 @@ mod tests {
                 aura_core::util::serialization::from_slice(&credential_bytes).unwrap();
             let encoded_progress = serde_json::to_string(&first_progress).unwrap();
             assert!(!encoded_progress.contains(&retained.credential));
-            assert_eq!(first_progress.as_object().unwrap().len(), 5);
+            assert_eq!(first_progress.as_object().unwrap().len(), 6);
             assert_eq!(first_progress["messages"][0].as_object().unwrap().len(), 3);
             let retry_result = tokio::time::timeout(
                 std::time::Duration::from_secs(10),
@@ -2514,6 +2517,7 @@ mod tests {
                     admitted.manifest_digest(),
                 )
                 .await.unwrap();
+            assert_eq!(acknowledged_progress["first_message_id"], first_message_id);
             assert_eq!(
                 acknowledged_progress["messages"][0]["message_id"],
                 first_message_id

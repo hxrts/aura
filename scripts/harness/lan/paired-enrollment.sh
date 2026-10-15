@@ -198,27 +198,39 @@ while (( SECONDS < deadline )); do
   if [[ -n "$progress_response" ]]; then
     progress_candidate=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" '
       select(.subject==$subject and .device==$device and .manifest_digest==$digest and
-        (.registration_present|type)=="boolean" and (.messages|type)=="array" and
+        (.registration_present|type)=="boolean" and
+        (.first_message_id | if .==null then true else
+          type=="string" and test("^[0-9a-f-]{36}$") end) and
+        (.messages|type)=="array" and
         (.messages|length)<=128 and
         all(.messages[]; (.message_id|type)=="string" and
           (.message_id|test("^[0-9a-f-]{36}$")) and
           (.envelope_digest|type)=="string" and
           (.envelope_digest|test("^[0-9a-f]{64}$")) and
           (.stage|IN("queued","retrieval_selected_for_receiver_credential","receiver_acknowledged_retained_frame")))) |
-      {subject,device,manifest_digest,registration_present,
+      {subject,device,manifest_digest,registration_present,first_message_id,
        messages:[.messages[]|{message_id,envelope_digest,stage}]}' \
       <<< "$progress_response") || progress_candidate=''
     if [[ -n "$progress_candidate" ]]; then
       [[ $(jq -r '.registration_present' <<< "$progress_candidate") == true ]] && registration_seen=true
       if [[ -z "$first_message_id" ]]; then
-        message_count=$(jq -r '.messages|length' <<< "$progress_candidate")
-        if (( message_count > 1 )); then
-          first_missing_stage=ambiguous_first_queue
+        broker_first_id=$(jq -r '.first_message_id // empty' <<< "$progress_candidate")
+        if [[ -z "$broker_first_id" && $(jq -r '.messages|length' <<< "$progress_candidate") != 0 ]]; then
+          first_missing_stage=unbound_first_queue
           break
-        elif (( message_count == 1 )); then
-          first_message_id=$(jq -r '.messages[0].message_id' <<< "$progress_candidate")
-          first_envelope_digest=$(jq -r '.messages[0].envelope_digest' <<< "$progress_candidate")
+        elif [[ -n "$broker_first_id" ]]; then
+          first_message_id=$broker_first_id
+          first_envelope_digest=$(jq -r --arg id "$first_message_id" \
+            '[.messages[]|select(.message_id==$id)|.envelope_digest]|if length==1 then .[0] else empty end' \
+            <<< "$progress_candidate")
+          if [[ -z "$first_envelope_digest" ]]; then
+            first_missing_stage=first_queue
+            break
+          fi
         fi
+      elif [[ $(jq -r '.first_message_id // empty' <<< "$progress_candidate") != "$first_message_id" ]]; then
+        first_missing_stage=first_queue_identity_changed
+        break
       fi
       # Later issuer retries can have different IDs. Retain only the first
       # original envelope's authenticated stage in this diagnostic receipt.
@@ -238,8 +250,10 @@ while (( SECONDS < deadline )); do
         else ($history + [$progress])[-16:] end') || exit 1
     fi
   fi
-  network_witness=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" '
-    select(type=="array" and length==1) | .[0] |
+  network_witness=$(jq -ce --arg subject "$subject" --arg device "$device" --arg digest "$digest" \
+    --arg id "$first_message_id" --arg envelope "$first_envelope_digest" '
+    select(type=="array") | map(select(.message_id==$id and .envelope_digest==$envelope)) |
+    select(length==1) | .[0] |
     select(.subject==$subject and .device==$device and .manifest_digest==$digest and
       .stage=="receiver_acknowledged_retained_frame" and
       (.message_id|type=="string" and test("^[0-9a-f-]{36}$")) and
@@ -247,13 +261,6 @@ while (( SECONDS < deadline )); do
     {subject,device,manifest_digest,message_id,envelope_digest,stage}' \
     <<< "$witness_response") || network_witness=''
   if [[ -n "$network_witness" ]]; then
-    if [[ -z "$first_message_id" ]] ||
-       [[ $(jq -r '.message_id' <<< "$network_witness") != "$first_message_id" ]] ||
-       [[ $(jq -r '.envelope_digest' <<< "$network_witness") != "$first_envelope_digest" ]]; then
-      network_witness=''
-      first_missing_stage=exact_first_message_ack
-      break
-    fi
     break
   fi
   if [[ "$registration_seen" == false ]] && (( SECONDS >= registration_deadline )); then

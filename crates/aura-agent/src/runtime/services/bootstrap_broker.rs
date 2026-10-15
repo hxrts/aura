@@ -3232,8 +3232,9 @@ mod tests {
             .expect("authorized read-only progress witness");
         let progress: serde_json::Value = serde_json::from_slice(&progress).unwrap();
         assert_eq!(progress["registration_present"], false);
+        assert!(progress["first_message_id"].is_null());
         assert_eq!(progress["messages"].as_array().unwrap().len(), 0);
-        assert_eq!(progress.as_object().unwrap().len(), 5);
+        assert_eq!(progress.as_object().unwrap().len(), 6);
 
         let invitation = serde_json::to_vec(&BootstrapBrokerInvitation {
             recipient_authority_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
