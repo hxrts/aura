@@ -37,13 +37,18 @@ mode() {
 rg -q 'AURA_BOOTSTRAP_BROKER_BIND=192.0.2.10:43190' "$local_config"
 rg -q 'AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND=true' "$local_config"
 rg -q 'AURA_BOOTSTRAP_BROKER_URL=http://192.0.2.10:43190' "$remote_config"
-[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP=true' "$remote_config") == 3 ]]
+[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP=true' "$remote_config") == 1 ]]
 rg -q '^fixed_ports = true$' "$local_config"
 rg -q '^fixed_ports = true$' "$remote_config"
-[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=' "$local_config") == 3 ]]
-[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=' "$remote_config") == 3 ]]
+[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=' "$local_config") == 1 ]]
+[[ $(rg -c 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=' "$remote_config") == 1 ]]
+[[ $(rg -c '^\[\[instances\]\]$' "$local_config") == 1 ]]
+[[ $(rg -c '^\[\[instances\]\]$' "$remote_config") == 1 ]]
+rg -q '^id = "alex-tui"$' "$local_config"
+rg -q '^id = "barbara-tui"$' "$remote_config"
+! rg -q 'alex-web|barbara-web|alex-tui2|barbara-tui2|mode = "browser"' "$local_config" "$remote_config"
 [[ $(rg -o 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=[0-9a-f]+' "$local_config" "$remote_config" | sed 's/^.*=//' | sort -u | wc -l | tr -d ' ') == 1 ]]
-[[ $(rg -o 'AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN=[0-9a-f]+' "$local_config" "$remote_config" | sed 's/^.*=//' | sort -u | wc -l | tr -d ' ') == 6 ]]
+[[ $(rg -o 'AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN=[0-9a-f]+' "$local_config" "$remote_config" | sed 's/^.*=//' | sort -u | wc -l | tr -d ' ') == 2 ]]
 ! rg -q 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN|AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN' "$fixture/paths" "$fixture/stderr" "$fixture/ssh-args"
 bearer=$(rg -o 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=[0-9a-f]+' "$local_config" | head -1)
 ! rg -Fq "${bearer#*=}" "$fixture/paths" "$fixture/stderr" "$fixture/ssh-args"
@@ -76,4 +81,12 @@ for invalid in missing-remote loopback-bind invalid-port; do
   [[ "$status" != 0 ]]
   [[ ! -e "$fixture/checkout/.tmp/e2e/enrollment-provision-second-enrollment-fixture" ]]
 done
+sed 's/^id = "alex-tui"$/id = "alex-web"/' \
+  "$fixture/checkout/configs/harness/lan-host-a.toml" > "$fixture/wrong-owner.toml"
+cp "$fixture/wrong-owner.toml" "$fixture/checkout/configs/harness/lan-host-a.toml"
+if PATH="$fixture/bin:$PATH" bash "$here/provision-enrollment.sh" wrong-owner-fixture \
+  > "$fixture/wrong-owner-out" 2> "$fixture/wrong-owner-error"; then
+  echo 'paired provision accepted a browser in the native owner slot' >&2; exit 1
+fi
+[[ ! -e "$fixture/remote root/.tmp/e2e/enrollment-provision-wrong-owner-fixture" ]]
 echo 'LAN enrollment broker provision fixtures passed'

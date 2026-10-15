@@ -1172,10 +1172,12 @@ broker prerequisite without changing the production default. It writes
 owner-only generated Host A/Host B configs under
 `.tmp/e2e/enrollment-provision-<token>/` and sends the Host B config over SSH
 stdin, keeping credentials out of command arguments. The generated configs
-select fixed ports, one shared random broker bearer, and distinct per-instance
-invitation credentials. Only `alex-tui` hosts the broker at Host A's LAN
-address, with the explicit development-only `AllowLanDevOnly` bind policy; other
-actors use its URL with a separate development-only private-LAN HTTP client
+select fixed ports, one shared random broker bearer, and distinct invitation
+credentials for exactly two native TUI owners: `alex-tui` on Host A and
+`barbara-tui` on Host B. The generated paired configs omit browser and second-device
+instances; the general LAN templates retain those for later flows. Only
+`alex-tui` hosts the broker at Host A's LAN address, with the explicit
+development-only `AllowLanDevOnly` bind policy; `barbara-tui` uses its URL with a separate development-only private-LAN HTTP client
 opt-in. The native client still refuses public, DNS, malformed, and HTTPS
 endpoints without an authenticated TLS implementation. The client exception is
 absent from the ordinary terminal release binary; for this paired LAN diagnostic,

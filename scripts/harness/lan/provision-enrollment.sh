@@ -33,15 +33,25 @@ broker_auth=$(openssl rand -hex 32)
 [[ "$broker_auth" =~ ^[0-9a-f]{64}$ ]] || exit 1
 
 render() { # source config, output config, host | client
-  local source_config=$1 output=$2 role=$3 line instance='' invitation=''
+  local source_config=$1 output=$2 role=$3 line instance='' invitation='' expected count=0
+  case "$role" in
+    host) expected=alex-tui ;;
+    client) expected=barbara-tui ;;
+    *) return 2 ;;
+  esac
   : > "$output"
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == '[[instances]]' ]]; then
+      ((count += 1))
+      (( count == 1 )) || break
       instance=''
       invitation=$(openssl rand -hex 32)
       [[ "$invitation" =~ ^[0-9a-f]{64}$ ]] || return 1
     elif [[ "$line" =~ ^id[[:space:]]*=[[:space:]]*\"([^\"]+)\"$ ]]; then
       instance=${BASH_REMATCH[1]}
+      [[ "$instance" == "$expected" ]] || {
+        echo 'paired enrollment template has unexpected native owner' >&2; return 1;
+      }
     fi
     printf '%s\n' "$line" >> "$output"
     if [[ "$line" == '[run]' ]]; then
@@ -62,6 +72,9 @@ render() { # source config, output config, host | client
       fi
     fi
   done < "$source_config"
+  [[ "$instance" == "$expected" && "$count" -ge 1 ]] || {
+    echo 'paired enrollment template lacks its native owner' >&2; return 1;
+  }
   chmod 600 "$output"
 }
 
