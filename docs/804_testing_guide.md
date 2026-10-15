@@ -2190,6 +2190,12 @@ lifetime. Its receipt records the inventory and each compile, discovery and
 execution result; a source change, missing fixture, failure or ignored test
 fails the batch. Run the full ownership aggregate at the combined checkpoint.
 
+Before that aggregate, freeze the integrated source and compile the affected
+native targets and web target with the guarded build wrapper. Fix compiler
+errors on that exact revision first. Then run the full ownership aggregate once;
+repeat it only after a relevant source change or a gate failure. A source-scoped
+policy pass or fixture result does not replace the aggregate.
+
 Required ownership coverage checks three separate forms of evidence: Rust test attributes without ignore annotations, exact names published by the selected harness, and successful execution of every required test. The signals harness is selected with `--features signals`. The process-lock lane requires the forced termination, shared namespace and native IO source regressions; its child-process helper does not satisfy coverage. Captured pretty harness output keeps nested trybuild diagnostics from splitting result lines. Zero-test, ignored, failed and name-lookalike output cannot satisfy the gate. When adding a required ownership test, update the typed suite inventory and its validator regressions; do not replace execution evidence with a successful Cargo exit status.
 
 ### Public signature ingress provenance regressions
