@@ -444,10 +444,7 @@ impl QuiescentFilesystemProfileCheckpoint {
             {
                 return Err(ProfileCheckpointError::Inventory);
             }
-            if !lifetime_branch_records
-                .last()
-                .is_some_and(|last| last == &path)
-            {
+            if lifetime_branch_records.last() != Some(&path) {
                 new_branch_records.push(path);
             }
         }
@@ -1161,7 +1158,7 @@ mod tests {
         );
         let selected =
             crate::ProductionSecureStorageHandler::for_production(root.path().to_path_buf())
-                .retain_profile_owner(owner.clone())
+                .retain_profile_owner(owner)
                 .expect("actual selected platform backend");
         let crate::ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
             panic!("platform backend retains original profile owner")

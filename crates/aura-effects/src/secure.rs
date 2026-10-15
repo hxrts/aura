@@ -2059,9 +2059,7 @@ impl FilesystemFallbackSecureStorageHandler {
                 let Component::Normal(raw) = component else {
                     return None;
                 };
-                let Some(encoded) = raw.to_str() else {
-                    return None;
-                };
+                let encoded = raw.to_str()?;
                 if encoded.starts_with(".aura-stage-") {
                     return None;
                 }
@@ -4553,13 +4551,15 @@ mod protected_retirement_primitive_tests {
                 .publish_retirement_birth(&descriptor, b"original bytes")
                 .await?
         );
-        let path = handler.descriptor_path(&location)?;
-        let record = handler
-            .owned_directory()?
-            .read(&path, true)?
-            .expect("published birth");
         #[cfg(feature = "simulator-checkpoint")]
-        assert!(handler.authenticate_checkpoint_branch_record(&path, &record));
+        {
+            let path = handler.descriptor_path(&location)?;
+            let record = handler
+                .owned_directory()?
+                .read(&path, true)?
+                .expect("published birth");
+            assert!(handler.authenticate_checkpoint_branch_record(&path, &record));
+        }
         assert_eq!(
             handler
                 .secure_retrieve(&location, &[SecureStorageCapability::Read])
