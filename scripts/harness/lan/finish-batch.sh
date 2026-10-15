@@ -8,6 +8,7 @@ finish_script=$(cat <<'SCRIPT'
 set -euo pipefail
 cd "$1"
 export AURA_E2E_ROOT="$PWD"
+export AURA_E2E_RUN_TOKEN="$2"
 # The pinned driver validates the expected token inside its lifecycle owner,
 # after environment bootstrap, and retains custody through stop and finish.
 bash scripts/harness/lan/drv.sh finalize "$2" "$3"

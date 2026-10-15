@@ -16,7 +16,7 @@ cat > "$fixture/bin/ssh" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 command=${@: -1}
-if [[ "$command" == 'bash -s -- '* ]]; then exec bash -c "$command"; fi
+if [[ "$command" == 'bash -s -- '* ]]; then unset AURA_E2E_RUN_TOKEN; exec bash -c "$command"; fi
 echo fixture-commit
 MOCK
 cat > "$fixture/bin/timeout" <<'MOCK'
@@ -63,6 +63,7 @@ if [[ "$FIXTURE_CASE" == interrupt ]]; then
 fi
 printf '%s:%s:%s\n' "$host" "$1" "${2:-}" >> "$FIXTURE_ROOT/actions"
 [[ "$1" == finalize && $(cat .tmp/e2e/run/retention-run-id 2>/dev/null) == "$2" ]] || exit 1
+[[ "${AURA_E2E_RUN_TOKEN:-}" == "$2" ]] || exit 1
 [[ "$FIXTURE_CASE" != refusal || "$host:$1" != local:finalize ]] || exit 23
 printf '%s:finished:%s\n' "$host" "$3" >> "$FIXTURE_ROOT/actions"
 MOCK
