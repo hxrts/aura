@@ -1465,6 +1465,11 @@ The store refuses the source filesystem and unrecognized filesystem types,
 including network mounts. It is not a LAN transfer mechanism. Without a
 separate volume, leave the variable unset; no cold export occurs. The current
 Mac has no such volume provisioned, so activation requires mounting one.
+On macOS, two APFS volumes in the same container also share free capacity;
+the cold store rejects that pairing even when their device IDs differ. Use a
+separate APFS container on independent storage, and verify its free capacity
+before enabling exports. The `/nix` volume on the development Mac shares the
+source APFS container and is not a cold store.
 
 Each budgeted command prints a JSON receipt path under
 `artifacts/disk-budget/receipts/`. The atomic snapshot records the source

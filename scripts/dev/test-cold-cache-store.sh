@@ -33,6 +33,40 @@ cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat > "$fakebin/df" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == -P ]]; then
+  printf 'Filesystem 512-blocks Used Available Capacity Mounted on\n'
+  if [[ "$2" == "$AURA_COLD_CACHE_STORE" ]]; then
+    printf '/dev/disk-store 100 1 99 1%% /store\n'
+  else
+    printf '/dev/disk-source 100 1 99 1%% /source\n'
+  fi
+else
+  /bin/df "$@"
+fi
+EOF
+cat > "$fakebin/diskutil" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == info && "$2" == -plist ]] || exit 2
+case "$3" in
+  /dev/disk-source) pool="${SOURCE_POOL:-source-container}" ;;
+  /dev/disk-store) pool="${STORE_POOL-store-container}" ;;
+  *) exit 2 ;;
+esac
+[[ -n "$pool" ]] || exit 1
+printf '<?xml version="1.0"?><plist version="1.0"><dict><key>APFSContainerReference</key><string>%s</string></dict></plist>\n' "$pool"
+EOF
+cat > "$fakebin/plutil" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == '-extract APFSContainerReference raw -o - -' ]] || exit 2
+sed -n 's,.*<string>\([^<]*\)</string>.*,\1,p'
+EOF
+cat > "$fakebin/uname" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == -s ]] || exit 2
+printf 'Darwin\n'
+EOF
 chmod +x "$fakebin"/*
 export PATH="$fakebin:$PATH" AURA_COLD_CACHE_STORE="$store"
 export AURA_BUILD_SHARED_DIR="$fixture/shared"
@@ -46,6 +80,12 @@ expect_fail() {
 STORE_DEVICE=1 expect_fail --export
 [[ -f "$project/target/dylint/cache" ]]
 STORE_MODE=777 expect_fail --export
+[[ -f "$project/target/dylint/cache" ]]
+STORE_POOL=source-container expect_fail --export
+rg -q 'shares the source APFS free-space pool' "$fixture/output"
+[[ -f "$project/target/dylint/cache" ]]
+STORE_POOL='' expect_fail --export
+rg -q 'cannot verify independent APFS container capacity' "$fixture/output"
 [[ -f "$project/target/dylint/cache" ]]
 ln -s "$fixture" "$store/aura-cold-cache"
 expect_fail --export
@@ -82,4 +122,4 @@ key="$(find "$AURA_BUILD_SHARED_DIR/cold-keys" -name '*.pem' -print -quit)"
 openssl dgst -sha256 -sign "$key" -out "${snapshot%/archive.tar}/manifest.sig" "$manifest"
 expect_fail --restore
 [[ ! -e "$project/target/dylint" ]]
-echo 'cold cache: distinct-device, clean-source, guarded export/restore, occupied lane, tamper and linked-member refusal passed'
+echo 'cold cache: distinct-device and APFS-pool, clean-source, guarded export/restore, occupied lane, tamper and linked-member refusal passed'

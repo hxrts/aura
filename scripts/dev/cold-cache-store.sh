@@ -61,10 +61,33 @@ filesystem_type() {
 [[ "$(device_id "$root")" != "$(device_id "$store")" ]] || {
   echo 'cold-cache-store: destination shares the source filesystem' >&2; exit 1;
 }
-case "$(filesystem_type "$store")" in
+source_fs="$(filesystem_type "$root")"
+store_fs="$(filesystem_type "$store")"
+case "$store_fs" in
   apfs|hfs|hfsplus|ext2|ext3|ext4|xfs|btrfs|zfs|tmpfs) ;;
   *) echo 'cold-cache-store: destination is not a recognized local filesystem' >&2; exit 1 ;;
 esac
+# Separate APFS volumes can share one container's free-space pool. Exporting
+# there consumes the same headroom it is meant to recover. On macOS, resolve
+# both container identities from the mounted devices and fail closed if either
+# identity is unavailable. Other filesystem behavior is unchanged.
+if [[ "$(uname -s)" == Darwin && "$source_fs" == apfs && "$store_fs" == apfs ]]; then
+  apfs_pool() {
+    local mount_device
+    mount_device="$(df -P "$1" | awk 'NR == 2 {print $1}')"
+    [[ "$mount_device" == /dev/* ]] || return 1
+    diskutil info -plist "$mount_device" |
+      plutil -extract APFSContainerReference raw -o - -
+  }
+  source_pool="$(apfs_pool "$root" 2>/dev/null)" || source_pool=''
+  store_pool="$(apfs_pool "$store" 2>/dev/null)" || store_pool=''
+  [[ -n "$source_pool" && -n "$store_pool" ]] || {
+    echo 'cold-cache-store: cannot verify independent APFS container capacity' >&2; exit 1;
+  }
+  [[ "$source_pool" != "$store_pool" ]] || {
+    echo 'cold-cache-store: destination shares the source APFS free-space pool' >&2; exit 1;
+  }
+fi
 [[ ! -L "$root/target" && ! -L "$root/${relative%/*}" ]] || {
   echo 'cold-cache-store: target path contains a symlink' >&2; exit 1;
 }
