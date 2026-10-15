@@ -180,67 +180,69 @@ impl SettingsCallbacks {
         Arc::new(
             move |nickname_suggestion: String,
                   setup_code: String,
-                  operation: LocalTerminalOperationOwner| {
+                  operation: WorkflowHandoffOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                spawn_ctx(ctx.clone(), async move {
-                    let start = match ctx
-                        .start_device_enrollment(&nickname_suggestion, setup_code)
-                        .await
-                    {
-                        Ok(start) => start,
-                        Err(error) => {
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "devices",
-                                    format!("Start device enrollment failed: {error}"),
-                                )),
-                            )
-                            .await;
-                            operation.fail(error.to_string()).await;
-                            return;
-                        }
-                    };
-
-                    send_ui_update_reliable(
-                        &tx,
-                        UiUpdate::DeviceEnrollmentStarted {
-                            manifest_transfer: start.manifest_transfer.clone(),
-                            ceremony_id: start.ceremony_id.clone(),
-                            nickname_suggestion: nickname_suggestion.clone(),
-                            enrollment_code: start.enrollment_code.clone(),
-                            pending_epoch: start.pending_epoch,
-                            device_id: start.device_id.clone(),
-                        },
-                    )
-                    .await;
-                    operation.succeed().await;
-
-                    let status_handle = start.status_handle.clone();
-                    ctx.remember_key_rotation_ceremony(start.cancel_handle)
-                        .await;
-
-                    // Prime status quickly (best-effort) so the modal has counters immediately.
-                    if let Ok(status) =
-                        aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
-                            ctx.app_core_raw(),
-                            &status_handle,
+                let success_ctx = ctx.clone();
+                let workflow_name = nickname_suggestion.clone();
+                spawn_handoff_workflow_callback_with_success(
+                    ctx,
+                    tx,
+                    operation,
+                    WorkflowHandoffSpec::new(
+                        SemanticOperationTransferScope::StartDeviceEnrollment,
+                        "devices",
+                        "Start device enrollment failed",
+                        "start_device_enrollment",
+                    ),
+                    move |app_core, instance_id| async move {
+                        aura_app::ui::workflows::ceremonies::start_device_enrollment_ceremony_from_setup_code_with_terminal_status(
+                            &app_core,
+                            workflow_name,
+                            setup_code,
+                            instance_id,
                         )
                         .await
-                    {
-                        send_ui_update_required(&tx, key_rotation_status_update(&status)).await;
-                    }
+                    },
+                    move |tx, start| async move {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::DeviceEnrollmentStarted {
+                                manifest_transfer: start.manifest_transfer.clone(),
+                                ceremony_id: start.ceremony_id.to_string(),
+                                nickname_suggestion: nickname_suggestion.clone(),
+                                enrollment_code: start.enrollment_code.clone(),
+                                pending_epoch: start.pending_epoch,
+                                device_id: start.device_id.to_string(),
+                            },
+                        )
+                        .await;
 
-                    let tx_monitor = tx.clone();
-                    spawn_ctx(ctx.clone(), async move {
-                        let policy =
-                            aura_app::ui::workflows::ceremonies::CeremonyPollPolicy::for_kind(
-                                status_handle.kind(),
-                                Duration::from_millis(500),
-                            );
-                        match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
-                            ctx.app_core_raw(),
+                        let status_handle = start.status_handle.clone();
+                        success_ctx
+                            .remember_key_rotation_ceremony(start.handle)
+                            .await;
+
+                        // Prime status quickly (best-effort) so the modal has counters immediately.
+                        if let Ok(status) =
+                            aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                                success_ctx.app_core_raw(),
+                                &status_handle,
+                            )
+                            .await
+                        {
+                            send_ui_update_required(&tx, key_rotation_status_update(&status)).await;
+                        }
+
+                        let tx_monitor = tx.clone();
+                        spawn_ctx(success_ctx.clone(), async move {
+                            let policy =
+                                aura_app::ui::workflows::ceremonies::CeremonyPollPolicy::for_kind(
+                                    status_handle.kind(),
+                                    Duration::from_millis(500),
+                                );
+                            match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
+                            success_ctx.app_core_raw(),
                             &status_handle,
                             policy,
                             |status| {
@@ -282,8 +284,9 @@ impl SettingsCallbacks {
                                 );
                             }
                         }
-                    });
-                });
+                        });
+                    },
+                );
             },
         )
     }

@@ -1088,6 +1088,12 @@ private per-step receipts retain typed failures, and `single-host-disposal.json`
 records each owner's shutdown.
 `cross_host_asserted:false` prevents this evidence from satisfying the final
 two-host batch. Use a fresh token and inspect private receipts on failure.
+The terminal's `StartDeviceEnrollment` submission hands its original instance
+to the app-owned setup verification and issuance workflow before awaiting it.
+An issuer refusal must retain the workflow's ceremony failure domain and code
+in the private operation receipt; a generic callback `internal_error` cannot
+identify the failed enrollment stage. Keep source details inside the protected
+owner and inspect the typed receipt before another process-boundary attempt.
 
 The paired enrollment inventory must prove, in order: a provisional device on
 one host exports its actual signed setup; the other host's issuer consumes that

@@ -27,6 +27,7 @@ static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationTransferScope {
     CreateAccount,
+    StartDeviceEnrollment,
     InvitationImport,
     ImportDeviceEnrollment,
     CreateGuardianInvitation,
@@ -1172,6 +1173,64 @@ mod tests {
             "relinquished owner must not publish dropped-owner failure"
         );
 
+        tasks.shutdown();
+        tasks.wait_required_disposed().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn enrollment_setup_handoff_preserves_original_instance_and_typed_refusal() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        init_signals_for_test(&app_core).await;
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, mut rx) = mpsc::channel(8);
+        let owner = SubmittedWorkflowOperationOwner::submit_for_test(
+            app_core.clone(),
+            tasks.clone(),
+            tx.clone(),
+            OperationId::device_enrollment(),
+            SemanticOperationKind::StartDeviceEnrollment,
+        )
+        .await;
+        let instance = owner.instance_id().clone();
+        let transfer =
+            owner.handoff_to_app_workflow(SemanticOperationTransferScope::StartDeviceEnrollment);
+        let outcome = transfer
+            .run_workflow(
+                app_core.clone(),
+                tx,
+                "enrollment_setup_handoff",
+                aura_app::ui::workflows::ceremonies::start_device_enrollment_ceremony_from_setup_code_with_terminal_status(
+                    &app_core,
+                    "Second device".to_string(),
+                    "invalid setup".to_string(),
+                    Some(instance.clone()),
+                ),
+            )
+            .await;
+        assert!(matches!(
+            outcome,
+            Err(SubmittedOperationWorkflowError::Workflow(_))
+        ));
+        let mut terminal_count = 0;
+        while let Ok(update) = rx.try_recv() {
+            if let UiUpdate::AuthoritativeOperationStatus {
+                instance_id,
+                status,
+                ..
+            } = update
+            {
+                if status.phase == SemanticOperationPhase::Failed {
+                    terminal_count += 1;
+                    assert_eq!(instance_id, Some(instance.clone()));
+                    let error = status.error.expect("typed enrollment failure");
+                    assert_eq!(error.domain, SemanticFailureDomain::Ceremony);
+                    assert_eq!(error.code, SemanticFailureCode::Unavailable);
+                }
+            }
+        }
+        assert_eq!(terminal_count, 1);
         tasks.shutdown();
         tasks.wait_required_disposed().await.unwrap();
     }

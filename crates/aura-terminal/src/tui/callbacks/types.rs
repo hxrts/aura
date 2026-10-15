@@ -116,7 +116,8 @@ pub(crate) type UpdateMfaCallback =
 /// Callback for adding a device: (nickname, setup_code, operation)
 #[doc(hidden)]
 #[allow(private_interfaces)]
-pub type AddDeviceCallback = Arc<dyn Fn(String, String, LocalTerminalOperationOwner) + Send + Sync>;
+pub type AddDeviceCallback =
+    Arc<dyn Fn(String, String, WorkflowHandoffOperationOwner) + Send + Sync>;
 #[doc(hidden)]
 #[allow(private_interfaces)]
 pub type RemoveDeviceCallback = Arc<dyn Fn(DeviceId, CeremonySubmissionOwner) + Send + Sync>;

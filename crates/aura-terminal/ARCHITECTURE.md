@@ -145,6 +145,10 @@ separate and still requires its own recovery boundary.
 - Converted ceremony-monitoring paths must consume typed upstream lifecycle terminality and surface timeout or rollback-incomplete outcomes explicitly; the TUI may not silently discard those terminal states.
 - The TUI exports separate enrollment code-issuance and completion instances
   with the app-owned terminal state, cancellation, and typed failure domain/code.
+  Code issuance transfers its original frontend operation instance to the
+  app-owned setup verification and issuance workflow through the sanctioned
+  callback handoff; the TUI may not replace that typed refusal with a local
+  string-derived terminal error.
   Its event loop may submit a guardian action only under the guardian operation
   kind after the invitation type is verified; it may not infer completion from
   a changed device count or a successful local import.
