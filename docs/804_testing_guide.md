@@ -1591,8 +1591,13 @@ unchanged crates come from `target/` and sccache and a one-crate change
 rebuilds only that crate and its dependents. `ship.sh` rsyncs the binaries,
 sends the Nix store paths they reference at run time (dev-shell libraries,
 listed by `scripts/harness/lan/runtime-refs.sh`) with `nix copy` (the remote
-user must be a Nix trusted-user), and keeps the web bundle on `dx`. The dev
-shell profile and those run-time paths are GC roots under `.nix-ship/` on both
+user must be a Nix trusted-user), and keeps the web bundle on `dx`. Web
+build-output symlinks are checked against regular files under the
+fixed checkout's public assets or the Nix store before transfer, then copied
+as files so an absolute local checkout path cannot break the remote bundle.
+`bash scripts/harness/lan/test-ship-web-assets.sh` covers the absolute-link
+transfer and escaping-link refusal. The dev shell profile and those run-time
+paths are GC roots under `.nix-ship/` on both
 hosts; `just nix-store-gc` reports the roots it keeps and the reclaimable
 store paths, and `just nix-store-gc --apply` collects them.
 

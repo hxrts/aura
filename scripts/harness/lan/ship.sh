@@ -126,7 +126,8 @@ ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && git fetch -q origin 
 rsync -a "$aura_bin" "$AURA_E2E_REMOTE:$remote_root/bin/aura"
 rsync -a "$repl_bin" "$AURA_E2E_REMOTE:$remote_root/target/release/tool_repl"
 rsync -a "$tailwind" "$AURA_E2E_REMOTE:$remote_root/$tailwind"
-rsync -a --delete --links "$web_public/" "$AURA_E2E_REMOTE:$remote_root/$web_public/"
+bash "$here/ship-web-assets.sh" "$AURA_E2E_ROOT" "$web_public" \
+  "$AURA_E2E_REMOTE:$remote_root/$web_public/"
 
 ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && \
   find bin/aura target/release/tool_repl $web_public -exec touch {} + && \

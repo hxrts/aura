@@ -414,7 +414,12 @@ stop)
   # Do not create a private request lease merely to acknowledge an empty stop.
   if [[ ! -e "$PRIVATE_REQUEST_LOCK" && ! -L "$PRIVATE_REQUEST_LOCK" &&
         ! -e "$PIDF" && ! -L "$PIDF" && ! -e "$IDENTITY" && ! -L "$IDENTITY" ]]; then
-    [[ -d "$D" && ! -L "$D" && -O "$D" && ! -L "$PRIVATE_DIR" ]] || exit 1
+    # A clean checkout may not have a run directory yet. The same-checkout
+    # process inventory below still has to be empty before this is a no-op.
+    if [[ -e "$D" || -L "$D" ]]; then
+      [[ -d "$D" && ! -L "$D" && -O "$D" ]] || exit 1
+    fi
+    [[ ! -L "$PRIVATE_DIR" ]] || exit 1
     if [[ -e "$PRIVATE_DIR" ]]; then
       [[ -d "$PRIVATE_DIR" && -O "$PRIVATE_DIR" ]] || exit 1
       dir_mode=$(stat -c %a "$PRIVATE_DIR" 2>/dev/null ||
