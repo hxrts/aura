@@ -14,6 +14,7 @@ use crate::profile_storage::FilesystemProfileStorageHandler;
 const MAX_FILES: usize = 256;
 const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_AUXILIARY_BYTES: usize = 256 * 1024;
 const MARKER: &str = ".aura-checkpoint-restore-in-progress";
 
 /// Fail-closed reasons for a quiescent filesystem checkpoint operation.
@@ -74,6 +75,38 @@ struct Archive {
     records: Vec<Record>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ArchiveV2 {
+    schema: u8,
+    records: Vec<Record>,
+    auxiliary: Vec<u8>,
+}
+
+impl Drop for ArchiveV2 {
+    fn drop(&mut self) {
+        self.auxiliary.zeroize();
+    }
+}
+
+/// Explicit nonsecret context for the simulator-only auxiliary payload. It
+/// binds the payload kind/version, original owner, epoch, fixture configuration
+/// and selected physical-clock observation; it grants no capture authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuxiliaryCheckpointContext {
+    /// Domain-separated kind of the opaque auxiliary payload.
+    pub kind: [u8; 16],
+    /// Version of that payload codec.
+    pub version: u16,
+    /// Original stopped owner identity.
+    pub owner: [u8; 32],
+    /// Original owner epoch; a different epoch cannot restore this artifact.
+    pub epoch: u64,
+    /// Configuration digest of the compatible simulator fixture.
+    pub fixture: [u8; 32],
+    /// Original selected physical-clock observation in milliseconds.
+    pub selected_clock_ms: u64,
+}
+
 /// A protected ciphertext artifact bound to the original profile path,
 /// source revision, participant identity and filesystem secure provider.
 /// Its key is derived inside the effect adapter and never serialized.
@@ -82,6 +115,7 @@ pub struct QuiescentFilesystemProfileCheckpoint {
     source: String,
     revision: [u8; 32],
     participant: [u8; 32],
+    auxiliary_context: Option<AuxiliaryCheckpointContext>,
 }
 
 /// One-use evidence issued by the actual selected, profile-owned filesystem
@@ -108,6 +142,18 @@ struct ProtectedArtifact {
     ciphertext: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ProtectedArtifactV2 {
+    schema: u8,
+    source: String,
+    revision: [u8; 32],
+    participant: [u8; 32],
+    context: AuxiliaryCheckpointContext,
+    salt: [u8; 32],
+    nonce: [u8; 12],
+    ciphertext: Vec<u8>,
+}
+
 impl QuiescentFilesystemProfileCheckpoint {
     fn binding(source: &str, revision: &[u8; 32], participant: &[u8; 32]) -> Vec<u8> {
         let mut binding = b"aura-filesystem-profile-checkpoint-v1\0".to_vec();
@@ -115,6 +161,26 @@ impl QuiescentFilesystemProfileCheckpoint {
         binding.extend_from_slice(source.as_bytes());
         binding.extend_from_slice(revision);
         binding.extend_from_slice(participant);
+        binding
+    }
+
+    fn auxiliary_binding(
+        source: &str,
+        revision: &[u8; 32],
+        participant: &[u8; 32],
+        context: &AuxiliaryCheckpointContext,
+    ) -> Vec<u8> {
+        let mut binding = b"aura-filesystem-profile-checkpoint-v2\0".to_vec();
+        binding.extend_from_slice(&(source.len() as u64).to_le_bytes());
+        binding.extend_from_slice(source.as_bytes());
+        binding.extend_from_slice(revision);
+        binding.extend_from_slice(participant);
+        binding.extend_from_slice(&context.kind);
+        binding.extend_from_slice(&context.version.to_le_bytes());
+        binding.extend_from_slice(&context.owner);
+        binding.extend_from_slice(&context.epoch.to_le_bytes());
+        binding.extend_from_slice(&context.fixture);
+        binding.extend_from_slice(&context.selected_clock_ms.to_le_bytes());
         binding
     }
 
@@ -195,6 +261,50 @@ impl QuiescentFilesystemProfileCheckpoint {
         revision: [u8; 32],
         participant: [u8; 32],
     ) -> Result<Self, ProfileCheckpointError> {
+        Self::capture_internal(
+            selected,
+            original_profile,
+            artifact_path,
+            revision,
+            participant,
+            None,
+        )
+    }
+
+    /// Bind one bounded simulator-only auxiliary payload into the same
+    /// selected-provider artifact as the quiescent profile. The opaque selected
+    /// proof is consumed once; context bytes are authenticated metadata, not
+    /// authorization to capture another profile or live owner.
+    pub fn capture_with_auxiliary(
+        selected: SelectedFilesystemCheckpointSource,
+        original_profile: &Path,
+        artifact_path: &Path,
+        revision: [u8; 32],
+        participant: [u8; 32],
+        context: AuxiliaryCheckpointContext,
+        auxiliary: &[u8],
+    ) -> Result<Self, ProfileCheckpointError> {
+        if auxiliary.is_empty() || auxiliary.len() > MAX_AUXILIARY_BYTES {
+            return Err(ProfileCheckpointError::Inventory);
+        }
+        Self::capture_internal(
+            selected,
+            original_profile,
+            artifact_path,
+            revision,
+            participant,
+            Some((context, auxiliary)),
+        )
+    }
+
+    fn capture_internal(
+        selected: SelectedFilesystemCheckpointSource,
+        original_profile: &Path,
+        artifact_path: &Path,
+        revision: [u8; 32],
+        participant: [u8; 32],
+        auxiliary: Option<(AuxiliaryCheckpointContext, &[u8])>,
+    ) -> Result<Self, ProfileCheckpointError> {
         use aura_core::effects::profile_storage::ProfileStorageLease;
         let owner = Self::owner(original_profile)?;
         let directory = &owner.directory;
@@ -227,8 +337,15 @@ impl QuiescentFilesystemProfileCheckpoint {
             records.push(Record { path, bytes });
         }
         let plaintext = Zeroizing::new(
-            postcard::to_allocvec(&Archive { schema: 1, records })
-                .map_err(|_| ProfileCheckpointError::Inventory)?,
+            match auxiliary {
+                Some((_, payload)) => postcard::to_allocvec(&ArchiveV2 {
+                    schema: 2,
+                    records,
+                    auxiliary: payload.to_vec(),
+                }),
+                None => postcard::to_allocvec(&Archive { schema: 1, records }),
+            }
+            .map_err(|_| ProfileCheckpointError::Inventory)?,
         );
         if plaintext.len() > MAX_ARCHIVE_BYTES {
             return Err(ProfileCheckpointError::Inventory);
@@ -241,7 +358,12 @@ impl QuiescentFilesystemProfileCheckpoint {
         rand::rngs::OsRng
             .try_fill_bytes(&mut nonce)
             .map_err(ProfileCheckpointError::Entropy)?;
-        let binding = Self::binding(&source, &revision, &participant);
+        let binding = match auxiliary {
+            Some((context, _)) => {
+                Self::auxiliary_binding(&source, &revision, &participant, &context)
+            }
+            None => Self::binding(&source, &revision, &participant),
+        };
         let key = Self::derived_key(&wrapping_key, &salt, &binding)?;
         let cipher = ChaCha20Poly1305::new((&*key).into());
         let ciphertext = cipher
@@ -253,15 +375,27 @@ impl QuiescentFilesystemProfileCheckpoint {
                 },
             )
             .map_err(|_| ProfileCheckpointError::Authentication)?;
-        let artifact = postcard::to_allocvec(&ProtectedArtifact {
-            schema: 1,
-            source: source.clone(),
-            revision,
-            participant,
-            salt,
-            nonce,
-            ciphertext,
-        })
+        let artifact = match auxiliary {
+            Some((context, _)) => postcard::to_allocvec(&ProtectedArtifactV2 {
+                schema: 2,
+                source: source.clone(),
+                revision,
+                participant,
+                context,
+                salt,
+                nonce,
+                ciphertext,
+            }),
+            None => postcard::to_allocvec(&ProtectedArtifact {
+                schema: 1,
+                source: source.clone(),
+                revision,
+                participant,
+                salt,
+                nonce,
+                ciphertext,
+            }),
+        }
         .map_err(|_| ProfileCheckpointError::Inventory)?;
         if artifact.len() > MAX_ARCHIVE_BYTES + 4096 {
             return Err(ProfileCheckpointError::Inventory);
@@ -277,6 +411,7 @@ impl QuiescentFilesystemProfileCheckpoint {
             source,
             revision,
             participant,
+            auxiliary_context: auxiliary.map(|(context, _)| context),
         })
     }
 
@@ -288,6 +423,33 @@ impl QuiescentFilesystemProfileCheckpoint {
         revision: [u8; 32],
         participant: [u8; 32],
     ) -> Result<(), ProfileCheckpointError> {
+        self.restore_internal(original_profile, revision, participant, None)
+            .await
+            .map(|_| ())
+    }
+
+    /// Restore a V2 artifact and return only its authenticated auxiliary bytes.
+    /// V1 artifacts, missing payloads and context substitutions are refused
+    /// before any profile mutation.
+    pub async fn restore_with_auxiliary(
+        &self,
+        original_profile: &Path,
+        revision: [u8; 32],
+        participant: [u8; 32],
+        context: AuxiliaryCheckpointContext,
+    ) -> Result<Zeroizing<Vec<u8>>, ProfileCheckpointError> {
+        self.restore_internal(original_profile, revision, participant, Some(context))
+            .await?
+            .ok_or(ProfileCheckpointError::Authentication)
+    }
+
+    async fn restore_internal(
+        &self,
+        original_profile: &Path,
+        revision: [u8; 32],
+        participant: [u8; 32],
+        expected_context: Option<AuxiliaryCheckpointContext>,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, ProfileCheckpointError> {
         use aura_core::effects::profile_storage::ProfileStorageLease;
         use aura_core::effects::secure::{SecureStorageEffects, SecureStorageLocation};
         use aura_core::effects::StorageCoreEffects;
@@ -305,31 +467,87 @@ impl QuiescentFilesystemProfileCheckpoint {
         let encoded = artifact_directory
             .read_bounded(&artifact_name, true, MAX_ARCHIVE_BYTES + 4096)?
             .ok_or(ProfileCheckpointError::Authentication)?;
-        let artifact: ProtectedArtifact =
-            postcard::from_bytes(&encoded).map_err(|_| ProfileCheckpointError::Authentication)?;
-        if artifact.schema != 1
-            || artifact.source != self.source
-            || artifact.revision != self.revision
-            || artifact.participant != self.participant
-        {
+        if expected_context != self.auxiliary_context {
             return Err(ProfileCheckpointError::ForeignSource);
         }
-        let binding = Self::binding(&self.source, &self.revision, &self.participant);
-        let key = Self::derived_key(&wrapping_key, &artifact.salt, &binding)?;
+        let (salt, nonce, ciphertext, binding) = match expected_context {
+            Some(context) => {
+                let artifact: ProtectedArtifactV2 = postcard::from_bytes(&encoded)
+                    .map_err(|_| ProfileCheckpointError::Authentication)?;
+                if artifact.schema != 2
+                    || artifact.source != self.source
+                    || artifact.revision != self.revision
+                    || artifact.participant != self.participant
+                    || artifact.context != context
+                {
+                    return Err(ProfileCheckpointError::ForeignSource);
+                }
+                (
+                    artifact.salt,
+                    artifact.nonce,
+                    artifact.ciphertext,
+                    Self::auxiliary_binding(
+                        &self.source,
+                        &self.revision,
+                        &self.participant,
+                        &context,
+                    ),
+                )
+            }
+            None => {
+                let artifact: ProtectedArtifact = postcard::from_bytes(&encoded)
+                    .map_err(|_| ProfileCheckpointError::Authentication)?;
+                if artifact.schema != 1
+                    || artifact.source != self.source
+                    || artifact.revision != self.revision
+                    || artifact.participant != self.participant
+                {
+                    return Err(ProfileCheckpointError::ForeignSource);
+                }
+                (
+                    artifact.salt,
+                    artifact.nonce,
+                    artifact.ciphertext,
+                    Self::binding(&self.source, &self.revision, &self.participant),
+                )
+            }
+        };
+        let key = Self::derived_key(&wrapping_key, &salt, &binding)?;
         let cipher = ChaCha20Poly1305::new((&*key).into());
         let plaintext = Zeroizing::new(
             cipher
                 .decrypt(
-                    Nonce::from_slice(&artifact.nonce),
+                    Nonce::from_slice(&nonce),
                     Payload {
-                        msg: &artifact.ciphertext,
+                        msg: &ciphertext,
                         aad: &binding,
                     },
                 )
                 .map_err(|_| ProfileCheckpointError::Authentication)?,
         );
-        let archive: Archive =
-            postcard::from_bytes(&plaintext).map_err(|_| ProfileCheckpointError::Inventory)?;
+        let (archive, auxiliary) = match expected_context {
+            Some(_) => {
+                let mut archive: ArchiveV2 = postcard::from_bytes(&plaintext)
+                    .map_err(|_| ProfileCheckpointError::Inventory)?;
+                if archive.schema != 2
+                    || archive.auxiliary.is_empty()
+                    || archive.auxiliary.len() > MAX_AUXILIARY_BYTES
+                {
+                    return Err(ProfileCheckpointError::Inventory);
+                }
+                (
+                    Archive {
+                        schema: 1,
+                        records: std::mem::take(&mut archive.records),
+                    },
+                    Some(Zeroizing::new(std::mem::take(&mut archive.auxiliary))),
+                )
+            }
+            None => (
+                postcard::from_bytes(&plaintext).map_err(|_| ProfileCheckpointError::Inventory)?,
+                None,
+            ),
+        };
         if archive.schema != 1 || archive.records.len() > MAX_FILES {
             return Err(ProfileCheckpointError::Inventory);
         }
@@ -494,7 +712,7 @@ impl QuiescentFilesystemProfileCheckpoint {
         }
         directory.remove(Path::new(MARKER))?;
         directory.acknowledge_entries()?;
-        Ok(())
+        Ok(auxiliary)
     }
 }
 
@@ -502,6 +720,38 @@ impl QuiescentFilesystemProfileCheckpoint {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    fn auxiliary_context() -> AuxiliaryCheckpointContext {
+        AuxiliaryCheckpointContext {
+            kind: *b"broker-state-v1!",
+            version: 1,
+            owner: [11; 32],
+            epoch: 7,
+            fixture: [13; 32],
+            selected_clock_ms: 5_000,
+        }
+    }
+
+    fn captured_auxiliary(
+        root: &tempfile::TempDir,
+        context: AuxiliaryCheckpointContext,
+    ) -> (tempfile::TempDir, QuiescentFilesystemProfileCheckpoint) {
+        use std::os::unix::fs::PermissionsExt;
+        let artifacts = tempfile::tempdir().expect("private auxiliary artifact directory");
+        std::fs::set_permissions(artifacts.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private auxiliary directory");
+        let checkpoint = QuiescentFilesystemProfileCheckpoint::capture_with_auxiliary(
+            selected(root),
+            root.path(),
+            &artifacts.path().join("checkpoint-v2.bin"),
+            [7; 32],
+            [9; 32],
+            context,
+            b"opaque stopped broker state",
+        )
+        .expect("selected provider V2 capture");
+        (artifacts, checkpoint)
+    }
 
     fn selected(root: &tempfile::TempDir) -> SelectedFilesystemCheckpointSource {
         let owner = Arc::new(
@@ -1167,5 +1417,202 @@ mod tests {
             owned.selected_filesystem_checkpoint_source().is_none(),
             "stale filesystem key cannot authorize a platform-selected checkpoint"
         );
+    }
+
+    #[tokio::test]
+    async fn auxiliary_v2_round_trips_only_under_selected_provider() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = initialized_profile();
+        let context = auxiliary_context();
+        let (_artifacts, checkpoint) = captured_auxiliary(&root, context);
+        let encoded = std::fs::read(&checkpoint.artifact_path).expect("private V2 artifact");
+        assert!(!encoded
+            .windows(b"opaque stopped broker state".len())
+            .any(|window| window == b"opaque stopped broker state"));
+        assert_eq!(
+            std::fs::metadata(&checkpoint.artifact_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let restored = checkpoint
+            .restore_with_auxiliary(root.path(), [7; 32], [9; 32], context)
+            .await
+            .expect("same selected owner and context");
+        assert_eq!(restored.as_slice(), b"opaque stopped broker state");
+    }
+
+    #[tokio::test]
+    async fn auxiliary_v2_refuses_foreign_context_and_source_before_mutation() {
+        let root = initialized_profile();
+        let context = auxiliary_context();
+        let (_artifacts, checkpoint) = captured_auxiliary(&root, context);
+        for foreign in [
+            AuxiliaryCheckpointContext {
+                kind: [0; 16],
+                ..context
+            },
+            AuxiliaryCheckpointContext {
+                version: 2,
+                ..context
+            },
+            AuxiliaryCheckpointContext {
+                owner: [0; 32],
+                ..context
+            },
+            AuxiliaryCheckpointContext {
+                epoch: 8,
+                ..context
+            },
+            AuxiliaryCheckpointContext {
+                fixture: [0; 32],
+                ..context
+            },
+            AuxiliaryCheckpointContext {
+                selected_clock_ms: 5_001,
+                ..context
+            },
+        ] {
+            assert!(matches!(
+                checkpoint
+                    .restore_with_auxiliary(root.path(), [7; 32], [9; 32], foreign)
+                    .await,
+                Err(ProfileCheckpointError::ForeignSource)
+            ));
+        }
+        assert!(matches!(
+            checkpoint
+                .restore_with_auxiliary(root.path(), [8; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::ForeignSource)
+        ));
+        assert!(matches!(
+            checkpoint
+                .restore_with_auxiliary(root.path(), [7; 32], [8; 32], context)
+                .await,
+            Err(ProfileCheckpointError::ForeignSource)
+        ));
+        assert_eq!(
+            std::fs::read(root.path().join("record")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[tokio::test]
+    async fn auxiliary_v2_refuses_changed_or_missing_artifact() {
+        let root = initialized_profile();
+        let context = auxiliary_context();
+        let (_artifacts, checkpoint) = captured_auxiliary(&root, context);
+        let original = std::fs::read(&checkpoint.artifact_path).unwrap();
+        let mut changed = original.clone();
+        *changed.last_mut().expect("ciphertext byte") ^= 1;
+        std::fs::write(&checkpoint.artifact_path, changed).unwrap();
+        assert!(matches!(
+            checkpoint
+                .restore_with_auxiliary(root.path(), [7; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::Authentication)
+        ));
+        std::fs::remove_file(&checkpoint.artifact_path).unwrap();
+        assert!(matches!(
+            checkpoint
+                .restore_with_auxiliary(root.path(), [7; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::Authentication)
+        ));
+        assert_eq!(
+            std::fs::read(root.path().join("record")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[tokio::test]
+    async fn auxiliary_v2_refuses_v1_downgrade_and_missing_payload() {
+        let root = initialized_profile();
+        let (_old_artifacts, old) = captured(&root);
+        let context = auxiliary_context();
+        let artifacts = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            QuiescentFilesystemProfileCheckpoint::capture_with_auxiliary(
+                selected(&root),
+                root.path(),
+                &artifacts.path().join("empty.bin"),
+                [7; 32],
+                [9; 32],
+                context,
+                b"",
+            ),
+            Err(ProfileCheckpointError::Inventory)
+        ));
+        assert!(matches!(
+            QuiescentFilesystemProfileCheckpoint::capture_with_auxiliary(
+                selected(&root),
+                root.path(),
+                &artifacts.path().join("oversize.bin"),
+                [7; 32],
+                [9; 32],
+                context,
+                &vec![0; MAX_AUXILIARY_BYTES + 1],
+            ),
+            Err(ProfileCheckpointError::Inventory)
+        ));
+        assert!(matches!(
+            old.restore_with_auxiliary(root.path(), [7; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::ForeignSource)
+        ));
+        let (_artifacts, checkpoint) = captured_auxiliary(&root, context);
+        let old_bytes = std::fs::read(&old.artifact_path).unwrap();
+        std::fs::write(&checkpoint.artifact_path, old_bytes).unwrap();
+        assert!(matches!(
+            checkpoint
+                .restore_with_auxiliary(root.path(), [7; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::Authentication)
+        ));
+        assert_eq!(
+            std::fs::read(root.path().join("record")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[tokio::test]
+    async fn auxiliary_v2_refuses_stale_epoch_and_foreign_owner() {
+        let root = initialized_profile();
+        let context = auxiliary_context();
+        let (_old_artifacts, old) = captured_auxiliary(&root, context);
+        let newer = AuxiliaryCheckpointContext {
+            epoch: context.epoch + 1,
+            ..context
+        };
+        let (_artifacts, checkpoint) = captured_auxiliary(&root, newer);
+        std::fs::write(
+            &checkpoint.artifact_path,
+            std::fs::read(&old.artifact_path).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            checkpoint
+                .restore_with_auxiliary(root.path(), [7; 32], [9; 32], newer)
+                .await,
+            Err(ProfileCheckpointError::ForeignSource)
+        ));
+        let foreign = initialized_profile();
+        assert!(matches!(
+            old.restore_with_auxiliary(foreign.path(), [7; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::ForeignSource)
+        ));
+        let owner = FilesystemProfileStorageHandler::new(root.path().to_path_buf())
+            .acquire_owned_native()
+            .expect("original active owner");
+        assert!(matches!(
+            old.restore_with_auxiliary(root.path(), [7; 32], [9; 32], context)
+                .await,
+            Err(ProfileCheckpointError::Busy)
+        ));
+        drop(owner);
     }
 }

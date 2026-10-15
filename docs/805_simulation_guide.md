@@ -706,6 +706,17 @@ canonical rendezvous manager likewise takes its broker child through its actor
 and refuses outstanding clones. This is still no protected broker artifact,
 fresh-owner restore, VM continuation replay, or measured speedup.
 
+The selected filesystem checkpoint also has a simulator-only V2 auxiliary
+channel. It encrypts one bounded opaque payload with the original profile
+inventory and authenticates payload kind/version, owner, epoch, fixture
+configuration, selected physical-clock observation, source revision and
+profile identity before restoration. The V1 restore path refuses V2 artifacts,
+and the V2 path refuses V1 or missing payloads. Broker state has no approved
+codec or fresh-owner restoration yet, and an older valid artifact with the
+same context cannot be detected without a separate monotonic anchor. Do not
+use fixture bearer tokens as encryption keys or count this channel as a
+complete broker co-checkpoint.
+
 ### Scenario Contract Workflow
 
 Conformance CI includes scenario contracts for consensus, sync, recovery, and reconfiguration. Each bundle is validated over a seed corpus. Validation checks terminal status (`AllDone`), required labels observed in trace, and minimum observable event count.

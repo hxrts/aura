@@ -36,6 +36,16 @@ record inventory and secure retrieval failures preserve their native causes.
   directory. Missing, corrupt, or mutable winners fail closed; the losing
   writer never replaces the winning ciphertext.
 
+- The simulator-only filesystem profile checkpoint's V2 auxiliary channel is
+  encrypted in the same private artifact as the profile inventory. Its AEAD
+  binding includes the selected profile identity, source revision, participant,
+  payload kind/version, original owner, epoch, fixture configuration and
+  selected physical-clock observation. Capture still consumes a proof from the
+  selected filesystem provider and acquires the exclusive profile lease;
+  restore authenticates the complete artifact before mutation. This adapter
+  does not serialize broker state or prove same-context rollback resistance
+  without an external monotonic anchor.
+
 - Platform secure retrieval reports exact-location `SecureStorageRecordMissing`
   only for keyring `NoEntry`; denied access and provider outages retain their
   native keyring causes. Noninteractive unit coverage enforces this distinction
