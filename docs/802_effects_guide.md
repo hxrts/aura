@@ -599,6 +599,18 @@ with a fault at every transaction boundary. The required assertions are:
 Use the test keyring for deterministic transaction faults, then run a separate
 native credential-provider lane on the actual OS service. Test-keyring success
 does not establish macOS Keychain or another OS provider's durability semantics.
+On macOS, Aura's pinned `keyring` adapter selects the User/login Keychain and
+cannot name an explicit temporary keychain. Before any OS-provider diagnostic,
+run `scripts/dev/os-keychain-preflight.sh --preflight` from a separately
+provisioned OS account. An administrator must install the root-owned,
+non-writable, non-symlink marker
+`/private/var/db/aura/keychain-diagnostic-identity` with exactly two lines,
+`isolated_uid=<diagnostic UID>` and `developer_uid=<developer UID>`; its parent
+directories must also be root-owned and not group/other writable. The script
+refuses a missing or unsafe marker, a developer-account match, or execution by
+another UID. It never accesses Keychain and a passing preflight is no
+durability proof. The actual isolated-account credential run and cleanup remain
+separate acceptance evidence; do not run it against a developer login Keychain.
 Only after both the selected-provider fixture and security/ownership gates pass
 should L6 transfer the platform lifetime root and the signed production native
 enrollment fixture resume. Browser storage has its own provider and evidence.
