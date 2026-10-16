@@ -4787,6 +4787,53 @@ pub fn run_browser_cache_owner() -> Result<()> {
     Ok(())
 }
 
+fn browser_driver_contract_constants(source: &str, rust: bool) -> Result<Vec<String>> {
+    let pattern = if rust {
+        r#"pub\(crate\)\s+const\s+(\w+)\s*:\s*&str\s*=\s*"([^"]+)";"#
+    } else {
+        r#"export\s+const\s+(\w+)\s*=\s*"([^"]+)";"#
+    };
+    let re = Regex::new(pattern)?;
+    let mut constants = re
+        .captures_iter(source)
+        .map(|capture| format!("{}={}", &capture[1], &capture[2]))
+        .collect::<Vec<_>>();
+    constants.sort();
+    Ok(constants)
+}
+
+#[cfg(test)]
+mod browser_driver_contract_sync_tests {
+    use super::browser_driver_contract_constants;
+
+    #[test]
+    fn formatted_seed_and_wake_keys_match_and_changed_value_refuses() {
+        let rust = r#"
+pub(crate) const PENDING_SEMANTIC_QUEUE_SEED_KEY: &str =
+    "__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__";
+pub(crate) const RUNTIME_STAGE_WAKE_SCHEDULED_KEY: &str =
+    "__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__";
+"#;
+        let ts = r#"
+export const PENDING_SEMANTIC_QUEUE_SEED_KEY = "__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__";
+export const RUNTIME_STAGE_WAKE_SCHEDULED_KEY = "__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__";
+"#;
+        let rust_inventory = browser_driver_contract_constants(rust, true).unwrap();
+        assert_eq!(rust_inventory.len(), 2);
+        assert_eq!(
+            rust_inventory,
+            browser_driver_contract_constants(ts, false).unwrap()
+        );
+
+        let changed = ts.replace("RUNTIME_STAGE_WAKE_SCHEDULED__", "OTHER_WAKE_SCHEDULED__");
+        assert_ne!(
+            rust_inventory,
+            browser_driver_contract_constants(&changed, false).unwrap(),
+            "a different TS key value must fail the inventory comparison"
+        );
+    }
+}
+
 pub fn run_browser_driver_contract_sync() -> Result<()> {
     // long-block-exception: multi-stage sync check between Rust and TS driver contract files
     let repo_root = repo_root()?;
@@ -4815,23 +4862,13 @@ pub fn run_browser_driver_contract_sync() -> Result<()> {
         );
     }
 
-    // Extract constants from Rust contract: `pub(crate) const NAME: &str = "value";`
+    // rustfmt may place the value on the next line; both contract languages
+    // still need an exact name/value inventory.
     let rust_src = read(&rust_contract)?;
-    let rust_const_re = Regex::new(r#"pub\(crate\) const (\w+): &str = "([^"]+)";"#)?;
-    let mut rust_consts: Vec<String> = rust_const_re
-        .captures_iter(&rust_src)
-        .map(|c| format!("{}={}", &c[1], &c[2]))
-        .collect();
-    rust_consts.sort();
+    let rust_consts = browser_driver_contract_constants(&rust_src, true)?;
 
-    // Extract constants from TS contract: `export const NAME = "value";`
     let ts_src = read(&ts_contract)?;
-    let ts_const_re = Regex::new(r#"export const (\w+) = "([^"]+)";"#)?;
-    let mut ts_consts: Vec<String> = ts_const_re
-        .captures_iter(&ts_src)
-        .map(|c| format!("{}={}", &c[1], &c[2]))
-        .collect();
-    ts_consts.sort();
+    let ts_consts = browser_driver_contract_constants(&ts_src, false)?;
 
     if rust_consts.is_empty() {
         bail!("browser-driver-contract-sync: failed to extract Rust contract constants");
@@ -4928,6 +4965,7 @@ pub fn run_browser_driver_contract_sync() -> Result<()> {
     ]
     .into();
 
+    let ts_const_re = Regex::new(r#"export\s+const\s+(\w+)\s*=\s*"([^"]+)";"#)?;
     let ts_const_values: BTreeSet<String> = ts_const_re
         .captures_iter(&ts_src)
         .map(|c| c[2].to_string())
