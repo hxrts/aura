@@ -98,9 +98,16 @@ case "$instance:$method:$intent" in
     echo '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2"}}}}' ;;
   barbara-tui:submit_semantic_command:OpenSettingsSection)
     jq -e '.params.intent.OpenSettingsSection=="devices"' <<< "$request" >/dev/null || exit 1
-    : > "$FIXTURE_DEVICES_OPEN"
+    if [[ "${FIXTURE_CASE:-}" != unapplied_screen &&
+          ( "${FIXTURE_CASE:-}" != unapplied_reopen || ! -e "$FIXTURE_RESTARTED" ) ]]; then
+      : > "$FIXTURE_DEVICES_OPEN"
+    fi
     echo '{"status":"ok","payload":{"submission":"accepted"}}' ;;
   barbara-tui:wait_for_ui_snapshot_event:)
+    if [[ "${FIXTURE_CASE:-}" == final_collision && -e "$FIXTURE_DEVICES_OPEN" && ! -e "$FIXTURE_RESTARTED" ]]; then
+      collision="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json"
+      [[ -e "$collision" ]] || printf '%s\n' 'preexisting-owner-collision' > "$collision"
+    fi
     if [[ "${FIXTURE_CASE:-}" == failed_original && -e "$FIXTURE_APPROVED" ]]; then
       echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"failed","failure":{"domain":"invitation","code":"internal_error","detail":"private-failure-detail-secret"}}],"runtime_events":[]}}}}'
       exit 0
@@ -133,6 +140,7 @@ case "$instance:$method:$intent" in
       --argjson version "$version" --argjson peer_count "$peer_count" \
       --argjson signed_count "$signed_count" '
       {status:"ok",payload:{event:{version:$version,snapshot:{screen:$screen,readiness:"ready",
+       selections:(if $screen=="settings" then [{list:"settings_sections",item_id:(if $fixture_case=="unapplied_section" or $fixture_case=="final_collision" then "profile" else "devices" end)}] else [] end),
        operations:[{id:"device_enrollment",instance_id:(if $fixture_case=="wrong_operation" then "tui-op-device_enrollment-99" else "tui-op-device_enrollment-2" end),state:"succeeded",failure:null}],
        runtime_events:([{id:"tui-runtime-fact-signed",fact:{kind:"device_enrollment_accepted",device_id:$signed,device_count:$signed_count}}] +
          (if $peer_count>0 then [{id:"tui-runtime-fact-peer",fact:{kind:"device_enrollment_accepted",device_id:$peer,device_count:$peer_count}}] else [] end)),
@@ -380,9 +388,37 @@ printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"
 rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
 PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/browser.stdout" 2> "$fixture/browser.stderr"
 browser_manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
+browser_private="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+for stage in accepted-devices reopened; do
+ for phase in first final; do
+  witness="$browser_private/barbara-web-$stage-$phase.snapshot-witness.json"
+  raw="$browser_private/barbara-web-$stage-$phase.snapshot-raw-private.json"
+  jq -e --arg commit "$FIXTURE_COMMIT" '
+    .source_revision==$commit and .instance_id=="barbara-web" and
+    .method=="wait_for_ui_snapshot_event" and .operation_instance=="op-2" and
+    .screen_is_settings and .devices_section_selected and .devices_item_count==2 and
+    .signed_invitee_current and .original_issuer_noncurrent and
+    .authority_response_matches_signed_subject==false and
+    .authority_response_file=="barbara-web-accepted-authority.raw-private.json" and
+    (.authority_response_sha256|length)==64 and
+    (.prior_original_host_ack_sha256|length)==64 and
+    (.prior_original_host_ack_receipt|startswith("barbara-web-accepted-"))' "$witness" >/dev/null
+  [[ $(stat -c '%a' "$witness" 2>/dev/null || stat -f '%Lp' "$witness") == 600 ]]
+  [[ $(stat -c '%a' "$raw" 2>/dev/null || stat -f '%Lp' "$raw") == 600 ]]
+ done
+done
+jq -e '.original_operation_succeeded and .current_snapshot_host_ack_bound' \
+  "$browser_private/barbara-web-accepted-devices-first.snapshot-witness.json" >/dev/null
+[[ $(stat -c '%a' "$browser_private/barbara-web-accepted-authority.raw-private.json" 2>/dev/null || \
+  stat -f '%Lp' "$browser_private/barbara-web-accepted-authority.raw-private.json") == 600 ]]
 jq -e '.actors.recipient=="barbara-web" and .operation_instances.approval=="op-2" and
   .transport.network_delivery_asserted==true and .assertions.exact_operation_and_host_ack and
-  .assertions.same_device_after_reopen' "$browser_manifest" >/dev/null
+  .assertions.same_device_after_reopen and
+  .evidence.canonical_snapshot_witnesses==[
+    "barbara-web-accepted-devices-first.snapshot-witness.json",
+    "barbara-web-accepted-devices-final.snapshot-witness.json",
+    "barbara-web-reopened-first.snapshot-witness.json",
+    "barbara-web-reopened-final.snapshot-witness.json"]' "$browser_manifest" >/dev/null
 jq -es 'any(.[]; .params.instance_id=="barbara-web" and .method=="restart" and
   .params.expected_operation_instance=="op-2")' "$FIXTURE_BROWSER_REQUESTS" >/dev/null
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
@@ -419,4 +455,49 @@ if FIXTURE_CASE=missing_ack AURA_E2E_RUN_DIR="$browser_bad" PATH="$fixture/bin:$
   echo 'browser paired fixture accepted missing host acknowledgment' >&2; exit 1
 fi
 [[ ! -e "$browser_bad/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
+for failure in unapplied_screen unapplied_section unapplied_reopen final_collision wrong_authority wrong_operation wrong_signed_device stale_roster; do
+  rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
+  bad_dir="$fixture/browser-$failure"
+  mkdir -m 700 "$bad_dir"
+  printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$bad_dir/repl.identity.json"
+  if FIXTURE_CASE="$failure" AURA_E2E_RUN_DIR="$bad_dir" PATH="$fixture/bin:$PATH" \
+      bash "$here/paired-enrollment.sh" > "$fixture/browser-$failure.stdout" 2> "$fixture/browser-$failure.stderr"; then
+    echo "browser paired fixture accepted $failure" >&2; exit 1
+  fi
+  [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
+  if [[ "$failure" == unapplied_section ]]; then
+    jq -e '.screen_is_settings and .devices_section_selected==false and
+      .devices_item_count==2 and .original_operation_succeeded' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json" >/dev/null
+  elif [[ "$failure" == unapplied_screen ]]; then
+    jq -e '.screen_is_settings==false and .devices_section_selected==false and
+      .devices_item_count==0 and .original_operation_succeeded' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json" >/dev/null
+  elif [[ "$failure" == final_collision ]]; then
+    [[ $(cat "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json") == preexisting-owner-collision ]]
+    jq -e '.capture_failure=="authoritative_snapshot_unavailable" and
+      .stage=="accepted-devices" and .operation_instance=="op-2"' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.capture-failure.json" >/dev/null
+  elif [[ "$failure" == unapplied_reopen ]]; then
+    jq -e '.screen_is_settings==false and .devices_section_selected==false and
+      .prior_original_host_ack_receipt=="barbara-web-accepted-1.json"' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-reopened-final.snapshot-witness.json" >/dev/null
+  elif [[ "$failure" == wrong_operation ]]; then
+    [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-first.snapshot-witness.json" ]]
+  elif [[ "$failure" == wrong_signed_device || "$failure" == stale_roster ]]; then
+    jq -e '.typed_failure=="canonical_device_binding_mismatch" and
+      .stage=="accepted-devices" and .operation_instance=="op-2"' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/accepted-devices-list-mismatch.json" >/dev/null
+    jq -e '.devices_section_selected and .original_operation_succeeded and
+      .signed_invitee_current==false' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json" >/dev/null
+  else
+    rg -q 'reopened authority differs from signed issuer subject' "$fixture/browser-$failure.stderr"
+  fi
+  for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
+    ! rg -Fq "$secret" "$fixture/browser-$failure.stdout" "$fixture/browser-$failure.stderr" \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN" --glob '*snapshot-witness.json' \
+      --glob '*capture-failure.json'
+  done
+done
 echo 'Paired LAN enrollment orchestration fixture passed'

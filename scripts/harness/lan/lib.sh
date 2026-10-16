@@ -101,7 +101,7 @@ lan_private_remove_owned_link() { # linked path, this invocation's temporary ino
 # custody; never send them to shared evidence.
 lan_private_receipt() { # instance method label [expected-operation] < response.json
   local instance=$1 method=$2 label=$3 expected_operation=${4:-} dir target scratch raw validator_stderr mode raw_target reason_target stderr_target reason
-  local failure_target='' custody_target='' custody_tmp='' source_revision raw_hash tooling_identity
+  local failure_target='' custody_target='' custody_tmp='' authority_target='' source_revision raw_hash tooling_identity
   case "$instance" in alex-tui|alex-tui2|alex-web|barbara-tui|barbara-tui2|barbara-web) ;; *) return 2;; esac
   case "$method" in prepare_device_enrollment_setup|submit_semantic_command|ui_state|wait_for_ui_snapshot_event|restart|get_authority_id) ;; *) return 2;; esac
   [[ "$label" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || return 2
@@ -304,9 +304,20 @@ lan_private_receipt() { # instance method label [expected-operation] < response.
       }
     fi
   fi
+  if [[ "$instance" == barbara-web && "$method" == get_authority_id &&
+        "$label" == accepted-authority-before-devices ]]; then
+    authority_target="$dir/barbara-web-accepted-authority.raw-private.json"
+    [[ ! -e "$authority_target" && ! -L "$authority_target" ]] || {
+      rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+    }
+    jq -e '.status=="ok" and (.payload.authority_id|type=="string" and length>0)' \
+      "$raw" >/dev/null 2>&1 || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+    ln "$raw" "$authority_target" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  fi
   ln "$scratch" "$target" || {
     lan_private_remove_owned_link "$failure_target" "$raw"
     lan_private_remove_owned_link "$custody_target" "$custody_tmp"
+    lan_private_remove_owned_link "$authority_target" "$raw"
     rm -f "$scratch" "$raw" "$validator_stderr"
     [[ -z "$custody_tmp" ]] || rm -f "$custody_tmp"
     return 2
@@ -314,6 +325,102 @@ lan_private_receipt() { # instance method label [expected-operation] < response.
   rm -f "$scratch" "$raw" "$validator_stderr"
   [[ -z "$custody_tmp" ]] || rm -f "$custody_tmp"
   printf '%s\n' "$target"
+}
+
+# Keep the original, successful authoritative snapshot only at a named
+# first/final observation boundary. Its private copy lets a failed canonical
+# Devices predicate be diagnosed without putting list contents in shared logs.
+lan_private_canonical_snapshot_witness() { # instance stage phase operation invitee issuer subject authority-response prior-ack-receipt < response.json
+  local instance=$1 stage=$2 phase=$3 operation=$4 invitee=$5 issuer=$6 subject=$7 authority_raw=$8 prior_ack=$9
+  local dir raw_tmp summary_tmp raw_target summary_target source_revision tooling raw_hash selector_hash authority_hash authority_match prior_ack_hash
+  [[ "$instance" == barbara-web && ( "$stage" == accepted-devices || "$stage" == reopened ) &&
+     ( "$phase" == first || "$phase" == final ) ]] || return 2
+  [[ "$operation" =~ ^op-[0-9]{1,20}$ && "$invitee" =~ ^[0-9a-f-]{36}$ &&
+     "$issuer" =~ ^[0-9a-f-]{36}$ && "$invitee" != "$issuer" &&
+     "$subject" =~ ^authority-[0-9a-f-]{36}$ ]] || return 2
+  [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || return 2
+  dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+  [[ -d "$dir" && ! -L "$dir" && -O "$dir" &&
+     $(stat -c '%a' "$dir" 2>/dev/null || stat -f '%Lp' "$dir") == 700 ]] || return 2
+  [[ "$authority_raw" == "$dir/barbara-web-accepted-authority.raw-private.json" &&
+     -f "$authority_raw" && ! -L "$authority_raw" && -O "$authority_raw" ]] || return 2
+  [[ $(stat -c '%a' "$authority_raw" 2>/dev/null || stat -f '%Lp' "$authority_raw") == 600 ]] || return 2
+  jq -e '.status=="ok" and (.payload.authority_id|type=="string" and length>0)' \
+    "$authority_raw" >/dev/null 2>&1 || return 2
+  authority_hash=$(sha256sum "$authority_raw" | cut -d' ' -f1) || return 2
+  if jq -e --arg subject "$subject" '.payload.authority_id==$subject' \
+      "$authority_raw" >/dev/null 2>&1; then authority_match=true; else authority_match=false; fi
+  [[ "${prior_ack%/*}" == "$dir" &&
+     "${prior_ack##*/}" =~ ^barbara-web-accepted-[1-9][0-9]*\.json$ &&
+     -f "$prior_ack" && ! -L "$prior_ack" && -O "$prior_ack" ]] || return 2
+  [[ $(stat -c '%a' "$prior_ack" 2>/dev/null || stat -f '%Lp' "$prior_ack") == 600 ]] || return 2
+  jq -e --arg operation "$operation" --arg invitee "$invitee" --arg issuer "$issuer" '
+    .instance_id=="barbara-web" and .method=="wait_for_ui_snapshot_event" and .status=="ok" and
+    any(.operations[]?; .id=="device_enrollment" and .instance_id==$operation and .state=="succeeded") and
+    any(.host_acknowledgments[]?; .device_count==2 and (.device_id==$invitee or .device_id==$issuer))
+  ' "$prior_ack" >/dev/null 2>&1 || return 2
+  prior_ack_hash=$(sha256sum "$prior_ack" | cut -d' ' -f1) || return 2
+  raw_target="$dir/barbara-web-$stage-$phase.snapshot-raw-private.json"
+  summary_target="$dir/barbara-web-$stage-$phase.snapshot-witness.json"
+  [[ ! -e "$raw_target" && ! -L "$raw_target" &&
+     ! -e "$summary_target" && ! -L "$summary_target" ]] || return 2
+  raw_tmp=$(mktemp "$dir/.canonical-snapshot.XXXXXX") || return 2
+  summary_tmp=$(mktemp "$dir/.canonical-witness.XXXXXX") || { rm -f "$raw_tmp"; return 2; }
+  chmod 600 "$raw_tmp" "$summary_tmp" || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  head -c 1048577 > "$raw_tmp" || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  (( $(wc -c < "$raw_tmp") <= 1048576 )) || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  jq -e '.status=="ok" and (.payload.event.version|type=="number") and
+    (.payload.event.snapshot|type=="object")' "$raw_tmp" >/dev/null 2>&1 || {
+    rm -f "$raw_tmp" "$summary_tmp"; return 2;
+  }
+  source_revision=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD) || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  [[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  tooling=$(lan_private_tooling_identity) || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  raw_hash=$(sha256sum "$raw_tmp" | cut -d' ' -f1) || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  selector_hash=$(printf '%s\n%s\n%s\n%s\n' "$operation" "$invitee" "$issuer" "$subject" |
+    sha256sum | cut -d' ' -f1) || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  jq -cn --slurpfile response "$raw_tmp" --arg revision "$source_revision" \
+    --arg token "$AURA_E2E_RUN_TOKEN" --arg stage "$stage" --arg phase "$phase" --arg operation "$operation" \
+    --arg invitee "$invitee" --arg issuer "$issuer" --arg selector_hash "$selector_hash" \
+    --arg authority_hash "$authority_hash" --arg raw_hash "$raw_hash" \
+    --arg raw_file "${raw_target##*/}" --arg prior_ack_file "${prior_ack##*/}" \
+    --arg prior_ack_hash "$prior_ack_hash" --arg authority_file "${authority_raw##*/}" \
+    --argjson authority_match "$authority_match" --argjson tooling "$tooling" '
+    $response[0].payload.event as $event |
+    $event.snapshot as $s |
+    [($s.lists // [])[]|select(.id=="devices")] as $lists |
+    (if ($lists|length)==1 then ($lists[0].items // []) else [] end) as $items |
+    {schema:1,source_revision:$revision,tooling:$tooling,run_token:$token,
+     instance_id:"barbara-web",method:"wait_for_ui_snapshot_event",stage:$stage,phase:$phase,
+     operation_instance:$operation,selector_sha256:$selector_hash,
+     authority_response_sha256:$authority_hash,
+     authority_response_file:$authority_file,
+     authority_response_matches_signed_subject:$authority_match,
+     prior_original_host_ack_receipt:$prior_ack_file,
+     prior_original_host_ack_sha256:$prior_ack_hash,
+     original_response_sha256:$raw_hash,original_response_file:$raw_file,
+     original_response_custody:"owner_only_private_artifact",
+     snapshot_version:$event.version,screen_is_settings:($s.screen=="settings"),
+     devices_section_selected:any($s.selections[]?;
+       .list=="settings_sections" and .item_id=="devices"),
+     readiness_ready:($s.readiness=="ready"),devices_list_count:($lists|length),
+     devices_item_count:($items|length),
+     signed_invitee_current:(([$items[]|select(.id==$invitee and .is_current==true)]|length)==1),
+     original_issuer_noncurrent:(([$items[]|select(.id==$issuer and .is_current==false)]|length)==1),
+     original_operation_succeeded:any($s.operations[]?;
+       .id=="device_enrollment" and .instance_id==$operation and .state=="succeeded"),
+     current_snapshot_host_ack_bound:any($s.runtime_events[]?;
+       .fact.kind=="device_enrollment_accepted" and .fact.device_count==2 and
+       (.fact.device_id==$invitee or .fact.device_id==$issuer))}' > "$summary_tmp" 2>/dev/null || {
+    rm -f "$raw_tmp" "$summary_tmp"; return 2;
+  }
+  ln "$raw_tmp" "$raw_target" || { rm -f "$raw_tmp" "$summary_tmp"; return 2; }
+  ln "$summary_tmp" "$summary_target" || {
+    lan_private_remove_owned_link "$raw_target" "$raw_tmp"
+    rm -f "$raw_tmp" "$summary_tmp"; return 2
+  }
+  rm -f "$raw_tmp" "$summary_tmp"
+  printf '%s\n' "$summary_target"
 }
 key() { req "$1" send_key "$(jq -cn --arg key "$2" '{key:$key}' | sed 's/^{//;s/}$//')" >/dev/null; }
 keys() { req "$1" send_keys "$(jq -cn --arg keys "$2" '{keys:$keys}' | sed 's/^{//;s/}$//')" 120 >/dev/null; }

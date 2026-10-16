@@ -55,8 +55,28 @@ private_exchange() { # instance method receipt-label < single request JSON
   fi
 }
 
-private_wait() { # instance label predicate jq program, expected operation and devices
-  local instance=$1 label=$2 predicate=$3 expected=$4 expected_device=${5:-} expected_ack_device=${6:-} after=null deadline remaining response version request counter=0
+private_wait_capture_final() { # instance stage operation invitee issuer subject authority-response prior-ack response
+  [[ "$1" == barbara-web && ( "$2" == accepted-devices || "$2" == reopened ) ]] || return 0
+  if lan_private_canonical_snapshot_witness "$1" "$2" final "$3" "$4" "$5" "$6" "$7" "$8" \
+      <<< "$9" >/dev/null; then
+    return 0
+  fi
+  local dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN" target tmp
+  target="$dir/barbara-web-$2-final.capture-failure.json"
+  [[ -d "$dir" && ! -L "$dir" && -O "$dir" && ! -e "$target" && ! -L "$target" ]] || return 1
+  tmp=$(mktemp "$dir/.capture-failure.XXXXXX") || return 1
+  chmod 600 "$tmp" || { rm -f "$tmp"; return 1; }
+  jq -cn --arg token "$AURA_E2E_RUN_TOKEN" --arg stage "$2" --arg operation "$3" '
+    {schema:1,run_token:$token,instance_id:"barbara-web",stage:$stage,
+     operation_instance:$operation,capture_failure:"authoritative_snapshot_unavailable"}' \
+    > "$tmp" || { rm -f "$tmp"; return 1; }
+  ln "$tmp" "$target" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  return 1
+}
+
+private_wait() { # instance label predicate jq program, expected operation/devices/authority
+  local instance=$1 label=$2 predicate=$3 expected=$4 expected_device=${5:-} expected_ack_device=${6:-} expected_subject=${7:-} authority_raw=${8:-} prior_ack=${9:-} after=null deadline remaining response previous_response version request counter=0
   local mismatch_dir mismatch_receipt
   local wait_seconds=${AURA_E2E_PRIVATE_WAIT_SECONDS:-240}
   [[ "$wait_seconds" =~ ^[1-9][0-9]{0,2}$ ]] || return 2
@@ -68,15 +88,33 @@ private_wait() { # instance label predicate jq program, expected operation and d
     counter=$((counter + 1))
     request=$(jq -cn --argjson after "$after" --argjson timeout "$((remaining * 1000))" \
       '{method:"wait_for_ui_snapshot_event",params:{after_version:$after,timeout_ms:$timeout}}') || return
-    private_exchange "$instance" wait_for_ui_snapshot_event "$label-$counter" 300 "$expected" <<< "$request" || return
+    private_exchange "$instance" wait_for_ui_snapshot_event "$label-$counter" 300 "$expected" <<< "$request" || {
+      private_wait_capture_final "$instance" "$label" "$expected" "$expected_device" \
+        "$expected_ack_device" "$expected_subject" "$authority_raw" \
+        "$prior_ack" "${response:-}" || :
+      return 1
+    }
     response=$PRIVATE_RESPONSE
     jq -e '.payload.event.snapshot != null and (.payload.event.version|type=="number")' \
-      <<< "$response" >/dev/null || return 1
+      <<< "$response" >/dev/null || {
+      private_wait_capture_final "$instance" "$label" "$expected" "$expected_device" \
+        "$expected_ack_device" "$expected_subject" "$authority_raw" \
+        "$prior_ack" "${previous_response:-}" || :
+      return 1
+    }
+    if [[ ( "$label" == accepted-devices || "$label" == reopened ) && "$instance" == barbara-web && "$counter" == 1 ]]; then
+      lan_private_canonical_snapshot_witness "$instance" "$label" first "$expected" \
+        "$expected_device" "$expected_ack_device" "$expected_subject" "$authority_raw" "$prior_ack" \
+        <<< "$response" >/dev/null || return 1
+    fi
     if jq -e --arg operation "$expected" '
       any(.payload.event.snapshot.operations[]?;
         .id=="device_enrollment" and .instance_id==$operation and
         (.state=="failed" or .state=="cancelled"))' <<< "$response" >/dev/null; then
       echo "device enrollment ended in typed refusal; inspect $PRIVATE_RECEIPT" >&2
+      private_wait_capture_final "$instance" "$label" "$expected" "$expected_device" \
+        "$expected_ack_device" "$expected_subject" "$authority_raw" \
+        "$prior_ack" "$response" || :
       return 1
     fi
     if [[ "$label" == accepted ]] && jq -e --arg operation "$expected" '
@@ -114,6 +152,7 @@ private_wait() { # instance label predicate jq program, expected operation and d
       jq -e --arg device "$expected_device" --arg ack "$expected_ack_device" '
         [.payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?] as $items |
         .payload.event.snapshot.screen=="settings" and
+        any(.payload.event.snapshot.selections[]?; .list=="settings_sections" and .item_id=="devices") and
         ($items|length)==2 and
         (([$items[]|select(.id==$device and .is_current==true)]|length)!=1 or
          ([$items[]|select(.id==$ack and .is_current==false)]|length)!=1)' \
@@ -131,16 +170,29 @@ private_wait() { # instance label predicate jq program, expected operation and d
          operation_instance:$operation,signed_manifest_device:$device,
          host_ack_device:$ack,canonical_device_ids:$ids}' > "$mismatch_receipt") || return 1
       echo "canonical Devices list differs from signed invitee or host ACK; inspect $mismatch_receipt" >&2
+      if [[ ( "$label" == accepted-devices || "$label" == reopened ) && "$instance" == barbara-web ]]; then
+        private_wait_capture_final "$instance" "$label" "$expected" "$expected_device" \
+          "$expected_ack_device" "$expected_subject" "$authority_raw" "$prior_ack" "$response" || return 1
+      fi
       return 1
     fi
     if jq -e --arg operation "$expected" --arg device "$expected_device" \
       --arg ack_device "$expected_ack_device" "$predicate" <<< "$response" >/dev/null; then
+      if [[ ( "$label" == accepted-devices || "$label" == reopened ) && "$instance" == barbara-web ]]; then
+        private_wait_capture_final "$instance" "$label" "$expected" "$expected_device" \
+          "$expected_ack_device" "$expected_subject" "$authority_raw" "$prior_ack" "$response" || return 1
+      fi
       PRIVATE_RESPONSE=$response
       return 0
     fi
     version=$(jq -er '.payload.event.version' <<< "$response") || return
     after=$version
+    previous_response=$response
   done
+  if [[ ( "$label" == accepted-devices || "$label" == reopened ) && "$instance" == barbara-web && "$counter" -gt 0 ]]; then
+    private_wait_capture_final "$instance" "$label" "$expected" "$expected_device" \
+      "$expected_ack_device" "$expected_subject" "$authority_raw" "$prior_ack" "$response" || :
+  fi
   echo "authoritative enrollment observation timed out for $instance" >&2
   return 1
 }
@@ -403,6 +455,23 @@ private_wait "$recipient" accepted '
     .fact.device_count==2 and
     (.fact.device_id==$device or .fact.device_id==$ack_device))' \
   "$import_operation" "$device" "$issuer_device"
+accepted_host_receipt=$PRIVATE_RECEIPT
+
+# Retain the actual pre-reopen authority response privately. The live browser
+# controller can remain provisional even after host ACK; compare it for
+# diagnosis, then require the signed subject from the fresh reopened owner.
+accepted_authority_raw=
+if [[ "$recipient_kind" == browser ]]; then
+  private_request "$recipient" get_authority_id accepted-authority-before-devices \
+    '{"method":"get_authority_id","params":{}}'
+  accepted_authority=$PRIVATE_RESPONSE
+  jq -e '.status=="ok" and (.payload.authority_id|type=="string" and length>0)' \
+    <<< "$accepted_authority" >/dev/null || {
+    echo 'recipient authority response is absent' >&2; exit 1
+  }
+  accepted_authority_raw="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-authority.raw-private.json"
+  [[ -f "$accepted_authority_raw" && ! -L "$accepted_authority_raw" ]] || exit 1
+fi
 
 # The canonical devices list is a Settings/Devices projection. Enrollment can
 # succeed during onboarding while that section is not selected; observe it in
@@ -412,22 +481,27 @@ private_request "$recipient" submit_semantic_command open-devices \
   '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"devices"}}}'
 private_wait "$recipient" accepted-devices '
   .payload.event.snapshot as $s |
-  $s.screen=="settings" and
+  $s.screen=="settings" and $s.readiness=="ready" and
+  any($s.selections[]?; .list=="settings_sections" and .item_id=="devices") and
   ([ $s.lists[]?|select(.id=="devices")|.items[]?] as $items |
     ($items|length)==2 and
     ([$items[]|select(.id==$device and .is_current==true)]|length)==1 and
     ([$items[]|select(.id==$ack_device and .is_current==false)]|length)==1)' \
-  "$import_operation" "$device" "$issuer_device"
+  "$import_operation" "$device" "$issuer_device" "$subject" "$accepted_authority_raw" \
+  "$accepted_host_receipt"
 accepted_receipt=$PRIVATE_RECEIPT
 
 private_request alex-tui get_authority_id issuer-authority '{"method":"get_authority_id","params":{}}'
 issuer_authority=$PRIVATE_RESPONSE
-private_request "$recipient" get_authority_id accepted-authority '{"method":"get_authority_id","params":{}}'
-accepted_authority=$PRIVATE_RESPONSE
+if [[ "$recipient_kind" != browser ]]; then
+  private_request "$recipient" get_authority_id accepted-authority '{"method":"get_authority_id","params":{}}'
+  accepted_authority=$PRIVATE_RESPONSE
+fi
 printf '%s\n%s\n' "$issuer_authority" "$accepted_authority" |
-  jq -es --arg subject "$subject" '.[0].payload.authority_id==$subject and
+  jq -es --arg subject "$subject" '
+    .[0].payload.authority_id==$subject and
     (.[1].payload.authority_id|type=="string" and length>0)' >/dev/null || {
-  echo 'issuer authority differs from signed manifest or recipient authority is absent' >&2; exit 1;
+  echo 'issuer or recipient authority differs from signed manifest' >&2; exit 1;
 }
 
 restart_request=$(jq -cn --arg kind "$recipient_kind" --arg operation "$import_operation" '
@@ -441,11 +515,13 @@ private_request "$recipient" submit_semantic_command reopen-devices \
 private_wait "$recipient" reopened '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and $s.readiness=="ready" and
+  any($s.selections[]?; .list=="settings_sections" and .item_id=="devices") and
   ([ $s.lists[]?|select(.id=="devices")|.items[]?] as $items |
     ($items|length)==2 and
     ([$items[]|select(.id==$device and .is_current==true)]|length)==1 and
     ([$items[]|select(.id==$ack_device and .is_current==false)]|length)==1)' \
-  '' "$device" "$issuer_device"
+  "$import_operation" "$device" "$issuer_device" "$subject" "$accepted_authority_raw" \
+  "$accepted_host_receipt"
 reopened_event=$PRIVATE_RESPONSE
 reopened_receipt=$PRIVATE_RECEIPT
 private_request "$recipient" get_authority_id reopened-authority '{"method":"get_authority_id","params":{}}'
@@ -494,7 +570,12 @@ jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local 
      "same_device_after_reopen"],
    actors:{issuer:"alex-tui",recipient:$recipient},
    operation_instances:{issue:$issued,approval:$accepted},
-   evidence:{network_delivery:$network_witness,accepted:$accepted_receipt,reopened:$reopened_receipt},
+   evidence:{network_delivery:$network_witness,accepted:$accepted_receipt,reopened:$reopened_receipt,
+     canonical_snapshot_witnesses:(if $recipient=="barbara-web" then
+       ["barbara-web-accepted-devices-first.snapshot-witness.json",
+        "barbara-web-accepted-devices-final.snapshot-witness.json",
+        "barbara-web-reopened-first.snapshot-witness.json",
+        "barbara-web-reopened-final.snapshot-witness.json"] else [] end)},
    assertions:{independent_accounts_before_issue:true,explicit_approval:true,
      exact_operation_and_host_ack:true,same_authority_after_reopen:true,
      same_device_after_reopen:true,two_devices_after_reopen:true},

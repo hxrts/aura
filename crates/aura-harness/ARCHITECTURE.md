@@ -99,6 +99,15 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   before issuance; generic Settings does not materialize its device list. It requires
   the signed invitee and issuer to be distinct canonical members; a transient
   two-device host event for either bound device is not a second roster entry.
+  For browser acceptance, a submitted `OpenSettingsSection` is only an action
+  receipt. The original authoritative snapshot must also select
+  `settings_sections/devices`, show Settings, and contain the signed invitee as
+  current and original issuer as the distinct peer. Owner-only first/final raw
+  snapshots for acceptance and reopen, plus redacted witnesses, retain version, applied section, list shape,
+  original operation and prior exact host-ACK receipt binding on failure. The
+  original pre-reopen authority response is captured privately and compared diagnostically;
+  adopted subject equality is required from the fresh same-profile owner after
+  restart, where the original browser controller may have been provisional.
   Read-only preflight records
   fixed commits, compared artifacts, planned host/process identity and the
   development-only broker before either owner starts; the result records
