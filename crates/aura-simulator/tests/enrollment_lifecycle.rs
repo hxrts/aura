@@ -539,11 +539,25 @@ async fn genuine_signed_bootstrap_enrollment_prefills_accepts_and_reopens() {
         Some(original.invitation_code.as_str())
     );
     assert!(supervisor.active_tasks().is_empty());
-    stopped
+    let reopened = stopped
         .expect("canonical acceptance and strict resource disposal")
-        .reopen_and_shutdown(SharedTransport::default())
+        .reopen_accepted_for_host_recovery(SharedTransport::default())
         .await
         .expect("same profiles retain original native confirmation and active package");
+    let health = reopened.recipient().runtime().maintenance_health().await;
+    assert!(
+        matches!(
+            health,
+            aura_agent::ServiceHealth::Degraded { ref reason }
+                if reason.contains("initial_lan_descriptor: [rendezvous_publish] StartupFailed")
+                    && reason.contains("manifest cryptography failed")
+        ),
+        "original optional descriptor failure remains observable: {health:?}"
+    );
+    reopened
+        .shutdown()
+        .await
+        .expect("reopened original owners strictly dispose");
 }
 
 #[tokio::test]

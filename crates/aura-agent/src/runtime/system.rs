@@ -785,6 +785,12 @@ impl RuntimeSystem {
             .await;
     }
 
+    /// Observe maintenance health, including the original optional LAN
+    /// descriptor publication failure, without owning its service lifecycle.
+    pub async fn maintenance_health(&self) -> ServiceHealth {
+        self.maintenance_service.health().await
+    }
+
     /// Create a new runtime system
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)] // Factory retained for future runtime wiring
