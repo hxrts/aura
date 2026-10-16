@@ -206,6 +206,10 @@
         };
       in
       {
+        # Shared pure definition only. Vendor/deps outputs and rehydration are
+        # deliberately absent until the dependency tree is proven.
+        lib.buildCacheKey = import ./nix/build-cache-key.nix;
+
         packages = {
           # Main CLI application (terminal interface)
           default = cargoNix.workspaceMembers.aura-terminal.build;

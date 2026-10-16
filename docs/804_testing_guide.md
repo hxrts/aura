@@ -1433,6 +1433,17 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 
 ### Build and Caching
 
+`nix/build-cache-key.nix` is the single pure key definition for the proposed
+dependency-only warm tree. `flake.nix` exports that function, and
+`scripts/dev/build-cache-key.sh INPUT.json` queries it with explicit producer
+inputs: platform, dev-shell and toolchain store paths, immutable vendor path
+and lock hash, dummy manifest/config paths, package, profile, features, target,
+Rust flags, C compiler, wrapper, incremental policy, and other declared
+build-script environment. The query is diagnostic until the vendor and deps
+outputs are implemented; it does not alter Cargo dispatch or rehydrate a
+worktree. An absent vendor path or any unrecorded producer input must prevent
+future warm-tree reuse rather than fall back to a guessed key.
+
 For the complete browser enrollment scenario, build the native
 `bootstrap_broker_fixture` example with `--features simulation` in the same guarded batch as the browser
 inventory. Set `AURA_BROWSER_BROKER_FIXTURE` to its executable path and wrap the
