@@ -819,6 +819,11 @@ git -C "$project" init -q
 git -C "$project" add Cargo.toml Cargo.lock flake.nix flake.lock justfile .gitignore \
   toolkit/xtask/Cargo.toml toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml
 git -C "$project" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm workload-fixture
+original_base="$(git -C "$project" rev-parse HEAD)"
+git -C "$project" -c user.name=fixture -c user.email=fixture@example.invalid commit --allow-empty -qm intermediate-base
+intermediate_base="$(git -C "$project" rev-parse HEAD)"
+git -C "$project" -c user.name=fixture -c user.email=fixture@example.invalid commit --allow-empty -qm fixed-source
+git -C "$project" update-ref refs/remotes/origin/main "$original_base"
 cat > "$fakebin/just" <<'EOF'
 #!/usr/bin/env bash
 [[ "$1" == ci-user-flow-policy ]] || exit 2
@@ -837,6 +842,7 @@ receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==4194304 and
   (.admission.workload.identity|type)=="string" and .final_exit_status==0' "$receipt" >/dev/null
 canonical_key="$(jq -r .admission.workload.identity "$receipt")"
+canonical_source="$(jq -r .source.fingerprint "$receipt")"
 mkdir -p "$project/artifacts/disk-budget/receipts/run.same"
 jq -n --arg root "$project" --arg identity "$canonical_key" \
   '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
@@ -847,8 +853,18 @@ expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" 
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e --arg identity "$canonical_key" '.admission.incoming_reservation_kib==3145728 and
   .admission.workload.identity==$identity' "$receipt" >/dev/null
+# Advancing the default origin base changes policy inputs without changing
+# HEAD or any checkout source. Do not reuse the old measured reservation.
+git -C "$project" update-ref refs/remotes/origin/main "$intermediate_base"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e --arg old "$canonical_key" --arg source "$canonical_source" \
+  '.source.fingerprint==$source and .admission.workload.identity!=$old and
+   .admission.incoming_reservation_kib==4194304' "$receipt" >/dev/null
+git -C "$project" update-ref refs/remotes/origin/main "$original_base"
 cp "$fakebin/just" "$test_root/just-original"
-for changed in recipe features profile target lock tool config policy-range guidance-range; do
+for changed in recipe features profile target lock tool config policy-range guidance-range github-base guidance-files guidance-empty; do
   case "$changed" in
     recipe) printf 'ci-user-flow-policy:\n    @true # revised\n' > "$project/justfile" ;;
     features) export AURA_BUILD_FEATURES=alternate ;;
@@ -859,6 +875,9 @@ for changed in recipe features profile target lock tool config policy-range guid
     config) mkdir -p "$project/.cargo"; printf 'changed config\n' > "$project/.cargo/config.toml" ;;
     policy-range) export AURA_UX_POLICY_DIFF_RANGE=alternate-policy ;;
     guidance-range) export AURA_UX_GUIDANCE_DIFF_RANGE=alternate-guidance ;;
+    github-base) export GITHUB_BASE_REF=alternate-base ;;
+    guidance-files) export AURA_UX_GUIDANCE_CHANGED_FILES=crates/alternate.rs ;;
+    guidance-empty) export AURA_UX_GUIDANCE_CHANGED_FILES='' ;;
   esac
   expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
     --lane gates --no-prune -- just ci-user-flow-policy
@@ -875,8 +894,26 @@ for changed in recipe features profile target lock tool config policy-range guid
     config) rm "$project/.cargo/config.toml"; rmdir "$project/.cargo" ;;
     policy-range) unset AURA_UX_POLICY_DIFF_RANGE ;;
     guidance-range) unset AURA_UX_GUIDANCE_DIFF_RANGE ;;
+    github-base) unset GITHUB_BASE_REF ;;
+    guidance-files|guidance-empty) unset AURA_UX_GUIDANCE_CHANGED_FILES ;;
   esac
 done
+graft_path="$(git -C "$project" rev-parse --path-format=absolute --git-path info/grafts)"
+printf '\n' > "$graft_path"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.workload==null and
+  .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+rm "$graft_path"
+# A shallow history is not certified by a ref map alone.
+printf '%s\n' "$original_base" > "$project/.git/shallow"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.workload==null and
+  .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+rm "$project/.git/shallow"
 for override in JUST_JUSTFILE JUST_WORKING_DIRECTORY; do
   export "$override"=other-recipe
   expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \

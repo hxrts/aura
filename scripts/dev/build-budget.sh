@@ -145,10 +145,17 @@ canonical_workload_identity() {
   [[ -z "${JUST_JUSTFILE:-}" && -z "${JUST_WORKING_DIRECTORY:-}" ]] || return 1
   [[ -f "$root/justfile" && ! -L "$root/justfile" ]] || return 1
   local selector_hash source_fingerprint tool_hash just_binary just_hash inputs_hash relative
+  local refs_hash graft_path
   local -a input_paths=(Cargo.toml Cargo.lock flake.nix flake.lock
     toolkit/xtask/Cargo.toml toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml)
   source_fingerprint="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
   [[ "$source_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+  # The recipe/toolkit can derive diff selectors from refs after admission.
+  # Bind all refs conservatively rather than reimplementing policy selection.
+  [[ "$(git -C "$root" rev-parse --is-shallow-repository)" == false ]] || return 1
+  graft_path="$(git -C "$root" rev-parse --path-format=absolute --git-path info/grafts)" || return 1
+  [[ ! -e "$graft_path" && ! -L "$graft_path" ]] || return 1
+  refs_hash="$(git -C "$root" show-ref --head | LC_ALL=C sort | sha256sum | awk '{print $1}')" || return 1
   source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
   for relative in .cargo/config .cargo/config.toml toolkit/xtask/.cargo/config \
     toolkit/xtask/.cargo/config.toml rust-toolchain rust-toolchain.toml \
@@ -164,16 +171,18 @@ canonical_workload_identity() {
     "${AURA_BUILD_PACKAGES:-}" "${CARGO_BUILD_TARGET:-}" "${RUSTFLAGS:-}" \
     "${CARGO_ENCODED_RUSTFLAGS:-}" "${RUSTC:-}" "${RUSTC_WRAPPER:-}" \
     "${RUSTC_WORKSPACE_WRAPPER:-}" "${AURA_UX_POLICY_DIFF_RANGE:-}" \
-    "${AURA_UX_GUIDANCE_DIFF_RANGE:-}" | sha256sum | awk '{print $1}')"
+    "${AURA_UX_GUIDANCE_DIFF_RANGE:-}" "${GITHUB_BASE_REF:-}" \
+    "${AURA_UX_GUIDANCE_CHANGED_FILES+x}" "${AURA_UX_GUIDANCE_CHANGED_FILES:-}" \
+    "${GIT_NO_REPLACE_OBJECTS:-}" "${GIT_REPLACE_REF_BASE:-}" | sha256sum | awk '{print $1}')"
   jq -cn --arg recipe "$(sha256sum "$root/justfile" | awk '{print $1}')" \
     --arg profile "$profile" --arg features "$features" --arg target "$target_triple" \
     --arg incremental "$CARGO_INCREMENTAL" --arg selector "$selector_hash" \
     --arg source "$source_fingerprint" --arg tool "$tool_hash" --arg just "$just_hash" \
-    --arg inputs "$inputs_hash" \
+    --arg inputs "$inputs_hash" --arg refs "$refs_hash" \
     '{command:["just","ci-user-flow-policy"],recipe_sha256:$recipe,
       profile:$profile,features:$features,target:$target,
       incremental:$incremental,selector_hash:$selector,
-      source_fingerprint:$source,input_hash:$inputs,
+      source_fingerprint:$source,input_hash:$inputs,refs_hash:$refs,
       tool_identity_hash:$tool,just_sha256:$just}' |
     sha256sum | awk '{print $1}'
 }

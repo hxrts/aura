@@ -1536,8 +1536,12 @@ held only while checking and reserving,
 and only builders of the same checkout block its sweeps, so two worktrees can
 build at once.
 For exact `gates` commands running `just ci-user-flow-policy`, admission uses
-only growth measured for that same recipe, source, toolchain, profile, feature
-and target identity. Broad ownership-gate and legacy profile peaks do not
+only growth measured for that same recipe, source, toolchain, profile, feature,
+target, Git ref map and policy-selector identity. Moving a default diff base
+invalidates prior measurements even when checkout files and HEAD are unchanged.
+Guidance file overrides distinguish unset from explicitly empty values.
+Shallow or grafted history uses the conservative general estimator instead.
+Broad ownership-gate and legacy profile peaks do not
 describe this workload. The first such run retains the 4 GiB cold reservation;
 later runs use the matching measured peak plus the normal 1 GiB margin. The
 recipe still runs all its checks, including macro compilation, and the 15 GiB
