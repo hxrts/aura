@@ -1928,6 +1928,21 @@ with optional architecture-specific hardware acceleration
             rename = "aura-core";
           }
           {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
+          }
+          {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
+          }
+          {
             name = "nix";
             packageId = "nix 0.26.4";
           }
@@ -1939,10 +1954,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "portable-pty";
             packageId = "portable-pty";
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.8";
           }
           {
             name = "rand_chacha";
@@ -2237,6 +2248,11 @@ with optional architecture-specific hardware acceleration
             rename = "aura-guards";
           }
           {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
+          }
+          {
             name = "hxrts-aura-journal";
             packageId = "hxrts-aura-journal";
             rename = "aura-journal";
@@ -2375,7 +2391,10 @@ with optional architecture-specific hardware acceleration
             packageId = "tempfile";
           }
         ];
-
+        features = {
+          "simulator-checkpoint" = [ "aura-agent/simulator-checkpoint" "aura-effects/simulator-checkpoint" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simulator-checkpoint" ];
       };
       "aura-terminal" = rec {
         crateName = "aura-terminal";
@@ -2645,9 +2664,10 @@ with optional architecture-specific hardware acceleration
         features = {
           "default" = [ "terminal" ];
           "development" = [ "terminal" "testing" "aura-app/debug-serialize" "aura-app/instrumented" "dep:aura-simulator" "dep:aura-testkit" "aura-app/app-internals" ];
-          "testing" = [ "terminal" "aura-app/app-internals" ];
+          "lan-http-dev" = [ "terminal" "aura-agent/lan-http-dev" ];
+          "testing" = [ "terminal" "aura-app/app-internals" "aura-agent/simulation" ];
         };
-        resolvedDefaultFeatures = [ "default" "development" "proptest" "terminal" "testing" ];
+        resolvedDefaultFeatures = [ "default" "development" "lan-http-dev" "proptest" "terminal" "testing" ];
       };
       "aura-testkit" = rec {
         crateName = "aura-testkit";
@@ -12741,9 +12761,10 @@ library used by the other higher-level Hickory DNS crates.
           "choreo-backend-telltale-machine" = [ "dep:telltale-machine" "aura-effects/telltale-runtime-capability" ];
           "default" = [ "choreo-backend-telltale-machine" ];
           "simulation" = [ "aura-core/simulation" "aura-journal/simulation" "aura-effects/simulation" ];
+          "simulator-checkpoint" = [ "simulation" "aura-effects/simulator-checkpoint" ];
           "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" "aura-social/transparent_onion" "aura-sync/transparent_onion" ];
         };
-        resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "real-android-keystore" "simulation" "transparent_onion" "web" ];
+        resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "lan-http-dev" "real-android-keystore" "simulation" "simulator-checkpoint" "transparent_onion" "web" ];
       };
       "hxrts-aura-amp" = rec {
         crateName = "hxrts-aura-amp";
@@ -13861,6 +13882,13 @@ library used by the other higher-level Hickory DNS crates.
         version = "0.2.0";
         edition = "2021";
         description = "Standard library of context-free effect handler implementations";
+        crateBin = [
+          {
+            name = "aura-os-keychain-diagnostic";
+            path = "src/bin/os_keychain_diagnostic.rs";
+            requiredFeatures = [ "os-keychain-diagnostic" ];
+          }
+        ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-effects; };
         libName = "aura_effects";
         authors = [
@@ -14139,10 +14167,11 @@ library used by the other higher-level Hickory DNS crates.
         ];
         features = {
           "simulation" = [ "aura-core/simulation" ];
+          "simulator-checkpoint" = [ "simulation" ];
           "telltale-runtime-capability" = [ "dep:telltale-machine" ];
           "transparent_onion" = [ "aura-core/transparent_onion" ];
         };
-        resolvedDefaultFeatures = [ "default" "simulation" "telltale-runtime-capability" "test-keyring" "test-support" "transparent_onion" ];
+        resolvedDefaultFeatures = [ "default" "os-keychain-diagnostic" "simulation" "simulator-checkpoint" "telltale-runtime-capability" "test-keyring" "test-support" "transparent_onion" ];
       };
       "hxrts-aura-guards" = rec {
         crateName = "hxrts-aura-guards";
