@@ -1608,6 +1608,9 @@ allocated tree or logical archive size, plus a 1 GiB
 margin while retaining the local 15 GiB floor and other builds' reservations;
 export separately retains the configured remote free-space floor. These
 receipts restore an inactive compiler cache at its original source identity.
+The archive's checkout revision identifies its export/restore context; it does
+not establish the build revision of each cached binary. Preserve the original
+build receipts and web provenance markers for artifact admission.
 The LAN ship owner remains responsible for shipping deployable artifacts.
 
 Each budgeted command prints a JSON receipt path under
