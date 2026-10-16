@@ -81,7 +81,36 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
   chmod 600 "$raw" "$validator_stderr" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
   head -c 1048577 > "$raw" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
   if (( $(wc -c < "$raw") > 1048576 )); then
-    rm -f "$scratch" "$raw" "$validator_stderr"
+    local prefix_target="$dir/$instance-$label.raw-prefix-private.bin"
+    reason_target="$dir/$instance-$label.validation.json"
+    [[ ! -e "$prefix_target" && ! -L "$prefix_target" &&
+       ! -e "$reason_target" && ! -L "$reason_target" ]] || {
+      rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+    }
+    head -c 1048576 "$raw" > "$scratch" || {
+      rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+    }
+    chmod 600 "$scratch" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+    ln "$scratch" "$prefix_target" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+    local reason_tmp
+    reason_tmp=$(mktemp "$dir/.validation.XXXXXX") || {
+      rm -f "$scratch" "$raw" "$validator_stderr" "$prefix_target"; return 2;
+    }
+    chmod 600 "$reason_tmp" || {
+      rm -f "$scratch" "$raw" "$validator_stderr" "$prefix_target" "$reason_tmp"; return 2;
+    }
+    jq -cn --arg token "$AURA_E2E_RUN_TOKEN" \
+      --arg instance "$instance" --arg method "$method" --arg label "$label" \
+      '{schema:1,run_token:$token,instance_id:$instance,method:$method,label:$label,
+        validation_failure:"response_too_large",capture_limit_bytes:1048576,
+        captured_prefix_bytes:1048576,truncated:true,
+        raw_response_custody:"owner_only_bounded_prefix"}' > "$reason_tmp" || {
+      rm -f "$scratch" "$raw" "$validator_stderr" "$prefix_target" "$reason_tmp"; return 2;
+    }
+    ln "$reason_tmp" "$reason_target" || {
+      rm -f "$scratch" "$raw" "$validator_stderr" "$prefix_target" "$reason_tmp"; return 2;
+    }
+    rm -f "$scratch" "$raw" "$validator_stderr" "$reason_tmp"
     return 2
   fi
   if ! jq -ce --arg instance "$instance" --arg method "$method" '

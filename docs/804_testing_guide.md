@@ -1091,7 +1091,10 @@ snapshots. Capture only redacted operation and transport evidence, and retain
 the original secret values in the owning process or a private transfer channel.
 If private ToolApi receipt validation itself fails, the helper retains the
 original response and validator stderr in owner-only `0600` artifacts under
-the run's `0700` private directory and writes a separate redacted validation category. Inspect
+the run's `0700` private directory and writes a separate redacted validation
+category. Responses over 1 MiB are refused without parsing; the helper retains
+only an explicitly truncated `0600` prefix of at most 1 MiB and a redacted
+`response_too_large` receipt bound to the run, instance, method, and label. Inspect
 that protected artifact locally to correct the exact schema mismatch; never
 copy its contents into a shared checklist log or infer operation completion
 from the broker ACK alone. Browser accepted runtime events carry canonical

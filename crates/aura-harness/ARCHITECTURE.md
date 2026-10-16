@@ -76,9 +76,12 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   whitelist rejects a private ToolApi response, the helper retains the raw
   response and any validator stderr only in `0600` artifacts inside the `0700`
   run directory alongside a separate redacted validation category. Those
-  private artifacts never enter the
-  shared checklist result, REPL output, URL or command arguments and requires
-  protected handling during diagnosis. Reopen still requires a fresh
+  private artifacts never enter the shared checklist result, REPL output, URL,
+  or command arguments and require protected handling during diagnosis. A
+  response over 1 MiB is always refused: the helper retains only a clearly
+  truncated, owner-only 1 MiB prefix and a redacted `response_too_large`
+  category bound to the run and method. It never parses that prefix as success.
+  Reopen still requires a fresh
   authoritative observation after restart.
   The paired LAN bootstrap omits ordinary contact links so enrollment cannot
   inherit an established contact route. Its checklist transfers signed setup
