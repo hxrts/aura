@@ -331,7 +331,9 @@ canonical immediate `ExportDeviceEnrollmentSetup` command is a runtime read:
 its typed page-owned queue result completes the export, and the following
 `ui_state` may retain the same published revision. The Playwright smoke fixture
 executes that queue and checks the unchanged revision; it also keeps the floor
-for other semantic submissions.
+for other semantic submissions. Match the canonical serialized submission
+value `device_enrollment_setup`; a test-only PascalCase value does not exercise
+the real browser request.
 
 Browser semantic observation must fail closed when the published snapshot is unavailable. It must not silently repair by reading a live controller or model snapshot behind the harness bridge. Channel-binding responses must either carry authoritative context materialization or fail explicitly. Selected ids or labels alone are not semantic bindings.
 

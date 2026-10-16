@@ -1311,7 +1311,7 @@ function runSelfTest() {
   const setupExport = {
     request: {
       intent: "ExportDeviceEnrollmentSetup",
-      contract: { submission: { kind: "immediate", value: "DeviceEnrollmentSetup" } },
+      contract: { submission: { kind: "immediate", value: "device_enrollment_setup" } },
     },
   };
   assert(
@@ -1321,6 +1321,9 @@ function runSelfTest() {
       }) &&
       !isReadOnlySetupExport("submit_semantic_command", {
         request: { ...setupExport.request, contract: { submission: { kind: "operation_handle" } } },
+      }) &&
+      !isReadOnlySetupExport("submit_semantic_command", {
+        request: { ...setupExport.request, contract: { submission: { kind: "immediate", value: "DeviceEnrollmentSetup" } } },
       }),
     "only canonical immediate signed setup export may keep the existing UI revision",
   );
@@ -5615,7 +5618,7 @@ function isReadOnlySetupExport(method, params) {
   return method === "submit_semantic_command" &&
     request?.intent === "ExportDeviceEnrollmentSetup" &&
     request?.contract?.submission?.kind === "immediate" &&
-    request?.contract?.submission?.value === "DeviceEnrollmentSetup";
+    request?.contract?.submission?.value === "device_enrollment_setup";
 }
 
 async function readActionDomFingerprint(session) {
