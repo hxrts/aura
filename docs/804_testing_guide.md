@@ -1579,6 +1579,37 @@ separate APFS container on independent storage, and verify its free capacity
 before enabling exports. The `/nix` volume on the development Mac shares the
 source APFS container and is not a cold store.
 
+The optional SSH backend is a separate, explicit operation; setting its
+variables does not enable automatic build-budget export. Set
+`AURA_COLD_CACHE_REMOTE_HOST=user@host` and
+`AURA_COLD_CACHE_REMOTE_DIR=/absolute/private/ext4/path`, leave
+`AURA_COLD_CACHE_STORE` unset, then run
+`scripts/dev/cold-cache-store.sh --export --root /absolute/clean/checkout --lane wasm-root-profile`.
+To recover the same absent lane, use the same environment and replace
+`--export` with `--restore`. The host must already be trusted in SSH known
+hosts; the script uses batch mode and strict host-key checking. It accepts
+only a separately identified Linux host with an owner-only `0700` directory
+on a local block-backed ext4 filesystem. An active builder, open lane file,
+dirty checkout, linked artifact, existing remote snapshot or stale remote
+capacity lock refuses export. Inspect an interrupted `.pending` snapshot or
+lock rather than stealing it or assuming that a partially transferred archive
+is ready.
+
+SSH export signs a source-root/revision/lane and archive manifest and a
+remote-host/machine/device location receipt with a `0600` key retained on the
+source filesystem. It checks remote archive size and hash, atomically publishes
+the owner-only `ready` directory, reads it back, then publishes a private
+local rollback receipt before guarded source pruning. Restore requires that
+same clean checkout, revision, lane, signing key and remote identity. It
+verifies both signatures and the archive, rejects links or unsafe members,
+and stages extraction before atomically publishing the absent lane. Admission
+reserves room for the downloaded archive and the larger of the original
+allocated tree or logical archive size, plus a 1 GiB
+margin while retaining the local 15 GiB floor and other builds' reservations;
+export separately retains the configured remote free-space floor. These
+receipts restore an inactive compiler cache at its original source identity.
+The LAN ship owner remains responsible for shipping deployable artifacts.
+
 Each budgeted command prints a JSON receipt path under
 `artifacts/disk-budget/receipts/`. The atomic snapshot records the source
 revision and fingerprint (including nonignored new source files), declared
