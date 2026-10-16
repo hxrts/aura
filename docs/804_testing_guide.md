@@ -1216,6 +1216,10 @@ file or symlink. It validates and retains only exact operation instance/state,
 typed failure domain/code, host acknowledgment, and readiness; free-text
 diagnostics, codes, screen names, and device-list IDs are omitted. Do not print
 or save the raw response.
+For a ToolApi error, the same receipt records an allowlisted `tool_failure`
+domain/code (including browser UI observation unavailability), or
+`unclassified` for an unknown message. The original free-text error and browser
+console tail stay outside the receipt.
 Each invitation credential is registered by its own receiver and used only to
 drain that receiver's broker invitation queue; the sender needs the shared
 broker bearer, not the recipient's invitation credential. The signed pending

@@ -95,12 +95,25 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
       and .fact.kind=="device_enrollment_accepted"
       and (.fact.device_id|type=="string" and test("^[0-9a-fA-F-]{36}$"))
       and (.fact.device_count|type=="number" and .>=1 and .<=16 and .==floor);
+    def tool_error_code($message):
+      if $message|contains("structured ui_state observation failed for instance")
+      then "browser_structured_observation_failed"
+      elif $message|contains("browser UI state unavailable for instance")
+      then "browser_ui_state_unavailable"
+      elif $message|startswith("Playwright driver ui_state timed out")
+      then "browser_driver_timeout"
+      elif $message|startswith("Playwright driver closed stdout while awaiting ui_state")
+      then "browser_driver_closed"
+      elif $message|startswith("failed to decode browser UiSnapshot")
+      then "browser_snapshot_decode_failed"
+      else "unclassified" end;
     . as $response
     | ($response.payload.event.snapshot // $response.payload) as $snapshot
     | [($snapshot.operations // [])[] | select(.id=="device_enrollment")] as $operations
     | [($snapshot.runtime_events // [])[] | select(.fact.kind=="device_enrollment_accepted")] as $acks
     | ($response.payload.handle.ui_operation // null) as $submitted
     | if ($response.status|IN("ok","error"))
+      and ($response.status!="error" or ($response.message|type=="string"))
       and ([$operations[]|operation]|all)
       and ([$acks[]|host_ack]|all)
       and ($submitted==null or ($submitted|handle))
@@ -108,6 +121,8 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
       and ($snapshot.readiness==null or ($snapshot.readiness|IN("ready","loading")))
       then {
         instance_id:$instance, method:$method, status:$response.status,
+        tool_failure:(if $response.status=="error" then
+          {domain:"tool_api",code:tool_error_code($response.message)} else null end),
         submitted_operation:(if $submitted==null then null else {id:$submitted.id,instance_id:$submitted.instance_id} end),
         operations:[$operations[]|{id,instance_id,state,failure:(.failure // null|if .==null then null else {domain,code} end)}],
         host_acknowledgments:[$acks[]|{device_id:.fact.device_id,device_count:.fact.device_count}],

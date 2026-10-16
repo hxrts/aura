@@ -81,7 +81,25 @@ browser_receipt=$(printf '%s\n' "$browser_snapshot" |
   lan_private_receipt barbara-web ui_state browser-before-restart)
 jq -e '.operations[0].instance_id=="op-2" and
   .operations[0].failure=={domain:"transport",code:"unavailable"} and
-  .host_acknowledgments[0].device_count==2' "$browser_receipt" >/dev/null
+  .host_acknowledgments[0].device_count==2 and .tool_failure==null' "$browser_receipt" >/dev/null
+for case_name in structured unavailable timeout closed decode unknown; do
+  case "$case_name" in
+    structured) prefix='Playwright driver ui_state failed: Error: structured ui_state observation failed for instance barbara-web'; expected=browser_structured_observation_failed;;
+    unavailable) prefix='Playwright driver ui_state failed: Error: browser UI state unavailable for instance barbara-web'; expected=browser_ui_state_unavailable;;
+    timeout) prefix='Playwright driver ui_state timed out'; expected=browser_driver_timeout;;
+    closed) prefix='Playwright driver closed stdout while awaiting ui_state'; expected=browser_driver_closed;;
+    decode) prefix='failed to decode browser UiSnapshot'; expected=browser_snapshot_decode_failed;;
+    unknown) prefix='unexpected browser error'; expected=unclassified;;
+  esac
+  error_receipt=$(jq -cn --arg message "$prefix: $secret" '{status:"error",message:$message}' |
+    lan_private_receipt barbara-web ui_state "browser-error-$case_name")
+  jq -e --arg expected "$expected" '.status=="error" and
+    .tool_failure=={domain:"tool_api",code:$expected} and .operations==[] and
+    .host_acknowledgments==[]' "$error_receipt" >/dev/null
+  ! rg -Fq "$secret" "$error_receipt"
+done
+! printf '%s\n' '{"status":"error","message":{"secret":"private-enrollment-code-fixture"}}' |
+  lan_private_receipt barbara-web ui_state browser-error-malformed >/dev/null
 [[ $(stat -c '%a' "$browser_receipt" 2>/dev/null || stat -f '%Lp' "$browser_receipt") == 600 ]]
 ! printf '%s\n' "$browser_snapshot" | lan_private_receipt barbara-tui ui_state browser-as-tui >/dev/null
 ! printf '%s\n' "$browser_snapshot" | jq -c '.payload.runtime_events[0].id="tui-runtime-fact-forged"' |
