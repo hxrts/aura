@@ -77,6 +77,7 @@ executable="${executables[0]}"
   echo 'run-exact-fixtures: test executable outside selected target' >&2; exit 1;
 }
 aura_receipt_update --arg executable "$executable" '.artifacts.test_executable=$executable'
+expected_files=()
 for name in "${names[@]}"; do
   [[ "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || {
     echo 'run-exact-fixtures: source changed during batch' >&2; exit 1;
@@ -84,8 +85,17 @@ for name in "${names[@]}"; do
   expected="$(mktemp "$(dirname "$AURA_BUILD_RECEIPT")/expected.XXXXXX")"
   chmod 600 "$expected"
   printf '%s\n' "$name" > "$expected"
+  expected_files+=("$expected")
   bash "$repo_root/scripts/dev/build-phase.sh" discovery --expected-tests "$expected" -- \
     "$executable" "$name" --exact --list
+done
+# Missing later declarations must fail before any fixture can execute.
+for index in "${!names[@]}"; do
+  [[ "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || {
+    echo 'run-exact-fixtures: source changed during batch' >&2; exit 1;
+  }
+  name="${names[$index]}"
+  expected="${expected_files[$index]}"
   bash "$repo_root/scripts/dev/build-phase.sh" execution --expected-tests "$expected" -- \
     "$executable" "$name" --exact --format pretty --nocapture
 done

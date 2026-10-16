@@ -17,6 +17,9 @@ cat > "$project/target/debug/deps/fixture-test" <<'EOF'
 name="$1"
 if [[ "$*" == *--list* ]]; then
   [[ "${MISSING_NAME:-}" != "$name" ]] || exit 0
+  if [[ "${MUTATE_NAME:-}" == "$name" ]]; then
+    printf '\n# changed during discovery\n' >> "$PROJECT_ROOT/Cargo.toml"
+  fi
   printf '%s: test\n' "$name"
 elif [[ "${FAIL_NAME:-}" == "$name" ]]; then
   printf 'test %s ... FAILED\n' "$name"
@@ -46,7 +49,7 @@ run_exact > "$fixture/output"
 [[ "$(wc -l < "$COMPILE_COUNTER" | tr -d ' ')" == 1 ]]
 jq -e '.metadata.packages=="fixture" and .metadata.expected_count==2 and
   .metadata.test_inventory=="suite::one,suite::two" and
-  ([.phases[].phase]==["compile","discovery","execution","discovery","execution"]) and
+  ([.phases[].phase]==["compile","discovery","discovery","execution","execution"]) and
   ([.phases[] | select(.phase=="discovery" or .phase=="execution") |
     select(.inventory_result=="matched" and .expected_count==1 and .observed_count==1)] | length)==4 and
   .artifacts.test_executable!=null' "$AURA_BUILD_RECEIPT" >/dev/null
@@ -56,10 +59,20 @@ if bash "$repo_root/scripts/dev/run-exact-fixtures.sh" --inside --root "$project
 [[ "$(wc -l < "$COMPILE_COUNTER" | tr -d ' ')" == 1 ]]
 aura_receipt_init "$project" ownership-exact bash exact-fixtures
 if MISSING_NAME=suite::two run_exact > "$fixture/output" 2>&1; then exit 1; fi
-jq -e '[.phases[] | select(.phase=="discovery" and .inventory_result=="mismatch")] | length==1' \
+jq -e '([.phases[] | select(.phase=="discovery" and .inventory_result=="mismatch")] | length)==1 and
+  ([.phases[] | select(.phase=="execution")] | length)==0' \
   "$AURA_BUILD_RECEIPT" >/dev/null
 aura_receipt_init "$project" ownership-exact bash exact-fixtures
 if FAIL_NAME=suite::one run_exact > "$fixture/output" 2>&1; then exit 1; fi
-jq -e '[.phases[] | select(.phase=="execution" and .failed_count==1)] | length==1' \
+jq -e '([.phases[] | select(.phase=="execution" and .failed_count==1)] | length)==1 and
+  ([.phases[] | select(.phase=="discovery" and .inventory_result=="matched")] | length)==2 and
+  ([.phases[].phase]==["compile","discovery","discovery","execution"])' \
   "$AURA_BUILD_RECEIPT" >/dev/null
+cp "$project/Cargo.toml" "$fixture/original-Cargo.toml"
+aura_receipt_init "$project" ownership-exact bash exact-fixtures
+if MUTATE_NAME=suite::one run_exact > "$fixture/output" 2>&1; then exit 1; fi
+jq -e '([.phases[] | select(.phase=="discovery")] | length)==1 and
+  ([.phases[] | select(.phase=="execution")] | length)==0' \
+  "$AURA_BUILD_RECEIPT" >/dev/null
+cp "$fixture/original-Cargo.toml" "$project/Cargo.toml"
 echo 'exact fixtures: one compile, declared inventory, exact discovery/execution, duplicate/missing/failure refusal passed'
