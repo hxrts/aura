@@ -1139,6 +1139,14 @@ that protected artifact locally to correct the exact schema mismatch; never
 copy its contents into a shared checklist log or infer operation completion
 from the broker ACK alone. Browser accepted runtime events carry canonical
 `runtime-event-<sequence>` string IDs.
+For a valid failed original approval operation, the paired checklist passes
+its exact operation instance to `lan_private_receipt`. That helper keeps the
+full response only as a `0600` private failure artifact, plus a separate
+custody receipt naming the candidate source revision, committed tooling
+revision and helper digest, run token, instance, method, and operation. The
+ordinary receipt still contains only the typed domain/code. A failed foreign
+operation is refused; a valid failure response is diagnostic evidence, not a
+complete replay bundle or host acknowledgment.
 
 For a local process-boundary diagnostic, run
 `scripts/harness/lan/single-host-enrollment.sh <fresh-token> <clean-peer-checkout>`
@@ -1277,12 +1285,14 @@ complete JSON request on stdin through `lib.sh`'s `req_private <instance>`;
 the selected driver verifies its REPL owner and forwards the request over that
 owner's `0600` Unix socket. The private response returns on the same socket,
 outside `repl.out` and the general scenario evidence. Keep it in process
-memory, and pass it on stdin to `lan_private_receipt <instance> <method> <label>`.
+memory, and pass it on stdin to `lan_private_receipt <instance> <method> <label>`
+(with the expected operation instance for an original approval wait).
 That helper writes one owner-only `0600` file per label and refuses an existing
 file or symlink. It validates and retains only exact operation instance/state,
 typed failure domain/code, host acknowledgment, and readiness; free-text
 diagnostics, codes, screen names, and device-list IDs are omitted. Do not print
-or save the raw response.
+the raw response or store it outside the owner-only failure custody described
+above.
 For a ToolApi error, the same receipt records an allowlisted `tool_failure`
 domain/code (including browser UI observation unavailability), or
 `unclassified` for an unknown message. The original free-text error and browser

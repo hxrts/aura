@@ -78,7 +78,14 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   run directory alongside a separate redacted validation category. Those
   private artifacts never enter the shared checklist result, REPL output, URL,
   or command arguments and require protected handling during diagnosis. A
-  response over 1 MiB is always refused: the helper retains only a clearly
+  valid failed original enrollment operation is also retained once as a
+  `0600` raw response with a separate custody receipt binding the exact
+  operation, run, instance, method, candidate revision, and verified tooling
+  bundle revision/digest. The ordinary receipt still omits free-text detail;
+  an unrelated failed operation cannot be substituted for the original.
+  That response is diagnostic evidence, not a replay bundle or proof of a
+  successful host write. A response over 1 MiB is always refused: the helper
+  retains only a clearly
   truncated, owner-only 1 MiB prefix and a redacted `response_too_large`
   category bound to the run and method. It never parses that prefix as success.
   Reopen still requires a fresh

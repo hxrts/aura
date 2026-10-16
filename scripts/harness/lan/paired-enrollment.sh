@@ -39,14 +39,14 @@ jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "
 }
 
 private_exchange() { # instance method receipt-label < single request JSON
-  local instance=$1 method=$2 label=$3 transport_timeout=${4:-90}
+  local instance=$1 method=$2 label=$3 transport_timeout=${4:-90} expected_operation=${5:-}
   [[ "$method" != wait_for_ui_snapshot_event || $# -ge 4 ]] || transport_timeout=300
   [[ "$transport_timeout" =~ ^[1-9][0-9]{0,2}$ && "$transport_timeout" -le 300 ]] || return 2
   PRIVATE_RESPONSE=$(req_private "$instance" "$transport_timeout") || {
     echo "private $method transport failed for $instance" >&2; return 1;
   }
   PRIVATE_RECEIPT=$(printf '%s\n' "$PRIVATE_RESPONSE" |
-    lan_private_receipt "$instance" "$method" "$label") || {
+    lan_private_receipt "$instance" "$method" "$label" "$expected_operation") || {
     echo "private $method receipt validation failed for $instance" >&2; return 1;
   }
   if ! jq -e '.status=="ok"' <<< "$PRIVATE_RESPONSE" >/dev/null; then
@@ -68,7 +68,7 @@ private_wait() { # instance label predicate jq program, expected operation and d
     counter=$((counter + 1))
     request=$(jq -cn --argjson after "$after" --argjson timeout "$((remaining * 1000))" \
       '{method:"wait_for_ui_snapshot_event",params:{after_version:$after,timeout_ms:$timeout}}') || return
-    private_exchange "$instance" wait_for_ui_snapshot_event "$label-$counter" <<< "$request" || return
+    private_exchange "$instance" wait_for_ui_snapshot_event "$label-$counter" 300 "$expected" <<< "$request" || return
     response=$PRIVATE_RESPONSE
     jq -e '.payload.event.snapshot != null and (.payload.event.version|type=="number")' \
       <<< "$response" >/dev/null || return 1
