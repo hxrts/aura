@@ -504,6 +504,7 @@ ci-build-cache-policy:
     bash scripts/dev/test-cold-cache-store.sh
     bash scripts/dev/test-run-exact-fixtures.sh
     bash scripts/dev/test-run-ownership-fast.sh
+    bash scripts/dev/test-policy-dependencies.sh
     bash scripts/dev/test-arch-lane-dispatch.sh
     bash scripts/dev/test-cargo-in-nix.sh
     bash scripts/dev/test-cargo-incremental-default.sh
@@ -825,6 +826,11 @@ ci-ownership-policy:
 # Fast source-scoped lint preflight; full ci-ownership-policy remains the checkpoint gate.
 ci-ownership-fast *FILES:
     bash scripts/dev/run-ownership-fast.sh {{ FILES }}
+
+# Compile toolkit policy owner and execute the selected static check in
+# separate guarded receipts. This does not replace ci-ownership-policy.
+ci-policy-static CHECK:
+    bash scripts/dev/run-policy-static.sh {{ CHECK }}
 
 # One compile and exact discovery/execution of a declared libtest inventory.
 ci-ownership-exact *FLAGS:

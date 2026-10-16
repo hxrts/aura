@@ -2328,9 +2328,19 @@ Acquisition waits at most 900 seconds in compile-fail suites. A timeout retains 
 `just ci-ownership-policy` executes the app/agent compile-fail suites, explicitly enabled signals compile-fail suite and native process-lock integration regression sequentially. Required suites fail when Cargo is unavailable or returns an unsuccessful version status; a signals-disabled build contains no pretend passing guard. The fs2 implementation is pinned to 0.4.3 and uses pre-MSRV descriptor APIs; Windows and Unix use their native process-scoped locks.
 
 For an iteration on a few Rust files, `just ci-ownership-fast
-crates/aura-agent/src/path.rs` compiles the ownership lint once and runs six
-source-scoped ownership modes against the named crate files. This is a fast
-preflight; `just ci-ownership-policy` remains the integration gate. For exact
+crates/aura-agent/src/path.rs` compiles the ownership lint once in a guarded
+`ownership-lint-compile` receipt, then runs six source-scoped modes in a
+separate guarded `ownership-lint-exec` receipt. The execution receipt names the
+original compile receipt and verifies its successful terminal result, source
+scope, tool identity, and binary hash. If execution admission is refused, keep
+that compile receipt and resume with
+`bash scripts/dev/run-ownership-fast.sh --compile-receipt /absolute/receipt.json crates/aura-agent/src/path.rs`
+on the same source and binary; a changed dependency refuses reuse. For the
+browser driver contract's static policy check, `just ci-policy-static
+browser-driver-contract-sync` similarly separates toolkit compilation from the
+selected typed check and records its three canonical Rust/TS inputs. These
+preflights do not replace `just ci-ownership-policy`; an integrated checkpoint
+must retain a successful full-source aggregate receipt. For exact
 native fixtures, use `just ci-ownership-exact --package hxrts-aura-agent
 --lib --expected-count 2 --name module::first --name module::second` (or
 `--test <binary>`). The driver requires the declared count and distinct exact

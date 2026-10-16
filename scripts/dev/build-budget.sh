@@ -155,7 +155,15 @@ estimate_incoming_growth() {
   # Older runs recorded the same peaks only in builds.tsv. A same-lane command
   # that failed before linking measured only its partial growth, so it cannot
   # displace a larger recent profile/target peak from a completed run.
-  if [[ -f "$legacy_log" && ! -L "$legacy_log" ]]; then
+  # These new policy workloads have separate compile and execution receipts.
+  # A profile-only legacy row may describe a much larger unrelated build;
+  # retain the conservative cold-start fallback until this exact lane has a
+  # measured peak, rather than importing that row as execution growth.
+  case "$lane" in
+    ownership-lint-compile|ownership-lint-exec|policy-toolkit-compile|policy-static-exec)
+      legacy_log='' ;;
+  esac
+  if [[ -n "$legacy_log" && -f "$legacy_log" && ! -L "$legacy_log" ]]; then
     measured="$(awk -F '\t' -v profile="$profile" -v triple="$target_triple" '
       NR>1 && $4==profile && $5==triple && $12~/^[0-9]+$/ && $13~/^[0-9]+$/ &&
       $14~/^[0-9]+$/ && $15~/^[0-9]+$/ {

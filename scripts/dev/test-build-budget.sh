@@ -665,6 +665,23 @@ printf 'start\tfinish\tother-native\tunlabelled\t%s\tunlabelled\t8\t15\t5\t20971
 expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 3145728'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==3145728' "$receipt" >/dev/null
+
+# New policy execution lanes must not inherit a legacy profile/triple peak
+# from unrelated compilation. They start with the existing conservative 4 GiB
+# fallback, then their own measured receipt plus the 1 GiB sampling margin.
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane policy-static-exec --no-prune -- \
+  sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$(cat "$1")" = 4194304'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.incoming_reservation_kib==4194304' "$receipt" >/dev/null
+mkdir -p "$project/artifacts/disk-budget/receipts/run.policy-peak"
+printf '{"root":"%s","lane":"policy-static-exec","command_exit_status":0,"disk":{"measured_growth_kib":524288}}\n' \
+  "$project" > "$project/artifacts/disk-budget/receipts/run.policy-peak/receipt.json"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane policy-static-exec --no-prune -- \
+  sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$(cat "$1")" = 1572864'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.incoming_reservation_kib==1572864' "$receipt" >/dev/null
 mkdir -p "$project/artifacts/disk-budget/receipts/run.failed-before-link"
 printf '{"root":"%s","lane":"test","command_exit_status":101,"disk":{"measured_growth_kib":31748}}\n' \
   "$project" > "$project/artifacts/disk-budget/receipts/run.failed-before-link/receipt.json"
