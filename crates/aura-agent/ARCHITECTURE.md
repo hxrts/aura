@@ -62,6 +62,17 @@ its exact provisional authority/device. Persisted setup replay suppression and
 acceptance-verifier binding remain required before full trust migration is
 complete; replacing the issuance parameter alone does not prove those contracts.
 
+For quorum issuance, the original approved signing intent now remains the
+argument to issuer return-registration retention. Its completed four-domain
+signature is stored with the selected runtime, original manifest digest and
+exact registration bytes in one private, move-only publication owner. The live
+broker publication consumes that owner and requires same runtime, issued digest
+and secure readback bytes; K1 follows its existing separately signed owned
+manifest path. This is provenance retention, not a protected V3 birth writer:
+the L3 record gate and signed baseline/setup verifier still lack a shared
+unforgeable provider-bound proof. Credential publication precedes signing and
+cannot acquire a later registration birth.
+
 ## Key Modules
 
 Required reactive publications, including startup replay, flush the ordered
