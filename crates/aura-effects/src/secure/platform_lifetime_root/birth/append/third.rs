@@ -4,7 +4,7 @@ use super::*;
 
 const THIRD_ROSTER_FILE: &str = "platform_lifetime/third-roster.v8";
 mod fourth;
-mod lifecycle;
+pub(in crate::secure::platform_lifetime_root::birth) mod lifecycle;
 
 #[cfg(test)]
 pub(super) fn cleanup_fixture(service: &str, id: &[u8; 32]) {
@@ -371,13 +371,67 @@ fn recover(
 /// Opaque custody of the original three-entry roster. The original profile
 /// lease remains retained through interrupted third-entry transitions.
 #[allow(dead_code)]
-pub(super) struct PlatformThreeRosterAdmission {
+pub(in crate::secure::platform_lifetime_root::birth) struct PlatformThreeRosterAdmission {
     root: [u8; 32],
     allocations: [[u8; 32]; 3],
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
 
-fn verify_owner(
+pub(super) async fn owned_references(
+    owned: &ProfileOwnedSecureStorage,
+    three: &PlatformThreeRosterAdmission,
+) -> Result<Vec<aura_core::effects::secret_lifetime::SecretAllocationReference>, AuraError> {
+    use aura_core::effects::secret_lifetime::SecretAllocationReference;
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, claim, scope) = verify_owner(owned, selected, three)?;
+    Ok(vec![
+        SecretAllocationReference {
+            allocation: root.birth_id,
+            scope: root.first_scope,
+        },
+        SecretAllocationReference {
+            allocation: claim.allocation,
+            scope: root.second_scope,
+        },
+        SecretAllocationReference {
+            allocation: root.third_id,
+            scope,
+        },
+    ])
+}
+
+pub(super) async fn owned_state(
+    owned: &ProfileOwnedSecureStorage,
+    three: &PlatformThreeRosterAdmission,
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    use aura_core::effects::secret_lifetime::SecretLifetimeState;
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, _, _) = verify_owner(owned, selected, three)?;
+    if root.third_phase == THIRD_DECISION_PENDING {
+        return Err(invalid("platform third decision is not acknowledged"));
+    }
+    let Some(record) = lifecycle::decision_record(selected, &root)? else {
+        return Ok(SecretLifetimeState::Live);
+    };
+    match record.kind {
+        decision::POSITIVE => Ok(SecretLifetimeState::Positive {
+            decision: record.bytes.to_vec(),
+        }),
+        decision::NEGATIVE if root.third_phase == THIRD_ERASURE_COMPLETE => {
+            Ok(SecretLifetimeState::Retired {
+                decision: record.bytes.to_vec(),
+            })
+        }
+        decision::NEGATIVE => Ok(SecretLifetimeState::Negative {
+            decision: record.bytes.to_vec(),
+        }),
+        _ => Err(invalid("platform third decision kind is invalid")),
+    }
+}
+
+pub(super) fn verify_owner(
     owned: &ProfileOwnedSecureStorage,
     selected: &PlatformSecureStorageHandler,
     three: &PlatformThreeRosterAdmission,
@@ -423,7 +477,7 @@ pub(super) async fn promote_after_third(
     result.map_err(|error| (error, two))
 }
 
-async fn promote_borrowed(
+pub(super) async fn promote_borrowed(
     owned: &ProfileOwnedSecureStorage,
     two: &PlatformRosterAdmission,
 ) -> Result<PlatformThreeRosterAdmission, AuraError> {

@@ -307,19 +307,42 @@ pub(super) async fn decide_roster(
     positive: bool,
     bytes: &[u8],
 ) -> Result<(), AuraError> {
-    decide_roster_inner(owned, roster, positive, bytes, StopAfter::Never).await
+    decide_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Two(roster),
+        positive,
+        bytes,
+        StopAfter::Never,
+    )
+    .await
+}
+
+pub(super) async fn decide_three(
+    owned: &ProfileOwnedSecureStorage,
+    three: &append::third::PlatformThreeRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Three(three),
+        positive,
+        bytes,
+        StopAfter::Never,
+    )
+    .await
 }
 
 async fn decide_roster_inner(
     owned: &ProfileOwnedSecureStorage,
-    roster: &append::PlatformRosterAdmission,
+    roster: append::OriginalRosterOwner<'_>,
     positive: bool,
     bytes: &[u8],
     stop: StopAfter,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let root = append::verify_roster_owner(owned, selected, roster)?;
+    let (root, _) = append::verify_original_roster(owned, selected, roster)?;
     decide_locked(owned, selected, root, positive, bytes, stop)
 }
 
@@ -736,9 +759,15 @@ mod tests {
             let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
                 unreachable!()
             };
-            assert!(decide_roster_inner(owned, &roster, false, b"refusal", stop)
-                .await
-                .is_err());
+            assert!(decide_roster_inner(
+                owned,
+                append::OriginalRosterOwner::Two(&roster),
+                false,
+                b"refusal",
+                stop
+            )
+            .await
+            .is_err());
             drop(roster);
             drop(selected);
             let reopened = fixture.selected()?;

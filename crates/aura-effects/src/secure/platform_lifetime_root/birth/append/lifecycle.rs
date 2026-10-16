@@ -129,12 +129,35 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn decide(
     positive: bool,
     bytes: &[u8],
 ) -> Result<(), AuraError> {
-    decide_inner(owned, roster, positive, bytes, DecisionStop::Never).await
+    decide_inner(
+        owned,
+        OriginalRosterOwner::Two(roster),
+        positive,
+        bytes,
+        DecisionStop::Never,
+    )
+    .await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide_three(
+    owned: &ProfileOwnedSecureStorage,
+    three: &super::third::PlatformThreeRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_inner(
+        owned,
+        OriginalRosterOwner::Three(three),
+        positive,
+        bytes,
+        DecisionStop::Never,
+    )
+    .await
 }
 
 async fn decide_inner(
     owned: &ProfileOwnedSecureStorage,
-    roster: &PlatformRosterAdmission,
+    roster: OriginalRosterOwner<'_>,
     positive: bool,
     bytes: &[u8],
     stop: DecisionStop,
@@ -144,8 +167,8 @@ async fn decide_inner(
     }
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let mut root = read_root(owned, selected)?;
-    let claim = bound_claim(owned, selected, &root, roster)?;
+    let root = read_root(owned, selected)?;
+    let (mut root, claim) = super::bound_original_state(owned, selected, root, roster)?;
     if root.second_phase < SECOND_ERASURE_PENDING {
         super::replay(owned, selected, &root, &claim, StopAfter::Never)?;
     }
@@ -336,19 +359,39 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_negati
     roster: &PlatformRosterAdmission,
     exact_decision: &[u8],
 ) -> Result<(), AuraError> {
-    deny_inner(owned, roster, exact_decision, DenialStop::Never).await
+    deny_inner(
+        owned,
+        OriginalRosterOwner::Two(roster),
+        exact_decision,
+        DenialStop::Never,
+    )
+    .await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_three(
+    owned: &ProfileOwnedSecureStorage,
+    three: &super::third::PlatformThreeRosterAdmission,
+    exact_decision: &[u8],
+) -> Result<(), AuraError> {
+    deny_inner(
+        owned,
+        OriginalRosterOwner::Three(three),
+        exact_decision,
+        DenialStop::Never,
+    )
+    .await
 }
 
 async fn deny_inner(
     owned: &ProfileOwnedSecureStorage,
-    roster: &PlatformRosterAdmission,
+    roster: OriginalRosterOwner<'_>,
     exact_decision: &[u8],
     stop: DenialStop,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let mut root = read_root(owned, selected)?;
-    let claim = bound_claim(owned, selected, &root, roster)?;
+    let root = read_root(owned, selected)?;
+    let (mut root, claim) = super::bound_original_state(owned, selected, root, roster)?;
     if root.second_phase < SECOND_ERASURE_PENDING {
         super::replay(owned, selected, &root, &claim, StopAfter::Never)?;
     }
@@ -474,18 +517,25 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn erase(
     owned: &ProfileOwnedSecureStorage,
     roster: &PlatformRosterAdmission,
 ) -> Result<(), AuraError> {
-    erase_inner(owned, roster, ErasureStop::Never).await
+    erase_inner(owned, OriginalRosterOwner::Two(roster), ErasureStop::Never).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_three(
+    owned: &ProfileOwnedSecureStorage,
+    three: &super::third::PlatformThreeRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_inner(owned, OriginalRosterOwner::Three(three), ErasureStop::Never).await
 }
 
 async fn erase_inner(
     owned: &ProfileOwnedSecureStorage,
-    roster: &PlatformRosterAdmission,
+    roster: OriginalRosterOwner<'_>,
     stop: ErasureStop,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let mut root = read_root(owned, selected)?;
-    let claim = bound_claim(owned, selected, &root, roster)?;
+    let root = read_root(owned, selected)?;
+    let (mut root, claim) = super::bound_original_state(owned, selected, root, roster)?;
     if root.second_phase < SECOND_ERASURE_PENDING {
         super::replay(owned, selected, &root, &claim, StopAfter::Never)?;
     }
@@ -563,10 +613,24 @@ pub(super) async fn read_live_secret(
     owned: &ProfileOwnedSecureStorage,
     roster: &PlatformRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_secret(owned, OriginalRosterOwner::Two(roster)).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_three_secret(
+    owned: &ProfileOwnedSecureStorage,
+    three: &super::third::PlatformThreeRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_secret(owned, OriginalRosterOwner::Three(three)).await
+}
+
+async fn read_owned_secret(
+    owned: &ProfileOwnedSecureStorage,
+    roster: OriginalRosterOwner<'_>,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let mut root = read_root(owned, selected)?;
-    let claim = bound_claim(owned, selected, &root, roster)?;
+    let root = read_root(owned, selected)?;
+    let (mut root, claim) = super::bound_original_state(owned, selected, root, roster)?;
     recover(owned, selected, &mut root, &claim)?;
     if root.second_phase >= SECOND_TOMBSTONE_PENDING {
         return Err(invalid(
@@ -734,9 +798,15 @@ mod tests {
             let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
                 unreachable!()
             };
-            assert!(decide_inner(owned, &roster, false, b"refusal", stop)
-                .await
-                .is_err());
+            assert!(decide_inner(
+                owned,
+                OriginalRosterOwner::Two(&roster),
+                false,
+                b"refusal",
+                stop
+            )
+            .await
+            .is_err());
             drop(roster);
             drop(selected);
             let reopened = fixture.selected()?;
@@ -773,7 +843,11 @@ mod tests {
                 unreachable!()
             };
             decide(owned, &roster, false, b"refusal").await?;
-            assert!(deny_inner(owned, &roster, b"refusal", stop).await.is_err());
+            assert!(
+                deny_inner(owned, OriginalRosterOwner::Two(&roster), b"refusal", stop)
+                    .await
+                    .is_err()
+            );
             drop(roster);
             drop(selected);
             let reopened = fixture.selected()?;
@@ -798,7 +872,9 @@ mod tests {
             };
             decide(owned, &roster, false, b"refusal").await?;
             acknowledge_negative(owned, &roster, b"refusal").await?;
-            assert!(erase_inner(owned, &roster, stop).await.is_err());
+            assert!(erase_inner(owned, OriginalRosterOwner::Two(&roster), stop)
+                .await
+                .is_err());
             drop(roster);
             drop(selected);
             let reopened = fixture.selected()?;

@@ -62,7 +62,7 @@ fn publish_marker(
     staged.acknowledge().map_err(io)
 }
 
-fn decision_record(
+pub(super) fn decision_record(
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,
 ) -> Result<Option<DecisionRecord>, AuraError> {
@@ -121,7 +121,7 @@ enum DecisionStop {
 }
 
 #[allow(dead_code)]
-pub(super) async fn decide(
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
     positive: bool,
@@ -280,7 +280,7 @@ enum DenialStop {
 }
 
 #[allow(dead_code)]
-pub(super) async fn acknowledge_negative(
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_negative(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
     exact_decision: &[u8],
@@ -407,7 +407,7 @@ fn finish_erasure(
 }
 
 #[allow(dead_code)]
-pub(super) async fn erase(
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
 ) -> Result<(), AuraError> {
@@ -477,7 +477,7 @@ pub(super) fn recover(
 }
 
 #[allow(dead_code)]
-pub(super) async fn read_live_secret(
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_live_secret(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {

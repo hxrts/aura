@@ -17,7 +17,52 @@ const INTENT_PREFIX: &str = "allocation-lifetime-birth-intent:v2:";
 const RECORD_PREFIX: &str = "allocation-lifetime-birth-record:v2:";
 const CLAIM_LEN: usize = CLAIM_MAGIC.len() + 32 * 5;
 pub(super) mod lifecycle;
-mod third;
+pub(in crate::secure::platform_lifetime_root::birth) mod third;
+
+/// Exactly one authenticated roster owner. A two-entry token cannot authorize
+/// a transition after the third birth has been anchored in the root.
+#[derive(Clone, Copy)]
+pub(in crate::secure::platform_lifetime_root::birth) enum OriginalRosterOwner<'a> {
+    Two(&'a PlatformRosterAdmission),
+    Three(&'a third::PlatformThreeRosterAdmission),
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn append_third_owned(
+    owned: &ProfileOwnedSecureStorage,
+    two: &PlatformRosterAdmission,
+    scope: &[u8],
+    secret: &[u8],
+) -> Result<third::PlatformThreeRosterAdmission, AuraError> {
+    third::append_third(owned, two, scope, secret).await?;
+    third::promote_borrowed(owned, two).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn recover_third_owned(
+    owned: &ProfileOwnedSecureStorage,
+) -> Result<third::PlatformThreeRosterAdmission, AuraError> {
+    third::recover_three_roster(owned).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn promote_third_owned(
+    owned: &ProfileOwnedSecureStorage,
+    two: &PlatformRosterAdmission,
+) -> Result<third::PlatformThreeRosterAdmission, AuraError> {
+    third::promote_borrowed(owned, two).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn third_references(
+    owned: &ProfileOwnedSecureStorage,
+    three: &third::PlatformThreeRosterAdmission,
+) -> Result<Vec<aura_core::effects::secret_lifetime::SecretAllocationReference>, AuraError> {
+    third::owned_references(owned, three).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn third_state(
+    owned: &ProfileOwnedSecureStorage,
+    three: &third::PlatformThreeRosterAdmission,
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    third::owned_state(owned, three).await
+}
 
 #[cfg(test)]
 pub(super) fn cleanup_third_fixture(service: &str, id: &[u8; 32]) {
@@ -493,6 +538,45 @@ pub(super) fn verify_roster_owner(
         return Err(invalid("platform whole roster marker is missing"));
     }
     Ok(root)
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) fn verify_original_roster(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    owner: OriginalRosterOwner<'_>,
+) -> Result<(RootRecord, Claim), AuraError> {
+    match owner {
+        OriginalRosterOwner::Two(two) => {
+            let root = verify_roster_owner(owned, selected, two)?;
+            let claim = lifecycle::bound_claim(owned, selected, &root, two)?;
+            Ok((root, claim))
+        }
+        OriginalRosterOwner::Three(three) => {
+            let (root, claim, _) = third::verify_owner(owned, selected, three)?;
+            Ok((root, claim))
+        }
+    }
+}
+
+pub(super) fn bound_original_state(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    root: RootRecord,
+    owner: OriginalRosterOwner<'_>,
+) -> Result<(RootRecord, Claim), AuraError> {
+    match owner {
+        OriginalRosterOwner::Two(two) => {
+            let claim = lifecycle::bound_claim(owned, selected, &root, two)?;
+            Ok((root, claim))
+        }
+        OriginalRosterOwner::Three(three) => {
+            let (verified, claim, _) = third::verify_owner(owned, selected, three)?;
+            if verified.id != root.id {
+                return Err(invalid("platform roster root changed under original owner"));
+            }
+            Ok((verified, claim))
+        }
+    }
 }
 
 fn validate_complete_roster(

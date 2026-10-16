@@ -214,18 +214,38 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_roster
     roster: &append::PlatformRosterAdmission,
     negative_decision: &[u8],
 ) -> Result<(), AuraError> {
-    acknowledge_roster_inner(owned, roster, negative_decision, StopAfter::Never).await
+    acknowledge_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Two(roster),
+        negative_decision,
+        StopAfter::Never,
+    )
+    .await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_three(
+    owned: &ProfileOwnedSecureStorage,
+    three: &append::third::PlatformThreeRosterAdmission,
+    negative_decision: &[u8],
+) -> Result<(), AuraError> {
+    acknowledge_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Three(three),
+        negative_decision,
+        StopAfter::Never,
+    )
+    .await
 }
 
 async fn acknowledge_roster_inner(
     owned: &ProfileOwnedSecureStorage,
-    roster: &append::PlatformRosterAdmission,
+    roster: append::OriginalRosterOwner<'_>,
     negative_decision: &[u8],
     stop: StopAfter,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let root = append::verify_roster_owner(owned, selected, roster)?;
+    let (root, _) = append::verify_original_roster(owned, selected, roster)?;
     acknowledge_locked(owned, selected, root, negative_decision, stop)
 }
 
@@ -364,11 +384,14 @@ mod tests {
             let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
                 unreachable!()
             };
-            assert!(
-                acknowledge_roster_inner(owned, &roster, b"first refusal", stop)
-                    .await
-                    .is_err()
-            );
+            assert!(acknowledge_roster_inner(
+                owned,
+                append::OriginalRosterOwner::Two(&roster),
+                b"first refusal",
+                stop
+            )
+            .await
+            .is_err());
             drop(roster);
             drop(selected);
             let reopened = fixture.selected()?;

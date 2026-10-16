@@ -623,9 +623,23 @@ async fn read_roster_first_secret(
     owned: &ProfileOwnedSecureStorage,
     roster: &append::PlatformRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_first_secret(owned, append::OriginalRosterOwner::Two(roster)).await
+}
+
+async fn read_three_first_secret(
+    owned: &ProfileOwnedSecureStorage,
+    three: &append::third::PlatformThreeRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_first_secret(owned, append::OriginalRosterOwner::Three(three)).await
+}
+
+async fn read_owned_first_secret(
+    owned: &ProfileOwnedSecureStorage,
+    roster: append::OriginalRosterOwner<'_>,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let root = append::verify_roster_owner(owned, selected, roster)?;
+    let (root, _) = append::verify_original_roster(owned, selected, roster)?;
     if matches!(root.phase, ERASURE_PENDING | ERASURE_COMPLETE) {
         return Err(invalid("platform first roster read denied by erasure"));
     }

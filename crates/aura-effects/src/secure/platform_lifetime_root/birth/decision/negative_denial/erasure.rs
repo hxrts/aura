@@ -123,17 +123,34 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn erase_roster(
     owned: &ProfileOwnedSecureStorage,
     roster: &append::PlatformRosterAdmission,
 ) -> Result<(), AuraError> {
-    erase_roster_inner(owned, roster, StopAfter::Never).await
+    erase_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Two(roster),
+        StopAfter::Never,
+    )
+    .await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_three(
+    owned: &ProfileOwnedSecureStorage,
+    three: &append::third::PlatformThreeRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Three(three),
+        StopAfter::Never,
+    )
+    .await
 }
 
 async fn erase_roster_inner(
     owned: &ProfileOwnedSecureStorage,
-    roster: &append::PlatformRosterAdmission,
+    roster: append::OriginalRosterOwner<'_>,
     stop: StopAfter,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let root = append::verify_roster_owner(owned, selected, roster)?;
+    let (root, _) = append::verify_original_roster(owned, selected, roster)?;
     erase_locked(owned, selected, root, stop)
 }
 
@@ -244,7 +261,11 @@ mod tests {
                 unreachable!()
             };
             acknowledge_roster(owned, &roster, b"first refusal").await?;
-            assert!(erase_roster_inner(owned, &roster, stop).await.is_err());
+            assert!(
+                erase_roster_inner(owned, append::OriginalRosterOwner::Two(&roster), stop)
+                    .await
+                    .is_err()
+            );
             drop(roster);
             drop(selected);
             let reopened = fixture.selected()?;
