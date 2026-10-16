@@ -583,7 +583,18 @@ fn validate_four(
     root: &mut RootRecord,
 ) -> Result<(Entry, [u8; 32]), AuraError> {
     let (claim, scope) = prior(owned, selected, root)?;
-    replay(owned, selected, root, &claim, &scope, StopAfter::Never)?;
+    // Before generic custody is claimed, the fourth writer still owns its
+    // selected credential. After transfer, a root-anchored generic erasure may
+    // already have deleted it; the authenticated generic manifest must be
+    // checked before requiring any fourth credential again.
+    if matches!(root.generic_phase, GENERIC_UNCLAIMED | GENERIC_INIT_PENDING) {
+        replay(owned, selected, root, &claim, &scope, StopAfter::Never)?;
+    } else if !matches!(
+        root.tail_phase,
+        TAIL_APPEND_COMPLETE | TAIL_DECISION_COMPLETE | TAIL_ERASURE_COMPLETE
+    ) {
+        return Err(invalid("platform fourth genesis was unsettled at transfer"));
+    }
     super::lifecycle::recover(owned, selected, root)?;
     let fourth = original_four(owned, root)?.remove(0);
     if fourth.phase == DECIDED {
@@ -613,15 +624,54 @@ fn read_current(
         root.generic_current_digest,
     )?;
     let entries = read_all(owned, root, &manifest)?;
-    if entries.len() != count - 3
-        || entries.iter().find(|entry| entry.id == fourth.id) != Some(fourth)
-    {
+    if entries.len() != count - 3 {
         return Err(invalid(
             "platform generic roster lost original fourth proof",
         ));
     }
-    for entry in entries.iter().filter(|entry| entry.id != fourth.id) {
-        lifecycle::validate_entry(selected, root, entry)?;
+    let current_fourth = entries
+        .iter()
+        .find(|entry| entry.id == fourth.id)
+        .ok_or_else(|| invalid("platform generic roster lost original fourth proof"))?;
+    if current_fourth.birth_digest != fourth.birth_digest
+        || current_fourth.scope != fourth.scope
+        || current_fourth.phase < fourth.phase
+        || (fourth.phase >= DECIDED && current_fourth.decision_digest != fourth.decision_digest)
+        || (fourth.phase == ERASED && current_fourth != fourth)
+    {
+        return Err(invalid(
+            "platform generic roster changed original fourth genesis",
+        ));
+    }
+    if current_fourth != fourth
+        && fourth.phase == DECIDED
+        && super::lifecycle::decision_record(selected, root)?
+            .is_none_or(|decision| decision.kind != super::super::super::super::decision::NEGATIVE)
+    {
+        return Err(invalid(
+            "platform generic fourth transition follows a positive decision",
+        ));
+    }
+    for entry in &entries {
+        if entry == fourth {
+            // The unchanged fourth entry is still governed by its original
+            // writer, including the selected birth credentials and markers.
+            let mut observed = root.clone();
+            let (claim, scope) = prior(owned, selected, &mut observed)?;
+            replay(
+                owned,
+                selected,
+                &mut observed,
+                &claim,
+                &scope,
+                StopAfter::Never,
+            )?;
+            if entry.phase != ERASED {
+                lifecycle::validate_entry(selected, root, entry)?;
+            }
+        } else {
+            lifecycle::validate_entry(selected, root, entry)?;
+        }
     }
     if root.generic_phase == GENERIC_ACTIVE
         && (root.generic_revision as usize) < MAX_GENERIC_REVISION
@@ -1074,6 +1124,202 @@ mod tests {
         };
         let generic = initialize(owned, four).await.map_err(|(error, _)| error)?;
         Ok((storage, generic))
+    }
+
+    #[tokio::test]
+    async fn generic_fourth_transfer_decision_and_reopen_preserve_original_lease() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, four) = super::super::lifecycle::tests::first_four(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let owner = initialize_borrowed(owned, &four, Stop::Never).await?;
+        let (selected, _) = selected_owner(owned)?;
+        let id = read_root(owned, selected)?.tail_next_id;
+        assert!(super::super::verify_four_prior(owned, selected, &four).is_err());
+        lifecycle::decide(owned, &owner, &id, true, b"fourth approval").await?;
+        assert_eq!(&**read_live(owned, &owner, &id).await?, b"fourth secret");
+        let fifth = append(owned, &owner, b"fifth scope", b"fifth secret").await?;
+        drop(four);
+        drop(owner);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let recovered = recover_generic(owned).await?;
+        assert_eq!(
+            &**read_live(owned, &recovered, &id).await?,
+            b"fourth secret"
+        );
+        assert_eq!(
+            &**read_live(owned, &recovered, &fifth).await?,
+            b"fifth secret"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_fourth_denial_and_erasure_reopen_under_original_scope() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, owner) = initial(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let (selected, _) = selected_owner(owned)?;
+        let id = read_root(owned, selected)?.tail_next_id;
+        lifecycle::decide(owned, &owner, &id, false, b"fourth denial").await?;
+        lifecycle::acknowledge_negative(owned, &owner, &id, b"fourth denial").await?;
+        assert!(read_live(owned, &owner, &id).await.is_err());
+        lifecycle::erase(owned, &owner, &id).await?;
+        assert!(read_entry(selected, &user(INTENT_PREFIX, &id))?.is_none());
+        assert!(read_entry(selected, &user(RECORD_PREFIX, &id))?.is_none());
+        drop(owner);
+        drop(storage);
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let recovered = recover_generic(owned).await?;
+        let (selected, _) = selected_owner(owned)?;
+        let root = read_root(owned, selected)?;
+        let fourth = original_four(owned, &root)?.remove(0);
+        let entries = read_current(owned, selected, &root, &fourth)?;
+        let retired = entries.iter().find(|entry| entry.id == id).expect("fourth");
+        assert_eq!(retired.phase, ERASED);
+        assert_eq!(retired.scope, b"fourth retained scope");
+        assert!(read_live(owned, &recovered, &id).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_fourth_legacy_negative_decision_refuses_unacknowledged_transfer() -> TestResult
+    {
+        let fixture = Fixture::new()?;
+        let (storage, four) = super::super::lifecycle::tests::first_four(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        super::super::lifecycle::decide(owned, &four, false, b"original fourth denial").await?;
+        assert!(initialize_borrowed(owned, &four, Stop::Never)
+            .await
+            .is_err());
+        let (selected, _) = selected_owner(owned)?;
+        assert_eq!(read_root(owned, selected)?.generic_phase, GENERIC_UNCLAIMED);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_fourth_erasure_replays_each_original_crash_boundary() -> TestResult {
+        for stop in [Stop::Root, Stop::Record, Stop::Intent, Stop::Marker] {
+            let fixture = Fixture::new()?;
+            let (storage, owner) = initial(&fixture).await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+                unreachable!()
+            };
+            let (selected, _) = selected_owner(owned)?;
+            let id = read_root(owned, selected)?.tail_next_id;
+            lifecycle::decide(owned, &owner, &id, false, b"fourth denial").await?;
+            lifecycle::acknowledge_negative(owned, &owner, &id, b"fourth denial").await?;
+            assert!(lifecycle::erase_inner(owned, &owner, &id, stop)
+                .await
+                .is_err());
+            drop(owner);
+            drop(storage);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let recovered = recover_generic(owned).await?;
+            assert!(read_live(owned, &recovered, &id).await.is_err());
+            let (selected, _) = selected_owner(owned)?;
+            assert!(read_entry(selected, &user(INTENT_PREFIX, &id))?.is_none());
+            assert!(read_entry(selected, &user(RECORD_PREFIX, &id))?.is_none());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_fourth_pending_erasure_refuses_changed_credential_and_manifest() -> TestResult
+    {
+        for changed in ["credential", "manifest"] {
+            let fixture = Fixture::new()?;
+            let (storage, owner) = initial(&fixture).await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+                unreachable!()
+            };
+            let (selected, _) = selected_owner(owned)?;
+            let id = read_root(owned, selected)?.tail_next_id;
+            lifecycle::decide(owned, &owner, &id, false, b"fourth denial").await?;
+            lifecycle::acknowledge_negative(owned, &owner, &id, b"fourth denial").await?;
+            assert!(lifecycle::erase_inner(owned, &owner, &id, Stop::Root)
+                .await
+                .is_err());
+            let root = read_root(owned, selected)?;
+            if changed == "credential" {
+                let name = user(RECORD_PREFIX, &id);
+                let mut bytes = read_entry(selected, &name)?.expect("root-pending survivor");
+                *bytes.last_mut().expect("sealed byte") ^= 1;
+                write_exact(selected, &name, &bytes)?;
+            } else {
+                let file = fixture
+                    .profile
+                    .path()
+                    .join(path(root.generic_revision as usize));
+                let mut bytes = std::fs::read(&file)?;
+                *bytes.last_mut().expect("manifest byte") ^= 1;
+                std::fs::write(&file, bytes)?;
+            }
+            drop(owner);
+            drop(storage);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            assert!(
+                recover_generic(owned).await.is_err(),
+                "{changed} must refuse"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_fourth_denial_refuses_missing_selected_credential_before_erasure() -> TestResult
+    {
+        for prefix in [RECORD_PREFIX, INTENT_PREFIX] {
+            let fixture = Fixture::new()?;
+            let (storage, owner) = initial(&fixture).await?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+                unreachable!()
+            };
+            let (selected, _) = selected_owner(owned)?;
+            let id = read_root(owned, selected)?.tail_next_id;
+            lifecycle::decide(owned, &owner, &id, false, b"fourth denial").await?;
+            lifecycle::acknowledge_negative(owned, &owner, &id, b"fourth denial").await?;
+            let root = read_root(owned, selected)?;
+            assert_eq!(root.generic_phase, GENERIC_ACTIVE);
+            selected
+                .entry_for_user(&user(prefix, &id))?
+                .delete_credential()?;
+            drop(owner);
+            drop(storage);
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let error = match recover_generic(owned).await {
+                Err(error) => error,
+                Ok(_) => panic!("missing fourth credential was accepted"),
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains("platform generic selected credential differs"),
+                "unexpected refusal: {error:?}"
+            );
+        }
+        Ok(())
     }
 
     #[tokio::test]

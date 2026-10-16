@@ -32,6 +32,17 @@ pub(super) fn decision(
         }
         return Ok(None);
     }
+    // A fourth decision may have been acknowledged by the original V11
+    // writer before the generic roster acquired its lease. The exact old
+    // digest remains in the authenticated root; do not invent a second
+    // generic decision record for that immutable decision.
+    if observed.is_none()
+        && entry.id == root.tail_next_id
+        && root.tail_phase >= TAIL_DECISION_COMPLETE
+        && entry.decision_digest == root.tail_decision_digest
+    {
+        return super::super::lifecycle::decision_record(selected, root);
+    }
     let bytes = observed.ok_or_else(|| invalid("platform generic decision is missing"))?;
     if aura_core::hash::hash(&bytes) != entry.decision_digest {
         return Err(invalid("platform generic decision differs from roster"));
