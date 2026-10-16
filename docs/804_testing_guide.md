@@ -1215,8 +1215,9 @@ same-checkout process inventory meaningful when both owners use one native
 binary: a live peer must not be mistaken for a prior local orphan at admission
 or still be present when the local finalizer checks its inventory.
 
-The native `devices` list is a Settings/Devices projection. Capture the
-issuer's single current device from that canonical list before issuance and
+The native `devices` list is a Settings/Devices projection. Open the Devices
+section through `OpenSettingsSection:"devices"`; generic Settings does not
+materialize its list. Capture the issuer's single current device there before issuance and
 bind it to the signed invitee, original operation, and broker message.
 `device_enrollment_accepted` observations report devices newly seen by the
 app; their history is transient. A `device_count=2` acknowledgment may name

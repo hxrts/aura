@@ -14,6 +14,7 @@ export AURA_E2E_REMOTE=fixture-host AURA_E2E_REMOTE_ROOT=fixture-root
 export AURA_E2E_HOST_ADDR=192.0.2.10 AURA_E2E_BOOTSTRAP=paired-enrollment
 export AURA_E2E_DRV="$fixture/bin/driver" FIXTURE_LOG="$fixture/requests"
 export FIXTURE_DEVICES_OPEN="$fixture/devices-open"
+export FIXTURE_ISSUER_DEVICES_OPEN="$fixture/issuer-devices-open"
 export FIXTURE_APPROVED="$fixture/approved"
 export AURA_E2E_PRIVATE_WAIT_SECONDS=2
 export AURA_E2E_AURA_BIN="$fixture/bin/aura" AURA_E2E_TOOL_REPL="$fixture/bin/tool_repl"
@@ -64,18 +65,24 @@ case "$instance:$method:$intent" in
     echo '{"status":"ok","payload":{"setup_code":"signed-setup-secret"}}' ;;
   alex-tui:submit_semantic_command:OpenScreen)
     echo '{"status":"ok","payload":{"submission":"accepted"}}' ;;
+  alex-tui:submit_semantic_command:OpenSettingsSection)
+    jq -e '.params.intent.OpenSettingsSection=="devices"' <<< "$request" >/dev/null || exit 1
+    : > "$FIXTURE_ISSUER_DEVICES_OPEN"
+    echo '{"status":"ok","payload":{"submission":"accepted"}}' ;;
   alex-tui:submit_semantic_command:StartDeviceEnrollment)
     jq -e '.params.intent.StartDeviceEnrollment.setup_code=="signed-setup-secret"' <<< "$request" >/dev/null || exit 1
     echo '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-1"}}}}' ;;
   alex-tui:wait_for_ui_snapshot_event:)
     if [[ $(jq -r '.params.after_version' <<< "$request") == null ]]; then
-      jq -cn --arg fixture_case "${FIXTURE_CASE:-}" '
+      jq -cn --arg fixture_case "${FIXTURE_CASE:-}" \
+        --argjson opened "$(if [[ -e "$FIXTURE_ISSUER_DEVICES_OPEN" ]]; then echo true; else echo false; fi)" '
         {status:"ok",payload:{event:{version:1,snapshot:{screen:"settings",
         readiness:"ready",quiescence:{state:"settled"},operations:[],runtime_events:[],
-        lists:[{id:"devices",items:(if $fixture_case=="missing_issuer" then [] else
+        lists:(if $fixture_case=="missing_issuer" or ($opened|not) then [] else
+          [{id:"devices",items:
           [{id:(if $fixture_case=="wrong_issuer_device" then
             "00000000-0000-4000-8000-000000000003" else
-            "00000000-0000-4000-8000-000000000001" end),is_current:true}] end)}]}}}}'
+            "00000000-0000-4000-8000-000000000001" end),is_current:true}]}] end)}}}}'
     else
       echo '{"status":"ok","payload":{"event":{"version":2,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-1","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-secret","fact":{"kind":"device_enrollment_code_ready","code":"issued-code-secret","manifest_transfer":{"manifest_code":"signed-manifest-secret","initiator_verifier_code":"retained-verifier-secret"}}}]}}}}'
     fi ;;
@@ -197,6 +204,11 @@ jq -es '
   [.[]|select(.params.instance_id=="barbara-tui" and
     .method=="submit_semantic_command" and
     .params.intent.OpenSettingsSection=="devices")]|length==2' "$FIXTURE_LOG" >/dev/null
+jq -se '
+  [ .[] | select(.params.instance_id=="alex-tui" and .method=="submit_semantic_command") |
+    (.params.intent|keys[0]) ] |
+  .[0:3]==["OpenScreen","OpenSettingsSection","StartDeviceEnrollment"]' \
+  "$FIXTURE_LOG" >/dev/null
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
   ! rg -Fq "$secret" "$fixture/stdout" "$fixture/stderr" "$AURA_E2E_RUN_DIR"
   rg -Fq "$secret" "$FIXTURE_LOG"
@@ -209,7 +221,7 @@ FIXTURE_CASE=multi_message AURA_E2E_RUN_DIR="$multi_dir" PATH="$fixture/bin:$PAT
 jq -e '.evidence.network_delivery.message_id=="33333333-3333-3333-3333-333333333333" and
   .transport.network_delivery_asserted==true' \
   "$multi_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" >/dev/null
-rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
 signed_count_dir="$fixture/count2-signed"
 mkdir -m 700 "$signed_count_dir"
 printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$signed_count_dir/repl.identity.json"
@@ -218,7 +230,7 @@ FIXTURE_CASE=count2_signed AURA_E2E_RUN_DIR="$signed_count_dir" PATH="$fixture/b
 jq -e '.assertions.exact_operation_and_host_ack and .assertions.two_devices_after_reopen' \
   "$signed_count_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" >/dev/null
 for failure in missing_ack wrong_host_ack_device missing_issuer wrong_issuer_device wrong_operation wrong_signed_device stale_roster missing_accepted_list wrong_authority wrong_reopen_device duplicate_ack single_ack no_network_ack no_registration wrong_network_message_id wrong_network_digest; do
-  rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
+  rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
   bad_dir="$fixture/$failure"
   mkdir -m 700 "$bad_dir"
   printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$bad_dir/repl.identity.json"
@@ -272,7 +284,7 @@ for failure in missing_ack wrong_host_ack_device missing_issuer wrong_issuer_dev
 done
 # A same-host diagnostic uses a second owner driver without claiming distinct
 # hosts or satisfying the final paired-LAN evidence requirement.
-rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN"
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN"
 peer_root="$fixture/peer-checkout"
 peer_run="$fixture/peer-run"
 local_run="$fixture/local-run"
@@ -361,7 +373,7 @@ printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_T
 printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"%s","network_delivery_asserted":false,"planned_process_identity":{"local":{"host":"fixture-local"},"remote":{"host":"fixture-remote","actor":"barbara-web"}},"broker":{"endpoint":"http://192.0.2.10:43190","policy":"development_only_lan_http","recipient_kind":"browser"}}\n' \
   "$FIXTURE_COMMIT" "$FIXTURE_COMMIT" "$AURA_E2E_RUN_TOKEN" > \
   "$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
-rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
 PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/browser.stdout" 2> "$fixture/browser.stderr"
 browser_manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
 jq -e '.actors.recipient=="barbara-web" and .operation_instances.approval=="op-2" and
@@ -372,7 +384,7 @@ jq -es 'any(.[]; .params.instance_id=="barbara-web" and .method=="restart" and
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
   ! rg -Fq "$secret" "$fixture/browser.stdout" "$fixture/browser.stderr" "$AURA_E2E_RUN_DIR"
 done
-rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
 browser_bad="$fixture/browser-missing-ack"
 mkdir -m 700 "$browser_bad"
 printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$browser_bad/repl.identity.json"

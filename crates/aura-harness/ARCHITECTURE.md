@@ -88,7 +88,8 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   and issued code/manifest/verifier through private stdin requests, keeps the
   exact approval handle and host acknowledgment, and compares authority and
   canonical device observations after same-profile restart. The checklist
-  captures the original issuer's current device before issuance and requires
+  opens Settings/Devices and captures the original issuer's current device
+  before issuance; generic Settings does not materialize its device list. It requires
   the signed invitee and issuer to be distinct canonical members; a transient
   two-device host event for either bound device is not a second roster entry.
   Read-only preflight records
