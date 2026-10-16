@@ -17,6 +17,9 @@ find "$public_root" -type l -print0 > "$links"
 # link to committed source assets or immutable Nix store files, never private
 # run data or another checkout's files.
 while IFS= read -r -d '' link; do
+  [[ -e "$link" ]] || {
+    echo 'ship web assets: broken build-output link' >&2; exit 1;
+  }
   resolved=$(realpath "$link") || {
     echo 'ship web assets: broken build-output link' >&2; exit 1;
   }
