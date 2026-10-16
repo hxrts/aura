@@ -1603,6 +1603,9 @@ source location when safely parseable, or a status class) and
 points to those protected logs for details. At terminal status, an atomic
 `completion.json` beside the receipt provides its path, exit status and UTC
 completion time for file watchers, after command output has flushed.
+The command tree receives stdout/stderr for capture, while the wrapper's extra
+FIFO writer is closed before command execution so detached compiler daemons
+cannot retain it and delay terminal receipt publication.
 Read JSON with `jq`; never source or evaluate receipt contents.
 Receipt read/modify/write updates use a bounded writer lock, preserving
 concurrent phase and native-cleanup observations. A stopped writer's lock is

@@ -179,6 +179,23 @@ jq -e '.command_exit_status==37 and .final_exit_status==37 and
 jq -e --arg receipt "$receipt" '.receipt==$receipt and .exit_status==37' \
   "$(dirname "$receipt")/completion.json" >/dev/null
 
+# Commands and their descendants must not inherit the wrapper's private FIFO
+# writer. A compiler daemon can detach and close stdout/stderr but retain that
+# extra descriptor, indefinitely withholding the receipt's terminal event.
+reset_case
+expect_status 37 timeout 15s "$host_bash" "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --no-prune -- "$host_bash" -c '
+  if { : >&9; } 2>/dev/null; then exit 87; fi
+  "$1" -c '\''if { : >&9; } 2>/dev/null; then exit 88; fi'\'' || exit $?
+  printf "private-fifo-not-inherited\n"
+  exit 37' fixture "$host_bash"
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.final_exit_status==37 and .command_exit_status==37 and
+  .current_phase=="finished" and .notification!=null' "$receipt" >/dev/null
+rg -q '^private-fifo-not-inherited$' "$(jq -r '.artifacts.command_log' "$receipt")"
+[[ ! -d "$project/target/.aura-build-budget.lock" ]]
+[[ ! -e "$(dirname "$receipt")/command.pipe" ]]
+
 # `kill -0` can still see an exited, unreaped child. Simulate that state and
 # require a terminal failure receipt and notification before the timeout.
 reset_case

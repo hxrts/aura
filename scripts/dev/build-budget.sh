@@ -574,7 +574,10 @@ tee -a "$AURA_BUILD_COMMAND_LOG" < "$command_fifo" &
 command_tee_pid=$!
 exec 9> "$command_fifo"
 command_log_open=1
-(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") >&9 2>&1 &
+# Keep only stdout/stderr in the command tree. A shared compiler daemon may
+# detach and close those streams while retaining other inherited descriptors;
+# leaking our private FIFO writer would then prevent tee from reaching EOF.
+(cd "$root" && AURA_BUILD_BUDGET_HELD="$root" "$@") >&9 2>&1 9>&- &
 child_pid=$!
 set +m
 aura_receipt_update --argjson pid "$child_pid" \
