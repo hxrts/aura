@@ -53,15 +53,17 @@ jq -cn --arg commit "$commit" --arg token "$token" --arg host "$host" \
   --arg tool_hash "$tool_hash" --arg aura_hash "$aura_hash" '
   {phase:"single-host-preflight",commit:{local:$commit,remote:$commit},run_token:$token,
    cross_host_asserted:false,network_delivery_asserted:false,
-   planned_process_identity:{local:{host:$host},remote:{host:$host}},
+   planned_process_identity:{local:{host:$host},remote:{host:$host,actor:"barbara-tui"}},
    artifacts:{tool_repl_sha256:$tool_hash,aura_sha256:$aura_hash},
-   broker:{endpoint:"http://127.0.0.1:43190",policy:"development_only_loopback_http"}}' > "$preflight"
+   broker:{endpoint:"http://127.0.0.1:43190",policy:"development_only_loopback_http",
+     recipient_kind:"native"}}' > "$preflight"
 chmod 600 "$preflight"
 export AURA_E2E_ROOT="$root" AURA_E2E_RUN_DIR="$local_run" AURA_E2E_RUN_TOKEN="$token"
 export AURA_E2E_TOOL_REPL="$tool" AURA_E2E_AURA_BIN="$aura"
 export AURA_E2E_LOCAL_PEER_ROOT="$peer" AURA_E2E_LOCAL_PEER_RUN_DIR="$peer_run"
 export AURA_E2E_LOCAL_CONFIG="$local_provision/host-a.toml"
 export AURA_E2E_BOOTSTRAP=paired-enrollment AURA_E2E_REMOTE=''
+export AURA_E2E_ENROLLMENT_RECIPIENT=native
 source "$here/lib.sh"
 local_started=0 peer_started=0 outcome=failed
 finish() {

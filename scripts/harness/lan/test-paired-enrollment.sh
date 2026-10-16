@@ -22,7 +22,7 @@ export AURA_E2E_LOCAL_CONFIG="$fixture/broker.toml"
 printf '  "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=%064d",\n' 0 > "$AURA_E2E_LOCAL_CONFIG"
 chmod 600 "$AURA_E2E_LOCAL_CONFIG"
 export FIXTURE_COMMIT=$(git -C "$here/../../.." rev-parse HEAD)
-printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"%s","network_delivery_asserted":false,"planned_process_identity":{"local":{"host":"fixture-local"},"remote":{"host":"fixture-remote"}},"broker":{"endpoint":"http://192.0.2.10:43190","policy":"development_only_lan_http"}}\n' \
+printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"%s","network_delivery_asserted":false,"planned_process_identity":{"local":{"host":"fixture-local"},"remote":{"host":"fixture-remote","actor":"barbara-tui"}},"broker":{"endpoint":"http://192.0.2.10:43190","policy":"development_only_lan_http","recipient_kind":"native"}}\n' \
   "$FIXTURE_COMMIT" "$FIXTURE_COMMIT" "$AURA_E2E_RUN_TOKEN" > \
   "$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
 cat > "$fixture/bin/git" <<'GIT'
@@ -311,4 +311,57 @@ if PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/prefl
   echo 'paired run accepted mismatched preflight' >&2; exit 1
 fi
 [[ $(wc -l < "$FIXTURE_LOG") == "$before" ]]
+cat > "$fixture/bin/browser-driver" <<'BROWSER'
+#!/usr/bin/env bash
+if [[ "$1" != req-private ]]; then exec "$FIXTURE_NATIVE_DRV" "$@"; fi
+IFS= read -r request
+instance=$(jq -r '.params.instance_id // ""' <<< "$request")
+if [[ "$instance" != barbara-web ]]; then
+  printf '%s\n' "$request" | "$FIXTURE_NATIVE_DRV" req-private
+  exit
+fi
+printf '%s\n' "$request" >> "$FIXTURE_BROWSER_REQUESTS"
+if [[ $(jq -r '.method' <<< "$request") == restart ]]; then
+  jq -e '.params.expected_operation_instance=="op-2"' <<< "$request" >/dev/null || exit 1
+fi
+rewritten=$(jq -c '.params.instance_id="barbara-tui" |
+  if .method=="restart" then .params.expected_operation_instance=null else . end' <<< "$request")
+response=$(printf '%s\n' "$rewritten" | "$FIXTURE_NATIVE_DRV" req-private) || exit
+printf '%s\n' "$response" | jq -c '
+  tojson | gsub("tui-op-device_enrollment-2";"op-2") | fromjson |
+  walk(if type=="object" and has("runtime_events") then
+    .runtime_events |= (map(if .fact.kind=="device_enrollment_accepted"
+      then .id=9 else . end)) else . end)'
+BROWSER
+chmod +x "$fixture/bin/browser-driver"
+export FIXTURE_NATIVE_DRV="$fixture/bin/driver"
+export FIXTURE_BROWSER_REQUESTS="$fixture/browser-requests"
+export AURA_E2E_DRV="$fixture/bin/browser-driver"
+export AURA_E2E_RUN_TOKEN=paired-browser-fixture AURA_E2E_ENROLLMENT_RECIPIENT=browser
+export AURA_E2E_RUN_DIR="$fixture/browser-evidence"
+mkdir -m 700 "$AURA_E2E_RUN_DIR" "$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN"
+printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$AURA_E2E_RUN_DIR/repl.identity.json"
+printf '{"phase":"preflight","commit":{"local":"%s","remote":"%s"},"run_token":"%s","network_delivery_asserted":false,"planned_process_identity":{"local":{"host":"fixture-local"},"remote":{"host":"fixture-remote","actor":"barbara-web"}},"broker":{"endpoint":"http://192.0.2.10:43190","policy":"development_only_lan_http","recipient_kind":"browser"}}\n' \
+  "$FIXTURE_COMMIT" "$FIXTURE_COMMIT" "$AURA_E2E_RUN_TOKEN" > \
+  "$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
+PATH="$fixture/bin:$PATH" bash "$here/paired-enrollment.sh" > "$fixture/browser.stdout" 2> "$fixture/browser.stderr"
+browser_manifest="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json"
+jq -e '.actors.recipient=="barbara-web" and .operation_instances.approval=="op-2" and
+  .transport.network_delivery_asserted==true and .assertions.exact_operation_and_host_ack and
+  .assertions.same_device_after_reopen' "$browser_manifest" >/dev/null
+jq -es 'any(.[]; .params.instance_id=="barbara-web" and .method=="restart" and
+  .params.expected_operation_instance=="op-2")' "$FIXTURE_BROWSER_REQUESTS" >/dev/null
+for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
+  ! rg -Fq "$secret" "$fixture/browser.stdout" "$fixture/browser.stderr" "$AURA_E2E_RUN_DIR"
+done
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
+browser_bad="$fixture/browser-missing-ack"
+mkdir -m 700 "$browser_bad"
+printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$browser_bad/repl.identity.json"
+if FIXTURE_CASE=missing_ack AURA_E2E_RUN_DIR="$browser_bad" PATH="$fixture/bin:$PATH" \
+  bash "$here/paired-enrollment.sh" > "$fixture/browser-bad.stdout" 2> "$fixture/browser-bad.stderr"; then
+  echo 'browser paired fixture accepted missing host acknowledgment' >&2; exit 1
+fi
+[[ ! -e "$browser_bad/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
 echo 'Paired LAN enrollment orchestration fixture passed'

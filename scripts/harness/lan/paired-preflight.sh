@@ -8,6 +8,9 @@ output=${1:-}
 [[ "${AURA_E2E_BOOTSTRAP:-}" == paired-enrollment && -n "$output" ]] || exit 2
 [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || exit 2
 [[ -n "$AURA_E2E_REMOTE" ]] || exit 2
+recipient_kind=${AURA_E2E_ENROLLMENT_RECIPIENT:-native}
+[[ "$recipient_kind" == native || "$recipient_kind" == browser ]] || exit 2
+recipient_actor=$(if [[ "$recipient_kind" == browser ]]; then echo barbara-web; else echo barbara-tui; fi)
 [[ ! -e "$output" && ! -L "$output" && -d "$(dirname "$output")" ]] || exit 2
 
 commit=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
@@ -74,8 +77,20 @@ done
   echo 'paired preflight remote artifacts differ' >&2; exit 1;
 }
 remote_url=$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-  "cd '$quoted_root' && sed -n 's/^[[:space:]]*\"AURA_BOOTSTRAP_BROKER_URL=\\([^\"]*\\)\",/\\1/p' $quoted_config")
-[[ $(printf '%s\n' "$remote_url" | sort -u) == "http://$broker_bind" ]] || {
+  "cd '$quoted_root' && sed -n 's/^[[:space:]]*\"$(if [[ "$recipient_kind" == browser ]]; then echo AURA_HARNESS_BROWSER_BROKER_URL; else echo AURA_BOOTSTRAP_BROKER_URL; fi)=\\([^\"]*\\)\",/\\1/p' $quoted_config")
+expected_remote_url="http://$broker_bind"
+if [[ "$recipient_kind" == browser ]]; then
+  relay_port=${AURA_E2E_BROWSER_BROKER_RELAY_PORT:-43191}
+  [[ "$relay_port" =~ ^[0-9]+$ ]] && (( relay_port > 1023 && relay_port < 65536 )) || exit 2
+  expected_remote_url="http://127.0.0.1:$relay_port"
+  local_auth_hash=$(sed -n 's/^[[:space:]]*"AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=\([0-9a-f]\{64\}\)",/\1/p' "$local_config" | sha256sum | cut -d' ' -f1)
+  remote_auth_hash=$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
+    "cd '$quoted_root' && sed -n 's/^[[:space:]]*\"AURA_HARNESS_BROWSER_BROKER_AUTH=\\([0-9a-f]\\{64\\}\\)\",/\\1/p' $quoted_config | sha256sum | cut -d' ' -f1")
+  [[ "$local_auth_hash" == "$remote_auth_hash" ]] || {
+    echo 'paired preflight browser broker bearer differs' >&2; exit 1;
+  }
+fi
+[[ $(printf '%s\n' "$remote_url" | sort -u) == "$expected_remote_url" ]] || {
   echo 'paired preflight broker endpoint differs across hosts' >&2; exit 1;
 }
 
@@ -83,6 +98,7 @@ scratch=$(mktemp "$(dirname "$output")/.paired-preflight.XXXXXX")
 jq -cn --arg commit "$commit" --arg smoke "$smoke_file" --arg smoke_hash "$smoke_hash" \
   --arg token "$AURA_E2E_RUN_TOKEN" --arg local_host "$local_host" --arg remote_host "$remote_host" \
   --arg remote "$AURA_E2E_REMOTE" --arg broker "http://$broker_bind" \
+  --arg recipient "$recipient_actor" --arg recipient_kind "$recipient_kind" \
   --arg local_config "$local_config" --arg remote_config "$remote_config" \
   --arg aura "$local_aura" --arg repl "$local_repl" --arg web "$local_web" \
   --arg remote_aura "$remote_aura" --arg remote_repl "$remote_repl" --arg remote_web "$remote_web" '
@@ -92,9 +108,10 @@ jq -cn --arg commit "$commit" --arg smoke "$smoke_file" --arg smoke_hash "$smoke
                     remote:{aura:$remote_aura,tool_repl:$remote_repl,web_index:$remote_web}},
    planned_process_identity:{local:{host:$local_host,actor:"alex-tui",config:$local_config,
       executable_sha256:$repl,pid_birth:"pending_start"},
-      remote:{host:$remote_host,ssh_destination:$remote,actor:"barbara-tui",config:$remote_config,
+      remote:{host:$remote_host,ssh_destination:$remote,actor:$recipient,config:$remote_config,
       executable_sha256:$repl,pid_birth:"pending_start"}},
-   broker:{endpoint:$broker,policy:"development_only_lan_http"},
+   broker:{endpoint:$broker,policy:"development_only_lan_http",
+      recipient_kind:$recipient_kind},
    inventory:["signed_setup_export","first_authenticated_envelope","pre_approval_no_import",
      "exact_approval_operation","typed_terminal_and_host_ack","same_authority_after_reopen",
      "same_device_after_reopen","owned_shutdown"],

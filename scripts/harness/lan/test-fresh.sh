@@ -82,4 +82,9 @@ export AURA_E2E_BOOTSTRAP=paired-enrollment
 bash "$fixture_root/driver/fresh.sh" "run token's" > "$fixture_root/out"
 [[ $(cat "$fixture_root/paired-actions") == $'onboard:alex-tui\nonboard:barbara-tui' ]]
 rg -q 'paired enrollment actors ready' "$fixture_root/out"
+export AURA_E2E_ENROLLMENT_RECIPIENT=browser
+: > "$fixture_root/paired-actions"
+bash "$fixture_root/driver/fresh.sh" "run token's" > "$fixture_root/out"
+[[ $(cat "$fixture_root/paired-actions") == $'onboard:alex-tui\nonboard:barbara-web' ]]
+rg -q 'paired enrollment actors ready: alex-tui and barbara-web' "$fixture_root/out"
 echo 'fresh-run shutdown sequencing fixtures passed'

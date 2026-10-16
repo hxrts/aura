@@ -44,7 +44,7 @@ case "$*" in
   *'sha256sum bin/aura'*)
     printf '%s  bin/aura\n%s  target/release/tool_repl\n%s  target/dx/aura-web/release/web/public/index.html\n' \
       "${FIXTURE_REMOTE_AURA_HASH:-$FIXTURE_AURA_HASH}" "$FIXTURE_REPL_HASH" "$FIXTURE_WEB_HASH";;
-  *'AURA_BOOTSTRAP_BROKER_URL'*) bash -c "${@: -1}";;
+  *'AURA_BOOTSTRAP_BROKER_URL'*|*'AURA_HARNESS_BROWSER_BROKER_'*) bash -c "${@: -1}";;
   *hostname*) printf 'fixture-remote\n';;
   *) exit 2;;
 esac
@@ -54,7 +54,7 @@ manifest="$fixture/evidence/paired-preflight.json"
 PATH="$fixture/bin:$PATH" bash "$here/paired-preflight.sh" "$manifest" > "$fixture/stdout"
 jq -e '.phase=="preflight" and .commit.local=="fixture-commit" and
   .commit.remote=="fixture-commit" and
-  .broker=={endpoint:"http://192.0.2.10:43190",policy:"development_only_lan_http"} and
+  .broker=={endpoint:"http://192.0.2.10:43190",policy:"development_only_lan_http",recipient_kind:"native"} and
   .local_smoke_receipt.validated_commit=="fixture-commit" and
   .artifact_sha256.local==.artifact_sha256.remote and
   .planned_process_identity.local.pid_birth=="pending_start" and
@@ -71,4 +71,32 @@ for failure in commit hash broker; do
   esac
   [[ ! -e "$manifest" ]]
 done
+sed -i.bak 's/192\.0\.2\.11:43190/192.0.2.10:43190/' "$AURA_E2E_LOCAL_CONFIG"
+browser_auth=$(printf 'a%.0s' {1..64})
+sed -i.bak "s/must-never-be-retained/$browser_auth/" "$AURA_E2E_LOCAL_CONFIG"
+cat > "$AURA_E2E_REMOTE_ROOT/$AURA_E2E_REMOTE_CONFIG" <<CONFIG
+  "AURA_HARNESS_BROWSER_BROKER_URL=http://127.0.0.1:43191",
+  "AURA_HARNESS_BROWSER_BROKER_AUTH=$browser_auth",
+CONFIG
+AURA_E2E_ENROLLMENT_RECIPIENT=browser PATH="$fixture/bin:$PATH" \
+  bash "$here/paired-preflight.sh" "$manifest" > "$fixture/browser-stdout"
+jq -e '.broker.recipient_kind=="browser" and
+  .planned_process_identity.remote.actor=="barbara-web" and
+  .network_delivery_asserted==false' "$manifest" >/dev/null
+! rg -Fq "$browser_auth" "$manifest" "$fixture/browser-stdout"
+rm -f "$manifest"
+wrong_browser_auth=$(printf 'b%.0s' {1..64})
+sed -i.bak "s/$browser_auth/$wrong_browser_auth/" "$AURA_E2E_REMOTE_ROOT/$AURA_E2E_REMOTE_CONFIG"
+if AURA_E2E_ENROLLMENT_RECIPIENT=browser PATH="$fixture/bin:$PATH" \
+  bash "$here/paired-preflight.sh" "$manifest" > "$fixture/out" 2> "$fixture/err"; then
+  echo 'browser preflight accepted a foreign broker bearer' >&2; exit 1
+fi
+[[ ! -e "$manifest" ]]
+sed -i.bak "s/$wrong_browser_auth/$browser_auth/" "$AURA_E2E_REMOTE_ROOT/$AURA_E2E_REMOTE_CONFIG"
+sed -i.bak 's/127\.0\.0\.1:43191/192.0.2.10:43191/' "$AURA_E2E_REMOTE_ROOT/$AURA_E2E_REMOTE_CONFIG"
+if AURA_E2E_ENROLLMENT_RECIPIENT=browser PATH="$fixture/bin:$PATH" \
+  bash "$here/paired-preflight.sh" "$manifest" > "$fixture/out" 2>&1; then
+  echo 'browser preflight accepted non-loopback browser endpoint' >&2; exit 1
+fi
+[[ ! -e "$manifest" ]]
 echo 'Paired LAN fixed-commit preflight fixtures passed'

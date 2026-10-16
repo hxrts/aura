@@ -14,6 +14,15 @@ source scripts/harness/lan/env.sh
 if [[ -z "${IN_NIX_SHELL:-}" ]]; then
   exec "${AURA_NIX_BIN:-/nix/var/nix/profiles/default/bin/nix}" develop "$PWD" --command bash "$here/batch.sh" "$AURA_E2E_RUN_TOKEN" -- "${checklist_command[@]}"
 fi
+if [[ "${AURA_E2E_ENROLLMENT_RECIPIENT:-native}" == browser &&
+      "${AURA_E2E_BROWSER_RELAY_ACTIVE:-0}" != 1 ]]; then
+  [[ "${AURA_E2E_BOOTSTRAP:-}" == paired-enrollment ]] || {
+    echo 'browser recipient requires paired enrollment bootstrap' >&2; exit 2;
+  }
+  export AURA_E2E_BROWSER_RELAY_ACTIVE=1
+  exec "$here/browser-broker-relay.sh" "${AURA_E2E_BROWSER_BROKER_RELAY_PORT:-43191}" -- \
+    bash "$here/batch.sh" "$AURA_E2E_RUN_TOKEN" -- "${checklist_command[@]}"
+fi
 checkpoint=$(git rev-parse HEAD)
 [[ -z "$(git status --porcelain --untracked-files=no)" ]] || { echo 'LAN checkpoint is dirty' >&2; exit 1; }
 [[ $(cat ".tmp/main-smoke-$checkpoint/validated-commit") == "$checkpoint" ]] || { echo 'matching complete smoke evidence missing' >&2; exit 1; }

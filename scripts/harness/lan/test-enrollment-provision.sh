@@ -81,6 +81,27 @@ for invalid in missing-remote loopback-bind invalid-port; do
   [[ "$status" != 0 ]]
   [[ ! -e "$fixture/checkout/.tmp/e2e/enrollment-provision-second-enrollment-fixture" ]]
 done
+browser_token=paired-browser-fixture
+AURA_E2E_ENROLLMENT_RECIPIENT=browser PATH="$fixture/bin:$PATH" \
+  bash "$here/provision-enrollment.sh" "$browser_token" \
+  > "$fixture/browser-paths" 2> "$fixture/browser-stderr"
+browser_local=$(sed -n 's/^AURA_E2E_LOCAL_CONFIG=//p' "$fixture/browser-paths")
+browser_remote="$fixture/remote root/.tmp/e2e/enrollment-provision-$browser_token/host-b.toml"
+[[ -f "$browser_local" && -f "$browser_remote" && $(mode "$browser_remote") == 600 ]]
+rg -q '^id = "alex-tui"$' "$browser_local"
+rg -q '^id = "barbara-web"$' "$browser_remote"
+! rg -q 'barbara-tui|barbara-tui2|AURA_BOOTSTRAP_BROKER_URL=' "$browser_remote"
+[[ $(rg -c '^\[\[instances\]\]$' "$browser_remote") == 1 ]]
+rg -q 'AURA_HARNESS_BROWSER_BROKER_URL=http://127.0.0.1:43191' "$browser_remote"
+browser_auth=$(rg -o 'AURA_HARNESS_BROWSER_BROKER_AUTH=[0-9a-f]+' "$browser_remote" | head -1)
+[[ "$browser_auth" =~ ^AURA_HARNESS_BROWSER_BROKER_AUTH=[0-9a-f]{64}$ ]]
+[[ "${browser_auth#*=}" == "$(rg -o 'AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=[0-9a-f]+' "$browser_local" | head -1 | cut -d= -f2)" ]]
+! rg -Fq "${browser_auth#*=}" "$fixture/browser-paths" "$fixture/browser-stderr" "$fixture/ssh-args"
+status=0
+AURA_E2E_ENROLLMENT_RECIPIENT=browser AURA_E2E_BROWSER_BROKER_RELAY_PORT=80 \
+  PATH="$fixture/bin:$PATH" bash "$here/provision-enrollment.sh" bad-browser-port-fixture \
+  > "$fixture/out" 2> "$fixture/err" || status=$?
+[[ "$status" != 0 && ! -e "$fixture/checkout/.tmp/e2e/enrollment-provision-bad-browser-port-fixture" ]]
 sed 's/^id = "alex-tui"$/id = "alex-web"/' \
   "$fixture/checkout/configs/harness/lan-host-a.toml" > "$fixture/wrong-owner.toml"
 cp "$fixture/wrong-owner.toml" "$fixture/checkout/configs/harness/lan-host-a.toml"

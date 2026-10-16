@@ -20,6 +20,13 @@ port=${AURA_E2E_ENROLLMENT_BROKER_PORT:-43190}
   echo 'invalid enrollment broker port' >&2; exit 2;
 }
 broker_url="http://$AURA_E2E_HOST_ADDR:$port"
+recipient_kind=${AURA_E2E_ENROLLMENT_RECIPIENT:-native}
+[[ "$recipient_kind" == native || "$recipient_kind" == browser ]] || {
+  echo 'paired enrollment recipient must be native or browser' >&2; exit 2;
+}
+browser_relay_port=${AURA_E2E_BROWSER_BROKER_RELAY_PORT:-43191}
+[[ "$browser_relay_port" =~ ^[0-9]+$ ]] &&
+  (( browser_relay_port > 1023 && browser_relay_port < 65536 && browser_relay_port != port )) || exit 2
 root="$AURA_E2E_ROOT/.tmp/e2e/enrollment-provision-$token"
 [[ ! -L "$AURA_E2E_ROOT/.tmp" && ! -L "$AURA_E2E_ROOT/.tmp/e2e" ]] || {
   echo 'enrollment provision parent is a symlink' >&2; exit 1;
@@ -33,46 +40,61 @@ broker_auth=$(openssl rand -hex 32)
 [[ "$broker_auth" =~ ^[0-9a-f]{64}$ ]] || exit 1
 
 render() { # source config, output config, host | client
-  local source_config=$1 output=$2 role=$3 line instance='' invitation='' expected count=0
+  local source_config=$1 output=$2 role=$3 line instance='' invitation='' expected count=0 selected=false
   case "$role" in
     host) expected=alex-tui ;;
-    client) expected=barbara-tui ;;
+    client) expected=$(if [[ "$recipient_kind" == browser ]]; then echo barbara-web; else echo barbara-tui; fi) ;;
     *) return 2 ;;
   esac
   : > "$output"
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == '[[instances]]' ]]; then
       ((count += 1))
-      (( count == 1 )) || break
+      selected=false
+      if [[ "$role" == host && "$count" == 1 || "$role" == client &&
+            ( "$recipient_kind" == native && "$count" == 1 || "$recipient_kind" == browser && "$count" == 2 ) ]]; then
+        selected=true
+      fi
       instance=''
-      invitation=$(openssl rand -hex 32)
-      [[ "$invitation" =~ ^[0-9a-f]{64}$ ]] || return 1
+      if [[ "$selected" == true ]]; then
+        invitation=$(openssl rand -hex 32)
+        [[ "$invitation" =~ ^[0-9a-f]{64}$ ]] || return 1
+      fi
     elif [[ "$line" =~ ^id[[:space:]]*=[[:space:]]*\"([^\"]+)\"$ ]]; then
-      instance=${BASH_REMATCH[1]}
-      [[ "$instance" == "$expected" ]] || {
-        echo 'paired enrollment template has unexpected native owner' >&2; return 1;
-      }
+      if [[ "$selected" == true ]]; then
+        instance=${BASH_REMATCH[1]}
+        [[ "$instance" == "$expected" ]] || {
+          echo 'paired enrollment template has unexpected selected owner' >&2; return 1;
+        }
+      fi
     fi
-    printf '%s\n' "$line" >> "$output"
+    if (( count == 0 )) || [[ "$selected" == true ]]; then
+      printf '%s\n' "$line" >> "$output"
+    fi
     if [[ "$line" == '[run]' ]]; then
       printf 'fixed_ports = true\n' >> "$output"
     fi
-    if [[ "$line" =~ ^[[:space:]]*env[[:space:]]*=[[:space:]]*\[$ ]]; then
+    if [[ "$selected" == true && "$line" =~ ^[[:space:]]*env[[:space:]]*=[[:space:]]*\[$ ]]; then
       [[ -n "$instance" && -n "$invitation" ]] || {
         echo 'instance environment appears before its identity' >&2; return 1;
       }
-      printf '  "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=%s",\n' "$broker_auth" >> "$output"
-      printf '  "AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN=%s",\n' "$invitation" >> "$output"
       if [[ "$role" == host && "$instance" == alex-tui ]]; then
+        printf '  "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=%s",\n' "$broker_auth" >> "$output"
+        printf '  "AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN=%s",\n' "$invitation" >> "$output"
         printf '  "AURA_BOOTSTRAP_BROKER_BIND=%s:%s",\n' "$AURA_E2E_HOST_ADDR" "$port" >> "$output"
         printf '  "AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND=true",\n' >> "$output"
+      elif [[ "$recipient_kind" == browser ]]; then
+        printf '  "AURA_HARNESS_BROWSER_BROKER_URL=http://127.0.0.1:%s",\n' "$browser_relay_port" >> "$output"
+        printf '  "AURA_HARNESS_BROWSER_BROKER_AUTH=%s",\n' "$broker_auth" >> "$output"
       else
+        printf '  "AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=%s",\n' "$broker_auth" >> "$output"
+        printf '  "AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN=%s",\n' "$invitation" >> "$output"
         printf '  "AURA_BOOTSTRAP_BROKER_URL=%s",\n' "$broker_url" >> "$output"
         printf '  "AURA_BOOTSTRAP_BROKER_ALLOW_PRIVATE_LAN_HTTP=true",\n' >> "$output"
       fi
     fi
   done < "$source_config"
-  [[ "$instance" == "$expected" && "$count" -ge 1 ]] || {
+  rg -q "^id = \"$expected\"$" "$output" || {
     echo 'paired enrollment template lacks its native owner' >&2; return 1;
   }
   chmod 600 "$output"

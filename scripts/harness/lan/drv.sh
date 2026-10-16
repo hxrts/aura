@@ -346,6 +346,18 @@ start)
   # Expose the browser transport relay on this host's LAN address (taken from the config's
   # non-loopback bind_address) so peers on the other host reach its browsers.
   lan_host=$(grep -o 'bind_address = "[^"]*"' "$2" | cut -d'"' -f2 | cut -d: -f1 | grep -v "^127\." | head -1 || true)
+  if [[ -z "$lan_host" ]] && grep -q 'AURA_HARNESS_BROWSER_BROKER_URL=http://127\.0\.0\.1:' "$2"; then
+    # The browser-only paired config has no native LAN bind from which to
+    # derive the web transport relay address. Keep page loading on loopback,
+    # while advertising only this host's private LAN address to peers.
+    if [[ "$AURA_E2E_HOST_ADDR" =~ ^10\.([0-9]{1,3}\.){2}[0-9]{1,3}$ ||
+          "$AURA_E2E_HOST_ADDR" =~ ^192\.168\.([0-9]{1,3}\.)[0-9]{1,3}$ ||
+          "$AURA_E2E_HOST_ADDR" =~ ^172\.(1[6-9]|2[0-9]|3[01])\.([0-9]{1,3}\.)[0-9]{1,3}$ ]]; then
+      lan_host=$AURA_E2E_HOST_ADDR
+    else
+      echo 'browser-only paired relay requires a private LAN host address' >&2; exit 2
+    fi
+  fi
   [ -n "$lan_host" ] && export AURA_HARNESS_WEB_RELAY_HOST="$lan_host"
   # Hold the FIFO open so the REPL never sees EOF.
   nohup bash -c 'exec 3<>"$1"; exec nice -n 5 "$2" --config "$3" --private-socket "$4" --idle-timeout-ms 0 <&3' \

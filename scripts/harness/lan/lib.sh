@@ -77,7 +77,9 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
   [[ ! -e "$target" && ! -L "$target" ]] || return 2
   scratch=$(mktemp "$dir/.receipt.XXXXXX") || return
   if ! jq -ce --arg instance "$instance" --arg method "$method" '
-    def op_id: type=="string" and test("^tui-op-device_enrollment-[0-9]{1,20}$");
+    def op_id: type=="string" and
+      (if $instance=="barbara-web" then test("^op-[0-9]{1,20}$")
+       else test("^tui-op-device_enrollment-[0-9]{1,20}$") end);
     def failure:
       . == null or (type=="object"
         and (.domain|IN("command","ceremony","invitation","channel_context","transport","delivery","projection","internal"))
@@ -88,7 +90,8 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
       and (.failure|failure);
     def handle: .id=="device_enrollment" and (.instance_id|op_id);
     def host_ack:
-      (.id|type=="string" and startswith("tui-runtime-fact-"))
+      ((if $instance=="barbara-web" then (.id|type=="number" and .>=0 and .==floor)
+         else (.id|type=="string" and startswith("tui-runtime-fact-")) end))
       and .fact.kind=="device_enrollment_accepted"
       and (.fact.device_id|type=="string" and test("^[0-9a-fA-F-]{36}$"))
       and (.fact.device_count|type=="number" and .>=1 and .<=16 and .==floor);

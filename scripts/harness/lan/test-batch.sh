@@ -106,6 +106,28 @@ bash "$fixture/local/scripts/harness/lan/batch.sh" "$token" -- bash "$fixture/lo
 [[ $(sed -n '1,2p' "$fixture/actions") == $'preflight\nfresh' ]]
 [[ -f "$fixture/local/.tmp/lan-checklist-$token/paired-preflight.json" ]]
 [[ $(stat -c '%a' "$fixture/local/.tmp/lan-checklist-$token") == 700 ]]
+cat > "$fixture/local/scripts/harness/lan/browser-broker-relay.sh" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$1" == 43191 && "$2" == -- && "${AURA_E2E_BROWSER_RELAY_ACTIVE:-0}" == 1 ]] || exit 2
+shift 2
+printf 'relay:start\n' >> "$FIXTURE_ROOT/actions"
+"$@"
+status=$?
+printf 'relay:stop\n' >> "$FIXTURE_ROOT/actions"
+exit "$status"
+MOCK
+chmod +x "$fixture/local/scripts/harness/lan/browser-broker-relay.sh"
+export AURA_E2E_ENROLLMENT_RECIPIENT=browser
+token=lan-batch-browser-fixture
+for checkout in "$fixture/local" "$fixture/remote root's"; do
+  printf '%s\n' "$token" > "$checkout/.tmp/e2e/run/retention-run-id"
+done
+: > "$fixture/actions"
+bash "$fixture/local/scripts/harness/lan/batch.sh" "$token" -- \
+  bash "$fixture/local/work/handoff/lan-checklist.sh" > "$fixture/output" 2>&1
+[[ $(sed -n '1,3p' "$fixture/actions") == $'relay:start\npreflight\nfresh' ]]
+[[ $(tail -1 "$fixture/actions") == relay:stop ]]
+unset AURA_E2E_ENROLLMENT_RECIPIENT
 export FIXTURE_CASE=preflight-failure
 token=lan-batch-preflight-refusal
 : > "$fixture/actions"

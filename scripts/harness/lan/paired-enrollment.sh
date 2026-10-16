@@ -19,8 +19,12 @@ else
   [[ -n "$AURA_E2E_REMOTE" ]] || { echo 'paired enrollment requires the other host' >&2; exit 2; }
 fi
 preflight="$AURA_E2E_ROOT/.tmp/lan-checklist-$AURA_E2E_RUN_TOKEN/paired-preflight.json"
+recipient_kind=${AURA_E2E_ENROLLMENT_RECIPIENT:-native}
+[[ "$recipient_kind" == native || "$recipient_kind" == browser ]] || exit 2
+recipient=$(if [[ "$recipient_kind" == browser ]]; then echo barbara-web; else echo barbara-tui; fi)
 commit=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
-jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "$single_host" '
+jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "$single_host" \
+  --arg kind "$recipient_kind" --arg recipient "$recipient" '
   .phase==(if $local==1 then "single-host-preflight" else "preflight" end) and
   .commit.local==$commit and .commit.remote==$commit and
   .run_token==$token and .network_delivery_asserted==false and
@@ -28,7 +32,9 @@ jq -e --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local "
     .planned_process_identity.local.host == .planned_process_identity.remote.host and
     .cross_host_asserted==false
    else .planned_process_identity.local.host != .planned_process_identity.remote.host end) and
-  .broker.policy==(if $local==1 then "development_only_loopback_http" else "development_only_lan_http" end)' "$preflight" >/dev/null || {
+  .broker.policy==(if $local==1 then "development_only_loopback_http" else "development_only_lan_http" end) and
+  (.broker.recipient_kind // "native")==$kind and
+  .planned_process_identity.remote.actor==$recipient' "$preflight" >/dev/null || {
   echo 'paired enrollment requires its fixed-commit preflight manifest' >&2; exit 1;
 }
 
@@ -121,7 +127,7 @@ private_request() { # instance method label, static request JSON, optional timeo
   private_exchange "$instance" "$method" "$label" "$timeout" <<< "$request"
 }
 
-private_request barbara-tui prepare_device_enrollment_setup setup \
+private_request "$recipient" prepare_device_enrollment_setup setup \
   '{"method":"prepare_device_enrollment_setup","params":{}}'
 setup_response=$PRIVATE_RESPONSE
 jq -e '.payload.setup_code|type=="string" and length>0' <<< "$setup_response" >/dev/null || {
@@ -165,7 +171,7 @@ digest=$(jq -er '.manifest_digest' <<< "$manifest_selector")
 }
 
 # A first delivery must not silently approve the new authority on Barbara.
-private_request barbara-tui ui_state before-approval '{"method":"ui_state","params":{}}'
+private_request "$recipient" ui_state before-approval '{"method":"ui_state","params":{}}'
 jq -e '[.payload.operations[]?|select(.id=="device_enrollment")]|length==0' \
   <<< "$PRIVATE_RESPONSE" >/dev/null || {
   echo 'recipient already has a device enrollment operation before approval' >&2; exit 1;
@@ -177,11 +183,15 @@ import_request=$(jq -ce '
   {method:"submit_semantic_command",params:{intent:{ImportDeviceEnrollmentCode:{
     code:.code,manifest_transfer:{manifest_code:.manifest_transfer.manifest_code,
     initiator_verifier_code:.manifest_transfer.initiator_verifier_code}}}}}' <<< "$issued_event") || exit 1
-private_request barbara-tui submit_semantic_command approve "$import_request"
+private_request "$recipient" submit_semantic_command approve "$import_request"
 unset setup_response issue_request issued_event import_request
 import_operation=$(jq -er '.payload.handle.ui_operation | select(.id=="device_enrollment") | .instance_id' \
   <<< "$PRIVATE_RESPONSE") || exit 1
-[[ "$import_operation" =~ ^tui-op-device_enrollment-[0-9]{1,20}$ ]] || exit 1
+if [[ "$recipient_kind" == browser ]]; then
+  [[ "$import_operation" =~ ^op-[0-9]{1,20}$ ]] || exit 1
+else
+  [[ "$import_operation" =~ ^tui-op-device_enrollment-[0-9]{1,20}$ ]] || exit 1
+fi
 
 # The original receiver obtains the mailbox credential during import. Its ACK
 # follows verified immutable retention and local queueing, independently of
@@ -316,7 +326,7 @@ unset broker_token witness_response progress_response progress_candidate
   # original operation and host acknowledgment through the private ToolApi
   # before concluding which independent-process hop is missing.
   PRIVATE_RECEIPT=''
-  private_request barbara-tui ui_state no-ack-owner-state \
+  private_request "$recipient" ui_state no-ack-owner-state \
     '{"method":"ui_state","params":{}}' 5 || :
   owner_observation='null'
   if [[ -n "${PRIVATE_RECEIPT:-}" && -f "$PRIVATE_RECEIPT" && ! -L "$PRIVATE_RECEIPT" ]]; then
@@ -345,7 +355,7 @@ ack_receipt="$ack_dir/broker-ack.json"
    signed_manifest_device:$device,original_ack:$witness,progress_history:$history}' > "$ack_receipt") || exit 1
 unset latest_progress
 
-private_wait barbara-tui accepted '
+private_wait "$recipient" accepted '
   .payload.event.snapshot as $s |
   ([ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and
     .fact.device_count==2 and (.fact.device_id|type)=="string" and
@@ -368,9 +378,9 @@ host_ack_device=$(jq -er --arg device "$device" '[.payload.event.snapshot.runtim
 # succeed during onboarding while that section is not selected; observe it in
 # its owning section after the exact host ACK instead of treating absence from
 # an unrelated screen as missing canonical state.
-private_request barbara-tui submit_semantic_command open-devices \
+private_request "$recipient" submit_semantic_command open-devices \
   '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"devices"}}}'
-private_wait barbara-tui accepted-devices '
+private_wait "$recipient" accepted-devices '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and
   ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device) ]|length)==1 and
@@ -380,7 +390,7 @@ accepted_receipt=$PRIVATE_RECEIPT
 
 private_request alex-tui get_authority_id issuer-authority '{"method":"get_authority_id","params":{}}'
 issuer_authority=$PRIVATE_RESPONSE
-private_request barbara-tui get_authority_id accepted-authority '{"method":"get_authority_id","params":{}}'
+private_request "$recipient" get_authority_id accepted-authority '{"method":"get_authority_id","params":{}}'
 accepted_authority=$PRIVATE_RESPONSE
 printf '%s\n%s\n' "$issuer_authority" "$accepted_authority" |
   jq -es --arg subject "$subject" '.[0].payload.authority_id==$subject and
@@ -388,14 +398,15 @@ printf '%s\n%s\n' "$issuer_authority" "$accepted_authority" |
   echo 'issuer authority differs from signed manifest or recipient authority is absent' >&2; exit 1;
 }
 
-restart_request='{"method":"restart","params":{"expected_operation_instance":null}}'
-private_request barbara-tui restart restart "$restart_request"
+restart_request=$(jq -cn --arg kind "$recipient_kind" --arg operation "$import_operation" '
+  {method:"restart",params:{expected_operation_instance:(if $kind=="browser" then $operation else null end)}}')
+private_request "$recipient" restart restart "$restart_request"
 jq -e '.payload.status=="restarted"' <<< "$PRIVATE_RESPONSE" >/dev/null || exit 1
-private_wait barbara-tui reopened-ready '
+private_wait "$recipient" reopened-ready '
   .payload.event.snapshot.readiness=="ready"' ''
-private_request barbara-tui submit_semantic_command reopen-devices \
+private_request "$recipient" submit_semantic_command reopen-devices \
   '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"devices"}}}'
-private_wait barbara-tui reopened '
+private_wait "$recipient" reopened '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and $s.readiness=="ready" and
   ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device) ]|length)==1 and
@@ -403,7 +414,7 @@ private_wait barbara-tui reopened '
   ([ $s.lists[]?|select(.id=="devices")|.items[]?|.id ]|unique|length)==2' '' "$device" "$host_ack_device"
 reopened_event=$PRIVATE_RESPONSE
 reopened_receipt=$PRIVATE_RECEIPT
-private_request barbara-tui get_authority_id reopened-authority '{"method":"get_authority_id","params":{}}'
+private_request "$recipient" get_authority_id reopened-authority '{"method":"get_authority_id","params":{}}'
 reopened_authority=$PRIVATE_RESPONSE
 printf '%s\n%s\n' "$issuer_authority" "$reopened_authority" |
   jq -es --arg subject "$subject" '.[0].payload.authority_id==$subject and
@@ -438,6 +449,7 @@ jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local 
   --arg preflight "$preflight" \
   --argjson local_identity "$local_identity" --argjson remote_identity "$remote_identity" \
   --arg issued "$issue_operation" --arg accepted "$import_operation" \
+  --arg recipient "$recipient" \
   --argjson network_witness "$network_witness" \
   --arg accepted_receipt "$accepted_receipt" --arg reopened_receipt "$reopened_receipt" '
   {schema:1,phase:(if $local==1 then "single-host-result" else "result" end),
@@ -446,7 +458,7 @@ jq -cn --arg commit "$commit" --arg token "$AURA_E2E_RUN_TOKEN" --argjson local 
    inventory:["signed_setup_export","issue_code_manifest_verifier","pre_approval_no_import",
      "exact_approval_operation","host_ack_two_devices","same_authority_after_reopen",
      "same_device_after_reopen"],
-   actors:{issuer:"alex-tui",recipient:"barbara-tui"},
+   actors:{issuer:"alex-tui",recipient:$recipient},
    operation_instances:{issue:$issued,approval:$accepted},
    evidence:{network_delivery:$network_witness,accepted:$accepted_receipt,reopened:$reopened_receipt},
    assertions:{independent_accounts_before_issue:true,explicit_approval:true,

@@ -75,5 +75,18 @@ printf '%s\n' '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_o
   | lan_private_receipt barbara-tui submit_semantic_command submitted >/dev/null
 printf '%s\n' '{"status":"ok","payload":{"status":"restarted","message":"private-enrollment-code-fixture"}}' \
   | lan_private_receipt barbara-tui restart reopened >/dev/null
+browser_snapshot=$(jq -c '.payload.operations[0].instance_id="op-2" |
+  .payload.runtime_events[0].id=9' "$fixture/snapshot")
+browser_receipt=$(printf '%s\n' "$browser_snapshot" |
+  lan_private_receipt barbara-web ui_state browser-before-restart)
+jq -e '.operations[0].instance_id=="op-2" and
+  .operations[0].failure=={domain:"transport",code:"unavailable"} and
+  .host_acknowledgments[0].device_count==2' "$browser_receipt" >/dev/null
+[[ $(stat -c '%a' "$browser_receipt" 2>/dev/null || stat -f '%Lp' "$browser_receipt") == 600 ]]
+! printf '%s\n' "$browser_snapshot" | lan_private_receipt barbara-tui ui_state browser-as-tui >/dev/null
+! printf '%s\n' "$browser_snapshot" | jq -c '.payload.runtime_events[0].id="tui-runtime-fact-forged"' |
+  lan_private_receipt barbara-web ui_state browser-forged-ack >/dev/null
+! printf '%s\n' "$browser_snapshot" | jq -c '.payload.operations[0].instance_id="tui-op-device_enrollment-2"' |
+  lan_private_receipt barbara-web ui_state browser-forged-operation >/dev/null
 ! rg -Fq "$secret" "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN" --glob '*.json'
 echo 'LAN private enrollment request and redacted receipt fixtures passed'

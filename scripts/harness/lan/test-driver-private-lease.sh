@@ -43,6 +43,11 @@ int main(int argc, char **argv) {
     }
     if (argc < 5 || strcmp(argv[1], "--config") != 0 ||
         strcmp(argv[3], "--private-socket") != 0) return 4;
+    FILE *relay = fopen(getenv("FIXTURE_RELAY_RECEIPT"), "w");
+    if (!relay) return 10;
+    const char *relay_host = getenv("AURA_HARNESS_WEB_RELAY_HOST");
+    fputs(relay_host ? relay_host : "missing", relay);
+    fclose(relay);
     int socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (socket_fd < 0) return 5;
     struct sockaddr_un address = {0};
@@ -66,11 +71,16 @@ cc -std=c11 -Wall -Wextra -Werror "$fixture/tool_repl.c" -o "$root/bin/tool_repl
 cat > "$fixture/config.toml" <<EOF
 [run]
 artifact_dir = "$root/.tmp/e2e/run/host-a/artifacts"
+[[instances]]
+id = "barbara-web"
+mode = "browser"
+env = ["AURA_HARNESS_BROWSER_BROKER_URL=http://127.0.0.1:43191"]
 EOF
 export IN_NIX_SHELL=fixture AURA_E2E_ROOT="$root"
 export AURA_E2E_RUN_DIR="$root/.tmp/e2e/run"
 export AURA_E2E_TOOL_REPL="$root/bin/tool_repl"
-export AURA_E2E_HOST_ADDR=127.0.0.1
+export AURA_E2E_HOST_ADDR=192.168.1.8
+export FIXTURE_RELAY_RECEIPT="$fixture/relay-host"
 export FIXTURE_READY_FIFO="$fixture/ready" FIXTURE_RELEASE_FIFO="$fixture/release"
 export FIXTURE_START_READY_FIFO="$fixture/start-ready"
 mkfifo "$FIXTURE_READY_FIFO" "$FIXTURE_RELEASE_FIFO" "$FIXTURE_START_READY_FIFO"
@@ -83,6 +93,7 @@ start_run() {
   [[ $(jq -r '.run_token' "$AURA_E2E_RUN_DIR/repl.identity.json") == "$AURA_E2E_RUN_TOKEN" ]]
   IFS= read -r -t 5 started <&5
   [[ "$started" == started ]]
+  [[ $(cat "$FIXTURE_RELAY_RECEIPT") == 192.168.1.8 ]]
   [[ -S "$AURA_E2E_RUN_DIR/private-$AURA_E2E_RUN_TOKEN/owner.sock" ]]
 }
 hold_helper() {
@@ -248,4 +259,10 @@ fi
 release_helper
 bash "$driver" stop > "$fixture/idempotent-stop-again.out"
 [[ ! -e "$private_dir" && ! -L "$private_dir" ]]
+export AURA_E2E_RUN_TOKEN=driver-public-relay-refusal AURA_E2E_HOST_ADDR=8.8.8.8
+if bash "$driver" start "$fixture/config.toml" > "$fixture/public-relay.out" 2> "$fixture/public-relay.err"; then
+  echo 'browser-only paired relay accepted a public host address' >&2; exit 1
+fi
+rg -q 'browser-only paired relay requires a private LAN host address' "$fixture/public-relay.err"
+[[ ! -f "$AURA_E2E_RUN_DIR/repl.pid" ]]
 echo 'LAN private request lifecycle fixture passed'

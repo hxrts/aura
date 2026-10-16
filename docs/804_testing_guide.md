@@ -1113,13 +1113,18 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
-For a future browser recipient on Host B, keep the browser driver's broker
-endpoint on `127.0.0.1`. The harness-only
-`scripts/harness/lan/browser-broker-relay.sh <recipient-loopback-port> -- <batch.sh ...>`
-owns an SSH reverse forward from Host A's authenticated LAN broker to Host B's
-loopback listener for the whole batch, starting before `fresh.sh` launches
-the recipient browser. The SSH command carries no broker bearer or invitation
-token; browser provisioning must keep those in owner-private configuration,
+For a browser recipient on Host B, set
+`AURA_E2E_ENROLLMENT_RECIPIENT=browser` for provisioning and the paired batch.
+The generated config selects only `alex-tui` and `barbara-web`, and keeps the
+browser driver's broker endpoint on `127.0.0.1`. The paired batch owns a
+harness-only SSH reverse forward from Host A's authenticated LAN broker to
+Host B's loopback listener, starting before `fresh.sh` launches the browser.
+The browser-only recipient config has no native LAN bind, so the driver also
+selects Host B's private LAN address for its owned web transport relay while
+the page itself still loads from loopback; a public or malformed host address
+refuses startup.
+The SSH command carries no broker bearer or invitation token; generated
+configuration keeps those in owner-private files,
 outside URLs, logs and process arguments. Relay port readiness does not prove
 registration, signed delivery, receiver ACK, host acknowledgment or reopen;
 the paired checklist still needs those exact authenticated witnesses.
