@@ -1324,6 +1324,20 @@ Native `restart` does not accept a browser evidence handle; the checklist keeps
 that exact operation in its pre-restart receipt and verifies fresh readiness,
 authority and devices after restart, without assuming a fixed screen.
 The checklist explicitly selects Settings/Devices before its list observation.
+For browser recipients, `submit_semantic_command` acknowledges submission,
+not application. The authoritative snapshot must show Settings with the
+`settings_sections/devices` selection and both distinct canonical devices,
+including the signed invitee marked current. On an observation failure, the
+checklist retains the first and final successful original snapshots for both
+acceptance and reopen as private 0600 artifacts. Their redacted witnesses record snapshot version, screen,
+section selection, list shape, exact operation, actual authority-response
+comparison from a separately retained private response, and the hash of the
+earlier exact host-ACK receipt. A later snapshot may no
+longer contain the historical host event; the earlier verified receipt supplies
+that evidence. The pre-reopen authority comparison is diagnostic because the
+live browser controller may still hold its provisional identity. The reopened
+same-profile owner must report the signed subject. These snapshots classify a
+missing projection; they do not replace the required host ACK or reopen proof.
 The checklist decodes only the nonsecret selector from the issuer's exact
 signed manifest through the pinned native codec on stdin. After import
 submission, it requires one bearer-authenticated broker ACK for that manifest,

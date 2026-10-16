@@ -111,6 +111,58 @@ jq -e '.operations[0].instance_id=="op-2" and
 original_root=$AURA_E2E_ROOT
 AURA_E2E_ROOT=$(cd "$here/../../.." && pwd)
 source_revision=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
+# A successful original ACK can be retained separately from a later snapshot:
+# the latter need not repeat the historical runtime event or terminal record.
+snapshot_invitee=00000000-0000-4000-8000-000000000003
+snapshot_issuer=00000000-0000-4000-8000-000000000002
+snapshot_subject=authority-11111111-1111-1111-1111-111111111111
+printf '%s\n' '{"status":"ok","payload":{"authority_id":"authority-99999999-9999-9999-9999-999999999999"}}' |
+  lan_private_receipt barbara-web get_authority_id accepted-authority-before-devices >/dev/null
+snapshot_authority_raw="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-authority.raw-private.json"
+[[ $(stat -c '%a' "$snapshot_authority_raw" 2>/dev/null || stat -f '%Lp' "$snapshot_authority_raw") == 600 ]]
+successful_event=$(printf '%s\n' "$browser_event" | jq -c '
+  .payload.event.snapshot.operations[0].state="succeeded" |
+  .payload.event.snapshot.operations[0].failure=null')
+prior_ack=$(printf '%s\n' "$successful_event" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event accepted-1 op-2)
+later_snapshot=$(printf '%s\n' "$successful_event" | jq -c --arg secret "$secret" \
+  --arg invitee "$snapshot_invitee" --arg issuer "$snapshot_issuer" '
+  .payload.event.version=10 | .payload.event.snapshot.screen="settings" |
+  .payload.event.snapshot.selections=[{list:"settings_sections",item_id:"profile"}] |
+  .payload.event.snapshot.lists=[{id:"devices",items:[
+    {id:$issuer,is_current:false},{id:$invitee,is_current:true}]}] |
+  .payload.event.snapshot.operations=[] | .payload.event.snapshot.runtime_events=[] |
+  .payload.event.snapshot.diagnostic=$secret')
+snapshot_witness=$(printf '%s\n' "$later_snapshot" |
+  lan_private_canonical_snapshot_witness barbara-web accepted-devices first op-2 "$snapshot_invitee" \
+    "$snapshot_issuer" "$snapshot_subject" "$snapshot_authority_raw" "$prior_ack")
+jq -e '.snapshot_version==10 and .screen_is_settings and
+  .stage=="accepted-devices" and
+  .devices_section_selected==false and .devices_item_count==2 and
+  .signed_invitee_current and .original_issuer_noncurrent and
+  .original_operation_succeeded==false and .current_snapshot_host_ack_bound==false and
+  .authority_response_matches_signed_subject==false and
+  .authority_response_file=="barbara-web-accepted-authority.raw-private.json" and
+  (.authority_response_sha256|length)==64 and
+  .prior_original_host_ack_receipt=="barbara-web-accepted-1.json" and
+  (.prior_original_host_ack_sha256|length)==64' "$snapshot_witness" >/dev/null
+snapshot_raw="${snapshot_witness%.snapshot-witness.json}.snapshot-raw-private.json"
+rg -Fq "$secret" "$snapshot_raw"
+! rg -Fq "$secret" "$snapshot_witness"
+[[ $(stat -c '%a' "$snapshot_raw" 2>/dev/null || stat -f '%Lp' "$snapshot_raw") == 600 ]]
+[[ $(stat -c '%a' "$snapshot_witness" 2>/dev/null || stat -f '%Lp' "$snapshot_witness") == 600 ]]
+! printf '%s\n' "$later_snapshot" |
+  lan_private_canonical_snapshot_witness barbara-web accepted-devices first op-2 "$snapshot_invitee" \
+    "$snapshot_issuer" "$snapshot_subject" "$snapshot_authority_raw" "$prior_ack" >/dev/null
+! printf '%s\n' "$later_snapshot" |
+  lan_private_canonical_snapshot_witness barbara-web accepted-devices final op-3 "$snapshot_invitee" \
+    "$snapshot_issuer" "$snapshot_subject" "$snapshot_authority_raw" "$prior_ack" >/dev/null
+[[ ! -e "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-raw-private.json" ]]
+ln -s "$fixture/snapshot" "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json"
+! printf '%s\n' "$later_snapshot" |
+  lan_private_canonical_snapshot_witness barbara-web accepted-devices final op-2 "$snapshot_invitee" \
+    "$snapshot_issuer" "$snapshot_subject" "$snapshot_authority_raw" "$prior_ack" >/dev/null
+[[ -L "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-accepted-devices-final.snapshot-witness.json" ]]
 failed_event=$(printf '%s\n' "$browser_event" | jq -c --arg secret "$secret" '
   .payload.event.snapshot.operations[0].failure={domain:"invitation",code:"internal_error",detail:$secret}')
 failure_receipt=$(printf '%s\n' "$failed_event" |
