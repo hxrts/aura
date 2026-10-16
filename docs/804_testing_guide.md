@@ -2361,10 +2361,26 @@ crates/aura-agent/src/path.rs` compiles the ownership lint once in a guarded
 `ownership-lint-compile` receipt, then runs six source-scoped modes in a
 separate guarded `ownership-lint-exec` receipt. The execution receipt names the
 original compile receipt and verifies its successful terminal result, source
-scope, tool identity, and binary hash. If execution admission is refused, keep
+scope, tool identity, and binary hash. The default run uses Cargo's warm
+freshness check and requires the original exact source fingerprint and scope
+for execution reuse. When a compile-lane admission is costly or the same lint
+binary will check several app source revisions, run
+`bash scripts/dev/run-ownership-fast.sh --certify-compile-inputs crates/aura-agent/src/path.rs`.
+That opt-in compile receipt also certifies a compiler input graph. The graph records the three
+workspace packages that build the lint, their whole-package file inventories,
+Cargo manifests and lock, selected registry package contents and locked archive
+checksums, feature resolution, native build selectors and selected tools. The
+certified compile stage checks locked archives against their extracted source;
+execution rechecks the recorded inputs and uses the original binary. An unrelated app
+source change may use that same compile receipt while the new execution receipt
+records its own current source fingerprint and checked-file scope. Changed or
+uncertifiable compiler inputs refuse certified reuse. Rechecking mutable registry
+sources can take longer than a warm Cargo freshness check; use certification
+when its compile-lane admission or source-scope reuse matters. If execution
+admission is refused, keep
 that compile receipt and resume with
 `bash scripts/dev/run-ownership-fast.sh --compile-receipt /absolute/receipt.json crates/aura-agent/src/path.rs`
-on the same source and binary; a changed dependency refuses reuse. For the
+on a current checked source and the original binary. For the
 browser driver contract's static policy check, `just ci-policy-static
 browser-driver-contract-sync` similarly separates toolkit compilation from the
 selected typed check and records its three canonical Rust/TS inputs. These

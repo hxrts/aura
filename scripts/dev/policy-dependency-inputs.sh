@@ -42,6 +42,264 @@ policy_toolkit_inputs() {
   done
   policy_hash_files "$root" "${paths[@]}"
 }
+
+policy_no_link_components() {
+  local path="$1" current='' component
+  local -a components=()
+  [[ "$path" == /* ]] || return 2
+  IFS=/ read -ra components <<< "$path"
+  for component in "${components[@]}"; do
+    [[ -n "$component" ]] || continue
+    [[ "$component" != . && "$component" != .. ]] || return 2
+    current="$current/$component"
+    [[ ! -L "$current" ]] || return 2
+  done
+}
+
+# The ownership lint binary is built from the normal/build dependency closure
+# of aura-macros. A depfile only lists files read by one invocation and cannot
+# certify new modules, manifests, or dependency edges. Hash whole local package
+# directories and the selected registry closure instead.
+policy_ownership_compile_inputs() {
+  local root="$1" certification="${2:-reuse}" scratch metadata graph local_list registry_list
+  local relative manifest package_dir archive checksum actual stage archive_hash source_hash tool_hash native_hash marker_hash
+  local cargo_home="${CARGO_HOME:-$HOME/.cargo}" cargo_config
+  [[ "$certification" == reuse || "$certification" == certify ]] || return 2
+  for cargo_config in "$root/.cargo/config" "$root/.cargo/config.toml" \
+    "$cargo_home/config" "$cargo_home/config.toml"; do
+    [[ ! -e "$cargo_config" && ! -L "$cargo_config" ]] && continue
+    [[ -f "$cargo_config" && ! -L "$cargo_config" ]] || return 2
+    # Alternate sources make the crates.io archive/source relation ambiguous.
+    if rg -q '^[[:space:]]*\[([[:space:]]*source\.|[[:space:]]*patch\.|[[:space:]]*replace\.)|^[[:space:]]*replace-with[[:space:]]*=' "$cargo_config"; then
+      return 2
+    fi
+  done
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/aura-ownership-inputs.XXXXXX")" || return 2
+  chmod 700 "$scratch"
+  metadata="$scratch/metadata.json"
+  local_list="$scratch/local.tsv"
+  registry_list="$scratch/registry.tsv"
+  if ! (cd "$root" && cargo metadata --locked --offline --format-version 1 > "$metadata"); then
+    rm -rf "$scratch"; return 2
+  fi
+  if ! jq -er '
+    . as $m |
+    ($m.resolve.nodes | map({key:.id,value:[.deps[] |
+      select(any(.dep_kinds[]; .kind == null or .kind == "build")) | .pkg]}) | from_entries) as $edges |
+    ($m.packages | map({key:.id,value:.}) | from_entries) as $packages |
+    ($m.resolve.nodes | map({key:.id,value:(.features // [] | sort)}) | from_entries) as $features |
+    ($m.packages[] | select(.name=="hxrts-aura-macros" and .source==null) | .id) as $start |
+    [$start | recurse($edges[.][]?)] | unique | map($packages[.]) |
+    if any(.[]; .source != null and .source != "registry+https://github.com/rust-lang/crates.io-index")
+      then error("unsupported ownership dependency source") else . end |
+    .[] | [.name,.version,(.source // "path"),.manifest_path,
+      ([.targets[] | .kind | join(",")] | sort | join(";")),
+      ($features[.id] | join(","))] | @tsv
+  ' "$metadata" | LC_ALL=C sort > "$scratch/closure.tsv"; then
+    rm -rf "$scratch"; return 2
+  fi
+  awk -F '\t' '$3=="path" {print}' "$scratch/closure.tsv" > "$local_list"
+  awk -F '\t' '$3!="path" {print}' "$scratch/closure.tsv" > "$registry_list"
+  if [[ "$(cut -f1 "$local_list" | LC_ALL=C sort | tr '\n' ' ')" != \
+    'hxrts-aura-core hxrts-aura-macros hxrts-aura-mpst ' ]]; then
+    rm -rf "$scratch"; return 2
+  fi
+  # No local build script or additional workspace path dependency is currently
+  # certified. Fail closed if the manifest graph changes instead of borrowing
+  # this receipt for a new compiler input owner.
+  if jq -e '[.packages[] | select(.name=="hxrts-aura-core" or .name=="hxrts-aura-macros" or .name=="hxrts-aura-mpst") |
+    any(.targets[]; any(.kind[]; .=="custom-build"))] | any' "$metadata" >/dev/null; then
+    rm -rf "$scratch"; return 2
+  fi
+  local -a paths=(Cargo.toml Cargo.lock flake.nix flake.lock)
+  local -a local_hashes=()
+  policy_no_link_components "$root/crates" || { rm -rf "$scratch"; return 2; }
+  while IFS=$'\t' read -r _ _ _ manifest _; do
+    [[ "$manifest" == "$root/crates/"*/Cargo.toml ]] || { rm -rf "$scratch"; return 2; }
+    package_dir="${manifest%/Cargo.toml}"
+    if ! policy_no_link_components "$manifest"; then
+      rm -rf "$scratch"; return 2;
+    fi
+    actual="$(policy_ownership_tree_hash "$package_dir")" || { rm -rf "$scratch"; return 2; }
+    local_hashes+=("${package_dir#"$root"/}:$actual")
+  done < "$local_list"
+  for relative in .cargo/config .cargo/config.toml rust-toolchain rust-toolchain.toml; do
+    [[ ! -e "$root/$relative" && ! -L "$root/$relative" ]] || paths+=("$relative")
+  done
+  source_hash="$(policy_hash_files "$root" "${paths[@]}")" || { rm -rf "$scratch"; return 2; }
+  tool_hash="$(policy_tool_identity)" || { rm -rf "$scratch"; return 2; }
+  native_hash="$(policy_ownership_native_identity)" || { rm -rf "$scratch"; return 2; }
+  {
+    printf 'local:%s\n' "$source_hash"
+    printf 'package:%s\n' "${local_hashes[@]}"
+    printf 'closure:%s\n' "$(sha256sum "$scratch/closure.tsv" | awk '{print $1}')"
+    while IFS=$'\t' read -r name version _ manifest _; do
+      package_dir="${manifest%/Cargo.toml}"
+      [[ "$manifest" == "$cargo_home/registry/src/"*/"$name-$version"/Cargo.toml ]] || {
+        rm -rf "$scratch"; return 2;
+      }
+      policy_no_link_components "$manifest" || { rm -rf "$scratch"; return 2; }
+      archive="$cargo_home/registry/cache/$(basename "$(dirname "$package_dir")")/$name-$version.crate"
+      [[ -f "$archive" ]] && policy_no_link_components "$archive" || { rm -rf "$scratch"; return 2; }
+      checksum="$(awk -v n="$name" -v v="$version" '
+        /^\[\[package\]\]$/ {match_name=0; match_version=0; checksum=""}
+        $0=="name = \"" n "\"" {match_name=1}
+        $0=="version = \"" v "\"" {match_version=1}
+        /^checksum = "/ && match_name && match_version {sub(/^checksum = "/, ""); sub(/"$/, ""); print; exit}
+      ' "$root/Cargo.lock")"
+      [[ "$checksum" =~ ^[a-f0-9]{64}$ ]] || { rm -rf "$scratch"; return 2; }
+      archive_hash="$(sha256sum "$archive" | awk '{print $1}')"
+      [[ "$archive_hash" == "$checksum" ]] || { rm -rf "$scratch"; return 2; }
+      [[ -z "$(find "$package_dir" ! -type f ! -type d -print -quit)" ]] || { rm -rf "$scratch"; return 2; }
+      [[ -f "$package_dir/.cargo-ok" && ! -L "$package_dir/.cargo-ok" ]] || {
+        rm -rf "$scratch"; return 2;
+      }
+      marker_hash="$(sha256sum "$package_dir/.cargo-ok" | awk '{print $1}')"
+      actual="$(policy_ownership_tree_hash "$package_dir" registry)" || { rm -rf "$scratch"; return 2; }
+      if [[ "$certification" == certify ]]; then
+        stage="$scratch/stage"
+        mkdir -m 700 "$stage"
+        # Archive bytes are locked. Still refuse traversal and special members
+        # before extracting them under the private, one-package staging root.
+        if ! tar -tf "$archive" > "$scratch/members" ||
+          ! tar -tvf "$archive" > "$scratch/member-types" ||
+          [[ ! -s "$scratch/members" ]]; then
+          rm -rf "$scratch"; return 2
+        fi
+        cut -c1 "$scratch/member-types" > "$scratch/kinds" || { rm -rf "$scratch"; return 2; }
+        [[ "$(wc -l < "$scratch/members")" == "$(wc -l < "$scratch/kinds")" ]] || {
+          rm -rf "$scratch"; return 2;
+        }
+        if rg -q '[^d-]' "$scratch/kinds"; then rm -rf "$scratch"; return 2; fi
+        while IFS= read -r relative; do
+          [[ "$relative" == "$name-$version/"* ]] || { rm -rf "$scratch"; return 2; }
+          relative="${relative#"$name-$version/"}"
+          [[ -z "$relative" || ( "$relative" != /* &&
+             "$relative" != .cargo-ok &&
+             ! "$relative" =~ (^|/)\.\.(/|$) &&
+             "$relative" =~ ^[A-Za-z0-9_.@/+(),\ -]+$ ) ]] || {
+            rm -rf "$scratch"; return 2;
+          }
+        done < "$scratch/members"
+        if ! tar -xf "$archive" -C "$stage"; then rm -rf "$scratch"; return 2; fi
+        [[ -z "$(find "$stage" ! -type f ! -type d -print -quit)" ]] || { rm -rf "$scratch"; return 2; }
+        [[ "$actual" == "$(policy_ownership_tree_hash "$stage/$name-$version" registry)" ]] || {
+          rm -rf "$scratch"; return 2;
+        }
+        rm -rf "$stage"
+      fi
+      printf '%s:%s:%s:%s:%s\n' "$name" "$version" "$checksum" "$actual" "$marker_hash"
+    done < "$registry_list"
+    printf 'tools:%s\n' "$tool_hash"
+    printf 'native:%s\n' "$native_hash"
+  } | sha256sum | awk '{print $1}'
+  local result="${PIPESTATUS[0]}"
+  rm -rf "$scratch"
+  [[ "$result" == 0 ]]
+}
+
+policy_ownership_native_identity() {
+  local key value resolved tool sdkroot exported item
+  local -a selectors=(
+    CC CXX AR LD RANLIB HOST_CC TARGET_CC HOST_CXX TARGET_CXX HOST_AR TARGET_AR
+    HOST_LD TARGET_LD CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+    SDKROOT DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET
+    PKG_CONFIG PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+    BINDGEN_EXTRA_CLANG_ARGS LIBCLANG_PATH RUSTC_BOOTSTRAP
+    HOST TARGET RUST_TARGET_PATH RUSTDOCFLAGS
+    NIX_CC NIX_CFLAGS_COMPILE NIX_LDFLAGS NIX_CFLAGS_LINK NIX_DONT_SET_RPATH
+  )
+  exported="$(compgen -e)" || return 2
+  while IFS= read -r key; do
+    case "$key" in
+      CFLAGS_*|CXXFLAGS_*|CPPFLAGS_*|LDFLAGS_*)
+        [[ -z "${!key-}" ]] || return 2 ;;
+    esac
+  done <<< "$exported"
+  for key in CFLAGS CXXFLAGS CPPFLAGS LDFLAGS BINDGEN_EXTRA_CLANG_ARGS; do
+    [[ -z "${!key-}" ]] || return 2
+  done
+  for key in PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR LIBCLANG_PATH OPENSSL_DIR OPENSSL_LIB_DIR OPENSSL_INCLUDE_DIR; do
+    value="${!key-}"
+    [[ -z "$value" ]] && continue
+    local -a locations=()
+    IFS=: read -ra locations <<< "$value"
+    for item in "${locations[@]}"; do
+      [[ -d "$item" && "$item" == /nix/store/* ]] || return 2
+      resolved="$(cd "$item" && pwd -P)" || return 2
+      [[ "$resolved" == /nix/store/* ]] || return 2
+    done
+  done
+  {
+    # Bind Cargo's declared build-script selector families, including target
+    # linker and native tool overrides, without recording raw values in the
+    # receipt. Unknown executable override syntax refuses reuse.
+    while IFS= read -r key; do
+      case "$key" in
+        CARGO_TARGET_*|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_*|CARGO_PROFILE_*|CARGO_CFG_*|CARGO_FEATURE_*|\
+        CC_*|CXX_*|AR_*|CFLAGS_*|CXXFLAGS_*|CPPFLAGS_*|LDFLAGS_*|\
+        PKG_CONFIG_*|OPENSSL_*|LIBCLANG_*|BINDGEN_*|NIX_*) selectors+=("$key") ;;
+      esac
+    done < <(printf '%s\n' "$exported" | LC_ALL=C sort -u)
+    while IFS= read -r key; do
+      value="${!key-}"
+      printf '%s\0%s\0' "$key" "$value"
+      case "$key" in
+        CC|CXX|AR|LD|RANLIB|PKG_CONFIG|HOST_CC|TARGET_CC|HOST_CXX|TARGET_CXX|HOST_AR|TARGET_AR|HOST_LD|TARGET_LD|CARGO_TARGET_*_LINKER|CC_*|CXX_*|AR_*)
+          [[ "$key" != CC_ENABLE_DEBUG_OUTPUT ]] || continue
+          [[ -z "$value" ]] && continue
+          [[ "$value" != *[[:space:]]* ]] || return 2
+          resolved="$(command -v "$value")" || return 2
+          [[ -f "$resolved" ]] || return 2
+          printf 'selected:%s:%s\0' "$key" "$(cd "$(dirname "$resolved")" && pwd -P)/$(basename "$resolved")"
+          sha256sum "$resolved"
+          ;;
+      esac
+    done < <(printf '%s\n' "${selectors[@]}" | LC_ALL=C sort -u)
+    for tool in cc clang clang++ ar ld ranlib pkg-config; do
+      resolved="$(command -v "$tool" 2>/dev/null || true)"
+      [[ -z "$resolved" ]] && continue
+      [[ -f "$resolved" ]] || return 2
+      printf 'default:%s:%s\0' "$tool" "$(cd "$(dirname "$resolved")" && pwd -P)/$(basename "$resolved")"
+      sha256sum "$resolved"
+    done
+    if [[ "$(uname -s)" == Darwin ]]; then
+      for tool in clang clang++ ar ld; do
+        resolved="$(xcrun --find "$tool" 2>/dev/null)" || return 2
+        [[ -f "$resolved" ]] || return 2
+        printf 'xcrun:%s:%s\0' "$tool" "$resolved"
+        sha256sum "$resolved"
+      done
+      xcode-select -p
+    fi
+    sdkroot="${SDKROOT:-}"
+    if [[ "$(uname -s)" == Darwin && -z "$sdkroot" ]]; then
+      sdkroot="$(xcrun --show-sdk-path 2>/dev/null)" || return 2
+    fi
+    if [[ -n "$sdkroot" ]]; then
+      [[ -d "$sdkroot" && "$sdkroot" == /nix/store/* ]] || return 2
+      resolved="$(cd "$sdkroot" && pwd -P)" || return 2
+      [[ "$resolved" == /nix/store/* ]] || return 2
+      printf 'sdk:%s:%s\0' "$sdkroot" "$resolved"
+    fi
+  } | sha256sum | awk '{print $1}'
+  local result="${PIPESTATUS[0]}"
+  [[ "$result" == 0 ]]
+}
+
+policy_ownership_tree_hash() {
+  local directory="$1" mode="${2:-local}"
+  [[ -d "$directory" && ! -L "$directory" ]] || return 2
+  [[ -z "$(find "$directory" ! -type f ! -type d -print -quit)" ]] || return 2
+  (cd "$directory" && {
+    find . -type d -print | LC_ALL=C sort | sed 's/^/dir:/'
+    if [[ "$mode" == registry ]]; then
+      find . -type f ! -path './.cargo-ok' -print0
+    else
+      find . -type f -print0
+    fi | LC_ALL=C sort -z | xargs -0 shasum -a 256
+  } | shasum -a 256 | awk '{print $1}')
+}
 policy_tool_identity() {
   local tool resolved key value selected cargo_home
   {

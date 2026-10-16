@@ -4,14 +4,22 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 stage=packet
-case "${1:-}" in
-  --compile-stage) stage=compile; shift ;;
-  --execution-stage) stage=execution; shift ;;
-esac
+certify_compile_inputs=0
+while :; do
+  case "${1:-}" in
+    --compile-stage) stage=compile; shift ;;
+    --execution-stage) stage=execution; shift ;;
+    --certify-compile-inputs) certify_compile_inputs=1; shift ;;
+    *) break ;;
+  esac
+done
 root="$repo_root"
 if [[ "${1:-}" == --root ]]; then root="${2:?missing root}"; shift 2; fi
 compile_receipt=''
 if [[ "${1:-}" == --compile-receipt ]]; then compile_receipt="${2:?missing compile receipt}"; shift 2; fi
+[[ "$certify_compile_inputs" != 1 || -z "$compile_receipt" ]] || {
+  echo 'run-ownership-fast: certification belongs to a new compile receipt' >&2; exit 2;
+}
 [[ $# -gt 0 ]] || { echo 'run-ownership-fast: at least one crate Rust file required' >&2; exit 2; }
 root="$(cd "$root" && pwd -P)"
 paths=()
@@ -35,8 +43,10 @@ if [[ "$stage" == packet ]]; then
   packet="$(mktemp -d "$root/artifacts/disk-budget/receipts/policy-packet.XXXXXX")"
   chmod 700 "$packet"
   export AURA_BUILD_PACKAGES=hxrts-aura-macros
+  compile_flags=(--compile-stage)
+  [[ "$certify_compile_inputs" != 1 ]] || compile_flags+=(--certify-compile-inputs)
   bash "$repo_root/scripts/dev/build-budget.sh" --root "$root" --lane ownership-lint-compile -- \
-    bash "$repo_root/scripts/dev/run-ownership-fast.sh" --compile-stage --root "$root" \
+    bash "$repo_root/scripts/dev/run-ownership-fast.sh" "${compile_flags[@]}" --root "$root" \
       "${paths[@]}" > "$packet/compile.log" 2>&1 || {
     cat "$packet/compile.log"; exit 1;
   }
@@ -60,7 +70,7 @@ source "$repo_root/scripts/dev/build-receipt.sh"
 source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
 frozen="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
 [[ -n "$frozen" && "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || {
-  echo 'run-ownership-fast: source changed before lint compile' >&2; exit 1;
+  echo 'run-ownership-fast: source changed before lint stage' >&2; exit 1;
 }
 modes=(actor-owned-task-spawn semantic-owner-no-spawn optional-owner-boundary
   authoritative-ref-no-reresolution weak-to-strong-identifier-upgrade time-domain-usage)
@@ -68,20 +78,47 @@ scope_json="$(printf '%s\n' "${paths[@]}" | jq -Rs 'split("\n") | map(select(len
 modes_json="$(printf '%s\n' "${modes[@]}" | jq -Rs 'split("\n") | map(select(length>0))')"
 scope_hash="$(policy_hash_files "$root" "${paths[@]}")"
 tool_hash="$(policy_tool_identity)"
+compile_graph=''
+graph_certified=false
+if [[ "$stage" == compile && "$certify_compile_inputs" == 1 ]]; then
+  compile_graph="$(policy_ownership_compile_inputs "$root" certify)" || {
+    echo 'run-ownership-fast: compiler input graph cannot be certified' >&2; exit 1;
+  }
+  graph_certified=true
+elif [[ "$stage" == execution ]]; then
+  [[ -f "$compile_receipt" && ! -L "$compile_receipt" &&
+     "$compile_receipt" == "$root/artifacts/disk-budget/receipts/"* ]] || {
+    echo 'run-ownership-fast: original compile receipt missing or outside checkout' >&2; exit 1;
+  }
+  graph_certified="$(jq -r '.metadata.policy_compile_graph_certified // false' "$compile_receipt")"
+  [[ "$graph_certified" == true || "$graph_certified" == false ]] || exit 1
+  if [[ "$graph_certified" == true ]]; then
+    compile_graph="$(policy_ownership_compile_inputs "$root" reuse)" || {
+      echo 'run-ownership-fast: certified compiler input graph changed' >&2; exit 1;
+    }
+  fi
+fi
 aura_receipt_update --argjson scope "$scope_json" --argjson modes "$modes_json" \
-  --arg scope_hash "$scope_hash" --arg tool_hash "$tool_hash" \
+  --arg scope_hash "$scope_hash" --arg tool_hash "$tool_hash" --arg graph "$compile_graph" \
+  --argjson certified "$graph_certified" \
   '.metadata.source_scope=$scope | .metadata.policy_modes=$modes |
-   .metadata.policy_scope_hash=$scope_hash | .metadata.policy_tool_identity_hash=$tool_hash'
+   .metadata.policy_scope_hash=$scope_hash | .metadata.policy_tool_identity_hash=$tool_hash |
+   .metadata.policy_compile_graph_certified=$certified |
+   .metadata.policy_compile_graph_hash=(if $certified then $graph else null end)'
 if [[ "$stage" == execution ]]; then
   [[ -f "$compile_receipt" && ! -L "$compile_receipt" &&
      "$compile_receipt" == "$root/artifacts/disk-budget/receipts/"* ]] || {
     echo 'run-ownership-fast: original compile receipt missing or outside checkout' >&2; exit 1;
   }
   jq -e --arg root "$root" --arg source "$frozen" --arg scope "$scope_hash" \
-    --arg tool "$tool_hash" --argjson paths "$scope_json" \
+    --arg graph "$compile_graph" --arg tool "$tool_hash" \
+    --argjson paths "$scope_json" --argjson certified "$graph_certified" \
     '.root==$root and .lane=="ownership-lint-compile" and
-     .source.fingerprint==$source and .final_exit_status==0 and
-     .metadata.source_scope==$paths and .metadata.policy_scope_hash==$scope and
+     .final_exit_status==0 and
+     (.metadata.policy_compile_graph_certified // false)==$certified and
+     (if $certified then .metadata.policy_compile_graph_hash==$graph
+      else .source.fingerprint==$source and .metadata.source_scope==$paths and
+           .metadata.policy_scope_hash==$scope end) and
      .metadata.policy_tool_identity_hash==$tool and
      ([.phases[] | select(.phase=="compile")] | length)==1 and
      ([.phases[] | .phase] | all(.=="compile" or .=="command")) and
@@ -97,10 +134,17 @@ if [[ "$stage" == execution ]]; then
   }
   AURA_RECEIPT_EVENT_KIND=dependency aura_receipt_update --arg dependency "$compile_receipt" \
     --arg binary "$(jq -r '.metadata.policy_binary_hash' "$compile_receipt")" \
-    '.metadata.policy_compile_receipt=$dependency | .metadata.policy_binary_hash=$binary'
+    --arg original "$(jq -r '.source.fingerprint' "$compile_receipt")" \
+    '.metadata.policy_compile_receipt=$dependency | .metadata.policy_binary_hash=$binary |
+     .metadata.policy_compile_source_fingerprint=$original'
 else
 bash "$repo_root/scripts/dev/build-phase.sh" compile -- \
   cargo build -p hxrts-aura-macros --bin ownership_lints
+if [[ "$graph_certified" == true ]]; then
+  [[ "$compile_graph" == "$(policy_ownership_compile_inputs "$root" reuse)" ]] || {
+    echo 'run-ownership-fast: compiler inputs changed during lint compile' >&2; exit 1;
+  }
+fi
 lint_binary="$root/target/debug/ownership_lints"
 [[ -f "$lint_binary" && -x "$lint_binary" && ! -L "$lint_binary" ]] || {
   echo 'run-ownership-fast: compiled ownership lint unavailable' >&2; exit 1;
@@ -123,6 +167,8 @@ done
 }
 [[ "$scope_hash" == "$(policy_hash_files "$root" "${paths[@]}")" &&
    "$tool_hash" == "$(policy_tool_identity)" &&
+   ( "$graph_certified" != true ||
+     "$compile_graph" == "$(policy_ownership_compile_inputs "$root" reuse)" ) &&
    "$(sha256sum "$lint_binary" | awk '{print $1}')" == \
      "$(jq -r '.metadata.policy_binary_hash' "$AURA_BUILD_RECEIPT")" ]] || {
   echo 'run-ownership-fast: source, tool, or compiled lint changed during batch' >&2; exit 1;
