@@ -239,7 +239,8 @@ mod device_id_serde {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&hex::encode(id.0))
+        let bytes = id.to_bytes().map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&hex::encode(bytes))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<DeviceId, D::Error>
@@ -248,12 +249,17 @@ mod device_id_serde {
     {
         let s = String::deserialize(deserializer)?;
         let bytes = hex::decode(s).map_err(serde::de::Error::custom)?;
-        if !matches!(bytes.len(), 16 | 32) {
-            return Err(serde::de::Error::custom("device_id must be 16 or 32 bytes"));
+        if bytes.len() != 32 {
+            return Err(serde::de::Error::custom("device_id must be 32 bytes"));
         }
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes[..16]);
-        Ok(DeviceId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes)))
+        if bytes[16..].iter().any(|byte| *byte != 0) {
+            return Err(serde::de::Error::custom(
+                "device_id has noncanonical trailing bytes",
+            ));
+        }
+        let mut canonical = [0u8; 32];
+        canonical.copy_from_slice(&bytes);
+        Ok(DeviceId::from_bytes(canonical))
     }
 }
 
@@ -299,23 +305,40 @@ mod config_serde_tests {
     use super::*;
 
     #[test]
-    fn device_id_round_trips_in_native_config_and_accepts_legacy_width() {
+    fn device_id_round_trips_with_canonical_wire_width() {
         let config = AgentConfig::default();
         let encoded = serde_json::to_value(&config).expect("serialize native config");
+        let wire = encoded["device_id"].as_str().expect("device id string");
+        assert_eq!(wire.len(), 64);
+        assert_eq!(wire, hex::encode(config.device_id.to_bytes().unwrap()));
         let decoded: AgentConfig =
             serde_json::from_value(encoded.clone()).expect("deserialize native config");
         assert_eq!(decoded.device_id, config.device_id);
+    }
 
-        let mut legacy = encoded.clone();
-        legacy["device_id"] = serde_json::Value::String(hex::encode(
-            config.device_id.to_bytes().expect("legacy bytes"),
+    #[test]
+    fn device_id_rejects_short_and_nonhex_wire() {
+        let mut invalid = serde_json::to_value(AgentConfig::default()).unwrap();
+        invalid["device_id"] = serde_json::Value::String(hex::encode(
+            AgentConfig::default().device_id.uuid().as_bytes(),
         ));
-        let decoded_legacy: AgentConfig =
-            serde_json::from_value(legacy).expect("deserialize legacy width");
-        assert_eq!(decoded_legacy.device_id, config.device_id);
-
-        let mut invalid = encoded;
+        let error = serde_json::from_value::<AgentConfig>(invalid.clone()).unwrap_err();
+        assert!(error.to_string().contains("device_id must be 32 bytes"));
         invalid["device_id"] = serde_json::Value::String("00".into());
-        assert!(serde_json::from_value::<AgentConfig>(invalid).is_err());
+        let error = serde_json::from_value::<AgentConfig>(invalid.clone()).unwrap_err();
+        assert!(error.to_string().contains("device_id must be 32 bytes"));
+        invalid["device_id"] = serde_json::Value::String("gg".repeat(32));
+        let error = serde_json::from_value::<AgentConfig>(invalid).unwrap_err();
+        assert!(error.to_string().contains("Invalid character"));
+    }
+
+    #[test]
+    fn device_id_rejects_noncanonical_trailing_bytes() {
+        let mut invalid = serde_json::to_value(AgentConfig::default()).unwrap();
+        let mut bytes = AgentConfig::default().device_id.to_bytes().unwrap();
+        bytes[31] = 1;
+        invalid["device_id"] = serde_json::Value::String(hex::encode(bytes));
+        let error = serde_json::from_value::<AgentConfig>(invalid).unwrap_err();
+        assert!(error.to_string().contains("noncanonical trailing bytes"));
     }
 }
