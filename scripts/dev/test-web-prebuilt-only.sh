@@ -9,9 +9,11 @@ public="$project/target/dx/aura-web/release/web/public"
 mkdir -p "$project/scripts/web" "$project/crates/aura-web/node_modules/ws" \
   "$project/crates/aura-web/public/assets" "$project/crates/aura-web/src" \
   "$public/assets" "$scratch/bin"
-cp "$repo_root/scripts/web/serve-static.sh" "$repo_root/scripts/web/log-bootstrap.sh" "$project/scripts/web/"
+cp "$repo_root/scripts/web/serve-static.sh" "$repo_root/scripts/web/log-bootstrap.sh" \
+  "$repo_root/scripts/web/prebuilt-provenance.sh" "$project/scripts/web/"
 : > "$project/Cargo.toml"
 : > "$project/Cargo.lock"
+printf 'pinned-toolchain=v1\n' > "$project/flake.lock"
 : > "$project/crates/aura-web/Cargo.toml"
 : > "$project/crates/aura-web/src/main.rs"
 : > "$project/crates/aura-web/public/assets/tailwind.css"
@@ -30,7 +32,15 @@ echo dx >> "$CALLS_FILE"
 exit 99
 EOF
 chmod +x "$scratch/bin/"* "$project/scripts/web/dx.sh"
+printf 'target/\n' > "$project/.gitignore"
+git -C "$project" init -q
+git -C "$project" add .
+GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid \
+GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid \
+  git -C "$project" commit -qm fixture
+source "$project/scripts/web/prebuilt-provenance.sh"
 valid_bundle() {
+  rm -f "$public/.aura-prebuilt-provenance"
   printf 'index\n' > "$public/index.html"
   # Asset admission needs the exported marker, without installing a driver.
   printf 'const __AURA_HARNESS__ = {};\n' > "$public/assets/app.js"
@@ -58,6 +68,15 @@ valid_bundle
 touch -t 200001010000 "$public/index.html"
 expect 1
 [[ -f "$public/index.html" && -f "$public/assets/app.js" ]]
+valid_bundle
+touch -t 200001010000 "$public/index.html"
+aura_web_write_prebuilt_provenance "$project" "$public"
+expect 0
+printf 'changed source\n' > "$project/crates/aura-web/src/main.rs"
+expect 1
+git -C "$project" checkout -q -- crates/aura-web/src/main.rs
+printf 'tampered asset\n' > "$public/assets/app.js"
+expect 1
 valid_bundle
 printf 'no harness support\n' > "$public/assets/app.js"
 expect 1

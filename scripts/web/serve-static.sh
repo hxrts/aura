@@ -8,6 +8,7 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
 build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
 prebuilt_only="${AURA_HARNESS_WEB_PREBUILT_ONLY:-0}"
+source "$script_dir/prebuilt-provenance.sh"
 [[ "$prebuilt_only" == 0 || "$prebuilt_only" == 1 ]] || {
     echo 'AURA_HARNESS_WEB_PREBUILT_ONLY must be 0 or 1' >&2; exit 2;
 }
@@ -82,7 +83,9 @@ if [[ "$prebuilt_only" == 1 ]]; then
         echo "[serve-web-static] unsupported profile: $build_profile" >&2; exit 1;
     }
     prebuilt_dir="$repo_root/target/dx/aura-web/$build_profile/web/public"
-    if web_sources_stale "$prebuilt_dir/index.html" || ! web_build_has_harness_support "$prebuilt_dir"; then
+    if { web_sources_stale "$prebuilt_dir/index.html" &&
+         ! aura_web_prebuilt_provenance_matches "$repo_root" "$prebuilt_dir"; } ||
+         ! web_build_has_harness_support "$prebuilt_dir"; then
         echo '[serve-web-static] missing, stale or non-harness web bundle; stop the harness and run scripts/harness/lan/build.sh web first' >&2
         exit 1
     fi

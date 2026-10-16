@@ -320,6 +320,12 @@ Home role commands are tracked operations: `/op` and `/deop` publish `grant_mode
 
 Browser `ui_state` remains observation-only and must not perform implicit navigation or state recovery. Explicit recovery goes through `recover_ui_state` and `readStructuredUiStateWithNavigationRecovery(...)`. DOM and text fallback paths are diagnostics only and must not become success-path observation behavior.
 
+For fixed-commit browser runs, the guarded web build records the clean source
+commit and hashes of its emitted index, JS and WASM files. The prebuilt-only
+static server accepts that exact build when Dioxus reuses byte-identical assets
+without updating their mtimes. A changed source tree or changed asset rejects
+the marker; browser startup never rebuilds inside a live harness run.
+
 The browser driver raises a semantic revision floor for mutating commands. The
 canonical immediate `ExportDeviceEnrollmentSetup` command is a runtime read:
 its typed page-owned queue result completes the export, and the following

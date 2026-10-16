@@ -4,15 +4,17 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
+source "$repo_root/scripts/web/prebuilt-provenance.sh"
 cd "$web_root"
 if [[ ! -d node_modules || ! -d node_modules/ws ]]; then
   npm ci
 fi
 npm run tailwind:build
-NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness
+NO_COLOR=true ../../scripts/web/dx.sh "${aura_web_build_args[@]}"
 
 public_dir="$repo_root/target/dx/aura-web/release/web/public"
 [[ -f "$public_dir/index.html" ]] || { echo 'web release build produced no index.html' >&2; exit 1; }
 mkdir -p "$public_dir/assets"
 ln -sfn "$web_root/public/assets/tailwind.css" "$public_dir/assets/tailwind.css"
+aura_web_write_prebuilt_provenance "$repo_root" "$public_dir"
 printf 'Web bundle: %s\n' "$public_dir"
