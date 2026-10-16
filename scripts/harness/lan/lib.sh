@@ -58,14 +58,61 @@ req_private() { # req_private <instance> [transport timeout seconds] < request.j
   fi
 }
 
+# Identify the actual sourced helper separately from the fixed candidate's
+# production revision. A private archived tooling bundle proves its committed
+# source and all three files in the paired-script load closure.
+lan_private_tooling_identity() {
+  local tooling_dir bundle_root manifest commit name expected actual committed lib_hash
+  tooling_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P) || return 2
+  bundle_root=$(cd "$tooling_dir/../../.." && pwd -P) || return 2
+  lib_hash=$(sha256sum "$tooling_dir/lib.sh" | cut -d' ' -f1) || return 2
+  manifest="$bundle_root/provenance.json"
+  if [[ ! -e "$manifest" && ! -L "$manifest" ]]; then
+    jq -cn --arg hash "$lib_hash" \
+      '{revision:null,lib_sha256:$hash,committed_bundle_verified:false}'
+    return
+  fi
+  [[ -f "$manifest" && ! -L "$manifest" && -O "$manifest" &&
+     -d "$bundle_root" && ! -L "$bundle_root" && -O "$bundle_root" ]] || return 2
+  [[ $(stat -c '%a' "$manifest" 2>/dev/null || stat -f '%Lp' "$manifest") == 600 &&
+     $(stat -c '%a' "$bundle_root" 2>/dev/null || stat -f '%Lp' "$bundle_root") == 700 ]] || return 2
+  commit=$(jq -er '.tooling_commit|select(type=="string" and test("^[0-9a-f]{40}$"))' "$manifest") || return 2
+  for name in paired-enrollment.sh lib.sh env.sh; do
+    expected=$(jq -er --arg name "$name" '.files[$name]|select(type=="string" and test("^[0-9a-f]{64}$"))' "$manifest") || return 2
+    actual=$(sha256sum "$tooling_dir/$name" | cut -d' ' -f1) || return 2
+    committed=$(git -C "$AURA_E2E_ROOT" show "$commit:scripts/harness/lan/$name" | sha256sum | cut -d' ' -f1) || return 2
+    [[ "$actual" == "$expected" && "$committed" == "$expected" ]] || return 2
+  done
+  jq -cn --arg revision "$commit" --arg hash "$lib_hash" \
+    '{revision:$revision,lib_sha256:$hash,committed_bundle_verified:true}'
+}
+
+lan_private_remove_owned_link() { # linked path, this invocation's temporary inode
+  local linked=$1 original=$2
+  if [[ -n "$linked" && -n "$original" && -f "$linked" && ! -L "$linked" &&
+        "$linked" -ef "$original" ]]; then
+    rm -f "$linked"
+  fi
+  return 0
+}
+
 # Whitelist only nonsecret facts required for paired enrollment evidence. The
-# The caller passes a private response on stdin. Keep the raw response only in
-# owner-only custody when validation fails; never send it to shared evidence.
-lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < response.json
-  local instance=$1 method=$2 label=$3 dir target scratch raw validator_stderr mode raw_target reason_target stderr_target reason
+# caller passes a private response on stdin. Keep raw failures only in owner-only
+# custody; never send them to shared evidence.
+lan_private_receipt() { # instance method label [expected-operation] < response.json
+  local instance=$1 method=$2 label=$3 expected_operation=${4:-} dir target scratch raw validator_stderr mode raw_target reason_target stderr_target reason
+  local failure_target='' custody_target='' custody_tmp='' source_revision raw_hash tooling_identity
   case "$instance" in alex-tui|alex-tui2|alex-web|barbara-tui|barbara-tui2|barbara-web) ;; *) return 2;; esac
   case "$method" in prepare_device_enrollment_setup|submit_semantic_command|ui_state|wait_for_ui_snapshot_event|restart|get_authority_id) ;; *) return 2;; esac
   [[ "$label" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || return 2
+  if [[ -n "$expected_operation" ]]; then
+    [[ "$method" == wait_for_ui_snapshot_event ]] || return 2
+    if [[ "$instance" == barbara-web ]]; then
+      [[ "$expected_operation" =~ ^op-[0-9]{1,20}$ ]] || return 2
+    else
+      [[ "$expected_operation" =~ ^tui-op-device_enrollment-[0-9]{1,20}$ ]] || return 2
+    fi
+  fi
   [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]{15,127}$ ]] || return 2
   [[ -d "$AURA_E2E_RUN_DIR" && ! -L "$AURA_E2E_RUN_DIR" && -O "$AURA_E2E_RUN_DIR" ]] || return 2
   dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
@@ -199,8 +246,73 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
   fi
   [[ -s "$scratch" ]] || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
   chmod 600 "$scratch" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
-  ln "$scratch" "$target" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  if [[ -n "$expected_operation" ]]; then
+    # An unrelated failed enrollment must not be recorded as the original one.
+    if jq -e --arg operation "$expected_operation" '
+      any((.payload.event.snapshot // .payload).operations[]?;
+        .id=="device_enrollment" and (.state=="failed" or .state=="cancelled")
+        and .instance_id!=$operation)' "$raw" >/dev/null 2>&1; then
+      rm -f "$scratch" "$raw" "$validator_stderr"; return 2
+    fi
+    if jq -e --arg operation "$expected_operation" '
+      any((.payload.event.snapshot // .payload).operations[]?;
+        .id=="device_enrollment" and .instance_id==$operation and
+        (.state=="failed" or .state=="cancelled"))' "$raw" >/dev/null 2>&1; then
+      failure_target="$dir/$instance-$label.failure-raw-private.json"
+      custody_target="$dir/$instance-$label.failure-custody.json"
+      [[ ! -e "$failure_target" && ! -L "$failure_target" &&
+         ! -e "$custody_target" && ! -L "$custody_target" ]] || {
+        rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+      }
+      source_revision=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD) || {
+        rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+      }
+      [[ "$source_revision" =~ ^[0-9a-f]{40}$ ]] || {
+        rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+      }
+      raw_hash=$(sha256sum "$raw" | cut -d' ' -f1) || {
+        rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+      }
+      tooling_identity=$(lan_private_tooling_identity) || {
+        rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+      }
+      custody_tmp=$(mktemp "$dir/.failure-custody.XXXXXX") || {
+        rm -f "$scratch" "$raw" "$validator_stderr"; return 2;
+      }
+      chmod 600 "$custody_tmp" || {
+        rm -f "$scratch" "$raw" "$validator_stderr" "$custody_tmp"; return 2;
+      }
+      jq -cn --arg source "$source_revision" --arg token "$AURA_E2E_RUN_TOKEN" \
+        --arg instance "$instance" --arg method "$method" --arg label "$label" \
+        --arg operation "$expected_operation" --arg hash "$raw_hash" \
+        --arg raw_name "${failure_target##*/}" --arg redacted_name "${target##*/}" \
+        --argjson tooling "$tooling_identity" \
+        '{schema:1,source_revision:$source,run_token:$token,instance_id:$instance,
+          method:$method,label:$label,operation_instance:$operation,
+          raw_response_sha256:$hash,raw_response_file:$raw_name,
+          redacted_receipt_file:$redacted_name,tooling:$tooling,
+          raw_response_custody:"owner_only_private_artifact"}' \
+        > "$custody_tmp" || {
+          rm -f "$scratch" "$raw" "$validator_stderr" "$custody_tmp"; return 2;
+        }
+      ln "$raw" "$failure_target" || {
+        rm -f "$scratch" "$raw" "$validator_stderr" "$custody_tmp"; return 2;
+      }
+      ln "$custody_tmp" "$custody_target" || {
+        lan_private_remove_owned_link "$failure_target" "$raw"
+        rm -f "$scratch" "$raw" "$validator_stderr" "$custody_tmp"; return 2;
+      }
+    fi
+  fi
+  ln "$scratch" "$target" || {
+    lan_private_remove_owned_link "$failure_target" "$raw"
+    lan_private_remove_owned_link "$custody_target" "$custody_tmp"
+    rm -f "$scratch" "$raw" "$validator_stderr"
+    [[ -z "$custody_tmp" ]] || rm -f "$custody_tmp"
+    return 2
+  }
   rm -f "$scratch" "$raw" "$validator_stderr"
+  [[ -z "$custody_tmp" ]] || rm -f "$custody_tmp"
   printf '%s\n' "$target"
 }
 key() { req "$1" send_key "$(jq -cn --arg key "$2" '{key:$key}' | sed 's/^{//;s/}$//')" >/dev/null; }

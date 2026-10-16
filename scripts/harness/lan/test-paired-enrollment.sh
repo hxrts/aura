@@ -101,6 +101,10 @@ case "$instance:$method:$intent" in
     : > "$FIXTURE_DEVICES_OPEN"
     echo '{"status":"ok","payload":{"submission":"accepted"}}' ;;
   barbara-tui:wait_for_ui_snapshot_event:)
+    if [[ "${FIXTURE_CASE:-}" == failed_original && -e "$FIXTURE_APPROVED" ]]; then
+      echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"failed","failure":{"domain":"invitation","code":"internal_error","detail":"private-failure-detail-secret"}}],"runtime_events":[]}}}}'
+      exit 0
+    fi
     if [[ "${FIXTURE_CASE:-}" == missing_ack ]]; then
       echo '{"status":"ok","payload":{"event":{"version":3,"snapshot":{"screen":"neighborhood","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-2","state":"succeeded","failure":null}],"runtime_events":[],"lists":[{"id":"devices","items":[]}]}}}}'
       exit 0
@@ -384,6 +388,28 @@ jq -es 'any(.[]; .params.instance_id=="barbara-web" and .method=="restart" and
 for secret in signed-setup-secret issued-code-secret signed-manifest-secret retained-verifier-secret; do
   ! rg -Fq "$secret" "$fixture/browser.stdout" "$fixture/browser.stderr" "$AURA_E2E_RUN_DIR"
 done
+rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
+browser_failed="$fixture/browser-failed-original"
+mkdir -m 700 "$browser_failed"
+printf '{"pid":100,"birth":"fixture-local","run_token":"%s"}\n' "$AURA_E2E_RUN_TOKEN" > "$browser_failed/repl.identity.json"
+if FIXTURE_CASE=failed_original AURA_E2E_RUN_DIR="$browser_failed" PATH="$fixture/bin:$PATH" \
+    bash "$here/paired-enrollment.sh" > "$fixture/browser-failed.stdout" 2> "$fixture/browser-failed.stderr"; then
+  echo 'paired fixture accepted failed original operation' >&2; exit 1
+fi
+failed_root="$browser_failed/private-enrollment-$AURA_E2E_RUN_TOKEN"
+failed_raw="$failed_root/barbara-web-accepted-1.failure-raw-private.json"
+failed_custody="$failed_root/barbara-web-accepted-1.failure-custody.json"
+jq -e '.operations[0].instance_id=="op-2" and .operations[0].state=="failed" and
+  .operations[0].failure=={domain:"invitation",code:"internal_error"}' \
+  "$failed_root/barbara-web-accepted-1.json" >/dev/null
+jq -e --arg commit "$FIXTURE_COMMIT" --arg token "$AURA_E2E_RUN_TOKEN" '
+  .source_revision==$commit and .run_token==$token and .instance_id=="barbara-web" and
+  .method=="wait_for_ui_snapshot_event" and .operation_instance=="op-2" and
+  .raw_response_custody=="owner_only_private_artifact"' "$failed_custody" >/dev/null
+rg -Fq private-failure-detail-secret "$failed_raw"
+! rg -Fq private-failure-detail-secret "$fixture/browser-failed.stdout" \
+  "$fixture/browser-failed.stderr" "$failed_root/barbara-web-accepted-1.json" "$failed_custody"
+[[ $(stat -c '%a' "$failed_raw" 2>/dev/null || stat -f '%Lp' "$failed_raw") == 600 ]]
 rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_ISSUER_DEVICES_OPEN" "$FIXTURE_APPROVED"
 browser_bad="$fixture/browser-missing-ack"
 mkdir -m 700 "$browser_bad"

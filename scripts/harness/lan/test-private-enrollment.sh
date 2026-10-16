@@ -108,6 +108,73 @@ event_receipt=$(printf '%s\n' "$browser_event" |
 jq -e '.operations[0].instance_id=="op-2" and
   .host_acknowledgments[0].device_count==2' "$event_receipt" >/dev/null
 [[ ! -e "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-browser-accepted-event.raw-private.json" ]]
+original_root=$AURA_E2E_ROOT
+AURA_E2E_ROOT=$(cd "$here/../../.." && pwd)
+source_revision=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
+failed_event=$(printf '%s\n' "$browser_event" | jq -c --arg secret "$secret" '
+  .payload.event.snapshot.operations[0].failure={domain:"invitation",code:"internal_error",detail:$secret}')
+failure_receipt=$(printf '%s\n' "$failed_event" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event original-failed op-2)
+failure_raw="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-original-failed.failure-raw-private.json"
+failure_custody="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-original-failed.failure-custody.json"
+jq -e '.operations[0].instance_id=="op-2" and .operations[0].state=="failed" and
+  .operations[0].failure=={domain:"invitation",code:"internal_error"}' "$failure_receipt" >/dev/null
+jq -e --arg source "$source_revision" --arg token "$AURA_E2E_RUN_TOKEN" \
+  --arg hash "$(sha256sum "$failure_raw" | cut -d' ' -f1)" \
+  --arg tooling_hash "$(sha256sum "$here/lib.sh" | cut -d' ' -f1)" '
+  .source_revision==$source and .run_token==$token and .instance_id=="barbara-web" and
+  .method=="wait_for_ui_snapshot_event" and .label=="original-failed" and
+  .operation_instance=="op-2" and .raw_response_sha256==$hash and
+  .raw_response_file=="barbara-web-original-failed.failure-raw-private.json" and
+  .redacted_receipt_file=="barbara-web-original-failed.json" and
+  .tooling.lib_sha256==$tooling_hash and .tooling.committed_bundle_verified==false and
+  .raw_response_custody=="owner_only_private_artifact"' "$failure_custody" >/dev/null
+rg -Fq "$secret" "$failure_raw"
+! rg -Fq "$secret" "$failure_receipt" "$failure_custody"
+for path in "$failure_raw" "$failure_custody" "$failure_receipt"; do
+  [[ $(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path") == 600 ]]
+done
+foreign_failed=$(printf '%s\n' "$failed_event" | jq -c '.payload.event.snapshot.operations[0].instance_id="op-3"')
+! printf '%s\n' "$foreign_failed" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event foreign-failed op-2 \
+  > "$fixture/foreign-failed.stdout" 2> "$fixture/foreign-failed.stderr"
+[[ ! -e "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-foreign-failed.failure-raw-private.json" ]]
+! rg -Fq "$secret" "$fixture/foreign-failed.stdout" "$fixture/foreign-failed.stderr"
+for collision in raw custody; do
+  collision_base="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-collision-$collision"
+  if [[ "$collision" == raw ]]; then
+    ln -s "$fixture/snapshot" "$collision_base.failure-raw-private.json"
+    protected="$collision_base.failure-raw-private.json"
+  else
+    printf 'existing-owner-artifact\n' > "$collision_base.failure-custody.json"
+    protected="$collision_base.failure-custody.json"
+  fi
+  ! printf '%s\n' "$failed_event" |
+    lan_private_receipt barbara-web wait_for_ui_snapshot_event "collision-$collision" op-2 \
+    > "$fixture/collision-$collision.stdout" 2> "$fixture/collision-$collision.stderr"
+  [[ ! -e "$collision_base.json" ]]
+  if [[ "$collision" == raw ]]; then [[ -L "$protected" ]];
+  else [[ $(cat "$protected") == existing-owner-artifact ]]; fi
+  ! rg -Fq "$secret" "$fixture/collision-$collision.stdout" "$fixture/collision-$collision.stderr"
+done
+mkdir "$fixture/race-bin"
+cat > "$fixture/race-bin/ln" <<'RACE_LN'
+#!/usr/bin/env bash
+destination=${*: -1}
+if [[ "$destination" == *'/barbara-web-collision-race.failure-custody.json' ]]; then
+  printf 'raced-existing-owner-artifact\n' > "$destination"
+fi
+exec /bin/ln "$@"
+RACE_LN
+chmod +x "$fixture/race-bin/ln"
+race_base="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-collision-race"
+! printf '%s\n' "$failed_event" |
+  PATH="$fixture/race-bin:$PATH" lan_private_receipt barbara-web wait_for_ui_snapshot_event collision-race op-2 \
+  > "$fixture/collision-race.stdout" 2> "$fixture/collision-race.stderr"
+[[ $(cat "$race_base.failure-custody.json") == raced-existing-owner-artifact ]]
+[[ ! -e "$race_base.failure-raw-private.json" && ! -e "$race_base.json" ]]
+! rg -Fq "$secret" "$fixture/collision-race.stdout" "$fixture/collision-race.stderr"
+AURA_E2E_ROOT=$original_root
 numeric_ack=$(printf '%s\n' "$browser_event" | jq -c '.payload.event.snapshot.runtime_events[0].id=9')
 ! printf '%s\n' "$numeric_ack" |
   lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-numeric-ack >/dev/null
@@ -168,4 +235,44 @@ printf '%s\n' 'preexisting-owner-receipt' > "$collision_reason"
 ! printf '%s\n' "$browser_snapshot" | jq -c '.payload.operations[0].instance_id="tui-op-device_enrollment-2"' |
   lan_private_receipt barbara-web ui_state browser-forged-operation >/dev/null
 ! rg -Fq "$secret" "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN" --glob '*.json'
+# A private tooling bundle must match all three committed load-closure files,
+# independently of the candidate checkout named in the failure receipt.
+tooling_source="$fixture/tooling-source"
+tooling_bundle="$fixture/tooling-bundle"
+mkdir -p "$tooling_source/scripts/harness/lan" "$tooling_bundle/scripts/harness/lan"
+chmod 700 "$tooling_bundle"
+for name in paired-enrollment.sh lib.sh env.sh; do
+  cp "$here/$name" "$tooling_source/scripts/harness/lan/$name"
+  cp "$here/$name" "$tooling_bundle/scripts/harness/lan/$name"
+done
+git -C "$tooling_source" init -q
+git -C "$tooling_source" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  add scripts/harness/lan
+git -C "$tooling_source" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  commit -qm 'fixture tooling closure'
+tooling_commit=$(git -C "$tooling_source" rev-parse HEAD)
+jq -cn --arg commit "$tooling_commit" \
+  --arg paired "$(sha256sum "$here/paired-enrollment.sh" | cut -d' ' -f1)" \
+  --arg lib "$(sha256sum "$here/lib.sh" | cut -d' ' -f1)" \
+  --arg env "$(sha256sum "$here/env.sh" | cut -d' ' -f1)" '
+  {tooling_commit:$commit,files:{"paired-enrollment.sh":$paired,"lib.sh":$lib,"env.sh":$env}}' \
+  > "$tooling_bundle/provenance.json"
+chmod 600 "$tooling_bundle/provenance.json"
+AURA_E2E_ROOT=$tooling_source
+source "$tooling_bundle/scripts/harness/lan/lib.sh"
+lan_private_tooling_identity | jq -e --arg commit "$tooling_commit" '
+  .revision==$commit and .committed_bundle_verified==true and
+  (.lib_sha256|type=="string" and length==64)' >/dev/null
+bundle_failure_receipt=$(printf '%s\n' "$failed_event" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event bundle-failed op-2)
+bundle_custody="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-bundle-failed.failure-custody.json"
+jq -e --arg commit "$tooling_commit" \
+  --arg hash "$(sha256sum "$tooling_bundle/scripts/harness/lan/lib.sh" | cut -d' ' -f1)" '
+  .tooling.revision==$commit and .tooling.lib_sha256==$hash and
+  .tooling.committed_bundle_verified==true and .operation_instance=="op-2"' \
+  "$bundle_custody" >/dev/null
+! rg -Fq "$secret" "$bundle_failure_receipt" "$bundle_custody"
+printf '\n' >> "$tooling_bundle/scripts/harness/lan/env.sh"
+! lan_private_tooling_identity > "$fixture/tampered-tooling.stdout" 2> "$fixture/tampered-tooling.stderr"
+[[ ! -s "$fixture/tampered-tooling.stdout" ]]
 echo 'LAN private enrollment request and redacted receipt fixtures passed'
