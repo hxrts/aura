@@ -1361,6 +1361,72 @@ mod tests {
                 b"measured secret"
             );
         }
+        if births as usize + 4 == MAX_COUNT {
+            let last = *ids.last().expect("maximum roster has a tail entry");
+            let before = read_root(owned, selected_owner(owned)?.0)?;
+            let interrupted = lifecycle::decide_inner(
+                owned,
+                &recovered,
+                &last,
+                false,
+                b"maximum negative decision",
+                Stop::Record,
+            )
+            .await;
+            assert!(matches!(
+                interrupted,
+                Err(AuraError::Invalid { message, .. })
+                    if message == "platform birth interrupted at fixture boundary"
+            ));
+            drop(recovered);
+            drop(reopened);
+
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let recovered = recover_generic(owned).await?;
+            let after_decision = read_root(owned, selected_owner(owned)?.0)?;
+            assert_eq!(after_decision.generic_count, MAX_COUNT as u16);
+            assert_eq!(after_decision.generic_revision, before.generic_revision + 1);
+            assert!(read_live(owned, &recovered, &last).await.is_err());
+            lifecycle::acknowledge_negative(owned, &recovered, &last, b"maximum negative decision")
+                .await?;
+            lifecycle::erase(owned, &recovered, &last).await?;
+            let (selected, _) = selected_owner(owned)?;
+            let after_erasure = read_root(owned, selected)?;
+            assert_eq!(after_erasure.generic_count, MAX_COUNT as u16);
+            assert_eq!(after_erasure.generic_revision, before.generic_revision + 3);
+            assert!(read_entry(selected, &user(INTENT_PREFIX, &last))?.is_none());
+            assert!(read_entry(selected, &user(RECORD_PREFIX, &last))?.is_none());
+            let entries = read_current(
+                owned,
+                selected,
+                &after_erasure,
+                &original_four(owned, &after_erasure)?.remove(0),
+            )?;
+            let erased = entries
+                .iter()
+                .find(|entry| entry.id == last)
+                .expect("retained maximum entry");
+            assert_eq!(erased.phase, ERASED);
+            assert_eq!(erased.scope, b"measured scope");
+            drop(recovered);
+            drop(reopened);
+
+            let reopened = fixture.selected()?;
+            let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+                unreachable!()
+            };
+            let recovered = recover_generic(owned).await?;
+            assert!(read_live(owned, &recovered, &last).await.is_err());
+            for index in [0, 63, 64, 127, 255, 1023, ids.len() - 2] {
+                assert_eq!(
+                    &**read_live(owned, &recovered, &ids[index]).await?,
+                    b"measured secret"
+                );
+            }
+        }
         println!(
             "platform lifetime profile {births} births: birth_ms={} verify_ms={} pre_commit_ms={} commit_ms={} post_commit_ms={} recovery_ms={}",
             birth_elapsed.as_millis(),
