@@ -1439,10 +1439,16 @@ dependency-only warm tree. `flake.nix` exports that function, and
 inputs: platform, dev-shell and toolchain store paths, immutable vendor path
 and lock hash, dummy manifest/config paths, package, profile, features, target,
 Rust flags, C compiler, wrapper, incremental policy, and other declared
-build-script environment. The query is diagnostic until the vendor and deps
-outputs are implemented; it does not alter Cargo dispatch or rehydrate a
-worktree. An absent vendor path or any unrecorded producer input must prevent
-future warm-tree reuse rather than fall back to a guessed key.
+build-script environment. `scripts/dev/build-cache-key.sh --debug` queries the
+flake's evaluated debug-lane producer key. The opt-in `vendor-deps` and
+`deps-debug` flake outputs materialize an immutable full-lock vendor directory
+and one debug dependency tree; neither changes the dev-shell Cargo dispatcher
+or rehydrates a worktree. Darwin same-derivation rebuild validation remains
+required before the debug tree can be used for rehydration: Cargo build-script
+output and dependency files may retain the Nix sandbox's changing build root.
+The other profiles and the dispatcher integration remain separate work. An
+absent vendor path or any unrecorded producer input
+must prevent future warm-tree reuse rather than fall back to a guessed key.
 
 For the complete browser enrollment scenario, build the native
 `bootstrap_broker_fixture` example with `--features simulation` in the same guarded batch as the browser

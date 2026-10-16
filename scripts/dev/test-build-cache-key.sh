@@ -65,4 +65,8 @@ flake="$(cd "$repo_root" && nix eval --raw --impure --expr '
   in outputs.lib.${builtins.currentSystem}.buildCacheKey input
 ')"
 [[ "$flake" == "$base" ]] || { echo 'flake and shell keys differ' >&2; exit 1; }
+system="$(nix eval --raw --impure --expr builtins.currentSystem)"
+debug_direct="$(cd "$repo_root" && nix eval --raw ".#lib.${system}.debugCacheKey")"
+debug_shell="$(bash "$repo_root/scripts/dev/build-cache-key.sh" --debug)"
+[[ "$debug_shell" == "$debug_direct" ]] || { echo 'debug shell and flake keys differ' >&2; exit 1; }
 echo 'build-cache-key: shared Nix/shell key, all dimensions and refusals passed'

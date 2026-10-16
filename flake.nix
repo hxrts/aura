@@ -9,6 +9,8 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Same pinned crane revision already present in the lock through Charon.
+    crane.url = "github:ipetkov/crane/e316f19ee058e6db50075115783be57ac549c389";
     crate2nix = {
       url = "github:timewave-computer/crate2nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -39,6 +41,7 @@
     , nixpkgs-cargo-deny
     , flake-utils
     , rust-overlay
+    , crane
     , crate2nix
     , toolkit
     , aeneas
@@ -78,6 +81,69 @@
             "clippy"
           ];
           targets = [ "wasm32-unknown-unknown" ];
+        };
+
+        # Inert warm-tree producer: Cargo in the dev shell still uses its
+        # existing dispatcher and registry until a separate consumer packet.
+        craneVendorLib = crane.mkLib pkgs;
+        craneLib = craneVendorLib.overrideToolchain (_: rustToolchain);
+        warmSrc = craneLib.cleanCargoSource ./.;
+        warmDummySrc = craneLib.mkDummySrc { src = warmSrc; cargoLock = ./Cargo.lock; };
+        warmVendor = craneVendorLib.vendorCargoDeps { cargoLock = ./Cargo.lock; };
+        warmVendorPath = warmVendor.outPath;
+        warmCC = if pkgs.stdenv.isDarwin then "clang" else "gcc";
+        warmWrapper = "${pkgs.sccache}/bin/sccache";
+        warmDebugArgs = {
+          dummySrc = warmDummySrc;
+          cargoLock = ./Cargo.lock;
+          cargoVendorDir = warmVendor;
+          pname = "aura-core-debug-warm";
+          version = "0.1.0";
+          cargoExtraArgs = "--locked -p hxrts-aura-core";
+          CARGO_PROFILE = "dev";
+          CC = warmCC;
+          CARGO_INCREMENTAL = "0";
+          RUSTC_WRAPPER = warmWrapper;
+          nativeBuildInputs = [ pkgs.sccache pkgs.jq ];
+          preBuild = ''
+            # A sandbox compiler must never reuse the developer-owned daemon:
+            # that process cannot write the sandbox's target directory.
+            export SCCACHE_SERVER_UDS="$TMPDIR/aura-sccache.sock"
+            export SCCACHE_DIR="$TMPDIR/aura-sccache"
+            mkdir -m 700 -p "$SCCACHE_DIR"
+            trap 'sccache --stop-server >/dev/null 2>&1 || true' EXIT
+          '';
+          postBuild = ''
+            if [ -f target/.rustc_info.json ]; then
+              jq -S . target/.rustc_info.json > target/.rustc_info.json.canonical
+              mv target/.rustc_info.json.canonical target/.rustc_info.json
+            fi
+          '';
+        };
+        warmDebug = craneLib.buildDepsOnly warmDebugArgs;
+        warmDebugKeyInputs = {
+          platform = system;
+          devShellPath = self.devShells.${system}.default.drvPath;
+          toolchainPath = rustToolchain.outPath;
+          vendorPath = warmVendorPath;
+          lockHash = builtins.hashFile "sha256" ./Cargo.lock;
+          dummyManifestPath = "${warmDummySrc}/Cargo.toml";
+          dummyConfigPath = "${warmVendorPath}/config.toml";
+          package = "hxrts-aura-core";
+          profile = "dev";
+          features = [ "default" ];
+          target = pkgs.stdenv.hostPlatform.config;
+          rustflags = "";
+          cc = warmCC;
+          wrapper = warmWrapper;
+          incremental = false;
+          buildEnv = {
+            CARGO_PROFILE = "dev";
+            CC = warmCC;
+            CARGO_INCREMENTAL = "0";
+            RUSTC_WRAPPER = warmWrapper;
+            SCCACHE_SERVER_UDS_POLICY = "sandbox-local";
+          };
         };
 
         auraCargo = pkgs.writeShellScriptBin "cargo" ''
@@ -209,8 +275,12 @@
         # Shared pure definition only. Vendor/deps outputs and rehydration are
         # deliberately absent until the dependency tree is proven.
         lib.buildCacheKey = import ./nix/build-cache-key.nix;
+        lib.debugCacheKeyInputs = warmDebugKeyInputs;
+        lib.debugCacheKey = (import ./nix/build-cache-key.nix) warmDebugKeyInputs;
 
         packages = {
+          vendor-deps = warmVendor;
+          deps-debug = warmDebug;
           # Main CLI application (terminal interface)
           default = cargoNix.workspaceMembers.aura-terminal.build;
           aura-terminal = cargoNix.workspaceMembers.aura-terminal.build;
