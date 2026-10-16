@@ -155,6 +155,18 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn erase_four(
     .await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_generic(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &append::third::fourth::generic::PlatformGenericRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Generic(generic),
+        StopAfter::Never,
+    )
+    .await
+}
+
 async fn erase_roster_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: append::OriginalRosterOwner<'_>,

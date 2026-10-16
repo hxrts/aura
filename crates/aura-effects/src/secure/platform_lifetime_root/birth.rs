@@ -640,6 +640,13 @@ async fn read_four_first_secret(
     read_owned_first_secret(owned, append::OriginalRosterOwner::Four(four)).await
 }
 
+async fn read_generic_first_secret(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &append::third::fourth::generic::PlatformGenericRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_first_secret(owned, append::OriginalRosterOwner::Generic(generic)).await
+}
+
 async fn read_owned_first_secret(
     owned: &ProfileOwnedSecureStorage,
     roster: append::OriginalRosterOwner<'_>,

@@ -11,17 +11,6 @@ use aura_core::effects::secret_lifetime::{
 };
 use tokio::sync::Mutex;
 
-#[derive(Debug, thiserror::Error)]
-#[error("selected platform lifetime provider is limited to four original births")]
-struct FourBirthCapacity;
-
-fn capacity_error() -> AuraError {
-    AuraError::Internal {
-        message: "selected platform lifetime birth capacity reached".into(),
-        source: Some(Arc::new(FourBirthCapacity)),
-    }
-}
-
 enum OwnerState {
     Uninitialized,
     Empty(EmptyPlatformLifetimeRootAdmission),
@@ -29,6 +18,7 @@ enum OwnerState {
     Two(append::PlatformRosterAdmission),
     Three(append::third::PlatformThreeRosterAdmission),
     Four(append::third::fourth::PlatformFourRosterAdmission),
+    Generic(append::third::fourth::generic::PlatformGenericRosterAdmission),
 }
 
 struct PlatformLifetimeInner {
@@ -46,6 +36,7 @@ enum Entry {
     Second,
     Third,
     Fourth,
+    Tail([u8; 32]),
 }
 
 struct PlatformLifetimeAllocation {
@@ -96,6 +87,9 @@ impl PlatformLifetimeInner {
             Some(root) if matches!(root.phase, PENDING | COMPLETE) => {
                 OwnerState::Empty(admit_empty_root(&self.owned).await?)
             }
+            Some(root) if root.generic_phase != GENERIC_UNCLAIMED => OwnerState::Generic(
+                append::third::fourth::generic::recover_generic(&self.owned).await?,
+            ),
             Some(root) if root.tail_phase != TAIL_IDLE => {
                 OwnerState::Four(append::third::fourth::recover_four_roster(&self.owned).await?)
             }
@@ -147,7 +141,16 @@ impl PlatformLifetimeInner {
                     *state = OwnerState::Four(four);
                 }
             }
-            OwnerState::Four(_) => {}
+            OwnerState::Four(four) => {
+                let (selected, _) = selected_owner(&self.owned)?;
+                let root = read_root(&self.owned, selected)?;
+                if root.generic_phase != GENERIC_UNCLAIMED {
+                    let generic =
+                        append::third::fourth::generic::promote_borrowed(&self.owned, four).await?;
+                    *state = OwnerState::Generic(generic);
+                }
+            }
+            OwnerState::Generic(_) => {}
             OwnerState::Uninitialized => unreachable!("initialized above"),
         }
         Ok(())
@@ -172,6 +175,31 @@ impl PlatformLifetimeInner {
                 .zip([Entry::First, Entry::Second, Entry::Third, Entry::Fourth])
                 .map(|(reference, entry)| (entry, reference))
                 .collect());
+        }
+        if let OwnerState::Generic(generic) = state {
+            let (selected, _) = selected_owner(&self.owned)?;
+            let root = read_root(&self.owned, selected)?;
+            return Ok(
+                append::third::fourth::generic::owned_references(&self.owned, generic)
+                    .await?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, reference)| {
+                        let entry = if index == 0 {
+                            Entry::First
+                        } else if index == 1 {
+                            Entry::Second
+                        } else if index == 2 {
+                            Entry::Third
+                        } else if reference.allocation == root.tail_next_id {
+                            Entry::Fourth
+                        } else {
+                            Entry::Tail(reference.allocation)
+                        };
+                        (entry, reference)
+                    })
+                    .collect(),
+            );
         }
         let (selected, _) = selected_owner(&self.owned)?;
         let _guard = selected.namespace_owner()?.mutation_guard().await;
@@ -238,6 +266,7 @@ impl PlatformLifetimeInner {
             }
             OwnerState::Three(_) => unreachable!("handled before namespace lock"),
             OwnerState::Four(_) => unreachable!("handled before namespace lock"),
+            OwnerState::Generic(_) => unreachable!("handled before namespace lock"),
             OwnerState::Uninitialized => Err(invalid("platform lifetime owner is uninitialized")),
         }
     }
@@ -275,6 +304,7 @@ impl ProfileSecretLifetimeBackend for PlatformLifetimeProvider {
     ) -> Result<Arc<dyn SecretLifetimeBackend>, AuraError> {
         let mut state = self.0.state.lock().await;
         self.0.reconcile(&mut state).await?;
+        let mut new_id = None;
         match &*state {
             OwnerState::Empty(empty) => {
                 let first = allocate_one(&self.0.owned, empty, scope, secret).await?;
@@ -294,16 +324,45 @@ impl ProfileSecretLifetimeBackend for PlatformLifetimeProvider {
                 let four = append::third::fourth::promote_borrowed(&self.0.owned, three).await?;
                 *state = OwnerState::Four(four);
             }
-            OwnerState::Four(_) => return Err(capacity_error()),
+            OwnerState::Four(four) => {
+                let generic =
+                    append::third::fourth::generic::promote_borrowed(&self.0.owned, four).await?;
+                *state = OwnerState::Generic(generic);
+                let OwnerState::Generic(generic) = &*state else {
+                    unreachable!("generic owner installed above")
+                };
+                new_id = Some(
+                    append::third::fourth::generic::append(&self.0.owned, generic, scope, secret)
+                        .await?,
+                );
+            }
+            OwnerState::Generic(generic) => {
+                new_id = Some(
+                    append::third::fourth::generic::append(&self.0.owned, generic, scope, secret)
+                        .await?,
+                );
+            }
             OwnerState::Uninitialized => unreachable!("reconciled above"),
         }
-        let (entry, reference) = self
-            .0
-            .references(&state)
-            .await?
-            .into_iter()
-            .last()
-            .ok_or_else(|| invalid("new platform birth was not retained"))?;
+        let (entry, reference) = if let Some(id) = new_id {
+            // Generic append has already authenticated every prior entry and
+            // published this exact scope/id under the root. A second complete
+            // roster scan here would double the cost of every birth.
+            (
+                Entry::Tail(id),
+                SecretAllocationReference {
+                    allocation: id,
+                    scope: scope.to_vec(),
+                },
+            )
+        } else {
+            self.0
+                .references(&state)
+                .await?
+                .into_iter()
+                .last()
+                .ok_or_else(|| invalid("new platform birth was not retained"))?
+        };
         Ok(Arc::new(PlatformLifetimeAllocation {
             inner: self.0.clone(),
             entry,
@@ -358,6 +417,19 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
         }
         if let (OwnerState::Four(four), Entry::Fourth) = (&*state, self.entry) {
             return append::third::fourth::owned_state(&self.inner.owned, four).await;
+        }
+        if let (OwnerState::Generic(generic), Entry::Third) = (&*state, self.entry) {
+            return append::third::owned_generic_state(&self.inner.owned, generic).await;
+        }
+        if let (OwnerState::Generic(generic), Entry::Fourth | Entry::Tail(_)) =
+            (&*state, self.entry)
+        {
+            return append::third::fourth::generic::owned_state(
+                &self.inner.owned,
+                generic,
+                &self.reference.allocation,
+            )
+            .await;
         }
         let (selected, _) = selected_owner(&self.inner.owned)?;
         let _guard = selected.namespace_owner()?.mutation_guard().await;
@@ -420,6 +492,30 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                     &self.inner.owned,
                     selected,
                     append::OriginalRosterOwner::Four(four),
+                )?;
+                let record = append::lifecycle::decision_record(selected, &verified, &claim)?;
+                (
+                    verified.second_phase,
+                    record.map(|record| (record.kind, record.bytes.to_vec())),
+                )
+            }
+            (OwnerState::Generic(generic), Entry::First) => {
+                let (verified, _) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Generic(generic),
+                )?;
+                let record = decision::read_record(selected, &verified)?;
+                (
+                    verified.phase,
+                    record.map(|record| (record.kind, record.bytes.to_vec())),
+                )
+            }
+            (OwnerState::Generic(generic), Entry::Second) => {
+                let (verified, claim) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Generic(generic),
                 )?;
                 let record = append::lifecycle::decision_record(selected, &verified, &claim)?;
                 (
@@ -506,6 +602,30 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                     .await?
                     .to_vec(),
             ),
+            (OwnerState::Generic(generic), Entry::First) => {
+                Ok(read_generic_first_secret(&self.inner.owned, generic)
+                    .await?
+                    .to_vec())
+            }
+            (OwnerState::Generic(generic), Entry::Second) => Ok(
+                append::lifecycle::read_generic_secret(&self.inner.owned, generic)
+                    .await?
+                    .to_vec(),
+            ),
+            (OwnerState::Generic(generic), Entry::Third) => Ok(
+                append::third::lifecycle::read_generic_secret(&self.inner.owned, generic)
+                    .await?
+                    .to_vec(),
+            ),
+            (OwnerState::Generic(generic), Entry::Fourth | Entry::Tail(_)) => {
+                Ok(append::third::fourth::generic::read_live(
+                    &self.inner.owned,
+                    generic,
+                    &self.reference.allocation,
+                )
+                .await?
+                .to_vec())
+            }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
     }
@@ -542,6 +662,26 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
             }
             (OwnerState::Four(four), Entry::Fourth) => {
                 append::third::fourth::lifecycle::decide(&self.inner.owned, four, true, bytes).await
+            }
+            (OwnerState::Generic(generic), Entry::First) => {
+                decision::decide_generic(&self.inner.owned, generic, true, bytes).await
+            }
+            (OwnerState::Generic(generic), Entry::Second) => {
+                append::lifecycle::decide_generic(&self.inner.owned, generic, true, bytes).await
+            }
+            (OwnerState::Generic(generic), Entry::Third) => {
+                append::third::lifecycle::decide_generic(&self.inner.owned, generic, true, bytes)
+                    .await
+            }
+            (OwnerState::Generic(generic), Entry::Fourth | Entry::Tail(_)) => {
+                append::third::fourth::generic::decide(
+                    &self.inner.owned,
+                    generic,
+                    &self.reference.allocation,
+                    true,
+                    bytes,
+                )
+                .await
             }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
@@ -580,6 +720,26 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
             (OwnerState::Four(four), Entry::Fourth) => {
                 append::third::fourth::lifecycle::decide(&self.inner.owned, four, false, bytes)
                     .await
+            }
+            (OwnerState::Generic(generic), Entry::First) => {
+                decision::decide_generic(&self.inner.owned, generic, false, bytes).await
+            }
+            (OwnerState::Generic(generic), Entry::Second) => {
+                append::lifecycle::decide_generic(&self.inner.owned, generic, false, bytes).await
+            }
+            (OwnerState::Generic(generic), Entry::Third) => {
+                append::third::lifecycle::decide_generic(&self.inner.owned, generic, false, bytes)
+                    .await
+            }
+            (OwnerState::Generic(generic), Entry::Fourth | Entry::Tail(_)) => {
+                append::third::fourth::generic::decide(
+                    &self.inner.owned,
+                    generic,
+                    &self.reference.allocation,
+                    false,
+                    bytes,
+                )
+                .await
             }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
@@ -635,6 +795,32 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                 }
             }
             return append::third::fourth::lifecycle::erase(&self.inner.owned, four).await;
+        }
+        if let (OwnerState::Generic(generic), Entry::Third) = (&*state, self.entry) {
+            match append::third::owned_generic_state(&self.inner.owned, generic).await? {
+                SecretLifetimeState::Negative { decision } if decision == bytes => {
+                    append::third::lifecycle::acknowledge_generic(
+                        &self.inner.owned,
+                        generic,
+                        bytes,
+                    )
+                    .await?;
+                }
+                SecretLifetimeState::Retired { decision } if decision == bytes => {}
+                _ => return Err(invalid("platform third retirement differs from original")),
+            }
+            return append::third::lifecycle::erase_generic(&self.inner.owned, generic).await;
+        }
+        if let (OwnerState::Generic(generic), Entry::Fourth | Entry::Tail(_)) =
+            (&*state, self.entry)
+        {
+            return append::third::fourth::generic::retire_negative_exact(
+                &self.inner.owned,
+                generic,
+                &self.reference.allocation,
+                bytes,
+            )
+            .await;
         }
         let (selected, _) = selected_owner(&self.inner.owned)?;
         let guard = selected.namespace_owner()?.mutation_guard().await;
@@ -705,6 +891,31 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                     ),
                 )
             }
+            (OwnerState::Generic(generic), Entry::First) => {
+                let (verified, _) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Generic(generic),
+                )?;
+                (
+                    decision::read_record(selected, &verified)?,
+                    matches!(verified.phase, ERASURE_PENDING | ERASURE_COMPLETE),
+                )
+            }
+            (OwnerState::Generic(generic), Entry::Second) => {
+                let (verified, claim) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Generic(generic),
+                )?;
+                (
+                    append::lifecycle::decision_record(selected, &verified, &claim)?,
+                    matches!(
+                        verified.second_phase,
+                        SECOND_ERASURE_PENDING | SECOND_ERASURE_COMPLETE
+                    ),
+                )
+            }
             _ => return Err(invalid("platform lifetime allocation owner changed")),
         };
         if !matches!(record, Some(record) if record.kind == decision::NEGATIVE && record.bytes.as_slice() == bytes)
@@ -766,6 +977,24 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                 }
                 append::lifecycle::erase_four(&self.inner.owned, four).await
             }
+            (OwnerState::Generic(generic), Entry::First) => {
+                if !erasure_started {
+                    decision::negative_denial::acknowledge_generic(
+                        &self.inner.owned,
+                        generic,
+                        bytes,
+                    )
+                    .await?;
+                }
+                decision::negative_denial::erasure::erase_generic(&self.inner.owned, generic).await
+            }
+            (OwnerState::Generic(generic), Entry::Second) => {
+                if !erasure_started {
+                    append::lifecycle::acknowledge_generic(&self.inner.owned, generic, bytes)
+                        .await?;
+                }
+                append::lifecycle::erase_generic(&self.inner.owned, generic).await
+            }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
     }
@@ -778,7 +1007,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     #[tokio::test]
-    async fn selected_adapter_recovers_empty_one_two_three_four_and_refuses_fifth() -> TestResult {
+    async fn selected_adapter_recovers_empty_through_fifth_under_original_lease() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -812,15 +1041,33 @@ mod tests {
         ] {
             assert_eq!(allocation.read_live_secret().await?, expected);
         }
-        let error = channel
-            .allocate(b"fifth scope", b"fifth secret")
-            .await
-            .err()
-            .expect("private capacity");
-        assert!(
-            matches!(error, AuraError::Internal { source: Some(ref source), .. }
-            if source.downcast_ref::<FourBirthCapacity>().is_some())
-        );
+        let fifth = channel.allocate(b"fifth scope", b"fifth secret").await?;
+        assert_eq!(fifth.reference().scope, b"fifth scope");
+        assert_eq!(fifth.read_live_secret().await?, b"fifth secret");
+        assert_eq!(first.read_live_secret().await?, b"first secret");
+        drop((
+            first, second, third, fourth, fifth, channel, duplicate, selected,
+        ));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        let recovered = channel.recover_owned_inventory().await?;
+        assert_eq!(recovered.len(), 5);
+        for (scope, secret) in [
+            (b"first scope".as_slice(), b"first secret".as_slice()),
+            (b"second scope".as_slice(), b"second secret".as_slice()),
+            (b"third scope".as_slice(), b"third secret".as_slice()),
+            (b"fourth scope".as_slice(), b"fourth secret".as_slice()),
+            (b"fifth scope".as_slice(), b"fifth secret".as_slice()),
+        ] {
+            let allocation = recovered
+                .iter()
+                .find(|allocation| allocation.reference().scope == scope)
+                .ok_or("original scope missing after generic reopen")?;
+            assert_eq!(allocation.read_live_secret().await?, secret);
+        }
         Ok(())
     }
 
@@ -919,6 +1166,314 @@ mod tests {
             assert!(allocation.read_live_secret().await.is_err());
         }
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_preserves_prior_lifecycle_after_fourth_erasure_and_reopen(
+    ) -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        channel.recover_owned_inventory().await?;
+        let first = channel.allocate(b"first scope", b"first secret").await?;
+        let second = channel.allocate(b"second scope", b"second secret").await?;
+        let third = channel.allocate(b"third scope", b"third secret").await?;
+        let fourth = channel.allocate(b"fourth scope", b"fourth secret").await?;
+        let fifth = channel.allocate(b"fifth scope", b"fifth secret").await?;
+        fourth
+            .decide_negative(b"fourth refusal")
+            .await?
+            .retire()
+            .await?;
+        assert!(fourth.read_live_secret().await.is_err());
+        assert_eq!(fifth.read_live_secret().await?, b"fifth secret");
+        drop((first, second, third, fourth, fifth, channel, selected));
+
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        let recovered = channel.recover_owned_inventory().await?;
+        assert_eq!(recovered.len(), 5);
+        for (scope, secret, refusal) in [
+            (
+                b"first scope".as_slice(),
+                b"first secret".as_slice(),
+                b"first refusal".as_slice(),
+            ),
+            (
+                b"second scope".as_slice(),
+                b"second secret".as_slice(),
+                b"second refusal".as_slice(),
+            ),
+            (
+                b"third scope".as_slice(),
+                b"third secret".as_slice(),
+                b"third refusal".as_slice(),
+            ),
+        ] {
+            let allocation = recovered
+                .iter()
+                .find(|allocation| allocation.reference().scope == scope)
+                .ok_or("prior allocation missing after generic reopen")?;
+            assert_eq!(allocation.read_live_secret().await?, secret);
+            allocation.decide_negative(refusal).await?.retire().await?;
+            assert!(
+                matches!(allocation.state().await?, SecretLifetimeState::Retired { decision } if decision == refusal)
+            );
+        }
+        drop((recovered, channel, reopened));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        let recovered = channel.recover_owned_inventory().await?;
+        assert_eq!(recovered.len(), 5);
+        for (scope, refusal) in [
+            (b"first scope".as_slice(), b"first refusal".as_slice()),
+            (b"second scope".as_slice(), b"second refusal".as_slice()),
+            (b"third scope".as_slice(), b"third refusal".as_slice()),
+            (b"fourth scope".as_slice(), b"fourth refusal".as_slice()),
+        ] {
+            let allocation = recovered
+                .iter()
+                .find(|allocation| allocation.reference().scope == scope)
+                .ok_or("original allocation missing after generic retirement")?;
+            assert!(
+                matches!(allocation.state().await?, SecretLifetimeState::Retired { decision } if decision == refusal)
+            );
+            assert!(allocation.read_live_secret().await.is_err());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_transfer_replays_original_root_interrupt() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let inner = Arc::new(PlatformLifetimeInner {
+            owned: ProfileOwnedSecureStorage {
+                backend: owned.backend.clone(),
+                _owner: owned._owner.clone(),
+            },
+            identity: owned._owner.lifetime_provider_identity.clone(),
+            state: Mutex::new(OwnerState::Uninitialized),
+        });
+        let provider = PlatformLifetimeProvider(inner.clone());
+        assert!(provider.recover_owned_inventory().await?.is_empty());
+        for index in 0..4 {
+            let scope = format!("scope-{index}");
+            provider
+                .allocate(scope.as_bytes(), b"original secret")
+                .await?;
+        }
+        let state = inner.state.lock().await;
+        let OwnerState::Four(four) = &*state else {
+            return Err("original four owner was not retained".into());
+        };
+        let interrupted =
+            append::third::fourth::generic::interrupt_transfer_after_root(&inner.owned, four).await;
+        assert!(matches!(
+            interrupted,
+            Err(AuraError::Invalid { message, .. })
+                if message == "platform birth interrupted at fixture boundary"
+        ));
+        drop(state);
+        let fifth = provider.allocate(b"fifth scope", b"fifth secret").await?;
+        assert_eq!(fifth.read_live_secret().await?, b"fifth secret");
+        assert_eq!(provider.recover_owned_inventory().await?.len(), 5);
+        drop((fifth, provider, inner, selected));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        assert_eq!(channel.recover_owned_inventory().await?.len(), 5);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_refuses_changed_prior_credential_before_sixth_birth(
+    ) -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        channel.recover_owned_inventory().await?;
+        for index in 0..5 {
+            let scope = format!("scope-{index}");
+            channel
+                .allocate(scope.as_bytes(), b"original secret")
+                .await?;
+        }
+        let platform = selected_owner(owned)?.0;
+        let prior = platform.entry_for_user(RECORD_USER)?;
+        let exact = prior.get_secret()?;
+        let root_before = platform.entry_for_user(KEYRING_USER)?.get_secret()?;
+        prior.set_secret(b"changed prior credential")?;
+        assert!(channel
+            .allocate(b"sixth scope", b"sixth secret")
+            .await
+            .is_err());
+        assert_eq!(
+            platform.entry_for_user(KEYRING_USER)?.get_secret()?,
+            root_before
+        );
+        prior.set_secret(&exact)?;
+        let sixth = channel.allocate(b"sixth scope", b"sixth secret").await?;
+        assert_eq!(sixth.read_live_secret().await?, b"sixth secret");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_fifth_retirement_and_sixth_positive_reopen() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        channel.recover_owned_inventory().await?;
+        for index in 0..4 {
+            let scope = format!("scope-{index}");
+            channel
+                .allocate(scope.as_bytes(), b"original secret")
+                .await?;
+        }
+        let fifth = channel.allocate(b"fifth scope", b"fifth secret").await?;
+        let sixth = channel.allocate(b"sixth scope", b"sixth secret").await?;
+        fifth
+            .decide_negative(b"fifth refusal")
+            .await?
+            .retire()
+            .await?;
+        sixth.decide_positive(b"sixth approval").await?;
+        assert!(
+            matches!(fifth.state().await?, SecretLifetimeState::Retired { decision } if decision == b"fifth refusal")
+        );
+        assert!(fifth.read_live_secret().await.is_err());
+        assert!(
+            matches!(sixth.state().await?, SecretLifetimeState::Positive { decision } if decision == b"sixth approval")
+        );
+        assert_eq!(sixth.read_live_secret().await?, b"sixth secret");
+        drop((fifth, sixth, channel, selected));
+
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        let recovered = channel.recover_owned_inventory().await?;
+        assert_eq!(recovered.len(), 6);
+        let fifth = recovered
+            .iter()
+            .find(|allocation| allocation.reference().scope == b"fifth scope")
+            .ok_or("fifth selected allocation missing")?;
+        let sixth = recovered
+            .iter()
+            .find(|allocation| allocation.reference().scope == b"sixth scope")
+            .ok_or("sixth selected allocation missing")?;
+        assert!(
+            matches!(fifth.state().await?, SecretLifetimeState::Retired { decision } if decision == b"fifth refusal")
+        );
+        assert!(
+            matches!(sixth.state().await?, SecretLifetimeState::Positive { decision } if decision == b"sixth approval")
+        );
+        assert_eq!(sixth.read_live_secret().await?, b"sixth secret");
+        Ok(())
+    }
+
+    async fn selected_adapter_generic_workload(count: usize) -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        channel.recover_owned_inventory().await?;
+        append::third::fourth::generic::profile::reset();
+        let birth_started = crate::time::monotonic_now();
+        for index in 0..count {
+            let scope = format!("scope-{index}");
+            let allocation = channel
+                .allocate(scope.as_bytes(), b"measured secret")
+                .await?;
+            assert_eq!(allocation.reference().scope, scope.as_bytes());
+        }
+        let birth_elapsed = birth_started.elapsed();
+        if count == aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT {
+            assert!(matches!(
+                channel.allocate(b"over capacity", b"secret").await,
+                Err(AuraError::Invalid { message, .. })
+                    if message == "platform generic roster capacity exhausted"
+            ));
+        }
+        let [verify_ns, pre_commit_ns, commit_ns, post_commit_ns] =
+            append::third::fourth::generic::profile::snapshot();
+        drop((channel, selected));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        let recovery_started = crate::time::monotonic_now();
+        let recovered = channel.recover_owned_inventory().await?;
+        let recovery_elapsed = recovery_started.elapsed();
+        assert_eq!(recovered.len(), count);
+        for index in [0, 3, 4, 63, 64, 255, count - 1]
+            .into_iter()
+            .filter(|index| *index < count)
+        {
+            let scope = format!("scope-{index}");
+            let allocation = recovered
+                .iter()
+                .find(|allocation| allocation.reference().scope == scope.as_bytes())
+                .ok_or("selected adapter lost an original scope")?;
+            assert_eq!(allocation.read_live_secret().await?, b"measured secret");
+        }
+        drop((recovered, channel, reopened));
+        let cleanup_started = crate::time::monotonic_now();
+        drop(fixture);
+        let cleanup_elapsed = cleanup_started.elapsed();
+        println!(
+            "selected adapter {count}: birth_ms={} verify_ms={} pre_commit_ms={} commit_ms={} post_commit_ms={} recovery_ms={} cleanup_ms={}",
+            birth_elapsed.as_millis(),
+            verify_ns / 1_000_000,
+            pre_commit_ns / 1_000_000,
+            commit_ns / 1_000_000,
+            post_commit_ns / 1_000_000,
+            recovery_elapsed.as_millis(),
+            cleanup_elapsed.as_millis(),
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_65_births_cross_first_page() -> TestResult {
+        selected_adapter_generic_workload(65).await
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_256_births_recover_original_scope() -> TestResult {
+        selected_adapter_generic_workload(256).await
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_generic_4096_births_recover_and_refuse_4097() -> TestResult {
+        selected_adapter_generic_workload(
+            aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT,
+        )
+        .await
     }
 
     #[tokio::test]

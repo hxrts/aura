@@ -381,6 +381,7 @@ pub(in crate::secure::platform_lifetime_root::birth) struct PlatformThreeRosterA
 pub(in crate::secure::platform_lifetime_root::birth) enum OriginalThirdOwner<'a> {
     Three(&'a PlatformThreeRosterAdmission),
     Four(&'a fourth::PlatformFourRosterAdmission),
+    Generic(&'a fourth::generic::PlatformGenericRosterAdmission),
 }
 
 pub(super) fn verify_original_third(
@@ -391,6 +392,9 @@ pub(super) fn verify_original_third(
     match owner {
         OriginalThirdOwner::Three(three) => verify_owner(owned, selected, three),
         OriginalThirdOwner::Four(four) => fourth::verify_four_prior(owned, selected, four),
+        OriginalThirdOwner::Generic(generic) => {
+            fourth::generic::verify_original_prior(owned, selected, generic)
+        }
     }
 }
 
@@ -430,6 +434,13 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn owned_four_state(
     four: &fourth::PlatformFourRosterAdmission,
 ) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
     owned_original_state(owned, OriginalThirdOwner::Four(four)).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn owned_generic_state(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &fourth::generic::PlatformGenericRosterAdmission,
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    owned_original_state(owned, OriginalThirdOwner::Generic(generic)).await
 }
 
 async fn owned_original_state(

@@ -349,6 +349,22 @@ pub(super) async fn decide_four(
     .await
 }
 
+pub(super) async fn decide_generic(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &append::third::fourth::generic::PlatformGenericRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Generic(generic),
+        positive,
+        bytes,
+        StopAfter::Never,
+    )
+    .await
+}
+
 async fn decide_roster_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: append::OriginalRosterOwner<'_>,

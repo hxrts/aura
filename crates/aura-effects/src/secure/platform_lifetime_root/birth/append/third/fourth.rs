@@ -9,7 +9,7 @@ const MAX_V10_ROSTER_FILE: usize = ROSTER_MAGIC_V10.len()
     + 2
     + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
         * (ROSTER_ENTRY_HEADER_LEN + MAX_SCOPE_BYTES);
-mod generic;
+pub(in crate::secure::platform_lifetime_root::birth) mod generic;
 pub(in crate::secure::platform_lifetime_root::birth) mod lifecycle;
 
 #[cfg(test)]
@@ -376,6 +376,7 @@ pub(in crate::secure::platform_lifetime_root::birth) struct PlatformFourRosterAd
     root: [u8; 32],
     fourth: [u8; 32],
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
+    generic_transferred: std::sync::atomic::AtomicBool,
 }
 
 fn verify_four(
@@ -392,7 +393,10 @@ pub(in crate::secure::platform_lifetime_root::birth) fn verify_four_prior(
     four: &PlatformFourRosterAdmission,
 ) -> Result<(RootRecord, Claim, Vec<u8>), AuraError> {
     let (_, owner) = selected_owner(owned)?;
-    if !Arc::ptr_eq(owner, &four._owner) || !owner.lifetime_root_claimed.load(Ordering::Acquire) {
+    if !Arc::ptr_eq(owner, &four._owner)
+        || !owner.lifetime_root_claimed.load(Ordering::Acquire)
+        || four.generic_transferred.load(Ordering::Acquire)
+    {
         return Err(invalid(
             "platform fourth owner lacks original profile lease",
         ));
@@ -530,6 +534,7 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn promote_borrowed(
         root: root.id,
         fourth: root.tail_next_id,
         _owner: owner.clone(),
+        generic_transferred: std::sync::atomic::AtomicBool::new(false),
     })
 }
 
@@ -554,6 +559,7 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn recover_four_roste
         root: root.id,
         fourth: root.tail_next_id,
         _owner: owner.clone(),
+        generic_transferred: std::sync::atomic::AtomicBool::new(false),
     })
 }
 

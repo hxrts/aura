@@ -251,6 +251,20 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_four(
     .await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_generic(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &append::third::fourth::generic::PlatformGenericRosterAdmission,
+    negative_decision: &[u8],
+) -> Result<(), AuraError> {
+    acknowledge_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Generic(generic),
+        negative_decision,
+        StopAfter::Never,
+    )
+    .await
+}
+
 async fn acknowledge_roster_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: append::OriginalRosterOwner<'_>,

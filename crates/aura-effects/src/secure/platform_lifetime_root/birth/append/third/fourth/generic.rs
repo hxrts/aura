@@ -6,7 +6,7 @@ use super::*;
 mod lifecycle;
 
 #[cfg(test)]
-mod profile {
+pub(in crate::secure::platform_lifetime_root::birth) mod profile {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
@@ -22,13 +22,13 @@ mod profile {
         );
     }
 
-    pub(super) fn reset() {
+    pub(in crate::secure::platform_lifetime_root::birth) fn reset() {
         for counter in [&VERIFY_NS, &PRE_COMMIT_NS, &COMMIT_NS, &POST_COMMIT_NS] {
             counter.store(0, Ordering::Relaxed);
         }
     }
 
-    pub(super) fn snapshot() -> [u64; 4] {
+    pub(in crate::secure::platform_lifetime_root::birth) fn snapshot() -> [u64; 4] {
         [&VERIFY_NS, &PRE_COMMIT_NS, &COMMIT_NS, &POST_COMMIT_NS]
             .map(|counter| counter.load(Ordering::Relaxed))
     }
@@ -802,6 +802,8 @@ enum Stop {
     Intent,
     Record,
     Marker,
+    #[cfg(test)]
+    AfterActive,
 }
 
 fn reconcile_locked(
@@ -879,7 +881,7 @@ fn reconcile_locked(
 
 /// One private original profile owner after the authenticated four-entry handoff.
 #[allow(dead_code)]
-pub(super) struct PlatformGenericRosterAdmission {
+pub(in crate::secure::platform_lifetime_root::birth) struct PlatformGenericRosterAdmission {
     root: [u8; 32],
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
@@ -893,6 +895,43 @@ pub(super) async fn initialize(
     result.map_err(|error| (error, four))
 }
 
+/// The adapter keeps its Four token until the authenticated handoff has
+/// reached a terminal root. Retrying this borrowed transition after a crash
+/// can only resume the exact original root under the same selected lease.
+pub(in crate::secure::platform_lifetime_root::birth) async fn promote_borrowed(
+    owned: &ProfileOwnedSecureStorage,
+    four: &PlatformFourRosterAdmission,
+) -> Result<PlatformGenericRosterAdmission, AuraError> {
+    initialize_borrowed(owned, four, Stop::Never).await
+}
+
+#[cfg(test)]
+pub(in crate::secure::platform_lifetime_root::birth) async fn interrupt_transfer_after_root(
+    owned: &ProfileOwnedSecureStorage,
+    four: &PlatformFourRosterAdmission,
+) -> Result<(), AuraError> {
+    initialize_borrowed(owned, four, Stop::Root)
+        .await
+        .map(|_| ())
+}
+
+#[cfg(test)]
+pub(in crate::secure::platform_lifetime_root::birth) async fn interrupt_transfer_after_active(
+    owned: &ProfileOwnedSecureStorage,
+    four: &PlatformFourRosterAdmission,
+) -> Result<(), AuraError> {
+    initialize_borrowed(owned, four, Stop::AfterActive)
+        .await
+        .map(|_| ())
+}
+
+fn claim_original_four_handoff(four: &PlatformFourRosterAdmission) -> Result<(), AuraError> {
+    four.generic_transferred
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| invalid("platform original fourth owner already transferred"))?;
+    Ok(())
+}
+
 async fn initialize_borrowed(
     owned: &ProfileOwnedSecureStorage,
     four: &PlatformFourRosterAdmission,
@@ -900,10 +939,39 @@ async fn initialize_borrowed(
 ) -> Result<PlatformGenericRosterAdmission, AuraError> {
     let (selected, owner) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let mut root = verify_four(owned, selected, four)?;
-    if root.generic_phase != GENERIC_UNCLAIMED {
-        return Err(invalid("platform generic roster was already claimed"));
+    if four.generic_transferred.load(Ordering::Acquire) {
+        return Err(invalid(
+            "platform original fourth owner already transferred",
+        ));
     }
+    let mut root = read_root(owned, selected)?;
+    if !Arc::ptr_eq(owner, &four._owner)
+        || !owner.lifetime_root_claimed.load(Ordering::Acquire)
+        || root.id != four.root
+        || root.tail_next_id != four.fourth
+    {
+        return Err(invalid(
+            "platform generic transfer lacks original four owner",
+        ));
+    }
+    if root.generic_phase != GENERIC_UNCLAIMED {
+        if !matches!(root.generic_phase, GENERIC_INIT_PENDING | GENERIC_ACTIVE) {
+            return Err(invalid(
+                "platform generic transfer has unrelated pending state",
+            ));
+        }
+        reconcile_locked(owned, selected, &mut root, stop)?;
+        #[cfg(test)]
+        if stop == Stop::AfterActive {
+            return Err(interrupted());
+        }
+        claim_original_four_handoff(four)?;
+        return Ok(PlatformGenericRosterAdmission {
+            root: root.id,
+            _owner: owner.clone(),
+        });
+    }
+    root = verify_four(owned, selected, four)?;
     let (fourth, _) = validate_four(owned, selected, &mut root)?;
     let reference = PageRef {
         max_id: fourth.id,
@@ -929,6 +997,11 @@ async fn initialize_borrowed(
         return Err(interrupted());
     }
     reconcile_locked(owned, selected, &mut root, stop)?;
+    #[cfg(test)]
+    if stop == Stop::AfterActive {
+        return Err(interrupted());
+    }
+    claim_original_four_handoff(four)?;
     Ok(PlatformGenericRosterAdmission {
         root: root.id,
         _owner: owner.clone(),
@@ -936,7 +1009,7 @@ async fn initialize_borrowed(
 }
 
 #[allow(dead_code)]
-pub(super) async fn recover_generic(
+pub(in crate::secure::platform_lifetime_root::birth) async fn recover_generic(
     owned: &ProfileOwnedSecureStorage,
 ) -> Result<PlatformGenericRosterAdmission, AuraError> {
     let (selected, owner) = selected_owner(owned)?;
@@ -961,8 +1034,10 @@ fn verify_owner(
     selected: &PlatformSecureStorageHandler,
     generic: &PlatformGenericRosterAdmission,
 ) -> Result<(RootRecord, Vec<Entry>, [u8; 32]), AuraError> {
-    let (_, owner) = selected_owner(owned)?;
-    if !Arc::ptr_eq(owner, &generic._owner) || !owner.lifetime_root_claimed.load(Ordering::Acquire)
+    let (original_selected, owner) = selected_owner(owned)?;
+    if !std::ptr::eq(original_selected, selected)
+        || !Arc::ptr_eq(owner, &generic._owner)
+        || !owner.lifetime_root_claimed.load(Ordering::Acquire)
     {
         return Err(invalid(
             "platform generic owner lacks original profile lease",
@@ -977,8 +1052,117 @@ fn verify_owner(
     Ok((root, entries, claim.allocation))
 }
 
+/// Revalidate the complete generic owner before delegating the immutable
+/// first-through-third roster to its existing lifecycle writers. The returned
+/// root and claim are tied to the same selected provider and namespace lock;
+/// this does not mint another admission token.
+pub(in crate::secure::platform_lifetime_root::birth) fn verify_original_prior(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    generic: &PlatformGenericRosterAdmission,
+) -> Result<(RootRecord, Claim, Vec<u8>), AuraError> {
+    let (mut root, _, _) = verify_owner(owned, selected, generic)?;
+    let (claim, third_scope) = prior(owned, selected, &mut root)?;
+    Ok((root, claim, third_scope))
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn owned_references(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &PlatformGenericRosterAdmission,
+) -> Result<Vec<aura_core::effects::secret_lifetime::SecretAllocationReference>, AuraError> {
+    use aura_core::effects::secret_lifetime::SecretAllocationReference;
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (mut root, entries, _) = verify_owner(owned, selected, generic)?;
+    let (claim, third_scope) = prior(owned, selected, &mut root)?;
+    let mut references = vec![
+        SecretAllocationReference {
+            allocation: root.birth_id,
+            scope: root.first_scope,
+        },
+        SecretAllocationReference {
+            allocation: claim.allocation,
+            scope: root.second_scope,
+        },
+        SecretAllocationReference {
+            allocation: root.third_id,
+            scope: third_scope,
+        },
+    ];
+    references.extend(entries.into_iter().map(|entry| SecretAllocationReference {
+        allocation: entry.id,
+        scope: entry.scope,
+    }));
+    Ok(references)
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn owned_state(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &PlatformGenericRosterAdmission,
+    id: &[u8; 32],
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    use aura_core::effects::secret_lifetime::SecretLifetimeState;
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, entries, _) = verify_owner(owned, selected, generic)?;
+    let entry = entries
+        .iter()
+        .find(|entry| &entry.id == id)
+        .ok_or_else(|| invalid("platform generic allocation is not owned"))?;
+    if entry.phase == LIVE {
+        return Ok(SecretLifetimeState::Live);
+    }
+    let record = lifecycle::decision(selected, &root, entry)?
+        .ok_or_else(|| invalid("platform generic decision is missing"))?;
+    match (entry.phase, record.kind) {
+        (DECIDED, decision::POSITIVE) => Ok(SecretLifetimeState::Positive {
+            decision: record.bytes.to_vec(),
+        }),
+        (DECIDED | DENIED, decision::NEGATIVE) => Ok(SecretLifetimeState::Negative {
+            decision: record.bytes.to_vec(),
+        }),
+        (ERASED, decision::NEGATIVE) => Ok(SecretLifetimeState::Retired {
+            decision: record.bytes.to_vec(),
+        }),
+        _ => Err(invalid("platform generic decision kind is invalid")),
+    }
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn retire_negative_exact(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &PlatformGenericRosterAdmission,
+    id: &[u8; 32],
+    exact: &[u8],
+) -> Result<(), AuraError> {
+    match owned_state(owned, generic, id).await? {
+        aura_core::effects::secret_lifetime::SecretLifetimeState::Negative { decision }
+            if decision == exact =>
+        {
+            lifecycle::acknowledge_negative(owned, generic, id, exact).await?;
+        }
+        aura_core::effects::secret_lifetime::SecretLifetimeState::Retired { decision }
+            if decision == exact => {}
+        _ => {
+            return Err(invalid(
+                "platform generic retirement differs from original decision",
+            ))
+        }
+    }
+    lifecycle::erase(owned, generic, id).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &PlatformGenericRosterAdmission,
+    id: &[u8; 32],
+    positive: bool,
+    exact: &[u8],
+) -> Result<(), AuraError> {
+    lifecycle::decide(owned, generic, id, positive, exact).await
+}
+
 #[allow(dead_code)]
-pub(super) async fn append(
+pub(in crate::secure::platform_lifetime_root::birth) async fn append(
     owned: &ProfileOwnedSecureStorage,
     generic: &PlatformGenericRosterAdmission,
     scope: &[u8],
@@ -1070,7 +1254,7 @@ async fn append_inner(
 }
 
 #[allow(dead_code)]
-pub(super) async fn read_live(
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_live(
     owned: &ProfileOwnedSecureStorage,
     generic: &PlatformGenericRosterAdmission,
     id: &[u8; 32],
@@ -1124,6 +1308,69 @@ mod tests {
         };
         let generic = initialize(owned, four).await.map_err(|(error, _)| error)?;
         Ok((storage, generic))
+    }
+
+    #[tokio::test]
+    async fn generic_original_four_refuses_concurrent_and_repeated_handoff() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, four) = super::super::lifecycle::tests::first_four(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        let (first, second) = tokio::join!(
+            promote_borrowed(owned, &four),
+            promote_borrowed(owned, &four),
+        );
+        let (generic, refused) = match (first, second) {
+            (Ok(generic), Err(refused)) | (Err(refused), Ok(generic)) => (generic, refused),
+            _ => return Err("exactly one original handoff must succeed".into()),
+        };
+        assert!(matches!(
+            refused,
+            AuraError::Invalid { message, .. }
+                if message == "platform original fourth owner already transferred"
+        ));
+        assert!(matches!(
+            promote_borrowed(owned, &four).await,
+            Err(AuraError::Invalid { message, .. })
+                if message == "platform original fourth owner already transferred"
+        ));
+        let (selected, _) = selected_owner(owned)?;
+        assert!(super::super::verify_four_prior(owned, selected, &four).is_err());
+        assert_eq!(owned_references(owned, &generic).await?.len(), 4);
+        drop((generic, four, storage));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        assert_eq!(
+            owned_references(owned, &recover_generic(owned).await?)
+                .await?
+                .len(),
+            4
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generic_original_four_retries_after_active_without_issued_token() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (storage, four) = super::super::lifecycle::tests::first_four(&fixture).await?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
+            unreachable!()
+        };
+        assert!(matches!(
+            interrupt_transfer_after_active(owned, &four).await,
+            Err(AuraError::Invalid { message, .. })
+                if message == "platform birth interrupted at fixture boundary"
+        ));
+        let (selected, _) = selected_owner(owned)?;
+        assert_eq!(read_root(owned, selected)?.generic_phase, GENERIC_ACTIVE);
+        assert!(super::super::verify_four_prior(owned, selected, &four).is_err());
+        let generic = promote_borrowed(owned, &four).await?;
+        assert_eq!(owned_references(owned, &generic).await?.len(), 4);
+        assert!(promote_borrowed(owned, &four).await.is_err());
+        Ok(())
     }
 
     #[tokio::test]

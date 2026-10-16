@@ -153,6 +153,22 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn decide_four(
     .await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide_generic(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &fourth::generic::PlatformGenericRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_inner(
+        owned,
+        OriginalThirdOwner::Generic(generic),
+        positive,
+        bytes,
+        DecisionStop::Never,
+    )
+    .await
+}
+
 async fn decide_inner(
     owned: &ProfileOwnedSecureStorage,
     three: OriginalThirdOwner<'_>,
@@ -331,6 +347,20 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_four(
     .await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_generic(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &fourth::generic::PlatformGenericRosterAdmission,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    deny_inner(
+        owned,
+        OriginalThirdOwner::Generic(generic),
+        bytes,
+        DenialStop::Never,
+    )
+    .await
+}
+
 async fn deny_inner(
     owned: &ProfileOwnedSecureStorage,
     three: OriginalThirdOwner<'_>,
@@ -464,6 +494,18 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn erase_four(
     erase_inner(owned, OriginalThirdOwner::Four(four), ErasureStop::Never).await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_generic(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &fourth::generic::PlatformGenericRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_inner(
+        owned,
+        OriginalThirdOwner::Generic(generic),
+        ErasureStop::Never,
+    )
+    .await
+}
+
 async fn erase_inner(
     owned: &ProfileOwnedSecureStorage,
     three: OriginalThirdOwner<'_>,
@@ -539,6 +581,13 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn read_four_secret(
     four: &fourth::PlatformFourRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {
     read_owned_secret(owned, OriginalThirdOwner::Four(four)).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_generic_secret(
+    owned: &ProfileOwnedSecureStorage,
+    generic: &fourth::generic::PlatformGenericRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_secret(owned, OriginalThirdOwner::Generic(generic)).await
 }
 
 async fn read_owned_secret(
