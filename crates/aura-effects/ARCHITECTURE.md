@@ -204,13 +204,14 @@ decisions; a foreign lease, duplicate root claim, damaged record or external
 conflict fails closed rather than starting a fresh inventory or reissuing a
 secret. This local lease and inventory grant no enrollment or peer authority.
 
-The private platform lifetime adapter keeps first and second allocations under
-their original authenticated roster after a third birth is acknowledged. A
-two-entry token refuses once that birth is claimed. First and second reads and
-terminal mutations instead verify the three-entry owner under the same
-namespace lock. This is a
-provider dependency only: L6 platform selection and OS credential-service
-durability remain unproved.
+The private platform lifetime adapter keeps the first three allocations under
+their original authenticated roster after a fourth birth is acknowledged.
+Two- and three-entry tokens refuse once a later birth is claimed. Reads and
+terminal mutations of earlier entries instead verify the four-entry owner,
+retained scopes, selected credentials, and lifecycle evidence under the same
+namespace lock. The private adapter refuses a fifth birth. This is a provider
+dependency only: L6 platform selection, the 4096-entry adapter contract, and
+OS credential-service durability remain unproved.
 
 Native platform keyring entries share namespaces across filesystem profiles. Owned Unix production construction additionally retains one service-wide descriptor lease under a fixed OS-user-bound namespace. The original selected profile lease caches that exact service lease across sanctioned runtime reassembly; unrelated profiles cannot simultaneously write the shared service. Raw platform adapters reject IO before this private custody is attached. The existing keyring service and key addresses remain unchanged. Configured platform records are not silently replaced by fresh filesystem state. Native filesystem fallback remains subject to its existing explicit test/harness construction policy; this incremental owner patch does not declare that fallback a platform credential store. Atomic multi-record profile handoff and live two-tab/process restart scenarios remain separate required integration gates.
 

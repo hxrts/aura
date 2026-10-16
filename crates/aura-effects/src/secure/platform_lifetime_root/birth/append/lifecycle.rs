@@ -155,6 +155,22 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn decide_three(
     .await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &super::third::fourth::PlatformFourRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_inner(
+        owned,
+        OriginalRosterOwner::Four(four),
+        positive,
+        bytes,
+        DecisionStop::Never,
+    )
+    .await
+}
+
 async fn decide_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: OriginalRosterOwner<'_>,
@@ -382,6 +398,20 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_three(
     .await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &super::third::fourth::PlatformFourRosterAdmission,
+    exact_decision: &[u8],
+) -> Result<(), AuraError> {
+    deny_inner(
+        owned,
+        OriginalRosterOwner::Four(four),
+        exact_decision,
+        DenialStop::Never,
+    )
+    .await
+}
+
 async fn deny_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: OriginalRosterOwner<'_>,
@@ -527,6 +557,13 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn erase_three(
     erase_inner(owned, OriginalRosterOwner::Three(three), ErasureStop::Never).await
 }
 
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &super::third::fourth::PlatformFourRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_inner(owned, OriginalRosterOwner::Four(four), ErasureStop::Never).await
+}
+
 async fn erase_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: OriginalRosterOwner<'_>,
@@ -621,6 +658,13 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn read_three_secret(
     three: &super::third::PlatformThreeRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {
     read_owned_secret(owned, OriginalRosterOwner::Three(three)).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_four_secret(
+    owned: &ProfileOwnedSecureStorage,
+    four: &super::third::fourth::PlatformFourRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_secret(owned, OriginalRosterOwner::Four(four)).await
 }
 
 async fn read_owned_secret(

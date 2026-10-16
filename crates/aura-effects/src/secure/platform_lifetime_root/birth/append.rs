@@ -25,6 +25,7 @@ pub(in crate::secure::platform_lifetime_root::birth) mod third;
 pub(in crate::secure::platform_lifetime_root::birth) enum OriginalRosterOwner<'a> {
     Two(&'a PlatformRosterAdmission),
     Three(&'a third::PlatformThreeRosterAdmission),
+    Four(&'a third::fourth::PlatformFourRosterAdmission),
 }
 
 pub(in crate::secure::platform_lifetime_root::birth) async fn append_third_owned(
@@ -555,6 +556,10 @@ pub(in crate::secure::platform_lifetime_root::birth) fn verify_original_roster(
             let (root, claim, _) = third::verify_owner(owned, selected, three)?;
             Ok((root, claim))
         }
+        OriginalRosterOwner::Four(four) => {
+            let (root, claim, _) = third::fourth::verify_four_prior(owned, selected, four)?;
+            Ok((root, claim))
+        }
     }
 }
 
@@ -571,6 +576,13 @@ pub(super) fn bound_original_state(
         }
         OriginalRosterOwner::Three(three) => {
             let (verified, claim, _) = third::verify_owner(owned, selected, three)?;
+            if verified.id != root.id {
+                return Err(invalid("platform roster root changed under original owner"));
+            }
+            Ok((verified, claim))
+        }
+        OriginalRosterOwner::Four(four) => {
+            let (verified, claim, _) = third::fourth::verify_four_prior(owned, selected, four)?;
             if verified.id != root.id {
                 return Err(invalid("platform roster root changed under original owner"));
             }

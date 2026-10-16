@@ -333,6 +333,22 @@ pub(super) async fn decide_three(
     .await
 }
 
+pub(super) async fn decide_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &append::third::fourth::PlatformFourRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_roster_inner(
+        owned,
+        append::OriginalRosterOwner::Four(four),
+        positive,
+        bytes,
+        StopAfter::Never,
+    )
+    .await
+}
+
 async fn decide_roster_inner(
     owned: &ProfileOwnedSecureStorage,
     roster: append::OriginalRosterOwner<'_>,

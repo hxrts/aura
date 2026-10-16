@@ -12,13 +12,13 @@ use aura_core::effects::secret_lifetime::{
 use tokio::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
-#[error("selected platform lifetime provider is limited to three original births")]
-struct ThreeBirthCapacity;
+#[error("selected platform lifetime provider is limited to four original births")]
+struct FourBirthCapacity;
 
 fn capacity_error() -> AuraError {
     AuraError::Internal {
         message: "selected platform lifetime birth capacity reached".into(),
-        source: Some(Arc::new(ThreeBirthCapacity)),
+        source: Some(Arc::new(FourBirthCapacity)),
     }
 }
 
@@ -28,6 +28,7 @@ enum OwnerState {
     One(PlatformBirthAdmission),
     Two(append::PlatformRosterAdmission),
     Three(append::third::PlatformThreeRosterAdmission),
+    Four(append::third::fourth::PlatformFourRosterAdmission),
 }
 
 struct PlatformLifetimeInner {
@@ -44,6 +45,7 @@ enum Entry {
     First,
     Second,
     Third,
+    Fourth,
 }
 
 struct PlatformLifetimeAllocation {
@@ -94,6 +96,9 @@ impl PlatformLifetimeInner {
             Some(root) if matches!(root.phase, PENDING | COMPLETE) => {
                 OwnerState::Empty(admit_empty_root(&self.owned).await?)
             }
+            Some(root) if root.tail_phase != TAIL_IDLE => {
+                OwnerState::Four(append::third::fourth::recover_four_roster(&self.owned).await?)
+            }
             Some(root) if root.third_phase != THIRD_UNCLAIMED => {
                 OwnerState::Three(append::recover_third_owned(&self.owned).await?)
             }
@@ -134,7 +139,15 @@ impl PlatformLifetimeInner {
                     *state = OwnerState::Three(three);
                 }
             }
-            OwnerState::Three(_) => {}
+            OwnerState::Three(three) => {
+                let (selected, _) = selected_owner(&self.owned)?;
+                let root = read_root(&self.owned, selected)?;
+                if root.tail_phase != TAIL_IDLE {
+                    let four = append::third::fourth::promote_borrowed(&self.owned, three).await?;
+                    *state = OwnerState::Four(four);
+                }
+            }
+            OwnerState::Four(_) => {}
             OwnerState::Uninitialized => unreachable!("initialized above"),
         }
         Ok(())
@@ -149,6 +162,14 @@ impl PlatformLifetimeInner {
                 .await?
                 .into_iter()
                 .zip([Entry::First, Entry::Second, Entry::Third])
+                .map(|(reference, entry)| (entry, reference))
+                .collect());
+        }
+        if let OwnerState::Four(four) = state {
+            return Ok(append::third::fourth::owned_references(&self.owned, four)
+                .await?
+                .into_iter()
+                .zip([Entry::First, Entry::Second, Entry::Third, Entry::Fourth])
                 .map(|(reference, entry)| (entry, reference))
                 .collect());
         }
@@ -216,6 +237,7 @@ impl PlatformLifetimeInner {
                 ])
             }
             OwnerState::Three(_) => unreachable!("handled before namespace lock"),
+            OwnerState::Four(_) => unreachable!("handled before namespace lock"),
             OwnerState::Uninitialized => Err(invalid("platform lifetime owner is uninitialized")),
         }
     }
@@ -267,7 +289,12 @@ impl ProfileSecretLifetimeBackend for PlatformLifetimeProvider {
                 let three = append::append_third_owned(&self.0.owned, two, scope, secret).await?;
                 *state = OwnerState::Three(three);
             }
-            OwnerState::Three(_) => return Err(capacity_error()),
+            OwnerState::Three(three) => {
+                append::third::fourth::append_fourth(&self.0.owned, three, scope, secret).await?;
+                let four = append::third::fourth::promote_borrowed(&self.0.owned, three).await?;
+                *state = OwnerState::Four(four);
+            }
+            OwnerState::Four(_) => return Err(capacity_error()),
             OwnerState::Uninitialized => unreachable!("reconciled above"),
         }
         let (entry, reference) = self
@@ -326,6 +353,12 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
         if let (OwnerState::Three(three), Entry::Third) = (&*state, self.entry) {
             return append::third_state(&self.inner.owned, three).await;
         }
+        if let (OwnerState::Four(four), Entry::Third) = (&*state, self.entry) {
+            return append::third::owned_four_state(&self.inner.owned, four).await;
+        }
+        if let (OwnerState::Four(four), Entry::Fourth) = (&*state, self.entry) {
+            return append::third::fourth::owned_state(&self.inner.owned, four).await;
+        }
         let (selected, _) = selected_owner(&self.inner.owned)?;
         let _guard = selected.namespace_owner()?.mutation_guard().await;
         let root = read_root(&self.inner.owned, selected)?;
@@ -349,6 +382,18 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                     record.map(|record| (record.kind, record.bytes.to_vec())),
                 )
             }
+            (OwnerState::Four(four), Entry::First) => {
+                let (verified, _) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Four(four),
+                )?;
+                let record = decision::read_record(selected, &verified)?;
+                (
+                    verified.phase,
+                    record.map(|record| (record.kind, record.bytes.to_vec())),
+                )
+            }
             (OwnerState::Two(roster), Entry::Second) => {
                 let claim =
                     append::lifecycle::bound_claim(&self.inner.owned, selected, &root, roster)?;
@@ -367,6 +412,18 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                 let record = append::lifecycle::decision_record(selected, &root, &claim)?;
                 (
                     root.second_phase,
+                    record.map(|record| (record.kind, record.bytes.to_vec())),
+                )
+            }
+            (OwnerState::Four(four), Entry::Second) => {
+                let (verified, claim) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Four(four),
+                )?;
+                let record = append::lifecycle::decision_record(selected, &verified, &claim)?;
+                (
+                    verified.second_phase,
                     record.map(|record| (record.kind, record.bytes.to_vec())),
                 )
             }
@@ -429,6 +486,26 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                     .await?
                     .to_vec(),
             ),
+            (OwnerState::Four(four), Entry::First) => {
+                Ok(read_four_first_secret(&self.inner.owned, four)
+                    .await?
+                    .to_vec())
+            }
+            (OwnerState::Four(four), Entry::Second) => {
+                Ok(append::lifecycle::read_four_secret(&self.inner.owned, four)
+                    .await?
+                    .to_vec())
+            }
+            (OwnerState::Four(four), Entry::Third) => Ok(
+                append::third::lifecycle::read_four_secret(&self.inner.owned, four)
+                    .await?
+                    .to_vec(),
+            ),
+            (OwnerState::Four(four), Entry::Fourth) => Ok(
+                append::third::fourth::read_fourth_secret(&self.inner.owned, four)
+                    .await?
+                    .to_vec(),
+            ),
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
     }
@@ -453,6 +530,18 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
             }
             (OwnerState::Three(three), Entry::Third) => {
                 append::third::lifecycle::decide(&self.inner.owned, three, true, bytes).await
+            }
+            (OwnerState::Four(four), Entry::First) => {
+                decision::decide_four(&self.inner.owned, four, true, bytes).await
+            }
+            (OwnerState::Four(four), Entry::Second) => {
+                append::lifecycle::decide_four(&self.inner.owned, four, true, bytes).await
+            }
+            (OwnerState::Four(four), Entry::Third) => {
+                append::third::lifecycle::decide_four(&self.inner.owned, four, true, bytes).await
+            }
+            (OwnerState::Four(four), Entry::Fourth) => {
+                append::third::fourth::lifecycle::decide(&self.inner.owned, four, true, bytes).await
             }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
@@ -479,6 +568,19 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
             (OwnerState::Three(three), Entry::Third) => {
                 append::third::lifecycle::decide(&self.inner.owned, three, false, bytes).await
             }
+            (OwnerState::Four(four), Entry::First) => {
+                decision::decide_four(&self.inner.owned, four, false, bytes).await
+            }
+            (OwnerState::Four(four), Entry::Second) => {
+                append::lifecycle::decide_four(&self.inner.owned, four, false, bytes).await
+            }
+            (OwnerState::Four(four), Entry::Third) => {
+                append::third::lifecycle::decide_four(&self.inner.owned, four, false, bytes).await
+            }
+            (OwnerState::Four(four), Entry::Fourth) => {
+                append::third::fourth::lifecycle::decide(&self.inner.owned, four, false, bytes)
+                    .await
+            }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
     }
@@ -499,6 +601,40 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                 }
             }
             return append::third::lifecycle::erase(&self.inner.owned, three).await;
+        }
+        if let (OwnerState::Four(four), Entry::Third) = (&*state, self.entry) {
+            match append::third::owned_four_state(&self.inner.owned, four).await? {
+                SecretLifetimeState::Negative { decision } if decision == bytes => {
+                    append::third::lifecycle::acknowledge_four(&self.inner.owned, four, bytes)
+                        .await?;
+                }
+                SecretLifetimeState::Retired { decision } if decision == bytes => {}
+                _ => {
+                    return Err(invalid(
+                        "platform third retirement differs from original negative decision",
+                    ))
+                }
+            }
+            return append::third::lifecycle::erase_four(&self.inner.owned, four).await;
+        }
+        if let (OwnerState::Four(four), Entry::Fourth) = (&*state, self.entry) {
+            match append::third::fourth::owned_state(&self.inner.owned, four).await? {
+                SecretLifetimeState::Negative { decision } if decision == bytes => {
+                    append::third::fourth::lifecycle::acknowledge_negative(
+                        &self.inner.owned,
+                        four,
+                        bytes,
+                    )
+                    .await?;
+                }
+                SecretLifetimeState::Retired { decision } if decision == bytes => {}
+                _ => {
+                    return Err(invalid(
+                        "platform fourth retirement differs from original negative decision",
+                    ))
+                }
+            }
+            return append::third::fourth::lifecycle::erase(&self.inner.owned, four).await;
         }
         let (selected, _) = selected_owner(&self.inner.owned)?;
         let guard = selected.namespace_owner()?.mutation_guard().await;
@@ -540,6 +676,31 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                     append::lifecycle::decision_record(selected, &root, &claim)?,
                     matches!(
                         root.second_phase,
+                        SECOND_ERASURE_PENDING | SECOND_ERASURE_COMPLETE
+                    ),
+                )
+            }
+            (OwnerState::Four(four), Entry::First) => {
+                let (verified, _) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Four(four),
+                )?;
+                (
+                    decision::read_record(selected, &verified)?,
+                    matches!(verified.phase, ERASURE_PENDING | ERASURE_COMPLETE),
+                )
+            }
+            (OwnerState::Four(four), Entry::Second) => {
+                let (verified, claim) = append::verify_original_roster(
+                    &self.inner.owned,
+                    selected,
+                    append::OriginalRosterOwner::Four(four),
+                )?;
+                (
+                    append::lifecycle::decision_record(selected, &verified, &claim)?,
+                    matches!(
+                        verified.second_phase,
                         SECOND_ERASURE_PENDING | SECOND_ERASURE_COMPLETE
                     ),
                 )
@@ -592,6 +753,19 @@ impl SecretLifetimeBackend for PlatformLifetimeAllocation {
                 }
                 append::lifecycle::erase_three(&self.inner.owned, three).await
             }
+            (OwnerState::Four(four), Entry::First) => {
+                if !erasure_started {
+                    decision::negative_denial::acknowledge_four(&self.inner.owned, four, bytes)
+                        .await?;
+                }
+                decision::negative_denial::erasure::erase_four(&self.inner.owned, four).await
+            }
+            (OwnerState::Four(four), Entry::Second) => {
+                if !erasure_started {
+                    append::lifecycle::acknowledge_four(&self.inner.owned, four, bytes).await?;
+                }
+                append::lifecycle::erase_four(&self.inner.owned, four).await
+            }
             _ => Err(invalid("platform lifetime allocation owner changed")),
         }
     }
@@ -604,7 +778,7 @@ mod tests {
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     #[tokio::test]
-    async fn selected_adapter_recovers_empty_one_two_three_and_refuses_fourth() -> TestResult {
+    async fn selected_adapter_recovers_empty_one_two_three_four_and_refuses_fifth() -> TestResult {
         let fixture = Fixture::new()?;
         let selected = fixture.selected()?;
         let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
@@ -628,14 +802,24 @@ mod tests {
         assert_eq!(first.read_live_secret().await?, b"first secret");
         assert_eq!(second.read_live_secret().await?, b"second secret");
         assert_eq!(third.read_live_secret().await?, b"third secret");
+        let fourth = channel.allocate(b"fourth scope", b"fourth secret").await?;
+        assert_eq!(fourth.reference().scope, b"fourth scope");
+        for (allocation, expected) in [
+            (&first, b"first secret".as_slice()),
+            (&second, b"second secret".as_slice()),
+            (&third, b"third secret".as_slice()),
+            (&fourth, b"fourth secret".as_slice()),
+        ] {
+            assert_eq!(allocation.read_live_secret().await?, expected);
+        }
         let error = channel
-            .allocate(b"fourth scope", b"fourth secret")
+            .allocate(b"fifth scope", b"fifth secret")
             .await
             .err()
             .expect("private capacity");
         assert!(
             matches!(error, AuraError::Internal { source: Some(ref source), .. }
-            if source.downcast_ref::<ThreeBirthCapacity>().is_some())
+            if source.downcast_ref::<FourBirthCapacity>().is_some())
         );
         Ok(())
     }
@@ -684,6 +868,85 @@ mod tests {
             );
             assert!(allocation.read_live_secret().await.is_err());
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_fourth_preserves_all_retirement_and_reopens() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        channel.recover_owned_inventory().await?;
+        let first = channel.allocate(b"first scope", b"first secret").await?;
+        let second = channel.allocate(b"second scope", b"second secret").await?;
+        let third = channel.allocate(b"third scope", b"third secret").await?;
+        let fourth = channel.allocate(b"fourth scope", b"fourth secret").await?;
+        for (allocation, decision) in [
+            (&first, b"first refusal".as_slice()),
+            (&second, b"second refusal".as_slice()),
+            (&third, b"third refusal".as_slice()),
+            (&fourth, b"fourth refusal".as_slice()),
+        ] {
+            let negative = allocation.decide_negative(decision).await?;
+            negative.retire().await?;
+            negative.retire().await?;
+            assert!(
+                matches!(allocation.state().await?, SecretLifetimeState::Retired { decision: exact } if exact == decision)
+            );
+            assert!(allocation.read_live_secret().await.is_err());
+        }
+        drop((first, second, third, fourth, channel, selected));
+        let reopened = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &reopened else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        let recovered = channel.recover_owned_inventory().await?;
+        assert_eq!(recovered.len(), 4);
+        for (allocation, (scope, decision)) in recovered.iter().zip([
+            (b"first scope".as_slice(), b"first refusal".as_slice()),
+            (b"second scope".as_slice(), b"second refusal".as_slice()),
+            (b"third scope".as_slice(), b"third refusal".as_slice()),
+            (b"fourth scope".as_slice(), b"fourth refusal".as_slice()),
+        ]) {
+            assert_eq!(allocation.reference().scope, scope);
+            assert!(
+                matches!(allocation.state().await?, SecretLifetimeState::Retired { decision: exact } if exact == decision)
+            );
+            assert!(allocation.read_live_secret().await.is_err());
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn selected_adapter_fourth_refuses_changed_prior_credential() -> TestResult {
+        let fixture = Fixture::new()?;
+        let selected = fixture.selected()?;
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &selected else {
+            unreachable!()
+        };
+        let mut channel = selected_profile_channel(owned)?;
+        channel.recover_owned_inventory().await?;
+        let first = channel.allocate(b"first scope", b"first secret").await?;
+        channel.allocate(b"second scope", b"second secret").await?;
+        channel.allocate(b"third scope", b"third secret").await?;
+        channel.allocate(b"fourth scope", b"fourth secret").await?;
+        let platform = selected_owner(owned)?.0;
+        let record = platform.entry_for_user(RECORD_USER)?;
+        let original = record.get_secret()?;
+        record.set_secret(b"changed prior credential")?;
+        let root_before = platform.entry_for_user(KEYRING_USER)?.get_secret()?;
+        assert!(first.read_live_secret().await.is_err());
+        assert!(first.decide_positive(b"cannot decide").await.is_err());
+        assert_eq!(
+            platform.entry_for_user(KEYRING_USER)?.get_secret()?,
+            root_before
+        );
+        record.set_secret(&original)?;
+        assert_eq!(first.read_live_secret().await?, b"first secret");
         Ok(())
     }
 

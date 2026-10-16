@@ -127,12 +127,35 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn decide(
     positive: bool,
     bytes: &[u8],
 ) -> Result<(), AuraError> {
-    decide_inner(owned, three, positive, bytes, DecisionStop::Never).await
+    decide_inner(
+        owned,
+        OriginalThirdOwner::Three(three),
+        positive,
+        bytes,
+        DecisionStop::Never,
+    )
+    .await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &fourth::PlatformFourRosterAdmission,
+    positive: bool,
+    bytes: &[u8],
+) -> Result<(), AuraError> {
+    decide_inner(
+        owned,
+        OriginalThirdOwner::Four(four),
+        positive,
+        bytes,
+        DecisionStop::Never,
+    )
+    .await
 }
 
 async fn decide_inner(
     owned: &ProfileOwnedSecureStorage,
-    three: &PlatformThreeRosterAdmission,
+    three: OriginalThirdOwner<'_>,
     positive: bool,
     bytes: &[u8],
     stop: DecisionStop,
@@ -142,7 +165,7 @@ async fn decide_inner(
     }
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (mut root, _, _) = verify_owner(owned, selected, three)?;
+    let (mut root, _, _) = verify_original_third(owned, selected, three)?;
     if root.third_phase != THIRD_BIRTH_COMPLETE {
         let existing = finish_decision(owned, selected, &mut root)?;
         if existing.kind != if positive { POSITIVE } else { NEGATIVE }
@@ -285,18 +308,38 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_negati
     three: &PlatformThreeRosterAdmission,
     exact_decision: &[u8],
 ) -> Result<(), AuraError> {
-    deny_inner(owned, three, exact_decision, DenialStop::Never).await
+    deny_inner(
+        owned,
+        OriginalThirdOwner::Three(three),
+        exact_decision,
+        DenialStop::Never,
+    )
+    .await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &fourth::PlatformFourRosterAdmission,
+    exact_decision: &[u8],
+) -> Result<(), AuraError> {
+    deny_inner(
+        owned,
+        OriginalThirdOwner::Four(four),
+        exact_decision,
+        DenialStop::Never,
+    )
+    .await
 }
 
 async fn deny_inner(
     owned: &ProfileOwnedSecureStorage,
-    three: &PlatformThreeRosterAdmission,
+    three: OriginalThirdOwner<'_>,
     exact_decision: &[u8],
     stop: DenialStop,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (mut root, _, _) = verify_owner(owned, selected, three)?;
+    let (mut root, _, _) = verify_original_third(owned, selected, three)?;
     let decision = finish_decision(owned, selected, &mut root)?;
     if decision.kind != NEGATIVE || decision.bytes.as_slice() != exact_decision {
         return Err(invalid(
@@ -411,17 +454,24 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn erase(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
 ) -> Result<(), AuraError> {
-    erase_inner(owned, three, ErasureStop::Never).await
+    erase_inner(owned, OriginalThirdOwner::Three(three), ErasureStop::Never).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase_four(
+    owned: &ProfileOwnedSecureStorage,
+    four: &fourth::PlatformFourRosterAdmission,
+) -> Result<(), AuraError> {
+    erase_inner(owned, OriginalThirdOwner::Four(four), ErasureStop::Never).await
 }
 
 async fn erase_inner(
     owned: &ProfileOwnedSecureStorage,
-    three: &PlatformThreeRosterAdmission,
+    three: OriginalThirdOwner<'_>,
     stop: ErasureStop,
 ) -> Result<(), AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (mut root, _, _) = verify_owner(owned, selected, three)?;
+    let (mut root, _, _) = verify_original_third(owned, selected, three)?;
     finish_decision(owned, selected, &mut root)?;
     finish_tombstone(owned, selected, &mut root)?;
     if root.third_phase == THIRD_TOMBSTONE_ACK_ERASURE_PENDING {
@@ -481,9 +531,23 @@ pub(in crate::secure::platform_lifetime_root::birth) async fn read_live_secret(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_secret(owned, OriginalThirdOwner::Three(three)).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_four_secret(
+    owned: &ProfileOwnedSecureStorage,
+    four: &fourth::PlatformFourRosterAdmission,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
+    read_owned_secret(owned, OriginalThirdOwner::Four(four)).await
+}
+
+async fn read_owned_secret(
+    owned: &ProfileOwnedSecureStorage,
+    three: OriginalThirdOwner<'_>,
+) -> Result<Zeroizing<Vec<u8>>, AuraError> {
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (root, _, scope) = verify_owner(owned, selected, three)?;
+    let (root, _, scope) = verify_original_third(owned, selected, three)?;
     if root.third_phase >= THIRD_TOMBSTONE_PENDING {
         return Err(invalid(
             "platform third live read denied by original tombstone",
@@ -601,11 +665,15 @@ mod tests {
             let ProductionSecureStorageHandler::ProfileOwned(owned) = &storage else {
                 unreachable!()
             };
-            assert!(
-                decide_inner(owned, &three, false, b"third denial", decision_stop)
-                    .await
-                    .is_err()
-            );
+            assert!(decide_inner(
+                owned,
+                OriginalThirdOwner::Three(&three),
+                false,
+                b"third denial",
+                decision_stop
+            )
+            .await
+            .is_err());
             drop(three);
             drop(storage);
             let reopened = fixture.selected()?;
@@ -626,9 +694,14 @@ mod tests {
                 unreachable!()
             };
             decide(owned, &three, false, b"third denial").await?;
-            assert!(deny_inner(owned, &three, b"third denial", denial_stop)
-                .await
-                .is_err());
+            assert!(deny_inner(
+                owned,
+                OriginalThirdOwner::Three(&three),
+                b"third denial",
+                denial_stop
+            )
+            .await
+            .is_err());
             drop(three);
             drop(storage);
             let reopened = fixture.selected()?;
@@ -655,7 +728,9 @@ mod tests {
             };
             decide(owned, &three, false, b"third denial").await?;
             acknowledge_negative(owned, &three, b"third denial").await?;
-            assert!(erase_inner(owned, &three, stop).await.is_err());
+            assert!(erase_inner(owned, OriginalThirdOwner::Three(&three), stop)
+                .await
+                .is_err());
             drop(three);
             drop(storage);
             let reopened = fixture.selected()?;

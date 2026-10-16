@@ -3,7 +3,7 @@
 use super::*;
 
 const THIRD_ROSTER_FILE: &str = "platform_lifetime/third-roster.v8";
-mod fourth;
+pub(in crate::secure::platform_lifetime_root::birth) mod fourth;
 pub(in crate::secure::platform_lifetime_root::birth) mod lifecycle;
 
 #[cfg(test)]
@@ -377,6 +377,23 @@ pub(in crate::secure::platform_lifetime_root::birth) struct PlatformThreeRosterA
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::secure::platform_lifetime_root::birth) enum OriginalThirdOwner<'a> {
+    Three(&'a PlatformThreeRosterAdmission),
+    Four(&'a fourth::PlatformFourRosterAdmission),
+}
+
+pub(super) fn verify_original_third(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    owner: OriginalThirdOwner<'_>,
+) -> Result<(RootRecord, Claim, Vec<u8>), AuraError> {
+    match owner {
+        OriginalThirdOwner::Three(three) => verify_owner(owned, selected, three),
+        OriginalThirdOwner::Four(four) => fourth::verify_four_prior(owned, selected, four),
+    }
+}
+
 pub(super) async fn owned_references(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
@@ -405,10 +422,24 @@ pub(super) async fn owned_state(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
 ) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    owned_original_state(owned, OriginalThirdOwner::Three(three)).await
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn owned_four_state(
+    owned: &ProfileOwnedSecureStorage,
+    four: &fourth::PlatformFourRosterAdmission,
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    owned_original_state(owned, OriginalThirdOwner::Four(four)).await
+}
+
+async fn owned_original_state(
+    owned: &ProfileOwnedSecureStorage,
+    owner: OriginalThirdOwner<'_>,
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
     use aura_core::effects::secret_lifetime::SecretLifetimeState;
     let (selected, _) = selected_owner(owned)?;
     let _guard = selected.namespace_owner()?.mutation_guard().await;
-    let (root, _, _) = verify_owner(owned, selected, three)?;
+    let (root, _, _) = verify_original_third(owned, selected, owner)?;
     if root.third_phase == THIRD_DECISION_PENDING {
         return Err(invalid("platform third decision is not acknowledged"));
     }

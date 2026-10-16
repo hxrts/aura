@@ -10,7 +10,7 @@ const MAX_V10_ROSTER_FILE: usize = ROSTER_MAGIC_V10.len()
     + aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT
         * (ROSTER_ENTRY_HEADER_LEN + MAX_SCOPE_BYTES);
 mod generic;
-mod lifecycle;
+pub(in crate::secure::platform_lifetime_root::birth) mod lifecycle;
 
 #[cfg(test)]
 pub(super) fn cleanup_generic_fixture(
@@ -265,7 +265,7 @@ fn replay(
 }
 
 #[allow(dead_code)]
-pub(super) async fn append_fourth(
+pub(in crate::secure::platform_lifetime_root::birth) async fn append_fourth(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
     scope: &[u8],
@@ -372,7 +372,7 @@ pub(super) async fn reconcile_fourth(owned: &ProfileOwnedSecureStorage) -> Resul
 
 /// Private four-entry custody; no decision or erasure API is issued here.
 #[allow(dead_code)]
-pub(super) struct PlatformFourRosterAdmission {
+pub(in crate::secure::platform_lifetime_root::birth) struct PlatformFourRosterAdmission {
     root: [u8; 32],
     fourth: [u8; 32],
     _owner: Arc<crate::profile_storage::OwnedProfileLease>,
@@ -383,6 +383,14 @@ fn verify_four(
     selected: &PlatformSecureStorageHandler,
     four: &PlatformFourRosterAdmission,
 ) -> Result<RootRecord, AuraError> {
+    verify_four_prior(owned, selected, four).map(|(root, _, _)| root)
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) fn verify_four_prior(
+    owned: &ProfileOwnedSecureStorage,
+    selected: &PlatformSecureStorageHandler,
+    four: &PlatformFourRosterAdmission,
+) -> Result<(RootRecord, Claim, Vec<u8>), AuraError> {
     let (_, owner) = selected_owner(owned)?;
     if !Arc::ptr_eq(owner, &four._owner) || !owner.lifetime_root_claimed.load(Ordering::Acquire) {
         return Err(invalid(
@@ -406,7 +414,78 @@ fn verify_four(
     if root.tail_phase < TAIL_APPEND_COMPLETE || root.tail_count != 4 {
         return Err(invalid("platform fourth owner lacks complete roster ACK"));
     }
-    Ok(root)
+    Ok((root, claim, scope))
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn owned_references(
+    owned: &ProfileOwnedSecureStorage,
+    four: &PlatformFourRosterAdmission,
+) -> Result<Vec<aura_core::effects::secret_lifetime::SecretAllocationReference>, AuraError> {
+    use aura_core::effects::secret_lifetime::SecretAllocationReference;
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let (root, claim, third_scope) = verify_four_prior(owned, selected, four)?;
+    let (bytes, None) = owned
+        ._owner
+        .directory
+        .read_private_publication(Path::new(FOURTH_ROSTER_FILE), MAX_V10_ROSTER_FILE)
+        .map_err(io)?
+        .ok_or_else(|| invalid("platform fourth roster ACK is missing"))?
+    else {
+        return Err(invalid("platform fourth roster ACK is incomplete"));
+    };
+    let fourth = entries(&bytes, ROSTER_MAGIC_V10, &root)?
+        .into_iter()
+        .find(|entry| entry[32..64] == root.tail_next_id)
+        .ok_or_else(|| invalid("platform fourth retained scope is missing"))?;
+    Ok(vec![
+        SecretAllocationReference {
+            allocation: root.birth_id,
+            scope: root.first_scope,
+        },
+        SecretAllocationReference {
+            allocation: claim.allocation,
+            scope: root.second_scope,
+        },
+        SecretAllocationReference {
+            allocation: root.third_id,
+            scope: third_scope,
+        },
+        SecretAllocationReference {
+            allocation: root.tail_next_id,
+            scope: fourth[ROSTER_ENTRY_HEADER_LEN..].to_vec(),
+        },
+    ])
+}
+
+pub(in crate::secure::platform_lifetime_root::birth) async fn owned_state(
+    owned: &ProfileOwnedSecureStorage,
+    four: &PlatformFourRosterAdmission,
+) -> Result<aura_core::effects::secret_lifetime::SecretLifetimeState, AuraError> {
+    use aura_core::effects::secret_lifetime::SecretLifetimeState;
+    let (selected, _) = selected_owner(owned)?;
+    let _guard = selected.namespace_owner()?.mutation_guard().await;
+    let root = verify_four(owned, selected, four)?;
+    if root.tail_phase == TAIL_DECISION_PENDING {
+        return Err(invalid("platform fourth decision is not acknowledged"));
+    }
+    let Some(record) = lifecycle::decision_record(selected, &root)? else {
+        return Ok(SecretLifetimeState::Live);
+    };
+    match record.kind {
+        decision::POSITIVE => Ok(SecretLifetimeState::Positive {
+            decision: record.bytes.to_vec(),
+        }),
+        decision::NEGATIVE if root.tail_phase == TAIL_ERASURE_COMPLETE => {
+            Ok(SecretLifetimeState::Retired {
+                decision: record.bytes.to_vec(),
+            })
+        }
+        decision::NEGATIVE => Ok(SecretLifetimeState::Negative {
+            decision: record.bytes.to_vec(),
+        }),
+        _ => Err(invalid("platform fourth decision kind is invalid")),
+    }
 }
 
 #[allow(dead_code)]
@@ -418,7 +497,7 @@ pub(super) async fn promote_after_fourth(
     result.map_err(|error| (error, three))
 }
 
-async fn promote_borrowed(
+pub(in crate::secure::platform_lifetime_root::birth) async fn promote_borrowed(
     owned: &ProfileOwnedSecureStorage,
     three: &PlatformThreeRosterAdmission,
 ) -> Result<PlatformFourRosterAdmission, AuraError> {
@@ -455,7 +534,7 @@ async fn promote_borrowed(
 }
 
 #[allow(dead_code)]
-pub(super) async fn recover_four_roster(
+pub(in crate::secure::platform_lifetime_root::birth) async fn recover_four_roster(
     owned: &ProfileOwnedSecureStorage,
 ) -> Result<PlatformFourRosterAdmission, AuraError> {
     let (selected, owner) = selected_owner(owned)?;
@@ -479,7 +558,7 @@ pub(super) async fn recover_four_roster(
 }
 
 #[allow(dead_code)]
-pub(super) async fn read_fourth_secret(
+pub(in crate::secure::platform_lifetime_root::birth) async fn read_fourth_secret(
     owned: &ProfileOwnedSecureStorage,
     four: &PlatformFourRosterAdmission,
 ) -> Result<Zeroizing<Vec<u8>>, AuraError> {

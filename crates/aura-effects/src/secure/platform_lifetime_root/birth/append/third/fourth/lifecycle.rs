@@ -61,7 +61,7 @@ fn publish_marker(
     staged.acknowledge().map_err(io)
 }
 
-pub(super) fn decision_record(
+pub(in crate::secure::platform_lifetime_root::birth) fn decision_record(
     selected: &PlatformSecureStorageHandler,
     root: &RootRecord,
 ) -> Result<Option<DecisionRecord>, AuraError> {
@@ -122,7 +122,7 @@ enum Stop {
 }
 
 #[allow(dead_code)]
-pub(super) async fn decide(
+pub(in crate::secure::platform_lifetime_root::birth) async fn decide(
     owned: &ProfileOwnedSecureStorage,
     four: &PlatformFourRosterAdmission,
     positive: bool,
@@ -276,7 +276,7 @@ fn finish_tombstone(
 }
 
 #[allow(dead_code)]
-pub(super) async fn acknowledge_negative(
+pub(in crate::secure::platform_lifetime_root::birth) async fn acknowledge_negative(
     owned: &ProfileOwnedSecureStorage,
     four: &PlatformFourRosterAdmission,
     exact_decision: &[u8],
@@ -399,7 +399,7 @@ fn finish_erasure(
 }
 
 #[allow(dead_code)]
-pub(super) async fn erase(
+pub(in crate::secure::platform_lifetime_root::birth) async fn erase(
     owned: &ProfileOwnedSecureStorage,
     four: &PlatformFourRosterAdmission,
 ) -> Result<(), AuraError> {
