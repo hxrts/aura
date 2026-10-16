@@ -59,6 +59,25 @@
           inherit system;
         };
         cargoDeny = cargoDenyPkgs.cargo-deny;
+        binaryen123Archive = {
+          "aarch64-darwin" = { platform = "arm64-macos"; sha256 = "74428be348c1a09863e7b642a1fa948cabf8ec9561052233d8288e941951725b"; };
+          "x86_64-darwin" = { platform = "x86_64-macos"; sha256 = "cc18b14d2b673d9c66bf54f31ff2b0ceb23ba5132455b893965ae2792f9e00dd"; };
+          "aarch64-linux" = { platform = "aarch64-linux"; sha256 = "4b6bd61ba6cd3b18c993b4657d93426c782f9b91b74be0d38018cd8be1319376"; };
+          "x86_64-linux" = { platform = "x86_64-linux"; sha256 = "e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe"; };
+        }.${system};
+        binaryen123Src = pkgs.fetchurl {
+          url = "https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-${binaryen123Archive.platform}.tar.gz";
+          inherit (binaryen123Archive) sha256;
+        };
+        # Keep wasm-opt and its sibling dynamic library in one immutable output.
+        binaryen123 = pkgs.runCommand "binaryen-version_123" {
+          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
+        } ''
+          mkdir -p "$out"
+          tar -xzf ${binaryen123Src} -C "$out" --strip-components=1
+          test -x "$out/bin/wasm-opt"
+          test -d "$out/lib"
+        '';
         # Lifecycle custody needs the portable binary, not optional Ruby-generated manuals.
         lifecycleFlock = pkgs.flock.overrideAttrs (old: {
           nativeBuildInputs = builtins.filter (input: input != pkgs.ronn) old.nativeBuildInputs;
@@ -279,6 +298,7 @@
         lib.debugCacheKey = (import ./nix/build-cache-key.nix) warmDebugKeyInputs;
 
         packages = {
+          binaryen123 = binaryen123;
           vendor-deps = warmVendor;
           deps-debug = warmDebug;
           # Main CLI application (terminal interface)

@@ -345,6 +345,21 @@ For fixed-commit browser runs, the guarded web build records the clean source
 commit and source tree, actual selected Node, npm, Cargo, Rust, Dioxus,
 wasm-bindgen and wasm-opt executable bytes, Binaryen library bytes, effective
 compiler configuration, and hashes of its emitted index, JS and WASM files.
+The `dx.sh` owner selects Binaryen `version_123` from the source-pinned Nix
+derivation, keeping `wasm-opt` and its dynamic library in one immutable store
+output. Missing or foreign outputs refuse the build; the old mutable release
+download is not an admitted fallback. The selected output is checked against
+the current flake derivation before inventory or build execution. This pins
+the tool input, but does not claim bit-for-bit reproducibility of the full web
+application build.
+Provision the output explicitly from an existing Nix shell before the web
+build:
+
+```sh
+bash scripts/dev/build-budget.sh --lane nix-binaryen --no-prune -- nix build --no-link .#binaryen123
+```
+
+Ordinary `nix develop` does not realize it.
 The selected-tool inventory stays in a protected local artifact; the public
 bundle marker contains only its digest. The prebuilt-only
 static server accepts that exact build when Dioxus reuses byte-identical assets

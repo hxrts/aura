@@ -498,7 +498,7 @@ ci-policy-toolkit-clippy:
 
 # Verify cache guards, evidence retention, and a tiny isolated compiler probe.
 ci-build-cache-policy:
-    bash -n scripts/dev/*.sh scripts/ci/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/ship-web-assets.sh scripts/harness/lan/test-ship-web-assets.sh scripts/harness/lan/runtime-refs.sh scripts/web/serve-static.sh scripts/web/prebuilt-provenance.sh scripts/web/test-prebuilt-provenance.sh
+    bash -n scripts/dev/*.sh scripts/ci/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/ship-web-assets.sh scripts/harness/lan/test-ship-web-assets.sh scripts/harness/lan/runtime-refs.sh scripts/web/dx.sh scripts/web/test-binaryen-selection.sh scripts/web/serve-static.sh scripts/web/prebuilt-provenance.sh scripts/web/test-prebuilt-provenance.sh
     bash scripts/ci/test-main-smoke.sh
     bash scripts/dev/test-cache-rank.sh
     bash scripts/dev/test-lane-idle-guard.sh
@@ -521,6 +521,7 @@ ci-build-cache-policy:
     bash scripts/harness/lan/test-ship-web-assets.sh
     bash scripts/dev/test-web-prebuilt-only.sh
     bash scripts/web/test-prebuilt-provenance.sh
+    bash scripts/web/test-binaryen-selection.sh
     bash scripts/dev/test-browser-build-budget.sh
     bash scripts/dev/test-retain-e2e-runs.sh
     bash scripts/dev/test-lan-retention.sh
