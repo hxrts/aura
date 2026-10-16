@@ -331,7 +331,7 @@ printf '%s\n' "$response" | jq -c '
   tojson | gsub("tui-op-device_enrollment-2";"op-2") | fromjson |
   walk(if type=="object" and has("runtime_events") then
     .runtime_events |= (map(if .fact.kind=="device_enrollment_accepted"
-      then .id=9 else . end)) else . end)'
+      then .id="runtime-event-9" else . end)) else . end)'
 BROWSER
 chmod +x "$fixture/bin/browser-driver"
 export FIXTURE_NATIVE_DRV="$fixture/bin/driver"

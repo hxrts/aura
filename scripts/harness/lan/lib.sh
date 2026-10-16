@@ -59,10 +59,10 @@ req_private() { # req_private <instance> [transport timeout seconds] < request.j
 }
 
 # Whitelist only nonsecret facts required for paired enrollment evidence. The
-# caller passes a private response on stdin; never write the raw response to a
-# file, shell trace or general semantic-evidence helper.
+# The caller passes a private response on stdin. Keep the raw response only in
+# owner-only custody when validation fails; never send it to shared evidence.
 lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < response.json
-  local instance=$1 method=$2 label=$3 dir target scratch mode
+  local instance=$1 method=$2 label=$3 dir target scratch raw validator_stderr mode raw_target reason_target stderr_target reason
   case "$instance" in alex-tui|alex-tui2|alex-web|barbara-tui|barbara-tui2|barbara-web) ;; *) return 2;; esac
   case "$method" in prepare_device_enrollment_setup|submit_semantic_command|ui_state|wait_for_ui_snapshot_event|restart|get_authority_id) ;; *) return 2;; esac
   [[ "$label" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || return 2
@@ -76,6 +76,14 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
   target="$dir/$instance-$label.json"
   [[ ! -e "$target" && ! -L "$target" ]] || return 2
   scratch=$(mktemp "$dir/.receipt.XXXXXX") || return
+  raw=$(mktemp "$dir/.raw-response.XXXXXX") || { rm -f "$scratch"; return 2; }
+  validator_stderr=$(mktemp "$dir/.validator-stderr.XXXXXX") || { rm -f "$scratch" "$raw"; return 2; }
+  chmod 600 "$raw" "$validator_stderr" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  head -c 1048577 > "$raw" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  if (( $(wc -c < "$raw") > 1048576 )); then
+    rm -f "$scratch" "$raw" "$validator_stderr"
+    return 2
+  fi
   if ! jq -ce --arg instance "$instance" --arg method "$method" '
     def op_id: type=="string" and
       (if $instance=="barbara-web" then test("^op-[0-9]{1,20}$")
@@ -90,7 +98,7 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
       and (.failure|failure);
     def handle: .id=="device_enrollment" and (.instance_id|op_id);
     def host_ack:
-      ((if $instance=="barbara-web" then (.id|type=="number" and .>=0 and .==floor)
+      ((if $instance=="barbara-web" then (.id|type=="string" and test("^runtime-event-[1-9][0-9]{0,19}$"))
          else (.id|type=="string" and startswith("tui-runtime-fact-")) end))
       and .fact.kind=="device_enrollment_accepted"
       and (.fact.device_id|type=="string" and test("^[0-9a-fA-F-]{36}$"))
@@ -129,11 +137,41 @@ lan_private_receipt() { # lan_private_receipt <instance> <method> <label> < resp
         ready:($snapshot.readiness=="ready"),
         restarted:($method=="restart" and $response.payload.status=="restarted")
       } else empty end
-  ' > "$scratch"; then rm -f "$scratch"; return 2; fi
-  [[ -s "$scratch" ]] || { rm -f "$scratch"; return 2; }
-  chmod 600 "$scratch" || { rm -f "$scratch"; return 2; }
-  ln "$scratch" "$target" || { rm -f "$scratch"; return 2; }
-  rm -f "$scratch"
+  ' "$raw" > "$scratch" 2> "$validator_stderr" || [[ ! -s "$scratch" ]]; then
+    rm -f "$scratch"
+    raw_target="$dir/$instance-$label.raw-private.json"
+    reason_target="$dir/$instance-$label.validation.json"
+    stderr_target="$dir/$instance-$label.validator-private.txt"
+    [[ ! -e "$raw_target" && ! -L "$raw_target" &&
+       ! -e "$reason_target" && ! -L "$reason_target" &&
+       ! -e "$stderr_target" && ! -L "$stderr_target" ]] || { rm -f "$raw" "$validator_stderr"; return 2; }
+    reason=$(jq -er --arg instance "$instance" '
+      if (.status|IN("ok","error")|not) then "invalid_status"
+      elif .status=="error" and (.message|type)!="string" then "invalid_tool_error"
+      elif any((.payload.event.snapshot // .payload).runtime_events[]?;
+        .fact.kind=="device_enrollment_accepted" and
+        (if $instance=="barbara-web" then
+          (if (.id|type)=="string" then (.id|test("^runtime-event-[1-9][0-9]{0,19}$")|not) else true end)
+         else (if (.id|type)=="string" then (.id|startswith("tui-runtime-fact-")|not) else true end) end))
+      then "invalid_host_ack_id"
+      else "unsupported_receipt_shape" end
+    ' "$raw" 2>/dev/null) || reason=malformed_json
+    (umask 077; set -C; jq -cn --arg instance "$instance" --arg method "$method" \
+      --arg reason "$reason" \
+      '{schema:1,instance_id:$instance,method:$method,validation_failure:$reason,
+        raw_response_custody:"owner_only_private_artifact"}' > "$reason_target") || { rm -f "$raw" "$validator_stderr"; return 2; }
+    chmod 600 "$reason_target" || { rm -f "$raw" "$validator_stderr"; return 2; }
+    ln "$raw" "$raw_target" || { rm -f "$raw" "$validator_stderr"; return 2; }
+    if [[ -s "$validator_stderr" ]]; then
+      ln "$validator_stderr" "$stderr_target" || { rm -f "$raw" "$validator_stderr"; return 2; }
+    fi
+    rm -f "$raw" "$validator_stderr"
+    return 2
+  fi
+  [[ -s "$scratch" ]] || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  chmod 600 "$scratch" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  ln "$scratch" "$target" || { rm -f "$scratch" "$raw" "$validator_stderr"; return 2; }
+  rm -f "$scratch" "$raw" "$validator_stderr"
   printf '%s\n' "$target"
 }
 key() { req "$1" send_key "$(jq -cn --arg key "$2" '{key:$key}' | sed 's/^{//;s/}$//')" >/dev/null; }

@@ -1089,6 +1089,13 @@ general `semantic`/`wait_snapshot` evidence capture for secret-bearing setup,
 enrollment and verifier transfers: those helpers retain whole responses and
 snapshots. Capture only redacted operation and transport evidence, and retain
 the original secret values in the owning process or a private transfer channel.
+If private ToolApi receipt validation itself fails, the helper retains the
+original response and validator stderr in owner-only `0600` artifacts under
+the run's `0700` private directory and writes a separate redacted validation category. Inspect
+that protected artifact locally to correct the exact schema mismatch; never
+copy its contents into a shared checklist log or infer operation completion
+from the broker ACK alone. Browser accepted runtime events carry canonical
+`runtime-event-<sequence>` string IDs.
 
 For a local process-boundary diagnostic, run
 `scripts/harness/lan/single-host-enrollment.sh <fresh-token> <clean-peer-checkout>`
