@@ -48,6 +48,8 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   signing context rejects the command. It is a read-only immediate result, so
   the browser driver may observe the current published UI snapshot afterward;
   it must not infer an enrollment operation or a new UI revision from export.
+  The serialized submission value is `device_enrollment_setup`, and the driver
+  must match that canonical wire spelling before exempting the revision floor.
 
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;

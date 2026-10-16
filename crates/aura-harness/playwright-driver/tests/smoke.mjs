@@ -285,7 +285,7 @@ async function main() {
       instance_id: 'smoke-a',
       request: {
         intent: 'ExportDeviceEnrollmentSetup',
-        contract: { submission: { kind: 'immediate', value: 'DeviceEnrollmentSetup' } }
+        contract: { submission: { kind: 'immediate', value: 'device_enrollment_setup' } }
       }
     });
     assert.equal(setup.value.kind, 'device_enrollment_setup');

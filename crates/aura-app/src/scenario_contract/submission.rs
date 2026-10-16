@@ -191,6 +191,13 @@ mod tests {
     fn setup_export_is_an_immediate_typed_value_without_ceremony_ownership() {
         let request = SemanticCommandRequest::new(IntentAction::ExportDeviceEnrollmentSetup);
         assert_eq!(request.kind(), IntentKind::ExportDeviceEnrollmentSetup);
+        let wire_request = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire_request["intent"], "ExportDeviceEnrollmentSetup");
+        assert_eq!(wire_request["contract"]["submission"]["kind"], "immediate");
+        assert_eq!(
+            wire_request["contract"]["submission"]["value"],
+            "device_enrollment_setup"
+        );
         assert_eq!(
             request.contract.submission,
             SubmissionContract::Immediate {
