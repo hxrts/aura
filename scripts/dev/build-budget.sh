@@ -214,7 +214,7 @@ admit_build() {
   printf 'Admission: free=%s KiB other-reservations=%s KiB incoming-reservation=%s KiB floor=%s GiB\n' \
     "$free" "$others" "$incoming_reservation_kib" "$min_free_gib"
   if (( free - others - incoming_reservation_kib < min_free_kib )); then
-    aura_receipt_update --arg reason insufficient-headroom \
+    AURA_RECEIPT_EVENT_KIND=admission aura_receipt_update --arg reason insufficient-headroom \
       --argjson free "$free" --argjson others "$others" \
       --argjson incoming "$incoming_reservation_kib" \
       --argjson floor "$min_free_kib" \
@@ -228,7 +228,7 @@ admit_build() {
   fi
   reservation="$shared_dir/reservations/$$"
   printf '%s\n' "$incoming_reservation_kib" > "$reservation"
-  aura_receipt_update --argjson free "$free" --argjson others "$others" \
+  AURA_RECEIPT_EVENT_KIND=admission aura_receipt_update --argjson free "$free" --argjson others "$others" \
     '.admission.admitted=true | .admission.admitted_free_kib=$free |
       .admission.admitted_other_reservations_kib=$others'
   rm -f "$lock/pid"; rmdir "$lock"

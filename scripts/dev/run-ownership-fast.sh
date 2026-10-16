@@ -95,7 +95,7 @@ if [[ "$stage" == execution ]]; then
        "$(jq -r '.metadata.policy_binary_hash' "$compile_receipt")" ]] || {
     echo 'run-ownership-fast: original compiled lint artifact changed' >&2; exit 1;
   }
-  aura_receipt_update --arg dependency "$compile_receipt" \
+  AURA_RECEIPT_EVENT_KIND=dependency aura_receipt_update --arg dependency "$compile_receipt" \
     --arg binary "$(jq -r '.metadata.policy_binary_hash' "$compile_receipt")" \
     '.metadata.policy_compile_receipt=$dependency | .metadata.policy_binary_hash=$binary'
 else

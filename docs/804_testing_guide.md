@@ -1639,6 +1639,21 @@ source location when safely parseable, or a status class) and
 points to those protected logs for details. At terminal status, an atomic
 `completion.json` beside the receipt provides its path, exit status and UTC
 completion time for file watchers, after command output has flushed.
+For coordinator wakeups, create a one-shot private subscriber with
+`bash scripts/dev/receipt-events.sh --create`, then block on
+`bash scripts/dev/receipt-events.sh --next "$FIFO"` in a separate caller-owned
+session. Pass that exact path as `AURA_BUILD_EVENT_FIFO="$FIFO"` to the
+budgeted command. The next wakeup prints only the receipt path, source
+fingerprint, event kind and sequence, and redacted status; open the receipt for
+the authoritative admission, dependency, failure, and artifact evidence.
+Restart `--next` for each later wakeup. A reader that starts late recovers
+events with `bash scripts/dev/receipt-events.sh --recover "$RECEIPT" "$LAST_SEQUENCE"`;
+the receipt's serialized event sequence is durable even when no listener was
+present. Close an idle FIFO with `--close "$FIFO"`. A missing or invalid reader
+cannot block or change a build result; the receipt records each advisory
+delivery as sent, missed, or not configured. The event stream never contains
+command arguments or protected output values. Completion wakeup follows the
+flushed output and atomic `completion.json` publication.
 The command tree receives stdout/stderr for capture, while the wrapper's extra
 FIFO writer is closed before command execution so detached compiler daemons
 cannot retain it and delay terminal receipt publication.

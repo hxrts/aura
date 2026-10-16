@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 # Sourced by build-budget; JSON is data, never sourced or evaluated.
+aura_receipt_stat_owner() {
+  local result
+  result="$(stat -f %u "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-9]+$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %u "$1" 2>/dev/null
+}
+aura_receipt_stat_mode() {
+  local result
+  result="$(stat -f %Lp "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-7]{3,4}$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %a "$1" 2>/dev/null
+}
 aura_receipt_update() (
   # Each writer owns a short-lived subshell lock. Its EXIT trap is independent
   # of the build owner's signal/cleanup traps; atomic rename alone would lose
   # concurrent phase and cleanup updates.
-  local temporary='' write_lock="${AURA_BUILD_RECEIPT}.write-lock" holder attempt acquired=0
+  local temporary='' event_temp='' event_payload='' event_before=0 write_lock="${AURA_BUILD_RECEIPT}.write-lock" holder attempt acquired=0
   cleanup_writer() {
     [[ -z "$temporary" ]] || rm -f "$temporary"
+    [[ -z "$event_temp" ]] || rm -f "$event_temp"
     rm -f "$write_lock/pid"
     rmdir "$write_lock" 2>/dev/null || true
   }
@@ -28,6 +41,12 @@ aura_receipt_update() (
   # abnormal exit, but release the writer explicitly on ordinary completion.
   trap cleanup_writer EXIT
   printf '%s\n' "${BASHPID:-$$}" > "$write_lock/pid"
+  if [[ "${AURA_RECEIPT_EVENT_KIND:-}" == first-failure ]] &&
+    jq -e 'any(.events[]?; .kind=="first-failure")' "$AURA_BUILD_RECEIPT" >/dev/null; then
+    cleanup_writer
+    trap - EXIT
+    return 0
+  fi
   if ! temporary="$(mktemp "${AURA_BUILD_RECEIPT}.XXXXXX")"; then
     cleanup_writer
     trap - EXIT
@@ -35,14 +54,74 @@ aura_receipt_update() (
   fi
   local status=0
   if jq "$@" "$AURA_BUILD_RECEIPT" > "$temporary"; then
+    if [[ -n "${AURA_RECEIPT_EVENT_KIND:-}" ]]; then
+      case "$AURA_RECEIPT_EVENT_KIND" in admission|dependency|first-failure|completion) ;; *) cleanup_writer; trap - EXIT; return 2 ;; esac
+      event_before="$(jq '(.events // [])|length' "$AURA_BUILD_RECEIPT")"
+      event_temp="$(mktemp "${AURA_BUILD_RECEIPT}.XXXXXX")"
+      jq --arg kind "$AURA_RECEIPT_EVENT_KIND" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        .events=(.events // []) |
+        (if $kind=="admission" then (.admission.admitted|tostring)
+         elif $kind=="dependency" then (.metadata.policy_compile_receipt // .metadata.policy_static.compile_receipt // "")
+         else $kind end) as $key |
+        if any(.events[]; .kind==$kind and .key==$key) then .
+        else .events += [{sequence:((.events|length)+1),kind:$kind,key:$key,at_utc:$at,
+          source_fingerprint:.source.fingerprint,
+          exit_status:(if $kind=="completion" then .final_exit_status else null end),
+          failure:(if $kind=="first-failure" then .failure_excerpt else null end)}] end
+      ' "$temporary" > "$event_temp" || { cleanup_writer; trap - EXIT; return 1; }
+      mv "$event_temp" "$temporary"
+      event_temp=''
+      if (( $(jq '.events|length' "$temporary") > event_before )); then
+        event_payload="$(jq -c --arg kind "$AURA_RECEIPT_EVENT_KIND" --arg receipt "$AURA_BUILD_RECEIPT" '
+          .events[-1] | select(.kind==$kind) |
+          {sequence,kind,source_fingerprint,exit_status,failure} + {receipt:$receipt}' "$temporary")"
+      fi
+    fi
     mv "$temporary" "$AURA_BUILD_RECEIPT" || status=$?
   else
     status=1
   fi
   cleanup_writer
   trap - EXIT
+  if (( status == 0 )) && [[ -n "$event_payload" ]]; then
+    local delivery=not-configured
+    if [[ -n "${AURA_BUILD_EVENT_FIFO:-}" ]]; then
+      delivery=missed
+      if aura_receipt_wake_subscriber "$event_payload"; then delivery=sent; fi
+    fi
+    AURA_RECEIPT_EVENT_KIND= aura_receipt_update --argjson sequence "$(jq -r .sequence <<< "$event_payload")" \
+      --arg delivery "$delivery" \
+      '.event_delivery=(.event_delivery // []) + [{sequence:$sequence,status:$delivery}]' || true
+  fi
   return "$status"
 )
+
+# An advisory wakeup only. The serialized receipt event is authoritative; a
+# missing or closed caller-owned FIFO never changes the build outcome.
+aura_receipt_wake_subscriber() {
+  local fifo="${AURA_BUILD_EVENT_FIFO:-}" shared="${AURA_BUILD_SHARED_DIR:-$HOME/.cache/aura-build}"
+  [[ -n "$fifo" ]] || return 1
+  local parent="$(dirname "$fifo")" subscribers="$shared/event-subscribers" uid="$(id -u)"
+  local shared_mode="$(aura_receipt_stat_mode "$shared")"
+  if [[ "$(dirname "$parent")" != "$subscribers" ||
+        ! "$(basename "$parent")" =~ ^listener\.[A-Za-z0-9]+$ ||
+        "$(basename "$fifo")" != event.fifo ||
+        ! "$shared_mode" =~ ^[0-7]{3,4}$ ||
+        -L "$shared" || -L "$subscribers" || -L "$parent" || -L "$fifo" || ! -p "$fifo" ||
+        "$(aura_receipt_stat_owner "$shared")" != "$uid" ||
+        "$(aura_receipt_stat_owner "$subscribers")" != "$uid" ||
+        "$(aura_receipt_stat_owner "$parent")" != "$uid" ||
+        "$(aura_receipt_stat_owner "$fifo")" != "$uid" ||
+        "$(aura_receipt_stat_mode "$subscribers")" != 700 ||
+        "$(aura_receipt_stat_mode "$parent")" != 700 ||
+        "$(aura_receipt_stat_mode "$fifo")" != 600 ]]; then
+    return 1
+  fi
+  (( (8#$shared_mode & 8#022) == 0 )) || return 1
+  # timeout also bounds a blocked FIFO open. Keep the payload small and never
+  # include command argv, raw diagnostics, or protected output contents.
+  timeout 0.2s bash -c 'printf "%s\n" "$1" > "$2"' _ "$1" "$fifo" >/dev/null 2>&1
+}
 
 aura_receipt_cargo_metadata() {
   receipt_packages='' receipt_features='' receipt_test_target='' receipt_test_filter=''
@@ -104,6 +183,16 @@ aura_receipt_safe_failure_identity() {
   location="$(sed -nE 's/.*panicked at ([A-Za-z0-9_./-]+\.rs):([0-9]+)(:[0-9]+)?.*/\1:\2/p' "$log" | sed -n '1p')"
   [[ "$location" =~ ^[A-Za-z0-9_./-]+\.rs:[0-9]+$ && ${#location} -le 100 ]] || location=''
   printf 'test %s failed%s; details in protected log\n' "$name" "${location:+ at $location}"
+}
+
+aura_receipt_first_failure() {
+  local safe_failure
+  [[ "$(jq -r '.events // [] | any(.kind=="first-failure")' "$AURA_BUILD_RECEIPT")" == false ]] || return 0
+  safe_failure="$(jq -r '.failure_excerpt // empty' "$AURA_BUILD_RECEIPT")"
+  [[ -n "$safe_failure" ]] || safe_failure="$(aura_receipt_safe_failure_identity)"
+  [[ -n "$safe_failure" ]] || safe_failure='phase failed; details in protected log'
+  AURA_RECEIPT_EVENT_KIND=first-failure aura_receipt_update --arg failure "$safe_failure" \
+    '.failure_excerpt=$failure'
 }
 
 aura_receipt_source_fingerprint() {
@@ -193,6 +282,8 @@ aura_receipt_finish() {
     --argjson status "$exit_status" \
     '{receipt:$receipt,finished_utc:$finished,exit_status:$status}' > "$temporary"
   mv "$temporary" "$notification"
+  if (( exit_status != 0 )); then aura_receipt_first_failure || true; fi
+  AURA_RECEIPT_EVENT_KIND=completion aura_receipt_update '.' || true
   printf 'Build complete: exit=%s receipt=%s\n' "$exit_status" "$AURA_BUILD_RECEIPT"
 }
 

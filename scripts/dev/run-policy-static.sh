@@ -73,7 +73,7 @@ jq -e --arg root "$root" --arg toolkit "$toolkit_hash" --arg tool "$tool_hash" \
      "$(jq -r '.metadata.policy_toolkit.binary_hash' "$compile_receipt")" ]] || exit 1
 scope_hash="$(policy_hash_files "$root" "${scope[@]}")"
 scope_json="$(printf '%s\n' "${scope[@]}" | jq -Rs 'split("\n")|map(select(length>0))')"
-aura_receipt_update --arg check "$check" --argjson scope "$scope_json" \
+AURA_RECEIPT_EVENT_KIND=dependency aura_receipt_update --arg check "$check" --argjson scope "$scope_json" \
   --arg scope_hash "$scope_hash" --arg toolkit "$toolkit_hash" --arg tool "$tool_hash" \
   --arg dependency "$compile_receipt" \
   --arg binary "$(jq -r '.metadata.policy_toolkit.binary_hash' "$compile_receipt")" \

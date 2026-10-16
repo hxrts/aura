@@ -140,4 +140,5 @@ aura_receipt_update --arg phase "$phase" --arg log "$phase_log" --arg started "$
     observed_count:(if $observed==null then null else ($observed|length) end)}]
     | .active_phase=null'
 recorded=1
+if (( status != 0 )); then aura_receipt_first_failure || true; fi
 exit "$status"
