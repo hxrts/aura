@@ -161,6 +161,16 @@ private_request alex-tui submit_semantic_command open-settings \
   '{"method":"submit_semantic_command","params":{"intent":{"OpenScreen":{"screen":"settings","channel_id":null,"context_id":null}}}}'
 private_wait alex-tui settings-ready \
   '.payload.event.snapshot | .screen=="settings" and .readiness=="ready" and .quiescence.state=="settled"' ''
+# The generic Settings screen does not materialize its Devices section. Ask
+# the owning section for its canonical list before binding the issuer device.
+private_request alex-tui submit_semantic_command open-issuer-devices \
+  '{"method":"submit_semantic_command","params":{"intent":{"OpenSettingsSection":"devices"}}}'
+private_wait alex-tui issuer-devices '
+  .payload.event.snapshot as $s |
+  $s.screen=="settings" and $s.readiness=="ready" and
+  ([ $s.lists[]?|select(.id=="devices")|.items[]? ] as $items |
+    ($items|length)==1 and $items[0].is_current==true and
+    ($items[0].id|type=="string" and test("^[0-9a-f-]{36}$")))' ''
 issuer_device=$(jq -er '
   [.payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?] as $items |
   if ($items|length)==1 and $items[0].is_current==true and
