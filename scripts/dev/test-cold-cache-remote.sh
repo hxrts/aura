@@ -10,6 +10,18 @@ base="${AURA_COLD_CACHE_TEST_REMOTE_BASE:?set private ext4 directory}"
 ssh_safe() {
   ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$host" "$@"
 }
+stat_mode() {
+  local result
+  result="$(stat -f %Lp "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-7]{3,4}$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %a "$1"
+}
+stat_mtime() {
+  local result
+  result="$(stat -f %m "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-9]+$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %Y "$1"
+}
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/aura-cold-remote-test.XXXXXX")"
 fixture="$(cd "$fixture" && pwd -P)"
 remote="$(ssh_safe "mktemp -d -p $base aura-cold-remote-test.XXXXXX")"
@@ -30,10 +42,11 @@ git -C "$project" -c core.hooksPath=/dev/null -c commit.gpgsign=false \
 printf 'preserved compiler artifact\n' > "$project/target/dylint/cache"
 chmod 640 "$project/target/dylint/cache"
 touch -t 202001020304 "$project/target/dylint/cache"
-original_mode="$(stat -f %Lp "$project/target/dylint/cache")"
-original_mtime="$(stat -f %m "$project/target/dylint/cache")"
+original_mode="$(stat_mode "$project/target/dylint/cache")"
+original_mtime="$(stat_mtime "$project/target/dylint/cache")"
 export AURA_COLD_CACHE_REMOTE_HOST="$host" AURA_COLD_CACHE_REMOTE_DIR="$remote"
 export AURA_BUILD_SHARED_DIR="$fixture/shared" AURA_BUILD_MIN_FREE_GIB=0
+export AURA_COLD_CACHE_REMOTE_MIN_FREE_GIB=0
 unset AURA_COLD_CACHE_STORE
 cold() { bash "$repo_root/scripts/dev/cold-cache-store.sh" --root "$project" --lane "$1" "$2"; }
 expect_fail() {
@@ -110,9 +123,15 @@ AURA_FAKE_SOURCE_ROOT="$project" AURA_FAKE_FREE_KIB="$one_copy_free" \
 [[ ! -e "$project/target/dylint" ]]
 cat > "$fixture/fakebin/tar" <<'FAKE_TAR'
 #!/usr/bin/env bash
-if [[ " $* " == *' -xf '* ]]; then
-  [[ "$(stat -f %Lp "$(dirname "$2")")" == 700 &&
-     "$(stat -f %Lp "$2")" == 700 ]] || exit 89
+mode() {
+  local result
+  result="$(stat -f %Lp "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-7]{3,4}$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %a "$1"
+}
+if [[ " $* " == *' -pxf '* ]]; then
+  [[ "$(mode "$(dirname "$2")")" == 700 &&
+     "$(mode "$2")" == 700 ]] || exit 89
   chmod 755 "$2" # archived '.' may make the payload readable mid-extraction
   printf 'partial extraction\n' > "$2/partial"
   exit 88
@@ -126,8 +145,8 @@ PATH="$fixture/fakebin:$PATH" expect_fail dylint --restore
 rm "$fixture/fakebin/tar" "$fixture/fakebin/df"
 cold dylint --restore > "$fixture/output"
 [[ "$(cat "$project/target/dylint/cache")" == 'preserved compiler artifact' ]]
-[[ "$(stat -f %Lp "$project/target/dylint/cache")" == "$original_mode" &&
-   "$(stat -f %m "$project/target/dylint/cache")" == "$original_mtime" ]]
+[[ "$(stat_mode "$project/target/dylint/cache")" == "$original_mode" &&
+   "$(stat_mtime "$project/target/dylint/cache")" == "$original_mtime" ]]
 rm -rf "$project/target/dylint"
 printf '# changed revision\n' >> "$project/Cargo.toml"
 git -C "$project" add Cargo.toml

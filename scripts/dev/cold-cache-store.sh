@@ -514,7 +514,7 @@ remote_restore() {
   restore_stage="$(mktemp -d "$root/target/.cold-restore.XXXXXX")"
   chmod 700 "$restore_stage"
   mkdir -m 700 "$restore_stage/payload"
-  tar -C "$restore_stage/payload" -xf "$pending/archive.tar" || {
+  tar -C "$restore_stage/payload" -pxf "$pending/archive.tar" || {
     echo 'cold-cache-store: staged extraction failed' >&2; return 1;
   }
   [[ ! -e "$path" && ! -L "$path" ]] || {
@@ -658,7 +658,7 @@ else
   admission_lock=''
   mkdir -p "$path"
   chmod 700 "$path"
-  if ! tar -C "$path" -xf "$snapshot/archive.tar"; then
+  if ! tar -C "$path" -pxf "$snapshot/archive.tar"; then
     rm -rf -- "$path"
     exit 1
   fi
