@@ -76,7 +76,7 @@ printf '%s\n' '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_o
 printf '%s\n' '{"status":"ok","payload":{"status":"restarted","message":"private-enrollment-code-fixture"}}' \
   | lan_private_receipt barbara-tui restart reopened >/dev/null
 browser_snapshot=$(jq -c '.payload.operations[0].instance_id="op-2" |
-  .payload.runtime_events[0].id=9' "$fixture/snapshot")
+  .payload.runtime_events[0].id="runtime-event-9"' "$fixture/snapshot")
 browser_receipt=$(printf '%s\n' "$browser_snapshot" |
   lan_private_receipt barbara-web ui_state browser-before-restart)
 jq -e '.operations[0].instance_id=="op-2" and
@@ -101,6 +101,39 @@ done
 ! printf '%s\n' '{"status":"error","message":{"secret":"private-enrollment-code-fixture"}}' |
   lan_private_receipt barbara-web ui_state browser-error-malformed >/dev/null
 [[ $(stat -c '%a' "$browser_receipt" 2>/dev/null || stat -f '%Lp' "$browser_receipt") == 600 ]]
+browser_event=$(jq -cn --argjson snapshot "$(printf '%s\n' "$browser_snapshot" | jq -c .payload)" \
+  '{status:"ok",payload:{event:{version:9,snapshot:$snapshot}}}')
+event_receipt=$(printf '%s\n' "$browser_event" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-accepted-event)
+jq -e '.operations[0].instance_id=="op-2" and
+  .host_acknowledgments[0].device_count==2' "$event_receipt" >/dev/null
+[[ ! -e "$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN/barbara-web-browser-accepted-event.raw-private.json" ]]
+numeric_ack=$(printf '%s\n' "$browser_event" | jq -c '.payload.event.snapshot.runtime_events[0].id=9')
+! printf '%s\n' "$numeric_ack" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-numeric-ack >/dev/null
+failure_root="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+jq -e '.validation_failure=="invalid_host_ack_id" and
+  .raw_response_custody=="owner_only_private_artifact"' \
+  "$failure_root/barbara-web-browser-numeric-ack.validation.json" >/dev/null
+[[ $(stat -c '%a' "$failure_root/barbara-web-browser-numeric-ack.raw-private.json" 2>/dev/null ||
+      stat -f '%Lp' "$failure_root/barbara-web-browser-numeric-ack.raw-private.json") == 600 ]]
+! rg -Fq "$secret" "$failure_root/barbara-web-browser-numeric-ack.validation.json"
+! printf '%s\n' "$browser_event" | jq -c \
+  '.payload.event.snapshot.runtime_events[0].id="runtime-event-foreign"' |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-foreign-ack >/dev/null
+malformed_ack=$(printf '%s\n' "$browser_event" | jq -c --arg secret "$secret" \
+  '.payload.event.snapshot.runtime_events[0].id={unexpected:$secret}')
+! printf '%s\n' "$malformed_ack" |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-malformed-ack \
+  > "$fixture/malformed-stdout" 2> "$fixture/malformed-stderr"
+jq -e '.validation_failure=="invalid_host_ack_id"' \
+  "$failure_root/barbara-web-browser-malformed-ack.validation.json" >/dev/null
+rg -Fq "$secret" "$failure_root/barbara-web-browser-malformed-ack.raw-private.json"
+! rg -Fq "$secret" "$fixture/malformed-stdout" "$fixture/malformed-stderr" \
+  "$failure_root/barbara-web-browser-malformed-ack.validation.json"
+! printf '%s\n' "$browser_event" | jq -c \
+  '.payload.event.snapshot.operations[0].instance_id="foreign-op-2"' |
+  lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-foreign-operation >/dev/null
 ! printf '%s\n' "$browser_snapshot" | lan_private_receipt barbara-tui ui_state browser-as-tui >/dev/null
 ! printf '%s\n' "$browser_snapshot" | jq -c '.payload.runtime_events[0].id="tui-runtime-fact-forged"' |
   lan_private_receipt barbara-web ui_state browser-forged-ack >/dev/null

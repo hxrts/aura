@@ -71,7 +71,14 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   The private evidence helper writes owner-only files and whitelists operation
   id/instance/state, typed failure domain/code, host acknowledgment, and
   readiness without copying codes, labels, screen names, device-list IDs, or
-  diagnostic detail. Reopen still requires a fresh
+  diagnostic detail. Browser runtime-event IDs use the canonical
+  `runtime-event-<sequence>` string shape; numeric IDs are refused. If the
+  whitelist rejects a private ToolApi response, the helper retains the raw
+  response and any validator stderr only in `0600` artifacts inside the `0700`
+  run directory alongside a separate redacted validation category. Those
+  private artifacts never enter the
+  shared checklist result, REPL output, URL or command arguments and requires
+  protected handling during diagnosis. Reopen still requires a fresh
   authoritative observation after restart.
   The paired LAN bootstrap omits ordinary contact links so enrollment cannot
   inherit an established contact route. Its checklist transfers signed setup
