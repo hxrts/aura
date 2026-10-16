@@ -69,7 +69,13 @@ case "$instance:$method:$intent" in
     echo '{"status":"ok","payload":{"submission":"accepted","handle":{"ui_operation":{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-1"}}}}' ;;
   alex-tui:wait_for_ui_snapshot_event:)
     if [[ $(jq -r '.params.after_version' <<< "$request") == null ]]; then
-      echo '{"status":"ok","payload":{"event":{"version":1,"snapshot":{"screen":"settings","readiness":"ready","quiescence":{"state":"settled"},"operations":[],"runtime_events":[]}}}}'
+      jq -cn --arg fixture_case "${FIXTURE_CASE:-}" '
+        {status:"ok",payload:{event:{version:1,snapshot:{screen:"settings",
+        readiness:"ready",quiescence:{state:"settled"},operations:[],runtime_events:[],
+        lists:[{id:"devices",items:(if $fixture_case=="missing_issuer" then [] else
+          [{id:(if $fixture_case=="wrong_issuer_device" then
+            "00000000-0000-4000-8000-000000000003" else
+            "00000000-0000-4000-8000-000000000001" end),is_current:true}] end)}]}}}}'
     else
       echo '{"status":"ok","payload":{"event":{"version":2,"snapshot":{"screen":"settings","readiness":"ready","operations":[{"id":"device_enrollment","instance_id":"tui-op-device_enrollment-1","state":"succeeded","failure":null}],"runtime_events":[{"id":"tui-runtime-fact-secret","fact":{"kind":"device_enrollment_code_ready","code":"issued-code-secret","manifest_transfer":{"manifest_code":"signed-manifest-secret","initiator_verifier_code":"retained-verifier-secret"}}}]}}}}'
     fi ;;
@@ -97,7 +103,7 @@ case "$instance:$method:$intent" in
       exit 0
     fi
     if [[ "${FIXTURE_CASE:-}" == wrong_reopen_device && -e "$FIXTURE_RESTARTED" ]]; then
-      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[],"runtime_events":[],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000003"}]}]}}}}'
+      echo '{"status":"ok","payload":{"event":{"version":5,"snapshot":{"screen":"settings","readiness":"ready","operations":[],"runtime_events":[],"lists":[{"id":"devices","items":[{"id":"00000000-0000-4000-8000-000000000001","is_current":false},{"id":"00000000-0000-4000-8000-000000000003","is_current":true}]}]}}}}'
       exit 0
     fi
     if [[ "${FIXTURE_CASE:-}" == missing_accepted_list && -e "$FIXTURE_DEVICES_OPEN" && ! -e "$FIXTURE_RESTARTED" ]]; then
@@ -107,19 +113,22 @@ case "$instance:$method:$intent" in
     peer=00000000-0000-4000-8000-000000000001
     signed=22222222-2222-2222-2222-222222222222
     [[ "${FIXTURE_CASE:-}" != wrong_host_ack_device ]] || peer=00000000-0000-4000-8000-000000000003
-    [[ "${FIXTURE_CASE:-}" != duplicate_ack ]] || peer=$signed
     peer_count=2 signed_count=1
     if [[ "${FIXTURE_CASE:-}" == count2_signed ]]; then peer_count=1 signed_count=2; fi
     if [[ "${FIXTURE_CASE:-}" == single_ack ]]; then peer_count=0; fi
     if [[ -e "$FIXTURE_DEVICES_OPEN" ]]; then screen=settings; version=5; else screen=neighborhood; version=3; fi
     jq -cn --arg peer "$peer" --arg signed "$signed" --arg screen "$screen" \
+      --arg fixture_case "${FIXTURE_CASE:-}" \
       --argjson version "$version" --argjson peer_count "$peer_count" \
       --argjson signed_count "$signed_count" '
       {status:"ok",payload:{event:{version:$version,snapshot:{screen:$screen,readiness:"ready",
-       operations:[{id:"device_enrollment",instance_id:"tui-op-device_enrollment-2",state:"succeeded",failure:null}],
+       operations:[{id:"device_enrollment",instance_id:(if $fixture_case=="wrong_operation" then "tui-op-device_enrollment-99" else "tui-op-device_enrollment-2" end),state:"succeeded",failure:null}],
        runtime_events:([{id:"tui-runtime-fact-signed",fact:{kind:"device_enrollment_accepted",device_id:$signed,device_count:$signed_count}}] +
          (if $peer_count>0 then [{id:"tui-runtime-fact-peer",fact:{kind:"device_enrollment_accepted",device_id:$peer,device_count:$peer_count}}] else [] end)),
-       lists:(if $screen=="settings" then [{id:"devices",items:[{id:"00000000-0000-4000-8000-000000000001"},{id:$signed}]}] else [] end)}}}}' ;;
+       lists:(if $screen=="settings" then [{id:"devices",items:[
+         {id:(if $fixture_case=="duplicate_ack" then $signed else "00000000-0000-4000-8000-000000000001" end),is_current:false},
+         {id:(if $fixture_case=="wrong_signed_device" then "00000000-0000-4000-8000-000000000003" else $signed end),
+          is_current:($fixture_case!="stale_roster" or $screen!="settings")}]}] else [] end)}}}}' ;;
   barbara-tui:get_authority_id:)
     if [[ ! -e "$FIXTURE_RESTARTED" ]]; then
       echo '{"status":"ok","payload":{"authority_id":"authority-99999999-9999-9999-9999-999999999999","source":"backend"}}'
@@ -208,7 +217,7 @@ FIXTURE_CASE=count2_signed AURA_E2E_RUN_DIR="$signed_count_dir" PATH="$fixture/b
   bash "$here/paired-enrollment.sh" > "$fixture/count2-signed.stdout" 2> "$fixture/count2-signed.stderr"
 jq -e '.assertions.exact_operation_and_host_ack and .assertions.two_devices_after_reopen' \
   "$signed_count_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" >/dev/null
-for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_authority wrong_reopen_device duplicate_ack single_ack no_network_ack no_registration wrong_network_message_id wrong_network_digest; do
+for failure in missing_ack wrong_host_ack_device missing_issuer wrong_issuer_device wrong_operation wrong_signed_device stale_roster missing_accepted_list wrong_authority wrong_reopen_device duplicate_ack single_ack no_network_ack no_registration wrong_network_message_id wrong_network_digest; do
   rm -f "$FIXTURE_RESTARTED" "$FIXTURE_DEVICES_OPEN" "$FIXTURE_APPROVED"
   bad_dir="$fixture/$failure"
   mkdir -m 700 "$bad_dir"
@@ -220,12 +229,18 @@ for failure in missing_ack wrong_host_ack_device missing_accepted_list wrong_aut
   fi
   [[ ! -e "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/paired-result.json" ]]
   if [[ "$failure" == wrong_host_ack_device ]]; then
+    jq -e '.typed_failure=="host_ack_device_binding_mismatch" and
+      .operation_instance=="tui-op-device_enrollment-2" and
+      .signed_manifest_device=="22222222-2222-2222-2222-222222222222" and
+      .original_issuer_device=="00000000-0000-4000-8000-000000000001"' \
+      "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/accepted-host-ack-mismatch.json" >/dev/null
+  fi
+  if [[ "$failure" == wrong_signed_device || "$failure" == stale_roster || "$failure" == duplicate_ack ]]; then
     jq -e '.typed_failure=="canonical_device_binding_mismatch" and
       .stage=="accepted-devices" and
       .operation_instance=="tui-op-device_enrollment-2" and
       .signed_manifest_device=="22222222-2222-2222-2222-222222222222" and
-      .host_ack_device=="00000000-0000-4000-8000-000000000003" and
-      (.canonical_device_ids|sort)==["00000000-0000-4000-8000-000000000001","22222222-2222-2222-2222-222222222222"]' \
+      .host_ack_device=="00000000-0000-4000-8000-000000000001"' \
       "$bad_dir/private-enrollment-$AURA_E2E_RUN_TOKEN/accepted-devices-list-mismatch.json" >/dev/null
   fi
   if [[ "$failure" == no_network_ack || "$failure" == no_registration || "$failure" == wrong_network_message_id || "$failure" == wrong_network_digest ]]; then
@@ -330,8 +345,10 @@ response=$(printf '%s\n' "$rewritten" | "$FIXTURE_NATIVE_DRV" req-private) || ex
 printf '%s\n' "$response" | jq -c '
   tojson | gsub("tui-op-device_enrollment-2";"op-2") | fromjson |
   walk(if type=="object" and has("runtime_events") then
-    .runtime_events |= (map(if .fact.kind=="device_enrollment_accepted"
-      then .id="runtime-event-9" else . end)) else . end)'
+    .runtime_events |= (map(select(.fact.kind!="device_enrollment_accepted" or
+      .fact.device_id!="22222222-2222-2222-2222-222222222222") |
+      if .fact.kind=="device_enrollment_accepted" then .id="runtime-event-9" else . end))
+    else . end)'
 BROWSER
 chmod +x "$fixture/bin/browser-driver"
 export FIXTURE_NATIVE_DRV="$fixture/bin/driver"
