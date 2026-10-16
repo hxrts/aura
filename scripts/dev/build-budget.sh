@@ -139,14 +139,53 @@ active_consumers() {
 # reserving, never during the build.
 reservation=''
 incoming_reservation_kib=$((reserve_gib * 1024 * 1024))
+workload_identity=''
+canonical_workload_identity() {
+  [[ "$lane" == gates && $# == 2 && "$1" == just && "$2" == ci-user-flow-policy ]] || return 1
+  [[ -z "${JUST_JUSTFILE:-}" && -z "${JUST_WORKING_DIRECTORY:-}" ]] || return 1
+  [[ -f "$root/justfile" && ! -L "$root/justfile" ]] || return 1
+  local selector_hash source_fingerprint tool_hash just_binary just_hash inputs_hash relative
+  local -a input_paths=(Cargo.toml Cargo.lock flake.nix flake.lock
+    toolkit/xtask/Cargo.toml toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml)
+  source_fingerprint="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
+  [[ "$source_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+  source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
+  for relative in .cargo/config .cargo/config.toml toolkit/xtask/.cargo/config \
+    toolkit/xtask/.cargo/config.toml rust-toolchain rust-toolchain.toml \
+    toolkit/xtask/rust-toolchain toolkit/xtask/rust-toolchain.toml; do
+    [[ ! -e "$root/$relative" && ! -L "$root/$relative" ]] || input_paths+=("$relative")
+  done
+  inputs_hash="$(policy_hash_files "$root" "${input_paths[@]}")" || return 1
+  tool_hash="$(policy_tool_identity)" || return 1
+  just_binary="$(command -v just)" || return 1
+  [[ -f "$just_binary" && ! -L "$just_binary" ]] || return 1
+  just_hash="$(sha256sum "$just_binary" | awk '{print $1}')"
+  selector_hash="$(printf '%s\0' \
+    "${AURA_BUILD_PACKAGES:-}" "${CARGO_BUILD_TARGET:-}" "${RUSTFLAGS:-}" \
+    "${CARGO_ENCODED_RUSTFLAGS:-}" "${RUSTC:-}" "${RUSTC_WRAPPER:-}" \
+    "${RUSTC_WORKSPACE_WRAPPER:-}" "${AURA_UX_POLICY_DIFF_RANGE:-}" \
+    "${AURA_UX_GUIDANCE_DIFF_RANGE:-}" | sha256sum | awk '{print $1}')"
+  jq -cn --arg recipe "$(sha256sum "$root/justfile" | awk '{print $1}')" \
+    --arg profile "$profile" --arg features "$features" --arg target "$target_triple" \
+    --arg incremental "$CARGO_INCREMENTAL" --arg selector "$selector_hash" \
+    --arg source "$source_fingerprint" --arg tool "$tool_hash" --arg just "$just_hash" \
+    --arg inputs "$inputs_hash" \
+    '{command:["just","ci-user-flow-policy"],recipe_sha256:$recipe,
+      profile:$profile,features:$features,target:$target,
+      incremental:$incremental,selector_hash:$selector,
+      source_fingerprint:$source,input_hash:$inputs,
+      tool_identity_hash:$tool,just_sha256:$just}' |
+    sha256sum | awk '{print $1}'
+}
 estimate_incoming_growth() {
   local receipt measured largest=-1 legacy_log="$root/artifacts/disk-budget/builds.tsv"
   # Receipts are written under this checkout and identify the workload lane.
   # A failed command can still leave artifacts, so its observed peak counts.
   for receipt in "$root"/artifacts/disk-budget/receipts/run.*/receipt.json; do
     [[ -f "$receipt" && ! -L "$receipt" ]] || continue
-    measured="$(jq -er --arg root "$root" --arg lane "$lane" \
+    measured="$(jq -er --arg root "$root" --arg lane "$lane" --arg workload "$workload_identity" \
       'select(.root==$root and .lane==$lane and
+        ($workload=="" or .admission.workload.identity==$workload) and
         (.command_exit_status!=null or .child.pid!=null)) |
        .disk.measured_growth_kib | select(type=="number" and .>=0) | floor' \
       "$receipt" 2>/dev/null)" || continue
@@ -159,6 +198,7 @@ estimate_incoming_growth() {
   # A profile-only legacy row may describe a much larger unrelated build;
   # retain the conservative cold-start fallback until this exact lane has a
   # measured peak, rather than importing that row as execution growth.
+  if [[ -n "$workload_identity" ]]; then legacy_log=''; fi
   case "$lane" in
     ownership-lint-compile|ownership-lint-exec|policy-toolkit-compile|policy-static-exec)
       legacy_log='' ;;
@@ -407,6 +447,13 @@ if (( dry_run == 0 )); then
   target_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host: / {print $2}' || true)}"
   source "$repo_root/scripts/dev/build-receipt.sh"
   aura_receipt_init "$root" "$lane" "$@"
+  workload_identity="$(canonical_workload_identity "$@" || true)"
+  if [[ -n "$workload_identity" ]]; then
+    aura_receipt_update --arg identity "$workload_identity" \
+      --arg profile "$profile" --arg features "$features" --arg target "$target_triple" \
+      '.admission.workload={name:"ci-user-flow-policy",identity:$identity,
+        profile:$profile,features:$features,target:$target}'
+  fi
   estimate_incoming_growth
   aura_receipt_update --argjson incoming "$incoming_reservation_kib" \
     '.admission.incoming_reservation_kib=$incoming'

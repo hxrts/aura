@@ -804,4 +804,102 @@ for recipe in _policy-check _ownership-lint web-check; do
     | rg -q 'build-budget.sh --lane gates' || { echo "justfile $recipe bypasses build-budget" >&2; exit 1; }
 done
 
+# The canonical user-flow gate compiles macros, but must not inherit broad
+# ownership-gate peaks merely because both use lane=gates. Bind its recipe and
+# selectors to an exact workload identity, retaining a 4 GiB cold fallback.
+reset_case
+printf 'ci-user-flow-policy:\n    @true\n' > "$project/justfile"
+printf 'target/\nartifacts/\n' > "$project/.gitignore"
+mkdir -p "$project/toolkit/xtask" "$project/crates/aura-macros"
+for relative in Cargo.lock flake.nix flake.lock toolkit/xtask/Cargo.toml \
+  toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml; do
+  printf 'fixture %s\n' "$relative" > "$project/$relative"
+done
+git -C "$project" init -q
+git -C "$project" add Cargo.toml Cargo.lock flake.nix flake.lock justfile .gitignore \
+  toolkit/xtask/Cargo.toml toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml
+git -C "$project" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm workload-fixture
+cat > "$fakebin/just" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == ci-user-flow-policy ]] || exit 2
+EOF
+chmod +x "$fakebin/just"
+mkdir -p "$project/artifacts/disk-budget/receipts/run.broad"
+printf '{"root":"%s","lane":"gates","command_exit_status":0,"disk":{"measured_growth_kib":10485760}}\n' \
+  "$project" > "$project/artifacts/disk-budget/receipts/run.broad/receipt.json"
+printf 'start\tfinish\tlane\tprofile\ttriple\tfeatures\tcap\tmin\temergency\tbefore_free\tbefore_target\tpre_free\tpre_target\tlowest_free\tpeak_target\tafter_free\tafter_target\tstatus\n' \
+  > "$project/artifacts/disk-budget/builds.tsv"
+printf 'start\tfinish\tgates\tunlabelled\t%s\tunlabelled\t8\t15\t5\t20971520\t6291456\t20971520\t6291456\t10485760\t6291456\t10485760\t6291456\t0\n' \
+  "$host_triple" >> "$project/artifacts/disk-budget/builds.tsv"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.incoming_reservation_kib==4194304 and
+  (.admission.workload.identity|type)=="string" and .final_exit_status==0' "$receipt" >/dev/null
+canonical_key="$(jq -r .admission.workload.identity "$receipt")"
+mkdir -p "$project/artifacts/disk-budget/receipts/run.same"
+jq -n --arg root "$project" --arg identity "$canonical_key" \
+  '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
+    command_exit_status:0,disk:{measured_growth_kib:2097152}}' \
+  > "$project/artifacts/disk-budget/receipts/run.same/receipt.json"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e --arg identity "$canonical_key" '.admission.incoming_reservation_kib==3145728 and
+  .admission.workload.identity==$identity' "$receipt" >/dev/null
+cp "$fakebin/just" "$test_root/just-original"
+for changed in recipe features profile target lock tool config policy-range guidance-range; do
+  case "$changed" in
+    recipe) printf 'ci-user-flow-policy:\n    @true # revised\n' > "$project/justfile" ;;
+    features) export AURA_BUILD_FEATURES=alternate ;;
+    profile) export AURA_BUILD_PROFILE=alternate ;;
+    target) export AURA_BUILD_TARGET_TRIPLE=alternate-target ;;
+    lock) printf 'changed lock\n' > "$project/Cargo.lock" ;;
+    tool) printf '# changed tool\n' >> "$fakebin/just" ;;
+    config) mkdir -p "$project/.cargo"; printf 'changed config\n' > "$project/.cargo/config.toml" ;;
+    policy-range) export AURA_UX_POLICY_DIFF_RANGE=alternate-policy ;;
+    guidance-range) export AURA_UX_GUIDANCE_DIFF_RANGE=alternate-guidance ;;
+  esac
+  expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --no-prune -- just ci-user-flow-policy
+  receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+  jq -e --arg old "$canonical_key" '.admission.incoming_reservation_kib==4194304 and
+    .admission.workload.identity!=$old' "$receipt" >/dev/null
+  case "$changed" in
+    recipe) printf 'ci-user-flow-policy:\n    @true\n' > "$project/justfile" ;;
+    features) unset AURA_BUILD_FEATURES ;;
+    profile) unset AURA_BUILD_PROFILE ;;
+    target) unset AURA_BUILD_TARGET_TRIPLE ;;
+    lock) printf 'fixture Cargo.lock\n' > "$project/Cargo.lock" ;;
+    tool) cp "$test_root/just-original" "$fakebin/just"; chmod +x "$fakebin/just" ;;
+    config) rm "$project/.cargo/config.toml"; rmdir "$project/.cargo" ;;
+    policy-range) unset AURA_UX_POLICY_DIFF_RANGE ;;
+    guidance-range) unset AURA_UX_GUIDANCE_DIFF_RANGE ;;
+  esac
+done
+for override in JUST_JUSTFILE JUST_WORKING_DIRECTORY; do
+  export "$override"=other-recipe
+  expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --no-prune -- just ci-user-flow-policy
+  receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+  jq -e '.admission.workload==null and
+    .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+  unset "$override"
+done
+mkdir -p "$project/artifacts/disk-budget/receipts/run.same-failed"
+jq -n --arg root "$project" --arg identity "$canonical_key" \
+  '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
+    command_exit_status:101,disk:{measured_growth_kib:5242880}}' \
+  > "$project/artifacts/disk-budget/receipts/run.same-failed/receipt.json"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.refusal.incoming_reservation_kib==6291456 and
+  .admission.admitted==false' "$receipt" >/dev/null
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-user-flow-policy extra
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.workload==null and
+  .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+
 echo 'build-budget safety tests passed'

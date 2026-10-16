@@ -1535,6 +1535,14 @@ under `~/.cache/aura-build/reservations` until it exits. The admission lock is
 held only while checking and reserving,
 and only builders of the same checkout block its sweeps, so two worktrees can
 build at once.
+For exact `gates` commands running `just ci-user-flow-policy`, admission uses
+only growth measured for that same recipe, source, toolchain, profile, feature
+and target identity. Broad ownership-gate and legacy profile peaks do not
+describe this workload. The first such run retains the 4 GiB cold reservation;
+later runs use the matching measured peak plus the normal 1 GiB margin. The
+recipe still runs all its checks, including macro compilation, and the 15 GiB
+admission and 5 GiB emergency floors remain unchanged. Other gate commands
+continue to use their existing estimates.
 
 The wrapper retains `wasm-debug` during direct debug Cargo commands with
 `--target wasm32-unknown-unknown`. A shell batch hides its compiler arguments;
