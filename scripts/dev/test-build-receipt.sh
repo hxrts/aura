@@ -24,6 +24,33 @@ git -C "$fixture" add .gitignore source.rs
 git -C "$fixture" -c core.hooksPath=/dev/null -c commit.gpgsign=false \
   -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial
 source "$repo_root/scripts/dev/build-receipt.sh"
+mkdir -p "$fixture/artifacts"
+cat > "$fixture/artifacts/unsafe-diff-helper" <<'UNSAFE_DIFF'
+#!/usr/bin/env bash
+touch "$AURA_TEST_DIFF_MARKER"
+printf 'same transformed text\n'
+UNSAFE_DIFF
+chmod +x "$fixture/artifacts/unsafe-diff-helper"
+printf 'source.rs diff=evil\n' > "$fixture/.gitattributes"
+git -C "$fixture" add .gitattributes
+git -C "$fixture" -c core.hooksPath=/dev/null -c commit.gpgsign=false \
+  -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm attributes
+git -C "$fixture" config diff.evil.textconv "$fixture/artifacts/unsafe-diff-helper"
+export AURA_TEST_DIFF_MARKER="$fixture/artifacts/diff-helper-called"
+touch -t 202001020304 "$fixture/source.rs"
+index_before="$(sha256sum "$fixture/.git/index")"
+raw_before="$(GIT_OPTIONAL_LOCKS=0 aura_receipt_source_fingerprint "$fixture")"
+[[ "$index_before" == "$(sha256sum "$fixture/.git/index")" &&
+   ! -e "$AURA_TEST_DIFF_MARKER" ]] || {
+  echo 'source fingerprint changed Git index or invoked configured diff helper' >&2; exit 1;
+}
+printf 'changed tracked bytes\n' > "$fixture/source.rs"
+raw_after="$(GIT_OPTIONAL_LOCKS=0 GIT_EXTERNAL_DIFF="$fixture/artifacts/unsafe-diff-helper" \
+  aura_receipt_source_fingerprint "$fixture")"
+[[ "$raw_before" != "$raw_after" && ! -e "$AURA_TEST_DIFF_MARKER" ]] || {
+  echo 'source fingerprint hid changed bytes or invoked configured diff helper' >&2; exit 1;
+}
+printf 'original\n' > "$fixture/source.rs"
 aura_receipt_init "$fixture" fixture cargo check --locked -p aura-simulator --features 'signals, test'
 jq -e '.command_argv==["cargo","check","--locked","-p","aura-simulator","--features","signals, test"]' "$AURA_BUILD_RECEIPT" >/dev/null
 jq -e '.metadata.packages=="aura-simulator" and .metadata.features=="signals, test" and

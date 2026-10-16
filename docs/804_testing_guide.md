@@ -1636,6 +1636,17 @@ release, web-release and canonical wasm-profile outputs are never automatic
 candidates. Every candidate still passes the independent lane cleaner's live
 process, open-file, symlink and lock checks at deletion time.
 
+To preview admission for a specific command, pass the same lane and command
+to `scripts/dev/build-budget.sh --dry-run --no-prune --lane <lane> -- <command>`.
+The preview reads the current source/workload identity, measured receipt peaks,
+and live reservations, then prints free space, incoming growth reservation,
+the 15 GiB floor, margin, and an advisory admission outcome. With no command,
+the incoming reservation is unknown. If the exact canonical user-flow identity
+cannot be certified, preview reports `unknown` with a conservative generic
+estimate; it does not claim admission. Preview creates no receipt, reservation,
+or lock, runs no command, and removes no stale reservation or cache. Capacity
+can change after the snapshot; only the real locked admission decides a build.
+
 For machines with a separate local filesystem, set `AURA_COLD_CACHE_STORE` to
 an existing directory on that volume. Guarded cleanup then exports eligible
 nonrelease lanes to a private, signed and checksum-verified snapshot before it removes

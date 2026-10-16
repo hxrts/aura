@@ -355,6 +355,26 @@ expect_status 0 run_budget --dry-run
 [[ "$(wc -l < "$CALLS_FILE")" -eq 1 ]]
 rg -q -- '--dry-run' "$CALLS_FILE"
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
+rg -q 'Admission preview: command absent; incoming reservation unknown' "$test_root/output"
+
+# Preview mirrors admission arithmetic without creating a receipt, lock,
+# reservation, command result, or stale-reservation cleanup side effect.
+reset_case
+mkdir -p "$AURA_BUILD_SHARED_DIR/reservations"
+printf '%s\n' 2097152 > "$AURA_BUILD_SHARED_DIR/reservations/99999999"
+sleep 60 & preview_holder=$!
+printf '%s\n' 1048576 > "$AURA_BUILD_SHARED_DIR/reservations/$preview_holder"
+printf '%s\n' $((19 * 1024 * 1024)) > "$FREE_FILE"
+expect_status 0 run_budget --dry-run --no-prune -- sh -c 'touch "$FREE_FILE.preview-command-ran"'
+rg -q 'other-reservations=1048576 KiB incoming-reservation=4194304 KiB floor=15728640 KiB margin=-1048576 KiB outcome=refused identity=generic workload=generic' "$test_root/output"
+[[ -f "$AURA_BUILD_SHARED_DIR/reservations/99999999" &&
+   -f "$AURA_BUILD_SHARED_DIR/reservations/$preview_holder" &&
+   ! -e "$FREE_FILE.preview-command-ran" &&
+   ! -d "$AURA_BUILD_SHARED_DIR/admission.lock" &&
+   ! -d "$project/artifacts/disk-budget/receipts" ]]
+kill "$preview_holder"
+wait "$preview_holder" 2>/dev/null || true
+rm -f "$AURA_BUILD_SHARED_DIR/reservations/99999999" "$AURA_BUILD_SHARED_DIR/reservations/$preview_holder"
 
 # An oversized unused incremental lane is reclaimed before dependencies are
 # swept; the running command observes both admission size and dependency reuse.
@@ -843,6 +863,15 @@ jq -e '.admission.incoming_reservation_kib==4194304 and
   (.admission.workload.identity|type)=="string" and .final_exit_status==0' "$receipt" >/dev/null
 canonical_key="$(jq -r .admission.workload.identity "$receipt")"
 canonical_source="$(jq -r .source.fingerprint "$receipt")"
+generic_tree_before="$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -print0 | sort -z | sha256sum)"
+generic_files_before="$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -type f -exec sha256sum '{}' + | LC_ALL=C sort | sha256sum)"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --dry-run --no-prune -- just ci-ownership-policy
+rg -q 'incoming-reservation=11534336 KiB.*outcome=refused identity=generic workload=generic' "$test_root/output"
+[[ "$generic_tree_before" == "$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -print0 | sort -z | sha256sum)" &&
+   "$generic_files_before" == "$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -type f -exec sha256sum '{}' + | LC_ALL=C sort | sha256sum)" ]] || {
+  echo 'generic preview changed protected artifact tree' >&2; exit 1;
+}
 mkdir -p "$project/artifacts/disk-budget/receipts/run.same"
 jq -n --arg root "$project" --arg identity "$canonical_key" \
   '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
@@ -853,6 +882,22 @@ expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" 
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e --arg identity "$canonical_key" '.admission.incoming_reservation_kib==3145728 and
   .admission.workload.identity==$identity' "$receipt" >/dev/null
+preview_tree_before="$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -print0 | sort -z | sha256sum)"
+preview_files_before="$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -type f -exec sha256sum '{}' + | LC_ALL=C sort | sha256sum)"
+touch -t 202001020304 "$project/justfile" # Same bytes, changed mtime must not refresh .git/index.
+preview_git_index_before="$(sha256sum "$project/.git/index")"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --dry-run --no-prune -- just ci-user-flow-policy
+rg -q "incoming-reservation=3145728 KiB.*workload=$canonical_key" "$test_root/output"
+rg -q 'outcome=admissible identity=certified' "$test_root/output"
+[[ "$preview_tree_before" == "$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -print0 | sort -z | sha256sum)" &&
+   "$preview_files_before" == "$(find "$project/artifacts" "$project/target" "$AURA_BUILD_SHARED_DIR" -type f -exec sha256sum '{}' + | LC_ALL=C sort | sha256sum)" ]] || {
+  echo 'certified preview changed protected artifact tree' >&2; exit 1;
+}
+[[ "$preview_git_index_before" == "$(sha256sum "$project/.git/index")" ]] || {
+  echo 'certified preview changed Git index' >&2; exit 1;
+}
+[[ ! -e "$FREE_FILE.preview-command-ran" ]]
 # Advancing the default origin base changes policy inputs without changing
 # HEAD or any checkout source. Do not reuse the old measured reservation.
 git -C "$project" update-ref refs/remotes/origin/main "$intermediate_base"
@@ -898,6 +943,11 @@ for changed in recipe features profile target lock tool config policy-range guid
     guidance-files|guidance-empty) unset AURA_UX_GUIDANCE_CHANGED_FILES ;;
   esac
 done
+expect_status 0 env RUSTC=/missing/aura-preview-compiler \
+  bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --dry-run --no-prune -- just ci-user-flow-policy
+rg -q 'canonical workload identity unavailable' "$test_root/output"
+rg -q 'outcome=unknown identity=uncertified-canonical workload=generic' "$test_root/output"
 graft_path="$(git -C "$project" rev-parse --path-format=absolute --git-path info/grafts)"
 printf '\n' > "$graft_path"
 expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
@@ -916,6 +966,10 @@ jq -e '.admission.workload==null and
 rm "$project/.git/shallow"
 for override in JUST_JUSTFILE JUST_WORKING_DIRECTORY; do
   export "$override"=other-recipe
+  expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --dry-run --no-prune -- just ci-user-flow-policy
+  rg -q 'canonical workload identity unavailable' "$test_root/output"
+  rg -q 'incoming-reservation=11534336 KiB.*outcome=unknown identity=uncertified-canonical workload=generic' "$test_root/output"
   expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
     --lane gates --no-prune -- just ci-user-flow-policy
   receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"

@@ -201,7 +201,7 @@ aura_receipt_source_fingerprint() {
   [[ -n "$revision" ]] || return 1
   {
     printf '%s\n' "$revision"
-    git -C "$checkout" diff HEAD --binary
+    git -C "$checkout" -c diff.autoRefreshIndex=false diff HEAD --binary --no-ext-diff --no-textconv
     while IFS= read -r -d '' path; do
       printf '%s\0' "$path"
       if [[ -L "$checkout/$path" ]]; then readlink "$checkout/$path";

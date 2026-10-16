@@ -144,11 +144,11 @@ canonical_workload_identity() {
   [[ "$lane" == gates && $# == 2 && "$1" == just && "$2" == ci-user-flow-policy ]] || return 1
   [[ -z "${JUST_JUSTFILE:-}" && -z "${JUST_WORKING_DIRECTORY:-}" ]] || return 1
   [[ -f "$root/justfile" && ! -L "$root/justfile" ]] || return 1
-  local selector_hash source_fingerprint tool_hash just_binary just_hash inputs_hash relative
+  local selector_hash tool_hash just_binary just_hash inputs_hash relative
   local refs_hash graft_path
   local -a input_paths=(Cargo.toml Cargo.lock flake.nix flake.lock
     toolkit/xtask/Cargo.toml toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml)
-  source_fingerprint="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
+  [[ -n "${source_fingerprint:-}" ]] || return 1
   [[ "$source_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
   # The recipe/toolkit can derive diff selectors from refs after admission.
   # Bind all refs conservatively rather than reimplementing policy selection.
@@ -232,12 +232,13 @@ estimate_incoming_growth() {
   fi
 }
 other_reservations_kib() {
-  local file pid total=0 kib
+  local mode="${1:-admit}" file pid total=0 kib
   for file in "$shared_dir"/reservations/*; do
     [[ -f "$file" ]] || continue
     pid="${file##*/}"
     if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
-      rm -f "$file"; continue
+      [[ "$mode" == preview ]] || rm -f "$file"
+      continue
     fi
     [[ "$pid" == "$$" ]] && continue
     kib="$(awk 'NR == 1 {print $1}' "$file")"
@@ -450,12 +451,13 @@ prune_safe_lanes() {
 
 printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free\n' \
   "$cap_gib" "$min_free_gib" "$emergency_gib"
+profile="${AURA_BUILD_PROFILE:-unlabelled}"
+features="${AURA_BUILD_FEATURES:-unlabelled}"
+target_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host: / {print $2}' || true)}"
 if (( dry_run == 0 )); then
-  profile="${AURA_BUILD_PROFILE:-unlabelled}"
-  features="${AURA_BUILD_FEATURES:-unlabelled}"
-  target_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host: / {print $2}' || true)}"
   source "$repo_root/scripts/dev/build-receipt.sh"
   aura_receipt_init "$root" "$lane" "$@"
+  source_fingerprint="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
   workload_identity="$(canonical_workload_identity "$@" || true)"
   if [[ -n "$workload_identity" ]]; then
     aura_receipt_update --arg identity "$workload_identity" \
@@ -474,6 +476,32 @@ before_free="$(free_kib)"
 before_target="$(target_kib strict)"
 printf 'Before: free=%s KiB target=%s KiB\n' "$before_free" "$before_target"
 if [[ "$dry_run" -eq 1 ]]; then
+  if (( $# > 0 )); then
+    # An advisory snapshot uses the real estimator and live-PID decisions,
+    # but never creates a receipt, lock, reservation, or cleanup side effect.
+    source "$repo_root/scripts/dev/build-receipt.sh"
+    source_fingerprint="$(GIT_OPTIONAL_LOCKS=0 aura_receipt_source_fingerprint "$root" || true)"
+    workload_identity="$(GIT_OPTIONAL_LOCKS=0 canonical_workload_identity "$@" || true)"
+    preview_identity_status=generic
+    if [[ "$lane" == gates && $# == 2 && "$1" == just && "$2" == ci-user-flow-policy ]]; then
+      if [[ -n "$workload_identity" ]]; then preview_identity_status=certified
+      else preview_identity_status=uncertified-canonical; fi
+    fi
+    estimate_incoming_growth
+    preview_others="$(other_reservations_kib preview)"
+    preview_margin=$(( before_free - preview_others - incoming_reservation_kib - min_free_kib ))
+    if (( preview_margin >= 0 )); then preview_outcome=admissible
+    else preview_outcome=refused; fi
+    if [[ "$preview_identity_status" == uncertified-canonical ]]; then
+      preview_outcome=unknown
+      echo 'build-budget: canonical workload identity unavailable; conservative generic estimate cannot certify admission' >&2
+    fi
+    printf 'Admission preview (advisory): free=%s KiB other-reservations=%s KiB incoming-reservation=%s KiB floor=%s KiB margin=%s KiB outcome=%s identity=%s workload=%s\n' \
+      "$before_free" "$preview_others" "$incoming_reservation_kib" "$min_free_kib" \
+      "$preview_margin" "$preview_outcome" "$preview_identity_status" "${workload_identity:-generic}"
+  else
+    echo 'Admission preview: command absent; incoming reservation unknown'
+  fi
   if (( no_prune == 1 )); then
     echo 'No-prune mode: cache collection disabled; admission and emergency floors remain active'
   else
