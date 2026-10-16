@@ -500,6 +500,7 @@ ci-policy-toolkit-clippy:
 ci-build-cache-policy:
     bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/ship-web-assets.sh scripts/harness/lan/test-ship-web-assets.sh scripts/harness/lan/runtime-refs.sh scripts/web/serve-static.sh
     bash scripts/dev/test-cache-rank.sh
+    bash scripts/dev/test-lane-idle-guard.sh
     bash scripts/dev/test-cold-cache-store.sh
     bash scripts/dev/test-run-exact-fixtures.sh
     bash scripts/dev/test-run-ownership-fast.sh

@@ -13,10 +13,17 @@ while [[ $# -gt 0 ]]; do
     --lane) lane="${2:?missing lane}"; shift 2 ;;
     --dry-run) mode=dry; shift ;;
     --apply) mode=apply; shift ;;
+    --assert-idle) mode=assert; shift ;;
     --lock-owned-by) lock_owner="${2:?missing owner pid}"; shift 2 ;;
-    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|trybuild-host-triple|kani|wasm-debug|wasm-profile|wasm-root-profile|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
+    --) shift; break ;;
+    *) echo 'usage: prune-inactive-lane.sh --lane LANE [--root PATH] [--dry-run|--apply|--assert-idle -- COMMAND]' >&2; exit 2 ;;
   esac
 done
+if [[ "$mode" == assert ]]; then
+  [[ $# -gt 0 ]] || { echo 'assert-idle requires a command' >&2; exit 2; }
+else
+  [[ $# -eq 0 ]] || { echo 'unexpected command without --assert-idle' >&2; exit 2; }
+fi
 case "$lane" in
   debug) relative=target/debug ;;
   debug-incremental) relative=target/debug/incremental ;;
@@ -71,18 +78,19 @@ if [[ "$lane" == trybuild* && -L "$root/target/tests" ]]; then
   refuse_cleanup symlink 'trybuild parent is a symlink'
 fi
 [[ ! -L "$path" ]] || refuse_cleanup symlink "lane is a symlink: $path"
-if [[ ! -d "$path" ]]; then
+if [[ ! -d "$path" && "$mode" != assert ]]; then
   cleanup_outcome=skipped; cleanup_reason=absent; cleanup_before=0; cleanup_after=0
   echo "No lane at $path"; exit 0
 fi
 cleanup_outcome=failed
 cleanup_reason=size-measurement
-size="$(du -sk "$path" | awk 'NR == 1 {print $1}')"
+size=0
+if [[ -d "$path" ]]; then size="$(du -sk "$path" | awk 'NR == 1 {print $1}')"; fi
 [[ ! "$size" =~ ^[0-9]+$ ]] || cleanup_before="$size"
 cleanup_outcome=refused
 cleanup_reason=preflight
 printf 'Lane=%s mode=%s candidate=%s KiB path=%s\n' "$lane" "$mode" "$size" "$path"
-if [[ "$mode" != apply ]]; then
+if [[ "$mode" == dry ]]; then
   cleanup_outcome=skipped; cleanup_reason=preview; exit 0
 fi
 
@@ -115,10 +123,24 @@ if printf '%s\n' "$open_files" | grep -F -- "$path" >/dev/null; then
   refuse_cleanup open-files "lane has open files: $path"
 fi
 # Inspect again after acquiring the shared lock and checking active users.
-[[ -d "$path" && ! -L "$path" && ! -L "$root/target" ]] || refuse_cleanup changed-path 'lane changed during preflight'
+[[ ! -L "$path" && ! -L "$root/target" ]] || refuse_cleanup changed-path 'lane changed during preflight'
+if [[ "$mode" == apply ]]; then
+  [[ -d "$path" ]] || refuse_cleanup changed-path 'lane changed during preflight'
+else
+  [[ ! -e "$path" || -d "$path" ]] || refuse_cleanup changed-path 'lane is not a directory'
+fi
 [[ ! -L "$root/target/wasm32-unknown-unknown" ]] || refuse_cleanup changed-path 'wasm parent changed during preflight'
 [[ "$lane" != debug-incremental || ! -L "$root/target/debug" ]] || refuse_cleanup changed-path 'debug parent changed during preflight'
 [[ "$lane" != trybuild* || ! -L "$root/target/tests" ]] || refuse_cleanup changed-path 'trybuild parent changed during preflight'
+if [[ "$mode" == assert ]]; then
+  cleanup_outcome=skipped; cleanup_reason=idle-assertion
+  guarded_status=0
+  "$@" || guarded_status=$?
+  if (( guarded_status != 0 )); then
+    cleanup_outcome=failed; cleanup_reason=guarded-command
+  fi
+  exit "$guarded_status"
+fi
 printf 'Removing whole inactive lane: %s (%s KiB)\n' "$path" "$size"
 cleanup_outcome=failed
 cleanup_reason=removal

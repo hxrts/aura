@@ -1450,6 +1450,12 @@ The other profiles and the dispatcher integration remain separate work. An
 absent vendor path or any unrecorded producer input
 must prevent future warm-tree reuse rather than fall back to a guessed key.
 
+`prune-inactive-lane.sh --lane LANE --assert-idle -- COMMAND` checks the same
+checkout lock, scoped builders, open files, and symlink boundaries as guarded
+pruning, then keeps that lock until `COMMAND` exits. An absent lane is allowed
+for a future restore; `--apply` still requires an existing lane and removes it.
+The assertion does not validate a warm-tree artifact or enable rehydration.
+
 For the complete browser enrollment scenario, build the native
 `bootstrap_broker_fixture` example with `--features simulation` in the same guarded batch as the browser
 inventory. Set `AURA_BROWSER_BROKER_FIXTURE` to its executable path and wrap the
