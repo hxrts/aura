@@ -283,6 +283,12 @@ same profile, location, signed statement, expiry and exact payload; a legacy
 protected record cannot gain a descriptor later. This writer remains private:
 the authenticated signed proof issuer and original selected physical provider
 must be wired before any protected enrollment record can be physically retired.
+The native private expiry primitive now requires that original V3 birth and
+exact profile/location/payload, then observes the retained selected physical
+provider under the record gate. Early or backward time and clock failures
+refuse deletion; a caller cannot supply a replacement deadline or wall clock.
+This proves only local expiry refusal and exact deletion. Verified terminal
+retirement and issuer/invitee callsites remain separate owner work.
 The platform keyring adapter reports this operation unsupported until it has
 an equivalent exact-record transactional contract.
 

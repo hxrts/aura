@@ -2094,9 +2094,10 @@ impl FilesystemFallbackSecureStorageHandler {
         self.decrypt_fallback_record_with_protection(&location, bytes)
             .is_ok()
     }
-    /// Provider primitive for a future domain-authorized retirement owner.
-    /// Deliberately private: exact bytes and a profile lock do not prove that
-    /// enrollment has reached a verified terminal or its selected expiry.
+    /// Private expiry-only primitive for a future domain-authorized owner.
+    /// A protected V3 birth is required; legacy immutable records cannot gain
+    /// retirement authority from a later caller. Terminal retirement still
+    /// needs a separate verified original-issuer proof at the owner boundary.
     #[cfg(unix)]
     #[allow(dead_code)]
     async fn retire_protected_exact(
@@ -2113,11 +2114,32 @@ impl FilesystemFallbackSecureStorageHandler {
         else {
             return Ok(false);
         };
-        let (plaintext, protected) =
-            self.decrypt_fallback_record_with_protection(location, &record)?;
-        if !protected || plaintext != expected_plaintext {
+        let (plaintext, protected, birth) =
+            self.decrypt_fallback_record_with_birth(location, &record)?;
+        let Some(birth) = birth else {
+            return Err(SecureStorageError::permission_denied(
+                "protected retirement requires its original authenticated birth",
+            ));
+        };
+        let profile = self.base_path.parent().ok_or_else(|| {
+            SecureStorageError::permission_denied("retirement has no selected profile")
+        })?;
+        use std::os::unix::ffi::OsStrExt;
+        if !protected
+            || birth.profile_digest != aura_core::hash::hash(profile.as_os_str().as_bytes())
+            || birth.location != *location
+            || plaintext != expected_plaintext
+        {
             return Err(SecureStorageError::permission_denied(
                 "protected retirement candidate differs from exact original",
+            ));
+        }
+        // Observe the retained selected endpoint while still holding the exact
+        // record gate. A caller-supplied wall clock or expiry cannot authorize
+        // deletion, and rollback before the original expiry fails closed.
+        if self.selected_clock.now_ms().await? < birth.expiry.ts_ms {
+            return Err(SecureStorageError::permission_denied(
+                "protected retirement has not reached original selected expiry",
             ));
         }
         directory
@@ -4617,7 +4639,7 @@ mod protected_retirement_primitive_tests {
     }
 
     #[tokio::test]
-    async fn exact_retirement_refuses_wrong_bytes_and_foreign_profile(
+    async fn legacy_protected_record_cannot_gain_expiry_retirement(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let first = tempfile::tempdir()?;
         let second = tempfile::tempdir()?;
@@ -4662,17 +4684,123 @@ mod protected_retirement_primitive_tests {
             first_handler.secure_retrieve(&location, read).await?,
             b"original"
         );
+        assert!(first_handler
+            .retire_protected_exact(&location, b"original")
+            .await
+            .is_err());
+        assert!(first_handler.secure_exists(&location).await?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn original_birth_retires_only_at_selected_expiry_after_rollback_and_clock_fault(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        struct SelectedClock {
+            now: AtomicU64,
+            fail: AtomicBool,
+        }
+        #[async_trait::async_trait]
+        impl aura_core::effects::PhysicalTimeEffects for SelectedClock {
+            async fn physical_time(
+                &self,
+            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+                if self.fail.load(Ordering::SeqCst) {
+                    return Err(aura_core::effects::TimeError::ServiceUnavailable);
+                }
+                Ok(aura_core::time::PhysicalTime::exact(
+                    self.now.load(Ordering::SeqCst),
+                ))
+            }
+
+            async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::TimeError> {
+                Ok(())
+            }
+        }
+
+        let profile = tempfile::tempdir()?;
+        let foreign_profile = tempfile::tempdir()?;
+        let handler = FilesystemFallbackSecureStorageHandler::with_base_path(profile.path().into());
+        let foreign =
+            FilesystemFallbackSecureStorageHandler::with_base_path(foreign_profile.path().into());
+        let clock = Arc::new(SelectedClock {
+            now: AtomicU64::new(499),
+            fail: AtomicBool::new(false),
+        });
+        handler.selected_clock.select(clock.clone());
+        let location = SecureStorageLocation::new("retirement-birth", "selected-expiry");
+        let descriptor = retirement_birth::ProtectedBirthDescriptor {
+            profile_digest: {
+                use std::os::unix::ffi::OsStrExt;
+                aura_core::hash::hash(
+                    std::fs::canonicalize(profile.path())?
+                        .as_os_str()
+                        .as_bytes(),
+                )
+            },
+            location: location.clone(),
+            signed_statement: b"original signed statement".to_vec(),
+            expiry: aura_core::time::PhysicalTime::exact(500),
+        };
+        assert!(foreign
+            .publish_retirement_birth(&descriptor, b"original bytes")
+            .await
+            .is_err());
         assert!(
-            first_handler
-                .retire_protected_exact(&location, b"original")
+            handler
+                .publish_retirement_birth(&descriptor, b"original bytes")
                 .await?
         );
+        assert!(matches!(
+            handler
+                .retire_protected_exact(&location, b"original bytes")
+                .await,
+            Err(SecureStorageError::PermissionDenied { .. })
+        ));
+        clock.now.store(500, Ordering::SeqCst);
+        assert!(matches!(
+            handler
+                .retire_protected_exact(&location, b"changed bytes")
+                .await,
+            Err(SecureStorageError::PermissionDenied { .. })
+        ));
+        clock.now.store(400, Ordering::SeqCst);
+        assert!(matches!(
+            handler
+                .retire_protected_exact(&location, b"original bytes")
+                .await,
+            Err(SecureStorageError::PermissionDenied { .. })
+        ));
+        clock.fail.store(true, Ordering::SeqCst);
+        assert!(matches!(
+            handler.retire_protected_exact(&location, b"original bytes").await,
+            Err(SecureStorageError::Storage { source: Some(cause), .. })
+                if cause.downcast_ref::<aura_core::effects::TimeError>().is_some()
+        ));
+        assert_eq!(
+            handler
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?,
+            b"original bytes"
+        );
+        drop(handler);
+        let reopened =
+            FilesystemFallbackSecureStorageHandler::with_base_path(profile.path().into());
+        reopened.selected_clock.select(clock.clone());
+        clock.fail.store(false, Ordering::SeqCst);
+        clock.now.store(500, Ordering::SeqCst);
         assert!(
-            !first_handler
-                .retire_protected_exact(&location, b"original")
+            reopened
+                .retire_protected_exact(&location, b"original bytes")
                 .await?
         );
-        assert!(!first_handler.secure_exists(&location).await?);
+        assert!(!reopened.secure_exists(&location).await?);
+        assert!(
+            !reopened
+                .retire_protected_exact(&location, b"original bytes")
+                .await?
+        );
         Ok(())
     }
 }
