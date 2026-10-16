@@ -2653,7 +2653,7 @@ fn parse_http_endpoint_with_policy(
     let loopback = localhost_port.is_some() || socket.is_some_and(|addr| addr.ip().is_loopback());
     let private_lan =
         socket.is_some_and(|addr| matches!(addr.ip(), std::net::IpAddr::V4(ip) if ip.is_private()));
-    if !loopback && !(policy.allows_private_lan() && private_lan) {
+    if !(loopback || (policy.allows_private_lan() && private_lan)) {
         return Err(aura_core::AuraError::invalid(
             "plain HTTP bootstrap broker URLs are restricted to loopback endpoints",
         ));
