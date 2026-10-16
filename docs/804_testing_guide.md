@@ -1113,6 +1113,17 @@ source on any refusal; keep the original profile and transfer available for a
 permitted retry. The local browser approval/persistence/reopen scenario remains
 separate evidence for browser storage and mounted controls.
 
+For a future browser recipient on Host B, keep the browser driver's broker
+endpoint on `127.0.0.1`. The harness-only
+`scripts/harness/lan/browser-broker-relay.sh <recipient-loopback-port> -- <batch.sh ...>`
+owns an SSH reverse forward from Host A's authenticated LAN broker to Host B's
+loopback listener for the whole batch, starting before `fresh.sh` launches
+the recipient browser. The SSH command carries no broker bearer or invitation
+token; browser provisioning must keep those in owner-private configuration,
+outside URLs, logs and process arguments. Relay port readiness does not prove
+registration, signed delivery, receiver ACK, host acknowledgment or reopen;
+the paired checklist still needs those exact authenticated witnesses.
+
 The native LAN finalizer takes an owner-only, bounded exclusive lease after
 private ToolApi helpers release their shared leases. It then stops the original
 REPL and requires the same-checkout owned-process inventory to be empty before
