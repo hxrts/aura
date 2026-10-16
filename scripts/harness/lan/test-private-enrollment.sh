@@ -131,6 +131,34 @@ jq -e '.validation_failure=="invalid_host_ack_id"' \
 rg -Fq "$secret" "$failure_root/barbara-web-browser-malformed-ack.raw-private.json"
 ! rg -Fq "$secret" "$fixture/malformed-stdout" "$fixture/malformed-stderr" \
   "$failure_root/barbara-web-browser-malformed-ack.validation.json"
+oversized="$fixture/oversized-response"
+printf '%s' "$browser_snapshot" > "$oversized"
+head -c 1048577 /dev/zero | tr '\0' ' ' >> "$oversized"
+! lan_private_receipt barbara-web ui_state browser-oversized \
+  < "$oversized" > "$fixture/oversized-stdout" 2> "$fixture/oversized-stderr"
+oversized_prefix="$failure_root/barbara-web-browser-oversized.raw-prefix-private.bin"
+oversized_reason="$failure_root/barbara-web-browser-oversized.validation.json"
+jq -e --arg token "$AURA_E2E_RUN_TOKEN" \
+  '.run_token==$token and .instance_id=="barbara-web" and .method=="ui_state" and
+   .label=="browser-oversized" and .validation_failure=="response_too_large" and
+   .capture_limit_bytes==1048576 and .captured_prefix_bytes==1048576 and
+   .truncated==true and .raw_response_custody=="owner_only_bounded_prefix"' \
+  "$oversized_reason" >/dev/null
+[[ $(wc -c < "$oversized_prefix") == 1048576 ]]
+[[ $(stat -c '%a' "$oversized_prefix" 2>/dev/null || stat -f '%Lp' "$oversized_prefix") == 600 ]]
+[[ $(stat -c '%a' "$oversized_reason" 2>/dev/null || stat -f '%Lp' "$oversized_reason") == 600 ]]
+rg -Fq "$secret" "$oversized_prefix"
+! rg -Fq "$secret" "$fixture/oversized-stdout" "$fixture/oversized-stderr" "$oversized_reason"
+[[ ! -e "$failure_root/barbara-web-browser-oversized.raw-private.json" ]]
+ln -s "$fixture/snapshot" "$failure_root/barbara-web-oversized-link.raw-prefix-private.bin"
+! lan_private_receipt barbara-web ui_state oversized-link < "$oversized" >/dev/null
+[[ -L "$failure_root/barbara-web-oversized-link.raw-prefix-private.bin" ]]
+[[ ! -e "$failure_root/barbara-web-oversized-link.validation.json" ]]
+collision_reason="$failure_root/barbara-web-oversized-collision.validation.json"
+printf '%s\n' 'preexisting-owner-receipt' > "$collision_reason"
+! lan_private_receipt barbara-web ui_state oversized-collision < "$oversized" >/dev/null
+[[ $(cat "$collision_reason") == preexisting-owner-receipt ]]
+[[ ! -e "$failure_root/barbara-web-oversized-collision.raw-prefix-private.bin" ]]
 ! printf '%s\n' "$browser_event" | jq -c \
   '.payload.event.snapshot.operations[0].instance_id="foreign-op-2"' |
   lan_private_receipt barbara-web wait_for_ui_snapshot_event browser-foreign-operation >/dev/null
