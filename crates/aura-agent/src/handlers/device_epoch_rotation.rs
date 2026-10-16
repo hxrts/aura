@@ -3162,8 +3162,9 @@ mod tests {
                 for null in [false, true] {
                     let label = format!("activation-required-{field}-{null}");
                     let (issuer, _invitee, _invitation, start, _accept, proof) = Box::pin(
-                        crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                        crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock(
                             &label,
+                            std::sync::Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000)),
                         ),
                     )
                     .await;
@@ -3266,6 +3267,112 @@ mod tests {
                         None
                     );
                 }
+            }
+        });
+    }
+
+    #[test]
+    fn enrollment_prepared_immutable_record_rejects_changed_binding_before_recovery() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let label = "activation-immutable-binding";
+            let ((issuer, _invitee, _invitation, start, _accept, proof), original_owner) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                    label,
+                    Some(std::sync::Arc::new(
+                        aura_testkit::time::ManualPhysicalClock::new(5_000),
+                    )),
+                    None,
+                ),
+            )
+            .await;
+            let effects = issuer.runtime().effects();
+            let tracker = issuer.runtime().ceremony_tracker();
+            let entered = observe_activation_fault_for_test(
+                effects.as_ref(),
+                start.ceremony_id.clone(),
+                false,
+            )
+            .await;
+            issuer
+                .runtime()
+                .ceremony_runner()
+                .record_verified_enrollment_response(proof)
+                .await
+                .expect("publish original verified response");
+            let interrupted = original_owner
+                .observe_original_prepared_interruption(entered)
+                .await
+                .expect("original owner reached genuine durable preparation");
+            assert!(!interrupted.after_tree);
+            let state = tracker.get(&start.ceremony_id).await.expect("registration");
+            let original = effects.export_tree_ops().await.expect("original tree");
+            let location = enrollment_activation_location(&start.ceremony_id);
+            let authentic_bytes = effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await
+                .expect("genuine immutable prepared record");
+            let authentic: StoredEnrollmentActivation =
+                from_slice(&authentic_bytes).expect("genuine prepared codec");
+            assert_eq!(authentic.subject, issuer.authority_id());
+            assert_eq!(authentic.ceremony, state.ceremony_id);
+            for field in ["subject", "epoch", "manifest", "corrupt"] {
+                let mut record: StoredEnrollmentActivation =
+                    from_slice(&authentic_bytes).expect("genuine prepared codec");
+                match field {
+                    "subject" => record.subject = AuthorityId::new_from_entropy([42; 32]),
+                    "epoch" => record.pending_epoch = record.pending_epoch.saturating_add(1),
+                    "manifest" => record.manifest_digest = [42; 32],
+                    "corrupt" => {}
+                    _ => unreachable!(),
+                }
+                let bytes = if field == "corrupt" {
+                    vec![0xff, 0x00, 0xff]
+                } else {
+                    to_vec(&record).expect("encoded changed record")
+                };
+                let error = effects
+                    .secure_store(
+                        &location,
+                        &bytes,
+                        &[
+                            SecureStorageCapability::Read,
+                            SecureStorageCapability::Write,
+                        ],
+                    )
+                    .await
+                    .expect_err("immutable prepared record rejects changed protected bytes");
+                assert!(matches!(
+                    &error,
+                    aura_core::AuraError::PermissionDenied { .. }
+                ));
+                assert!(
+                    std::error::Error::source(&error).is_some_and(|source| {
+                        source.is::<aura_core::effects::secure::ImmutableSecureRecordMutation>()
+                    }),
+                    "{field}: refusal must come from the immutable secure-record guard"
+                );
+                assert_eq!(
+                    effects.export_tree_ops().await.expect("tree after refusal"),
+                    original,
+                    "{field}: no tree mutation"
+                );
+                assert_eq!(
+                    tracker
+                        .get(&start.ceremony_id)
+                        .await
+                        .expect("ceremony after refusal")
+                        .terminal_outcome,
+                    None,
+                    "{field}: no terminal acknowledgment"
+                );
+                assert_eq!(
+                    effects
+                        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                        .await
+                        .expect("unchanged prepared bytes"),
+                    authentic_bytes,
+                    "{field}: no rewrite of rejected record"
+                );
             }
         });
     }
