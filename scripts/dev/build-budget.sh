@@ -163,7 +163,7 @@ canonical_workload_identity() {
     [[ ! -e "$root/$relative" && ! -L "$root/$relative" ]] || input_paths+=("$relative")
   done
   inputs_hash="$(policy_hash_files "$root" "${input_paths[@]}")" || return 1
-  tool_hash="$(policy_tool_identity)" || return 1
+  tool_hash="$(policy_tool_identity "$root" "$root")" || return 1
   just_binary="$(command -v just)" || return 1
   [[ -f "$just_binary" && ! -L "$just_binary" ]] || return 1
   just_hash="$(sha256sum "$just_binary" | awk '{print $1}')"

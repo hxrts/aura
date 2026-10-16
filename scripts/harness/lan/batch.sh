@@ -25,7 +25,7 @@ if [[ "${AURA_E2E_ENROLLMENT_RECIPIENT:-native}" == browser &&
 fi
 checkpoint=$(git rev-parse HEAD)
 [[ -z "$(git status --porcelain --untracked-files=no)" ]] || { echo 'LAN checkpoint is dirty' >&2; exit 1; }
-[[ $(cat ".tmp/main-smoke-$checkpoint/validated-commit") == "$checkpoint" ]] || { echo 'matching complete smoke evidence missing' >&2; exit 1; }
+bash scripts/ci/main-smoke.sh --verify >/dev/null || { echo 'matching complete smoke evidence missing' >&2; exit 1; }
 quoted_root=${AURA_E2E_REMOTE_ROOT//\'/\'\\\'\'}
 remote_checkpoint=$(ssh -o BatchMode=yes -o ConnectTimeout=15 "$AURA_E2E_REMOTE" "cd '$quoted_root' && test -z \"\$(git status --porcelain --untracked-files=no)\" && git rev-parse HEAD")
 [[ "$remote_checkpoint" == "$checkpoint" ]] || { echo 'remote checkpoint differs; finish shipping first' >&2; exit 1; }

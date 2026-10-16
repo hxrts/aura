@@ -3,14 +3,16 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/aura-web-prebuilt-test.XXXXXX")"
+scratch="$(cd "$scratch" && pwd -P)"
 trap 'rm -rf "$scratch"' EXIT
 project="$scratch/project"
 public="$project/target/dx/aura-web/release/web/public"
-mkdir -p "$project/scripts/web" "$project/crates/aura-web/node_modules/ws" \
+mkdir -p "$project/scripts/web" "$project/scripts/dev" "$project/crates/aura-web/node_modules/ws" \
   "$project/crates/aura-web/public/assets" "$project/crates/aura-web/src" \
   "$public/assets" "$scratch/bin"
 cp "$repo_root/scripts/web/serve-static.sh" "$repo_root/scripts/web/log-bootstrap.sh" \
   "$repo_root/scripts/web/prebuilt-provenance.sh" "$project/scripts/web/"
+cp "$repo_root/scripts/dev/policy-dependency-inputs.sh" "$project/scripts/dev/"
 : > "$project/Cargo.toml"
 : > "$project/Cargo.lock"
 printf 'pinned-toolchain=v1\n' > "$project/flake.lock"
@@ -26,13 +28,28 @@ for command in npm node; do
 printf '%s\n' "${0##*/}" >> "$CALLS_FILE"
 EOF
 done
+for command in cargo rustc dx wasm-bindgen wasm-opt; do
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$scratch/bin/$command"
+done
 cat > "$project/scripts/web/dx.sh" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == --selected-tool-inventory ]]; then cp "$AURA_WEB_FIXTURE_INVENTORY" "$2"; exit; fi
 echo dx >> "$CALLS_FILE"
 exit 99
 EOF
 chmod +x "$scratch/bin/"* "$project/scripts/web/dx.sh"
-printf 'target/\n' > "$project/.gitignore"
+source "$project/scripts/web/prebuilt-provenance.sh"
+tool_inventory="$scratch/tool-inventory"
+export AURA_WEB_FIXTURE_INVENTORY="$tool_inventory"
+: > "$tool_inventory"
+chmod 600 "$tool_inventory"
+mkdir -p "$scratch/binaryen/lib"
+printf 'library-v1\n' > "$scratch/binaryen/lib/libbinaryen.dylib"
+for command in node npm cargo rustc dx wasm-bindgen wasm-opt; do
+  aura_web_record_selected_tool "$tool_inventory" "$command" "$scratch/bin/$command"
+done
+aura_web_record_binaryen_libraries "$tool_inventory" "$scratch/binaryen/lib"
+printf 'target/\nartifacts/\n' > "$project/.gitignore"
 git -C "$project" init -q
 git -C "$project" add .
 GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid \
@@ -70,7 +87,9 @@ expect 1
 [[ -f "$public/index.html" && -f "$public/assets/app.js" ]]
 valid_bundle
 touch -t 200001010000 "$public/index.html"
-aura_web_write_prebuilt_provenance "$project" "$public"
+AURA_HARNESS_WEB_PREBUILT_ONLY=0 aura_web_write_prebuilt_provenance "$project" "$public" "$tool_inventory" \
+  "$(aura_web_clean_commit "$project")" "$(aura_web_clean_tree "$project")" \
+  "$(aura_web_build_config_digest "$project")"
 expect 0
 printf 'changed source\n' > "$project/crates/aura-web/src/main.rs"
 expect 1

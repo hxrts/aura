@@ -15,7 +15,8 @@ recipient_actor=$(if [[ "$recipient_kind" == browser ]]; then echo barbara-web; 
 
 commit=$(git -C "$AURA_E2E_ROOT" rev-parse HEAD)
 smoke_file="$AURA_E2E_ROOT/.tmp/main-smoke-$commit/validated-commit"
-[[ -f "$smoke_file" && $(cat "$smoke_file") == "$commit" ]] || {
+[[ -f "$smoke_file" && ! -L "$smoke_file" ]] &&
+  (cd "$AURA_E2E_ROOT" && bash scripts/ci/main-smoke.sh --verify >/dev/null) || {
   echo 'paired preflight requires matching local smoke receipt' >&2; exit 1;
 }
 web_index=${AURA_E2E_WEB_INDEX:-$AURA_E2E_ROOT/target/dx/aura-web/release/web/public/index.html}

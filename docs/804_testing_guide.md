@@ -173,6 +173,27 @@ Quint and other verification tools generate models, traces, and invariants. They
 
 Declare package, features, test binary/filter and expected discovered fixtures before each batch. Actual discovery and successful nonignored execution are both required. Preserve valid receipts for unchanged scopes; rerun scopes affected by a changed dependency. Keep one active vertical integration batch per worktree and compile before expanding adjacent functionality. The two-worktree and external build setup stay unchanged.
 
+Run the canonical fixed-commit smoke with `bash scripts/ci/main-smoke.sh` from
+a clean checkout. It executes the six declared Clippy, web, app, UI, agent and
+terminal commands through separate guarded `handoff-smoke` lifetimes. The owner
+keeps protected output and build receipts for each attempt. Repeating it on the
+same clean revision reuses only passed steps whose exact command, selected
+tool bytes, build and provider selectors, output hashes and keyring cleanup
+still match. A failed or refused step has no complete-smoke marker; resume
+starts at that step while retaining its first protected failure log. Each
+executed step receives a private empty test keyring, removed after its owned
+process finishes. This replaces the ignored `work/handoff/smoke.sh` runner.
+`bash scripts/ci/main-smoke.sh --verify` is the preflight contract: LAN
+helpers require it instead of trusting the commit string in
+`.tmp/main-smoke-<commit>/validated-commit`. Step receipts prove execution of
+the six commands, not durability of external native profiles or provenance of
+shipped binaries. The LAN ship's artifact hashes and web prebuilt provenance
+remain separate required checks.
+Reusable compile and web-build identities also bind Cargo configuration from
+the actual working directory through checkout ancestors, including files
+outside the repository. Adding, changing or removing an ancestor config
+invalidates prior exact-input evidence; linked config paths refuse reuse.
+
 Enrollment is the first reusable complete-flow fixture target. Extend canonical setup/export, explicit verifier transfer, issuer/receiver execution, app host-finalization, terminal publication, persistence and cleanup/reopen seams. Keep generic effect controls in testkit and runtime assembly in its sanctioned owner. Existing model-only AMP steps and incomplete fixture paths remain coverage gaps until real execution proves them.
 
 Select the primary evidence using the [coverage assignment matrix](805_simulation_guide.md#assign-coverage-before-execution). When a reusable fixture cannot execute a required stage, record the missing seam and its dependent flow; extending that seam precedes repeated E2E attempts for the same local blocker.
@@ -321,7 +342,11 @@ Home role commands are tracked operations: `/op` and `/deop` publish `grant_mode
 Browser `ui_state` remains observation-only and must not perform implicit navigation or state recovery. Explicit recovery goes through `recover_ui_state` and `readStructuredUiStateWithNavigationRecovery(...)`. DOM and text fallback paths are diagnostics only and must not become success-path observation behavior.
 
 For fixed-commit browser runs, the guarded web build records the clean source
-commit and hashes of its emitted index, JS and WASM files. The prebuilt-only
+commit and source tree, actual selected Node, npm, Cargo, Rust, Dioxus,
+wasm-bindgen and wasm-opt executable bytes, Binaryen library bytes, effective
+compiler configuration, and hashes of its emitted index, JS and WASM files.
+The selected-tool inventory stays in a protected local artifact; the public
+bundle marker contains only its digest. The prebuilt-only
 static server accepts that exact build when Dioxus reuses byte-identical assets
 without updating their mtimes. A changed source tree or changed asset rejects
 the marker; browser startup never rebuilds inside a live harness run.
@@ -1686,15 +1711,19 @@ Within one budgeted lifetime, use `bash scripts/dev/build-phase.sh compile --
 COMMAND...`, followed by `discovery` and `execution` phases with
 `--expected-tests FILE -- COMMAND...`. The file contains one exact Rust test
 name per line. Discovery requires standard `--list` output, execution requires
-default pretty text harness output without `--quiet` or `--nocapture` (JSON
-output is unsupported); both require a
-nonempty exact match. The runner executes the command itself and records its
+pretty text harness output without `--quiet` (JSON output is unsupported);
+`--nocapture` is supported when protected phase output retains assertions.
+Both phases require a nonempty exact match. The runner executes the command itself and records its
 raw exit separately from inventory validation. The expected inventory is
 selected before command execution; missing tests fail with exit status 78.
 Execution counts include pretty harness `ok` and `FAILED` terminal results,
 with separate passed, failed and ignored counts. An ignored test cannot satisfy
 the required execution inventory. A matching inventory preserves a failing
-command's original exit status, including 101.
+command's original exit status, including 101. The canonical
+`run-exact-fixtures.sh` batch compiles one executable, discovers every declared
+exact name before running any fixture, then executes those names with
+fail-fast behavior. A missing later declaration prevents all execution; a
+source change during discovery or execution refuses the batch.
 Use a separate `disposal` phase for an actual native shutdown/cleanup command;
 its result remains independent of semantic or compile failure. Completion
 prints the final status and receipt path, so coordinators can inspect one

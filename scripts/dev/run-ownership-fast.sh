@@ -77,7 +77,7 @@ modes=(actor-owned-task-spawn semantic-owner-no-spawn optional-owner-boundary
 scope_json="$(printf '%s\n' "${paths[@]}" | jq -Rs 'split("\n") | map(select(length>0))')"
 modes_json="$(printf '%s\n' "${modes[@]}" | jq -Rs 'split("\n") | map(select(length>0))')"
 scope_hash="$(policy_hash_files "$root" "${paths[@]}")"
-tool_hash="$(policy_tool_identity)"
+tool_hash="$(policy_tool_identity "$root" "$root")"
 compile_graph=''
 graph_certified=false
 if [[ "$stage" == compile && "$certify_compile_inputs" == 1 ]]; then
@@ -166,7 +166,7 @@ done
   echo 'run-ownership-fast: source changed during batch' >&2; exit 1;
 }
 [[ "$scope_hash" == "$(policy_hash_files "$root" "${paths[@]}")" &&
-   "$tool_hash" == "$(policy_tool_identity)" &&
+   "$tool_hash" == "$(policy_tool_identity "$root" "$root")" &&
    ( "$graph_certified" != true ||
      "$compile_graph" == "$(policy_ownership_compile_inputs "$root" reuse)" ) &&
    "$(sha256sum "$lint_binary" | awk '{print $1}')" == \

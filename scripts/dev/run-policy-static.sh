@@ -43,7 +43,7 @@ fi
 frozen="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
 [[ -n "$frozen" && "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || exit 1
 toolkit_hash="$(policy_toolkit_inputs "$root")"
-tool_hash="$(policy_tool_identity)"
+tool_hash="$(policy_tool_identity "$root" "$root")"
 binary="$root/toolkit/xtask/target/debug/aura-toolkit-xtask"
 if [[ "$stage" == compile ]]; then
   aura_receipt_update --arg toolkit "$toolkit_hash" --arg tool "$tool_hash" \
@@ -54,7 +54,7 @@ if [[ "$stage" == compile ]]; then
   aura_receipt_update --arg hash "$(sha256sum "$binary" | awk '{print $1}')" \
     '.metadata.policy_toolkit.binary_hash=$hash'
   [[ "$toolkit_hash" == "$(policy_toolkit_inputs "$root")" &&
-     "$tool_hash" == "$(policy_tool_identity)" &&
+     "$tool_hash" == "$(policy_tool_identity "$root" "$root")" &&
      "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || exit 1
   exit
 fi
@@ -83,7 +83,7 @@ AURA_RECEIPT_EVENT_KIND=dependency aura_receipt_update --arg check "$check" --ar
 bash "$repo_root/scripts/dev/build-phase.sh" execution -- "$binary" check "$check"
 [[ "$scope_hash" == "$(policy_hash_files "$root" "${scope[@]}")" &&
    "$toolkit_hash" == "$(policy_toolkit_inputs "$root")" &&
-   "$tool_hash" == "$(policy_tool_identity)" &&
+   "$tool_hash" == "$(policy_tool_identity "$root" "$root")" &&
    "$frozen" == "$(aura_receipt_source_fingerprint "$root")" &&
    "$(sha256sum "$binary" | awk '{print $1}')" == \
      "$(jq -r '.metadata.policy_static.binary_hash' "$AURA_BUILD_RECEIPT")" ]] || exit 1

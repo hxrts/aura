@@ -5,6 +5,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/aura-policy-deps.XXXXXX")"
 fixture="$(cd "$fixture" && pwd -P)"
 trap 'rm -rf "$fixture"' EXIT
+env -i PATH="$PATH" FIXTURE_ONLY_SECRET=fixture-only bash -xc \
+  'source "$1"; policy_exported_names' _ \
+  "$repo_root/scripts/dev/policy-dependency-inputs.sh" \
+  > "$fixture/exported-names" 2> "$fixture/exported-trace"
+[[ -s "$fixture/exported-names" ]]
+if rg -q 'fixture-only|FIXTURE_ONLY_SECRET=' \
+    "$fixture/exported-names" "$fixture/exported-trace"; then
+  echo 'exported value leaked under Bash tracing' >&2; exit 1
+fi
 project="$fixture/project"
 mkdir -p "$project/toolkit/xtask/src" "$project/toolkit/xtask/target/debug" \
   "$project/crates/aura-web/src/harness" \
@@ -116,16 +125,32 @@ if policy_toolkit_inputs "$project" > "$fixture/output"; then exit 1; fi
 rm "$project/toolkit/xtask/src/linked.rs"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/fakebin/wrapper"
 chmod +x "$fixture/fakebin/wrapper"
-wrapper_before="$(RUSTC_WORKSPACE_WRAPPER="$fixture/fakebin/wrapper" policy_tool_identity)"
+wrapper_before="$(RUSTC_WORKSPACE_WRAPPER="$fixture/fakebin/wrapper" policy_tool_identity "$project" "$project")"
 printf '# updated\n' >> "$fixture/fakebin/wrapper"
-wrapper_after="$(RUSTC_WORKSPACE_WRAPPER="$fixture/fakebin/wrapper" policy_tool_identity)"
+wrapper_after="$(RUSTC_WORKSPACE_WRAPPER="$fixture/fakebin/wrapper" policy_tool_identity "$project" "$project")"
 [[ "$wrapper_before" != "$wrapper_after" ]]
 mkdir -p "$fixture/cargo-home"
 printf '[build]\n' > "$fixture/cargo-home/config.toml"
-config_before="$(CARGO_HOME="$fixture/cargo-home" policy_tool_identity)"
+config_before="$(CARGO_HOME="$fixture/cargo-home" policy_tool_identity "$project" "$project")"
 printf 'jobs = 1\n' >> "$fixture/cargo-home/config.toml"
-config_after="$(CARGO_HOME="$fixture/cargo-home" policy_tool_identity)"
+config_after="$(CARGO_HOME="$fixture/cargo-home" policy_tool_identity "$project" "$project")"
 [[ "$config_before" != "$config_after" ]]
+ancestor_before="$(policy_tool_identity "$project" "$project")"
+mkdir -p "$fixture/.cargo"
+printf '[build]\njobs = 1\n' > "$fixture/.cargo/config.toml"
+ancestor_added="$(policy_tool_identity "$project" "$project")"
+[[ "$ancestor_before" != "$ancestor_added" ]]
+printf '[build]\njobs = 2\n' > "$fixture/.cargo/config.toml"
+ancestor_changed="$(policy_tool_identity "$project" "$project")"
+[[ "$ancestor_added" != "$ancestor_changed" ]]
+rm "$fixture/.cargo/config.toml"
+[[ "$ancestor_before" == "$(policy_tool_identity "$project" "$project")" ]]
+rmdir "$fixture/.cargo"
+ln -s "$project/.cargo" "$fixture/.cargo"
+if policy_tool_identity "$project" "$project" > "$fixture/output"; then
+  echo 'linked ancestor Cargo config directory was accepted' >&2; exit 1
+fi
+rm "$fixture/.cargo"
 cat > "$project/Justfile" <<'JUST'
 _policy-check *ARGS:
     AURA_BUILD_WAIT_SECONDS=1800 bash scripts/dev/build-budget.sh --lane gates -- cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- {{ ARGS }}

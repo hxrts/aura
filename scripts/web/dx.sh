@@ -127,6 +127,21 @@ wasm_bin="$wasm_root/bin/wasm-bindgen"
 wasm_opt_bin="$binaryen_root/bin/wasm-opt"
 web_node_bin="$repo_root/crates/aura-web/node_modules/.bin"
 
+if [[ "${1:-}" == --selected-tool-inventory ]]; then
+  inventory="${2:-}"
+  [[ -f "$inventory" && ! -L "$inventory" && -O "$inventory" &&
+     "$(wc -c < "$inventory")" -eq 0 ]] || exit 2
+  source "$script_dir/prebuilt-provenance.sh"
+  for name in node npm cargo rustc; do
+    aura_web_record_selected_tool "$inventory" "$name" "$(command -v "$name")"
+  done
+  aura_web_record_selected_tool "$inventory" dx "$dx_bin"
+  aura_web_record_selected_tool "$inventory" wasm-bindgen "$wasm_bin"
+  aura_web_record_selected_tool "$inventory" wasm-opt "$wasm_opt_bin"
+  aura_web_record_binaryen_libraries "$inventory" "$binaryen_root/lib"
+  exit 0
+fi
+
 if [[ -f Dioxus.toml ]]; then
   mkdir -p public/assets
 fi
@@ -169,6 +184,16 @@ export NO_DOWNLOADS=1
 
 # Ensure cargo uses the workspace root target directory
 export CARGO_TARGET_DIR="$repo_root/target"
+
+if [[ -n "${AURA_WEB_TOOL_INVENTORY:-}" ]]; then
+  source "$script_dir/prebuilt-provenance.sh"
+  aura_web_record_selected_tool "$AURA_WEB_TOOL_INVENTORY" cargo "$(command -v cargo)"
+  aura_web_record_selected_tool "$AURA_WEB_TOOL_INVENTORY" rustc "$(command -v rustc)"
+  aura_web_record_selected_tool "$AURA_WEB_TOOL_INVENTORY" dx "$dx_bin"
+  aura_web_record_selected_tool "$AURA_WEB_TOOL_INVENTORY" wasm-bindgen "$wasm_bin"
+  aura_web_record_selected_tool "$AURA_WEB_TOOL_INVENTORY" wasm-opt "$wasm_opt_bin"
+  aura_web_record_binaryen_libraries "$AURA_WEB_TOOL_INVENTORY" "$binaryen_root/lib"
+fi
 
 if [[ "${1:-}" != build ]]; then
   exec "$dx_bin" "$@"

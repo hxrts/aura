@@ -194,9 +194,13 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/fakebin/native-cc"
 native_before="$(CC=native-cc policy_ownership_compile_inputs "$project" reuse)"
 printf '# changed executable bytes\n' >> "$fixture/fakebin/native-cc"
 [[ "$native_before" != "$(CC=native-cc policy_ownership_compile_inputs "$project" reuse)" ]]
-compgen() { return 127; }
+# A malformed exported-name producer must refuse certification instead of
+# silently producing an incomplete native selector inventory.
+export() {
+  if [[ "$1" == -p ]]; then printf 'invalid declaration\n'; else builtin export "$@"; fi
+}
 if policy_ownership_compile_inputs "$project" reuse > "$fixture/output"; then exit 1; fi
-unset -f compgen
+unset -f export
 mv "$project/crates" "$project/crates-real"
 ln -s crates-real "$project/crates"
 if policy_ownership_compile_inputs "$project" reuse > "$fixture/output"; then exit 1; fi

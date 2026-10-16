@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # Input identities for the existing ownership and toolkit policy owners.
+policy_exported_names() {
+  # `compgen` is absent from the pinned noninteractive Nix Bash. Filter
+  # values before Bash can trace them.
+  export -p | awk '
+    !/^declare -x [A-Za-z_][A-Za-z0-9_]*(=|$)/ { bad = 1; next }
+    { sub(/^declare -x /, ""); sub(/=.*/, ""); print; count++ }
+    END { if (bad || !count) exit 2 }
+  '
+}
 # Source this file; policy verdicts remain in the Rust checks.
 policy_hash_files() {
   local root="$1" relative component current
@@ -127,7 +136,7 @@ policy_ownership_compile_inputs() {
     [[ ! -e "$root/$relative" && ! -L "$root/$relative" ]] || paths+=("$relative")
   done
   source_hash="$(policy_hash_files "$root" "${paths[@]}")" || { rm -rf "$scratch"; return 2; }
-  tool_hash="$(policy_tool_identity)" || { rm -rf "$scratch"; return 2; }
+  tool_hash="$(policy_tool_identity "$root" "$root")" || { rm -rf "$scratch"; return 2; }
   native_hash="$(policy_ownership_native_identity)" || { rm -rf "$scratch"; return 2; }
   {
     printf 'local:%s\n' "$source_hash"
@@ -209,7 +218,7 @@ policy_ownership_native_identity() {
     HOST TARGET RUST_TARGET_PATH RUSTDOCFLAGS
     NIX_CC NIX_CFLAGS_COMPILE NIX_LDFLAGS NIX_CFLAGS_LINK NIX_DONT_SET_RPATH
   )
-  exported="$(compgen -e)" || return 2
+  exported="$(policy_exported_names)" || return 2
   while IFS= read -r key; do
     case "$key" in
       CFLAGS_*|CXXFLAGS_*|CPPFLAGS_*|LDFLAGS_*)
@@ -301,7 +310,13 @@ policy_ownership_tree_hash() {
   } | shasum -a 256 | awk '{print $1}')
 }
 policy_tool_identity() {
-  local tool resolved key value selected cargo_home
+  local target_root="${1:?checkout root required}" cargo_cwd="${2:?Cargo working directory required}"
+  local tool resolved key value selected cargo_home current config
+  target_root="$(cd "$target_root" && pwd -P)" || return 2
+  cargo_cwd="$(cd "$cargo_cwd" && pwd -P)" || return 2
+  [[ "$cargo_cwd" == "$target_root" || "$cargo_cwd" == "$target_root/"* ]] || return 2
+  policy_no_link_components "$target_root" || return 2
+  policy_no_link_components "$cargo_cwd" || return 2
   {
     for tool in rustc cargo; do
       resolved="$(command -v "$tool")"
@@ -331,6 +346,23 @@ policy_tool_identity() {
         [[ -f "$key" && ! -L "$key" ]] || return 2
         sha256sum "$key"
       }
+    done
+    # Cargo loads configuration from the invocation directory and every
+    # ancestor, including parents outside the checkout. Bind addition and
+    # removal as well as changed bytes; linked directories/files are unsafe.
+    current="$cargo_cwd"
+    while :; do
+      [[ ! -L "$current/.cargo" &&
+         ( ! -e "$current/.cargo" || -d "$current/.cargo" ) ]] || return 2
+      for config in "$current/.cargo/config" "$current/.cargo/config.toml"; do
+        [[ ! -e "$config" && ! -L "$config" ]] && continue
+        [[ -f "$config" && ! -L "$config" ]] || return 2
+        printf 'ancestor-config:%s\0' "$config"
+        sha256sum "$config"
+      done
+      [[ "$current" != / ]] || break
+      current="${current%/*}"
+      [[ -n "$current" ]] || current=/
     done
   } | sha256sum | awk '{print $1}'
 }

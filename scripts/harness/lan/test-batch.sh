@@ -5,9 +5,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 export FIXTURE_ROOT="$fixture"
-mkdir -p "$fixture/bin" "$fixture/local/work/handoff" "$fixture/local/scripts/harness/lan" "$fixture/remote root's/scripts/harness/lan" "$fixture/local/.tmp/main-smoke-fixture-commit"
+mkdir -p "$fixture/bin" "$fixture/local/work/handoff" "$fixture/local/scripts/harness/lan" "$fixture/local/scripts/ci" "$fixture/remote root's/scripts/harness/lan" "$fixture/local/.tmp/main-smoke-fixture-commit"
 cp "$here/batch.sh" "$here/finish-batch.sh" "$fixture/local/scripts/harness/lan/"
 printf '%s\n' fixture-commit > "$fixture/local/.tmp/main-smoke-fixture-commit/validated-commit"
+cat > "$fixture/local/scripts/ci/main-smoke.sh" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$1" == --verify && "$(cat .tmp/main-smoke-fixture-commit/validated-commit)" == fixture-commit ]]
+MOCK
 cat > "$fixture/bin/git" <<'MOCK'
 #!/usr/bin/env bash
 case "$1" in rev-parse) echo fixture-commit;; status) :;; *) exit 2;; esac

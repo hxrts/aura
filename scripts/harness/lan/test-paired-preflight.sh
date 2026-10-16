@@ -12,6 +12,11 @@ export AURA_E2E_WEB_INDEX="$fixture/index.html" FIXTURE_COMMIT=fixture-commit
 export AURA_E2E_LOCAL_CONFIG="$AURA_E2E_ROOT/.tmp/e2e/enrollment-provision-$AURA_E2E_RUN_TOKEN/host-a.toml"
 export AURA_E2E_REMOTE_CONFIG=".tmp/e2e/enrollment-provision-$AURA_E2E_RUN_TOKEN/host-b.toml"
 mkdir -p "$fixture/bin" "$AURA_E2E_ROOT/.tmp/main-smoke-$FIXTURE_COMMIT" "$(dirname "$AURA_E2E_LOCAL_CONFIG")"
+mkdir -p "$AURA_E2E_ROOT/scripts/ci"
+cat > "$AURA_E2E_ROOT/scripts/ci/main-smoke.sh" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$1" == --verify && "$(cat .tmp/main-smoke-$FIXTURE_COMMIT/validated-commit)" == "$FIXTURE_COMMIT" ]]
+MOCK
 mkdir -p "$AURA_E2E_REMOTE_ROOT/$(dirname "$AURA_E2E_REMOTE_CONFIG")"
 mkdir -m 700 "$fixture/evidence"
 printf '%s\n' "$FIXTURE_COMMIT" > "$AURA_E2E_ROOT/.tmp/main-smoke-$FIXTURE_COMMIT/validated-commit"
