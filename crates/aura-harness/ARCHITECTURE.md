@@ -104,6 +104,9 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   trust. Signing readiness is established by successful runtime export;
   unavailable or unready export fails explicitly. The coordinator rejects
   onboarding before export, and scenarios own the account-creation prerequisite.
+  The browser driver's canonical immediate setup export is a runtime read: its
+  page-owned queue result completes the command without demanding a later UI
+  revision. Other semantic submissions retain the mutation revision floor.
 
 - Config-first execution: invalid run or scenario configs fail before instance startup.
 - Scenario list counts use `u32` on the wire; comparison with a local snapshot

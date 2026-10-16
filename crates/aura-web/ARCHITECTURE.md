@@ -42,7 +42,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   the bounded app workflow. Its immediate `DeviceEnrollmentSetup` value carries
   the exact runtime-issued code; export has no enrollment ceremony handle and
   never stages identity or fabricates device identifiers. Missing runtime or
-  signing context rejects the command.
+  signing context rejects the command. It is a read-only immediate result, so
+  the browser driver may observe the current published UI snapshot afterward;
+  it must not infer an enrollment operation or a new UI revision from export.
 
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;

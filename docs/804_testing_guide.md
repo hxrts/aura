@@ -320,6 +320,13 @@ Home role commands are tracked operations: `/op` and `/deop` publish `grant_mode
 
 Browser `ui_state` remains observation-only and must not perform implicit navigation or state recovery. Explicit recovery goes through `recover_ui_state` and `readStructuredUiStateWithNavigationRecovery(...)`. DOM and text fallback paths are diagnostics only and must not become success-path observation behavior.
 
+The browser driver raises a semantic revision floor for mutating commands. The
+canonical immediate `ExportDeviceEnrollmentSetup` command is a runtime read:
+its typed page-owned queue result completes the export, and the following
+`ui_state` may retain the same published revision. The Playwright smoke fixture
+executes that queue and checks the unchanged revision; it also keeps the floor
+for other semantic submissions.
+
 Browser semantic observation must fail closed when the published snapshot is unavailable. It must not silently repair by reading a live controller or model snapshot behind the harness bridge. Channel-binding responses must either carry authoritative context materialization or fail explicitly. Selected ids or labels alone are not semantic bindings.
 
 For enrollment, assert code issuance and ceremony completion as separate

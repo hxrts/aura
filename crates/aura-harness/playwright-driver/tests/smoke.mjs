@@ -158,6 +158,25 @@ const fixtureHtml = `<!doctype html>
           bootstrap_transition_detail: null,
           enqueue_ready: true
         };
+        window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__ = () => {
+          const queue = window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__ ?? [];
+          for (const encoded of queue.splice(0)) {
+            const { command_id, request_json } = JSON.parse(encoded);
+            const request = JSON.parse(request_json);
+            if (request.intent !== 'ExportDeviceEnrollmentSetup') {
+              throw new Error('unexpected semantic fixture intent');
+            }
+            window.__AURA_DRIVER_PUSH_SEMANTIC_RESULT?.({
+              command_id,
+              ok: true,
+              result: {
+                submission: 'accepted',
+                handle: {},
+                value: { kind: 'device_enrollment_setup', setup_code: 'fixture-opaque-code' }
+              }
+            });
+          }
+        };
       })();
     </script>
   </body>
@@ -262,6 +281,16 @@ async function main() {
 
     const before = await driver.call('ui_state', { instance_id: 'smoke-a' });
     assert.equal(before.screen, 'contacts');
+    const setup = await driver.call('submit_semantic_command', {
+      instance_id: 'smoke-a',
+      request: {
+        intent: 'ExportDeviceEnrollmentSetup',
+        contract: { submission: { kind: 'immediate', value: 'DeviceEnrollmentSetup' } }
+      }
+    });
+    assert.equal(setup.value.kind, 'device_enrollment_setup');
+    const afterSetup = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(afterSetup.revision.semantic_seq, before.revision.semantic_seq);
     // A failed click must not strand structured ui_state behind a revision
     // floor the page never reaches (Task 23 / F-04).
     await assert.rejects(

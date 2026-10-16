@@ -1308,6 +1308,22 @@ function runSelfTest() {
       !String(submitSemanticCommand).includes("markObservationMutation("),
     "semantic submit must raise the ui-observation mutation floor exactly once at dispatch; a second local mark can strand browser ui_state behind an unreachable revision floor after startup",
   );
+  const setupExport = {
+    request: {
+      intent: "ExportDeviceEnrollmentSetup",
+      contract: { submission: { kind: "immediate", value: "DeviceEnrollmentSetup" } },
+    },
+  };
+  assert(
+    isReadOnlySetupExport("submit_semantic_command", setupExport) &&
+      !isReadOnlySetupExport("submit_semantic_command", {
+        request: { ...setupExport.request, intent: "StartDeviceEnrollment" },
+      }) &&
+      !isReadOnlySetupExport("submit_semantic_command", {
+        request: { ...setupExport.request, contract: { submission: { kind: "operation_handle" } } },
+      }),
+    "only canonical immediate signed setup export may keep the existing UI revision",
+  );
   assert(
     String(submitSemanticCommand).includes("waitForSemanticEnqueueChannelReady(") &&
       String(enqueueSemanticPayload).includes(
@@ -5591,6 +5607,17 @@ const ACTION_SETTLE_EXEMPT_METHODS: ReadonlySet<DriverMethod> = new Set([
 const ACTION_SETTLE_WINDOW_MS = 400;
 const ACTION_SETTLE_POLL_MS = 50;
 
+// The signed setup export is a typed immediate read of the selected runtime.
+// It does not publish a new UI revision. The queue result is its completion
+// witness; requiring a later revision would strand the next ui_state read.
+function isReadOnlySetupExport(method, params) {
+  const request = params?.request;
+  return method === "submit_semantic_command" &&
+    request?.intent === "ExportDeviceEnrollmentSetup" &&
+    request?.contract?.submission?.kind === "immediate" &&
+    request?.contract?.submission?.value === "DeviceEnrollmentSetup";
+}
+
 async function readActionDomFingerprint(session) {
   try {
     return await withOperationTimeout(
@@ -5682,6 +5709,7 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
   const shouldMarkActionMutation =
     instanceId &&
     ACTION_METHODS.has(method) &&
+    !isReadOnlySetupExport(method, params) &&
     sessions.has(instanceId);
   const mutationFloorBeforeAction = shouldMarkActionMutation
     ? captureObservationMutationFloor(getSession(instanceId))
