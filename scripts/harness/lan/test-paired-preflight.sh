@@ -44,6 +44,11 @@ case "$*" in
   *'sha256sum bin/aura'*)
     printf '%s  bin/aura\n%s  target/release/tool_repl\n%s  target/dx/aura-web/release/web/public/index.html\n' \
       "${FIXTURE_REMOTE_AURA_HASH:-$FIXTURE_AURA_HASH}" "$FIXTURE_REPL_HASH" "$FIXTURE_WEB_HASH";;
+  *'AURA_HARNESS_BROWSER_BROKER_AUTH='*)
+    [[ "$*" == *' develop --command '* ]] || exit 24
+    remote_command=${*: -1}
+    remote_command=${remote_command#* develop --command }
+    (cd "$AURA_E2E_REMOTE_ROOT" && bash -c "$remote_command");;
   *'AURA_BOOTSTRAP_BROKER_URL'*|*'AURA_HARNESS_BROWSER_BROKER_'*) bash -c "${@: -1}";;
   *hostname*) printf 'fixture-remote\n';;
   *) exit 2;;

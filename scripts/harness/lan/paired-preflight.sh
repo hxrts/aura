@@ -84,8 +84,11 @@ if [[ "$recipient_kind" == browser ]]; then
   [[ "$relay_port" =~ ^[0-9]+$ ]] && (( relay_port > 1023 && relay_port < 65536 )) || exit 2
   expected_remote_url="http://127.0.0.1:$relay_port"
   local_auth_hash=$(sed -n 's/^[[:space:]]*"AURA_BOOTSTRAP_BROKER_AUTH_TOKEN=\([0-9a-f]\{64\}\)",/\1/p' "$local_config" | sha256sum | cut -d' ' -f1)
+  printf -v remote_auth_cmd '%q ' bash -c \
+    'sed -n '\''s/^[[:space:]]*"AURA_HARNESS_BROWSER_BROKER_AUTH=\([0-9a-f]\{64\}\)",/\1/p'\'' "$1" | sha256sum | cut -d " " -f1' \
+    bash "$remote_config"
   remote_auth_hash=$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" \
-    "cd '$quoted_root' && sed -n 's/^[[:space:]]*\"AURA_HARNESS_BROWSER_BROKER_AUTH=\\([0-9a-f]\\{64\\}\\)\",/\\1/p' $quoted_config | sha256sum | cut -d' ' -f1")
+    "cd '$quoted_root' && $quoted_nix develop --command $remote_auth_cmd")
   [[ "$local_auth_hash" == "$remote_auth_hash" ]] || {
     echo 'paired preflight browser broker bearer differs' >&2; exit 1;
   }
