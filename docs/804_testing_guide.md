@@ -1215,16 +1215,17 @@ same-checkout process inventory meaningful when both owners use one native
 binary: a live peer must not be mistaken for a prior local orphan at admission
 or still be present when the local finalizer checks its inventory.
 
-The native `devices` list is a Settings/Devices projection. Typed
-`device_enrollment_accepted` observations may name the signed invitee or the
-other peer at `device_count=2`; event count and ordering do not identify the
-device. Require the observed set to contain the signed invitee and one
-distinct peer, with a two-device acknowledgment.
-After the exact approval operation succeeds and the two-device host
-observations appear, the paired checklist opens Settings/Devices through the
-semantic command plane. Both the signed invitee and observed peer IDs must be
-distinct entries in the canonical two-item list, before and after same-profile
-restart. The shared `SettingsSection::Devices` semantic value serializes as
+The native `devices` list is a Settings/Devices projection. Capture the
+issuer's single current device from that canonical list before issuance and
+bind it to the signed invitee, original operation, and broker message.
+`device_enrollment_accepted` observations report devices newly seen by the
+app; their history is transient. A `device_count=2` acknowledgment may name
+either the signed invitee or that original issuer device. The event alone does
+not prove membership. After the exact approval operation succeeds and this
+app-owned acknowledgment appears, the paired checklist opens Settings/Devices
+through the semantic command plane. Its canonical two-item list must contain
+the signed invitee as current and the original issuer as the distinct peer,
+before and after same-profile restart. The shared `SettingsSection::Devices` semantic value serializes as
 `"devices"` in ToolApi requests. Absence of the list on an onboarding or
 other settings section is not evidence that the canonical device record is
 missing.

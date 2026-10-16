@@ -88,12 +88,35 @@ private_wait() { # instance label predicate jq program, expected operation and d
       echo "device enrollment succeeded without its host acknowledgment; inspect $PRIVATE_RECEIPT" >&2
       return 1
     fi
+    if [[ "$label" == accepted ]] && jq -e --arg operation "$expected" \
+      --arg device "$expected_device" --arg issuer "$expected_ack_device" '
+      .payload.event.snapshot as $s |
+      any($s.operations[]?; .id=="device_enrollment" and
+        .instance_id==$operation and .state=="succeeded") and
+      any($s.runtime_events[]?; .fact.kind=="device_enrollment_accepted" and
+        .fact.device_count==2) and
+      (any($s.runtime_events[]?; .fact.kind=="device_enrollment_accepted" and
+        .fact.device_count==2 and (.fact.device_id==$device or .fact.device_id==$issuer))|not)' \
+      <<< "$response" >/dev/null; then
+      mismatch_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
+      mismatch_receipt="$mismatch_dir/accepted-host-ack-mismatch.json"
+      [[ -d "$mismatch_dir" && ! -L "$mismatch_dir" && -O "$mismatch_dir" &&
+         ! -e "$mismatch_receipt" && ! -L "$mismatch_receipt" ]] || return 1
+      (umask 077; set -C; jq -cn --arg operation "$expected" --arg device "$expected_device" \
+        --arg issuer "$expected_ack_device" '
+        {schema:1,typed_failure:"host_ack_device_binding_mismatch",
+         operation_instance:$operation,signed_manifest_device:$device,
+         original_issuer_device:$issuer}' > "$mismatch_receipt") || return 1
+      echo "host acknowledgment differs from signed invitee and original issuer; inspect $mismatch_receipt" >&2
+      return 1
+    fi
     if [[ "$label" == accepted-devices || "$label" == reopened ]] &&
       jq -e --arg device "$expected_device" --arg ack "$expected_ack_device" '
-        [.payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?|.id] as $ids |
+        [.payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?] as $items |
         .payload.event.snapshot.screen=="settings" and
-        ($ids|unique|length)==2 and
-        (($ids|index($device))==null or ($ids|index($ack))==null)' \
+        ($items|length)==2 and
+        (([$items[]|select(.id==$device and .is_current==true)]|length)!=1 or
+         ([$items[]|select(.id==$ack and .is_current==false)]|length)!=1)' \
         <<< "$response" >/dev/null; then
       mismatch_dir="$AURA_E2E_RUN_DIR/private-enrollment-$AURA_E2E_RUN_TOKEN"
       mismatch_receipt="$mismatch_dir/$label-list-mismatch.json"
@@ -138,6 +161,13 @@ private_request alex-tui submit_semantic_command open-settings \
   '{"method":"submit_semantic_command","params":{"intent":{"OpenScreen":{"screen":"settings","channel_id":null,"context_id":null}}}}'
 private_wait alex-tui settings-ready \
   '.payload.event.snapshot | .screen=="settings" and .readiness=="ready" and .quiescence.state=="settled"' ''
+issuer_device=$(jq -er '
+  [.payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?] as $items |
+  if ($items|length)==1 and $items[0].is_current==true and
+     ($items[0].id|type=="string" and test("^[0-9a-f-]{36}$"))
+  then $items[0].id else empty end' <<< "$PRIVATE_RESPONSE") || {
+  echo 'issuer original current device is absent from canonical Settings' >&2; exit 1;
+}
 
 issue_request=$(jq -ce '{method:"submit_semantic_command",params:{intent:{StartDeviceEnrollment:{device_name:"Barbara paired device",code_name:"paired-enrollment",setup_code:.payload.setup_code}}}}' \
   <<< "$setup_response") || exit 1
@@ -166,7 +196,7 @@ subject=$(jq -er '.subject' <<< "$manifest_selector")
 device=$(jq -er '.device' <<< "$manifest_selector")
 digest=$(jq -er '.manifest_digest' <<< "$manifest_selector")
 [[ "$subject" =~ ^authority-[0-9a-f-]{36}$ && "$device" =~ ^[0-9a-f-]{36}$ &&
-   "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+   "$digest" =~ ^[0-9a-f]{64}$ && "$device" != "$issuer_device" ]] || {
   echo 'issuer manifest selector has invalid shape' >&2; exit 1;
 }
 
@@ -357,22 +387,12 @@ unset latest_progress
 
 private_wait "$recipient" accepted '
   .payload.event.snapshot as $s |
-  ([ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and
-    .fact.device_count==2 and (.fact.device_id|type)=="string" and
-    (.fact.device_id|test("^[0-9a-f-]{36}$"))) ] | length) as $complete |
-  ([ $s.runtime_events[]?|select(.fact.kind=="device_enrollment_accepted" and
-    (.fact.device_id|type)=="string" and
-    (.fact.device_id|test("^[0-9a-f-]{36}$"))) | .fact.device_id ] | unique) as $ids |
-  if any($s.operations[]?; .id=="device_enrollment" and .instance_id==$operation and .state=="succeeded")
-  then $complete>0 and ($ids|length)==2 and ($ids|index($device))!=null
-  else false end' "$import_operation" "$device"
-accepted_event=$PRIVATE_RESPONSE
-host_ack_device=$(jq -er --arg device "$device" '[.payload.event.snapshot.runtime_events[]? |
-  select(.fact.kind=="device_enrollment_accepted" and
-    (.fact.device_id|type)=="string" and
-    (.fact.device_id|test("^[0-9a-f-]{36}$")) and .fact.device_id!=$device) |
-  .fact.device_id] | unique | if length==1 then .[0] else empty end' \
-  <<< "$accepted_event") || exit 1
+  any($s.operations[]?; .id=="device_enrollment" and
+    .instance_id==$operation and .state=="succeeded") and
+  any($s.runtime_events[]?; .fact.kind=="device_enrollment_accepted" and
+    .fact.device_count==2 and
+    (.fact.device_id==$device or .fact.device_id==$ack_device))' \
+  "$import_operation" "$device" "$issuer_device"
 
 # The canonical devices list is a Settings/Devices projection. Enrollment can
 # succeed during onboarding while that section is not selected; observe it in
@@ -383,9 +403,11 @@ private_request "$recipient" submit_semantic_command open-devices \
 private_wait "$recipient" accepted-devices '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device) ]|length)==1 and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$ack_device) ]|length)==1 and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]?|.id ]|unique|length)==2' "$import_operation" "$device" "$host_ack_device"
+  ([ $s.lists[]?|select(.id=="devices")|.items[]?] as $items |
+    ($items|length)==2 and
+    ([$items[]|select(.id==$device and .is_current==true)]|length)==1 and
+    ([$items[]|select(.id==$ack_device and .is_current==false)]|length)==1)' \
+  "$import_operation" "$device" "$issuer_device"
 accepted_receipt=$PRIVATE_RECEIPT
 
 private_request alex-tui get_authority_id issuer-authority '{"method":"get_authority_id","params":{}}'
@@ -409,9 +431,11 @@ private_request "$recipient" submit_semantic_command reopen-devices \
 private_wait "$recipient" reopened '
   .payload.event.snapshot as $s |
   $s.screen=="settings" and $s.readiness=="ready" and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$device) ]|length)==1 and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]?|select(.id==$ack_device) ]|length)==1 and
-  ([ $s.lists[]?|select(.id=="devices")|.items[]?|.id ]|unique|length)==2' '' "$device" "$host_ack_device"
+  ([ $s.lists[]?|select(.id=="devices")|.items[]?] as $items |
+    ($items|length)==2 and
+    ([$items[]|select(.id==$device and .is_current==true)]|length)==1 and
+    ([$items[]|select(.id==$ack_device and .is_current==false)]|length)==1)' \
+  '' "$device" "$issuer_device"
 reopened_event=$PRIVATE_RESPONSE
 reopened_receipt=$PRIVATE_RECEIPT
 private_request "$recipient" get_authority_id reopened-authority '{"method":"get_authority_id","params":{}}'
@@ -421,7 +445,7 @@ printf '%s\n%s\n' "$issuer_authority" "$reopened_authority" |
     .[1].payload.authority_id==$subject' >/dev/null || {
   echo 'reopened authority differs from signed issuer subject' >&2; exit 1;
 }
-printf '%s\n' "$reopened_event" | jq -e --arg peer "$host_ack_device" '
+printf '%s\n' "$reopened_event" | jq -e --arg peer "$issuer_device" '
   [ .payload.event.snapshot.lists[]?|select(.id=="devices")|.items[]?|select(.id==$peer)]|length==1' >/dev/null || {
   echo 'original accepted device is absent after reopen' >&2; exit 1;
 }

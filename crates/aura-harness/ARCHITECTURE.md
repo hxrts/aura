@@ -87,7 +87,11 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
   inherit an established contact route. Its checklist transfers signed setup
   and issued code/manifest/verifier through private stdin requests, keeps the
   exact approval handle and host acknowledgment, and compares authority and
-  device observations after same-profile restart. Read-only preflight records
+  canonical device observations after same-profile restart. The checklist
+  captures the original issuer's current device before issuance and requires
+  the signed invitee and issuer to be distinct canonical members; a transient
+  two-device host event for either bound device is not a second roster entry.
+  Read-only preflight records
   fixed commits, compared artifacts, planned host/process identity and the
   development-only broker before either owner starts; the result records
   actual process identity and receipts. Native restart retains the original
