@@ -4791,6 +4791,33 @@ mod committed_receipt_tests {
                         historical.validate().is_err(),
                         "v3 body cannot authorize the current five-domain approval"
                     );
+                    let mut reordered = serde_json::to_value(&current)
+                        .expect("current intent has a JSON-compatible mutation shape");
+                    reordered["domains"]
+                        .as_array_mut()
+                        .expect("current intent has ordered domains")
+                        .swap(0, 1);
+                    let reordered: aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent =
+                        serde_json::from_value(reordered)
+                            .expect("reordered domains remain parseable");
+                    assert!(
+                        reordered.validate().is_err(),
+                        "reordered domains cannot authorize the current approval"
+                    );
+                    let mut substituted = serde_json::to_value(&current)
+                        .expect("current intent has a JSON-compatible mutation shape");
+                    let domains = substituted["domains"]
+                        .as_array_mut()
+                        .expect("current intent has ordered domains");
+                    let replacement = domains[2].clone();
+                    domains[3] = replacement;
+                    let substituted: aura_invitation::enrollment_signing_intent::EnrollmentSigningIntent =
+                        serde_json::from_value(substituted)
+                            .expect("substituted domain remains parseable");
+                    assert!(
+                        substituted.validate().is_err(),
+                        "a substituted issuer return domain cannot authorize current approval"
+                    );
                 }
                 let sibling_app = std::sync::Arc::new(async_lock::RwLock::new(
                     aura_app::AppCore::with_runtime(
