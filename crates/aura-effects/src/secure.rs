@@ -4989,6 +4989,67 @@ mod immutable_secure_record_tests {
     }
 
     #[tokio::test]
+    async fn selected_secure_read_rejects_persistent_alias_and_insecure_record(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir()?;
+        let owner = std::sync::Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(
+                temporary.path().to_path_buf(),
+            )
+            .acquire_owned_native()?,
+        );
+        let writer =
+            ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(owner.clone())?;
+        let reader = ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(owner)?;
+        let location = SecureStorageLocation::new("read_external_alias", "original");
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        assert_eq!(
+            writer
+                .secure_store_immutable(&location, b"original protected bytes", &caps)
+                .await?,
+            ImmutableSecureStoreOutcome::Created
+        );
+        let ProductionSecureStorageHandler::ProfileOwned(owned) = &writer else {
+            panic!("selected profile backend required");
+        };
+        let ProductionSecureStorageHandler::FilesystemFallback(handler) = owned.backend.as_ref()
+        else {
+            panic!("selected filesystem backend required");
+        };
+        let path = handler.base_path.join(handler.descriptor_path(&location)?);
+        let alias = temporary.path().join("persistent-alias");
+        std::fs::hard_link(&path, &alias)?;
+        let alias_error = reader.secure_retrieve(&location, &caps).await.unwrap_err();
+        assert_eq!(
+            std::error::Error::source(&alias_error)
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::PermissionDenied)
+        );
+        std::fs::remove_file(&alias)?;
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+        let mode_error = reader.secure_retrieve(&location, &caps).await.unwrap_err();
+        assert_eq!(
+            std::error::Error::source(&mode_error)
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::PermissionDenied)
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        assert_eq!(
+            reader.secure_retrieve(&location, &caps).await?,
+            b"original protected bytes"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn mutable_first_publication_remains_mutable_and_protection_bit_is_authenticated(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
