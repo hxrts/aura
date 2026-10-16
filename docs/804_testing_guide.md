@@ -1679,6 +1679,30 @@ not establish the build revision of each cached binary. Preserve the original
 build receipts and web provenance markers for artifact admission.
 The LAN ship owner remains responsible for shipping deployable artifacts.
 
+Completed LAN run evidence has a separate, explicit SSH archive mode. Use
+`scripts/dev/cold-cache-store.sh --export --root /absolute/clean/checkout --run-host <host-id> --run-id <run-id>`
+with the same remote settings above. It accepts only a canonical
+`.tmp/e2e/run/<host-id>/artifacts/runs/<run-id>` bundle with a completed,
+unpinned retention manifest; either a successful or failed run may be retained.
+The newest successful run remains local. Export refuses active readers,
+open files, links, dirty source, and insufficient remote capacity. It signs
+the run identity and a private member inventory of content and metadata,
+verifies the remote copy, and leaves a local signed location and rollback
+receipt before deleting only that exact run directory. Keep that local pointer
+and signing key. Restore uses `--restore` with the same host and run IDs,
+requires the original clean revision and an absent original path, verifies
+the private inventory, and atomically publishes the restored bundle after
+disk admission. An interrupted remote `.pending` bundle is not a ready copy;
+inspect it before retrying. This mode does not archive arbitrary diagnostic
+or Codex logs and does not change compiler-cache or LAN artifact provenance.
+The authenticated roundtrip regression runs separately from
+`just ci-build-cache-policy`: set `AURA_COLD_CACHE_TEST_REMOTE_HOST=user@host`
+and `AURA_COLD_CACHE_TEST_REMOTE_BASE=/absolute/private/ext4/path`, then run
+`nix develop --command bash scripts/dev/test-cold-evidence-remote.sh`.
+It creates and removes synthetic private bundles only; it does not select or
+archive a real run. The ordinary cache-policy gate covers the local cold-store
+contract without requiring an SSH host.
+
 Each budgeted command prints a JSON receipt path under
 `artifacts/disk-budget/receipts/`. The atomic snapshot records the source
 revision and fingerprint (including nonignored new source files), declared

@@ -4,16 +4,27 @@
 # ext4 volume on a separate Linux host.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-action='' lane='' root="$repo_root" lock_owner=''
+action='' lane='' root="$repo_root" lock_owner='' run_host='' run_id='' evidence=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --export|--restore) action="${1#--}"; shift ;;
     --root) root="${2:?missing root}"; shift 2 ;;
     --lane) lane="${2:?missing lane}"; shift 2 ;;
+    --run-host) run_host="${2:?missing run host}"; shift 2 ;;
+    --run-id) run_id="${2:?missing run id}"; shift 2 ;;
     --lock-owned-by) lock_owner="${2:?missing owner}"; shift 2 ;;
     *) echo 'usage: cold-cache-store.sh --export|--restore --lane LANE [--root PATH] [--lock-owned-by PID]' >&2; exit 2 ;;
   esac
 done
+if [[ -n "$run_host" || -n "$run_id" ]]; then
+  [[ -z "$lane" && "$run_host" =~ ^[A-Za-z0-9_-]+$ &&
+     "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$run_id" != *..* ]] || {
+    echo 'cold-cache-store: invalid evidence run identity' >&2; exit 2;
+  }
+  evidence=1
+  lane="evidence-h${#run_host}-$run_host-r${#run_id}-$run_id"
+  relative=".tmp/e2e/run/$run_host/artifacts/runs/$run_id"
+else
 case "$lane" in
   debug-incremental) relative=target/debug/incremental ;;
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
@@ -24,6 +35,7 @@ case "$lane" in
   release) relative=target/release ;;
   *) echo 'cold-cache-store: unsupported cache lane' >&2; exit 2 ;;
 esac
+fi
 [[ -n "$action" ]] || { echo 'cold-cache-store: action required' >&2; exit 2; }
 root="$(cd "$root" && pwd -P)"
 remote_host="${AURA_COLD_CACHE_REMOTE_HOST:-}"
@@ -46,6 +58,10 @@ else
   }
   store="$(cd "$store" && pwd -P)"
 fi
+if (( evidence == 1 && remote_mode == 0 )); then
+  echo 'cold-cache-store: protected run archival requires independent remote ext4' >&2
+  exit 2
+fi
 stat_owner() {
   local result
   result="$(stat -f %u "$1" 2>/dev/null || true)"
@@ -57,6 +73,18 @@ stat_mode() {
   result="$(stat -f %Lp "$1" 2>/dev/null || true)"
   if [[ "$result" =~ ^[0-7]{3,4}$ ]]; then printf '%s\n' "$result"; return; fi
   stat -c %a "$1"
+}
+stat_mtime() {
+  local result
+  result="$(stat -f %m "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-9]+$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %Y "$1"
+}
+stat_size() {
+  local result
+  result="$(stat -f %z "$1" 2>/dev/null || true)"
+  if [[ "$result" =~ ^[0-9]+$ ]]; then printf '%s\n' "$result"; return; fi
+  stat -c %s "$1"
 }
 if (( remote_mode == 0 )); then
   mode="$(stat_mode "$store")"
@@ -130,6 +158,68 @@ if (( remote_mode == 0 )); then
   done
 fi
 path="$root/$relative"
+evidence_runs="$root/.tmp/e2e/run/$run_host/artifacts/runs"
+evidence_lock=''
+evidence_members() {
+  local base="$1" member relative kind bytes digest
+  while IFS= read -r -d '' member; do
+    relative="${member#"$base"}"
+    [[ "$relative" != *$'\n'* && "$relative" != *$'\r'* &&
+       "$relative" != *$'\t'* ]] || return 1
+    if [[ -d "$member" ]]; then kind=d; bytes=0; digest=-
+    elif [[ -f "$member" && ! -L "$member" ]]; then
+      kind=f; bytes="$(stat_size "$member")"
+      digest="$(sha256sum "$member" | awk '{print $1}')"
+    else return 1; fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$relative" "$kind" \
+      "$(stat_mode "$member")" "$(stat_mtime "$member")" "$bytes" "$digest"
+  done < <(find "$base" -print0 | LC_ALL=C sort -z)
+}
+evidence_validate_payload() {
+  local candidate="$1" check_newest="$2" manifest="$1/.aura-retention.json"
+  local member mode owner sibling newest=-1 selected_epoch
+  [[ -d "$candidate" && ! -L "$candidate" && -f "$manifest" && ! -L "$manifest" ]] || return 1
+  [[ -z "$(find "$candidate" ! -type d ! -type f -print -quit)" &&
+     -z "$(find "$candidate" -type f -links +1 -print -quit)" ]] || return 1
+  while IFS= read -r -d '' member; do
+    mode="$(stat_mode "$member")"; owner="$(stat_owner "$member")"
+    [[ "$owner" == "$(id -u)" ]] || return 1
+    if [[ -d "$member" ]]; then [[ "$mode" == 700 ]] || return 1
+    else [[ "$mode" == 600 ]] || return 1; fi
+  done < <(find "$candidate" -print0)
+  jq -e --arg id "$run_id" '
+    .schema_version==1 and .run_id==$id and .state=="completed" and
+    (.outcome=="success" or .outcome=="failed") and .pinned==false and
+    (.finished_epoch|type=="number" and .>=0)' "$manifest" >/dev/null || return 1
+  if (( check_newest == 1 )); then
+    selected_epoch="$(jq -r '.finished_epoch' "$manifest")"
+    if [[ "$(jq -r '.outcome' "$manifest")" == success ]]; then
+      for sibling in "$evidence_runs"/*/.aura-retention.json; do
+        [[ -f "$sibling" && ! -L "$sibling" ]] || continue
+        if jq -e '.schema_version==1 and .state=="completed" and
+          .outcome=="success" and (.finished_epoch|type=="number")' "$sibling" >/dev/null 2>&1; then
+          local epoch
+          epoch="$(jq -r '.finished_epoch' "$sibling")"
+          (( epoch > newest )) && newest="$epoch"
+        fi
+      done
+      (( selected_epoch < newest )) || {
+        echo 'cold-cache-store: newest completed success remains local' >&2; return 1;
+      }
+    fi
+  fi
+}
+evidence_validate_source() {
+  local ancestor active
+  for ancestor in "$root/.tmp" "$root/.tmp/e2e" "$root/.tmp/e2e/run" \
+    "$root/.tmp/e2e/run/$run_host" "$root/.tmp/e2e/run/$run_host/artifacts" \
+    "$evidence_runs"; do
+    [[ -d "$ancestor" && ! -L "$ancestor" ]] || return 1
+  done
+  active="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
+  [[ -z "$active" ]] || { echo 'cold-cache-store: harness consumer active' >&2; return 1; }
+  evidence_validate_payload "$path" 1
+}
 shared_dir="${AURA_BUILD_SHARED_DIR:-$HOME/.cache/aura-build}"
 mkdir -p "$shared_dir/cold-keys"
 [[ "$(device_id "$shared_dir")" == "$(device_id "$root")" ]] || {
@@ -156,6 +246,7 @@ cleanup() {
     rmdir "$admission_lock" 2>/dev/null || true
   fi
   if (( owns_lock == 1 )); then rm -f "$lock_dir/pid"; rmdir "$lock_dir" 2>/dev/null || true; fi
+  [[ -z "$evidence_lock" ]] || rmdir "$evidence_lock" 2>/dev/null || true
   [[ -z "$restore_stage" ]] || rm -rf -- "$restore_stage"
   [[ -z "${pending:-}" ]] || rm -rf -- "$pending"
   if [[ -n "$remote_lock_token" ]]; then
@@ -173,6 +264,16 @@ else
   mkdir "$lock_dir" 2>/dev/null || { echo 'cold-cache-store: checkout lock busy' >&2; exit 1; }
   owns_lock=1
   printf '%s\n' "$$" > "$lock_dir/pid"
+fi
+if (( evidence == 1 )); then
+  [[ -d "$evidence_runs" && ! -L "$evidence_runs" ]] || {
+    echo 'cold-cache-store: evidence run root absent or linked' >&2; exit 1;
+  }
+  evidence_lock="$evidence_runs/.aura-retention.lock"
+  mkdir -m 700 "$evidence_lock" 2>/dev/null || {
+    evidence_lock=''
+    echo 'cold-cache-store: retention owner lock busy' >&2; exit 1;
+  }
 fi
 source "$repo_root/scripts/dev/scoped-builders.sh"
 [[ -z "$(aura_scoped_processes "$root" 'cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|cargo-kani|kani-driver' "$$")" ]] || {
@@ -227,11 +328,13 @@ remote_pending="$remote_snapshot/.pending"
 remote_location="$bucket/location.json"
 remote_location_sig="$bucket/location.sig"
 remote_verify_ready() {
-  remote_ssh "bash -s -- $remote_ready" <<'REMOTE'
+  remote_ssh "bash -s -- $remote_ready $evidence" <<'REMOTE'
 set -euo pipefail
-ready=$1
+ready=$1; evidence=$2
 [[ -d "$ready" && ! -L "$ready" && "$(stat -c %a "$ready")" == 700 ]]
-for name in archive.tar manifest.json manifest.sig location.json location.sig; do
+names=(archive.tar manifest.json manifest.sig location.json location.sig)
+[[ "$evidence" == 0 ]] || names+=(members.tsv)
+for name in "${names[@]}"; do
   file="$ready/$name"
   [[ -f "$file" && ! -L "$file" && "$(stat -c %a "$file")" == 600 &&
      "$(stat -c %u "$file")" == "$(id -u)" ]]
@@ -248,6 +351,9 @@ remote_local_bucket_preflight() {
   done
 }
 remote_export() {
+  if (( evidence == 1 )); then
+    evidence_validate_source || { echo 'cold-cache-store: evidence source not safely inactive' >&2; return 1; }
+  fi
   [[ -d "$path" && ! -L "$path" ]] || { echo 'cold-cache-store: lane absent or linked' >&2; return 1; }
   [[ -z "$(find "$path" -type l -print -quit)" &&
      -z "$(find "$path" -type f -links +1 -print -quit)" ]] || {
@@ -267,7 +373,11 @@ remote_export() {
      ! -e "$remote_location_sig" && ! -L "$remote_location_sig" ]] || {
     echo 'cold-cache-store: existing location receipt refuses overwrite' >&2; return 1;
   }
-  local archive_bytes source_allocated_kib remote_floor expected_sha actual_sha remote_bytes
+  local archive_bytes source_allocated_kib remote_floor expected_sha actual_sha remote_bytes metadata_sha='' rollback_text
+  rollback_text="cold-cache-store.sh --restore --lane $lane --root $root with the same remote configuration and revision $revision"
+  if (( evidence == 1 )); then
+    rollback_text="cold-cache-store.sh --restore --root $root --run-host $run_host --run-id $run_id with the same remote configuration and revision $revision"
+  fi
   # Tar's logical bytes can greatly exceed allocated blocks for sparse files.
   # Measure the stream itself before admission rather than reserving from du.
   archive_bytes="$(tar -C "$path" -cf - . | wc -c | tr -d ' ')"
@@ -341,11 +451,21 @@ REMOTE
   }
   umask 077
   pending="$(mktemp -d "$shared_dir/cold-keys/.remote.XXXXXX")"
+  if (( evidence == 1 )); then
+    evidence_members "$path" > "$pending/members.tsv" || {
+      echo 'cold-cache-store: evidence metadata inventory failed' >&2; return 1;
+    }
+    metadata_sha="$(sha256sum "$pending/members.tsv" | awk '{print $1}')"
+    remote_ssh "umask 077; cat > $remote_pending/members.tsv" < "$pending/members.tsv"
+  fi
   jq -n --arg revision "$revision" --arg root "$root" --arg lane "$lane" \
     --arg sha "$actual_sha" --argjson bytes "$remote_bytes" \
-    --argjson allocated "$source_allocated_kib" \
+    --argjson allocated "$source_allocated_kib" --arg metadata "$metadata_sha" \
+    --arg relative "${relative:-}" \
     '{schema:1,source_revision:$revision,source_root:$root,lane:$lane,
-      sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated}' \
+      sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated} +
+      (if $metadata=="" then {} else
+        {metadata_sha256:$metadata,source_relative:$relative} end)' \
     > "$pending/manifest.json"
   openssl dgst -sha256 -sign "$signing_key" -out "$pending/manifest.sig" "$pending/manifest.json"
   remote_ssh "umask 077; cat > $remote_pending/manifest.json" < "$pending/manifest.json"
@@ -360,20 +480,27 @@ REMOTE
   jq -n --arg revision "$revision" --arg root "$root" --arg lane "$lane" \
     --arg host "$remote_host" --arg dir "$remote_dir" --arg machine "$remote_machine" \
     --arg device "$remote_device" --arg sha "$actual_sha" --argjson bytes "$remote_bytes" \
-    --argjson allocated "$source_allocated_kib" \
+    --argjson allocated "$source_allocated_kib" --arg metadata "$metadata_sha" \
+    --arg relative "${relative:-}" --arg rollback "$rollback_text" \
     '{schema:1,source_revision:$revision,source_root:$root,lane:$lane,
       remote_host:$host,remote_dir:$dir,remote_machine:$machine,remote_device:$device,
       sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated,
-      rollback:"cold-cache-store.sh --restore with the same source checkout, lane, and remote configuration"}' \
+      rollback:$rollback} +
+      (if $metadata=="" then {} else
+        {metadata_sha256:$metadata,source_relative:$relative} end)' \
     > "$pending/location.json"
   openssl dgst -sha256 -sign "$signing_key" -out "$pending/location.sig" "$pending/location.json"
   remote_ssh "umask 077; cat > $remote_pending/location.json" < "$pending/location.json"
-  remote_ssh "umask 077; cat > $remote_pending/location.sig" < "$pending/location.sig"
-  remote_ssh "bash -s -- $remote_pending $remote_ready" <<'REMOTE'
+  remote_ssh "umask 077; cat > $remote_pending/location.sig" < "$pending/location.sig" || {
+    echo 'cold-cache-store: remote location upload stopped before ready' >&2; return 1;
+  }
+  remote_ssh "bash -s -- $remote_pending $remote_ready $evidence" <<'REMOTE'
 set -euo pipefail
-pending=$1; ready=$2
+pending=$1; ready=$2; evidence=$3
 [[ -d "$pending" && ! -L "$pending" && ! -e "$ready" && ! -L "$ready" ]]
-for name in archive.tar manifest.json manifest.sig location.json location.sig; do
+names=(archive.tar manifest.json manifest.sig location.json location.sig)
+[[ "$evidence" == 0 ]] || names+=(members.tsv)
+for name in "${names[@]}"; do
   file="$pending/$name"
   [[ -f "$file" && ! -L "$file" && "$(stat -c %a "$file")" == 600 &&
      "$(stat -c %u "$file")" == "$(id -u)" ]]
@@ -386,6 +513,9 @@ REMOTE
   cmp "$pending/manifest.sig" <(remote_ssh "cat $remote_ready/manifest.sig")
   cmp "$pending/location.json" <(remote_ssh "cat $remote_ready/location.json")
   cmp "$pending/location.sig" <(remote_ssh "cat $remote_ready/location.sig")
+  if (( evidence == 1 )); then
+    cmp "$pending/members.tsv" <(remote_ssh "cat $remote_ready/members.tsv")
+  fi
   remote_verify_ready
   [[ "$expected_sha" == "$(remote_ssh "cat $remote_ready/archive.tar" | sha256sum | awk '{print $1}')" ]] || {
     echo 'cold-cache-store: remote readback hash mismatch' >&2; return 1;
@@ -397,21 +527,48 @@ REMOTE
      "$expected_sha" == "$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')" ]] || {
     echo 'cold-cache-store: source changed before guarded prune' >&2; return 1;
   }
-  bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" --lane "$lane" \
-    --lock-owned-by "$$" --apply
+  if (( evidence == 1 )); then
+    evidence_validate_source || { echo 'cold-cache-store: evidence changed before guarded prune' >&2; return 1; }
+    cmp "$pending/members.tsv" <(evidence_members "$path") || {
+      echo 'cold-cache-store: evidence metadata changed before guarded prune' >&2; return 1;
+    }
+    open_files="$(lsof -n -P 2>/dev/null)" || {
+      echo 'cold-cache-store: final open-file scan failed' >&2; return 1;
+    }
+    if printf '%s\n' "$open_files" | grep -F -- "$path" >/dev/null; then
+      echo 'cold-cache-store: evidence became open before guarded prune' >&2; return 1
+    fi
+    [[ -f "$remote_location" && -f "$remote_location_sig" ]] || return 1
+    rm -rf -- "$path"
+  else
+    bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" --lane "$lane" \
+      --lock-owned-by "$$" --apply
+  fi
   printf 'cold-cache-store: remote export verified %s bytes at %s:%s\n' \
     "$remote_bytes" "$remote_host" "$remote_ready"
 }
 remote_restore() {
   [[ ! -e "$path" && ! -L "$path" ]] || { echo 'cold-cache-store: restore lane already exists' >&2; return 1; }
+  if (( evidence == 1 )); then
+    local ancestor active
+    for ancestor in "$root/.tmp" "$root/.tmp/e2e" "$root/.tmp/e2e/run" \
+      "$root/.tmp/e2e/run/$run_host" "$root/.tmp/e2e/run/$run_host/artifacts" \
+      "$evidence_runs"; do
+      [[ -d "$ancestor" && ! -L "$ancestor" ]] || {
+        echo 'cold-cache-store: evidence restore parent absent or linked' >&2; return 1;
+      }
+    done
+    active="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
+    [[ -z "$active" ]] || { echo 'cold-cache-store: harness consumer active' >&2; return 1; }
+  fi
   remote_probe
   remote_local_bucket_preflight
-  remote_verify_ready
   [[ -f "$remote_location" && ! -L "$remote_location" &&
      -f "$remote_location_sig" && ! -L "$remote_location_sig" &&
      -f "$signing_key" && ! -L "$signing_key" ]] || {
     echo 'cold-cache-store: protected location receipt absent' >&2; return 1;
   }
+  remote_verify_ready
   public_key="$(mktemp "$shared_dir/cold-keys/.pub.XXXXXX")"
   openssl pkey -in "$signing_key" -pubout -out "$public_key" 2>/dev/null
   [[ "$(stat_mode "$remote_location")" == 600 &&
@@ -422,18 +579,23 @@ remote_restore() {
     "$remote_location" >/dev/null || { echo 'cold-cache-store: location signature mismatch' >&2; return 1; }
   jq -e --arg rev "$revision" --arg root "$root" --arg lane "$lane" \
     --arg host "$remote_host" --arg dir "$remote_dir" --arg machine "$remote_machine" \
-    --arg device "$remote_device" \
+    --arg device "$remote_device" --argjson evidence "$evidence" \
+    --arg relative "${relative:-}" \
     '.schema==1 and .source_revision==$rev and .source_root==$root and .lane==$lane and
      .remote_host==$host and .remote_dir==$dir and .remote_machine==$machine and
      .remote_device==$device and (.sha256|test("^[0-9a-f]{64}$")) and
      (.bytes|type=="number" and .>0 and .<1099511627776) and
-     (.source_allocated_kib|type=="number" and .>=0 and .<1073741824)' \
+     (.source_allocated_kib|type=="number" and .>=0 and .<1073741824) and
+     (if $evidence==1 then
+       (.metadata_sha256|test("^[0-9a-f]{64}$")) and .source_relative==$relative
+      else (.metadata_sha256==null and .source_relative==null) end)' \
     "$remote_location" >/dev/null || { echo 'cold-cache-store: location identity mismatch' >&2; return 1; }
-  local bytes expected allocated free floor others file pid kib archive_kib extract_kib
+  local bytes expected allocated free floor others file pid kib archive_kib extract_kib metadata_sha
   local reserve_kib acquired holder attempt
   bytes="$(jq -r '.bytes' "$remote_location")"
   expected="$(jq -r '.sha256' "$remote_location")"
   allocated="$(jq -r '.source_allocated_kib' "$remote_location")"
+  metadata_sha="$(jq -r '.metadata_sha256 // empty' "$remote_location")"
   mkdir -p "$shared_dir/reservations"
   admission_lock="$shared_dir/admission.lock"
   acquired=0
@@ -487,8 +649,11 @@ remote_restore() {
     "$pending/manifest.json" >/dev/null || { echo 'cold-cache-store: manifest signature mismatch' >&2; return 1; }
   jq -e --arg rev "$revision" --arg root "$root" --arg lane "$lane" \
     --arg sha "$expected" --argjson bytes "$bytes" --argjson allocated "$allocated" \
+    --arg metadata "$metadata_sha" --arg relative "${relative:-}" \
     '.schema==1 and .source_revision==$rev and .source_root==$root and .lane==$lane and
-     .sha256==$sha and .bytes==$bytes and .source_allocated_kib==$allocated' \
+     .sha256==$sha and .bytes==$bytes and .source_allocated_kib==$allocated and
+     (.metadata_sha256 // "")==$metadata and
+     (if $metadata=="" then .source_relative==null else .source_relative==$relative end)' \
     "$pending/manifest.json" >/dev/null || {
       echo 'cold-cache-store: remote manifest differs from location receipt' >&2; return 1;
     }
@@ -497,6 +662,12 @@ remote_restore() {
      "$bytes" == "$(wc -c < "$pending/archive.tar" | tr -d ' ')" ]] || {
     echo 'cold-cache-store: remote archive hash or size mismatch' >&2; return 1;
   }
+  if (( evidence == 1 )); then
+    remote_ssh "cat $remote_ready/members.tsv" > "$pending/members.tsv"
+    [[ "$metadata_sha" == "$(sha256sum "$pending/members.tsv" | awk '{print $1}')" ]] || {
+      echo 'cold-cache-store: evidence metadata manifest mismatch' >&2; return 1;
+    }
+  fi
   member_list="$(mktemp "$shared_dir/cold-keys/.members.XXXXXX")"
   kind_list="$(mktemp "$shared_dir/cold-keys/.kinds.XXXXXX")"
   tar -tf "$pending/archive.tar" > "$member_list"
@@ -517,6 +688,22 @@ remote_restore() {
   tar -C "$restore_stage/payload" -pxf "$pending/archive.tar" || {
     echo 'cold-cache-store: staged extraction failed' >&2; return 1;
   }
+  if (( evidence == 1 )); then
+    evidence_validate_payload "$restore_stage/payload" 0 || {
+      echo 'cold-cache-store: restored evidence metadata or permissions refused' >&2; return 1;
+    }
+    # Extraction writes children after creating '.', so restore its signed
+    # directory mtime before comparing the full metadata inventory.
+    local root_epoch root_stamp
+    root_epoch="$(awk -F '\t' 'NR==1 {print $4}' "$pending/members.tsv")"
+    [[ "$root_epoch" =~ ^[0-9]+$ ]] || return 1
+    root_stamp="$(date -u -r "$root_epoch" +%Y%m%d%H%M.%S 2>/dev/null ||
+      date -u -d "@$root_epoch" +%Y%m%d%H%M.%S)" || return 1
+    TZ=UTC touch -t "$root_stamp" "$restore_stage/payload"
+    cmp "$pending/members.tsv" <(evidence_members "$restore_stage/payload") || {
+      echo 'cold-cache-store: restored evidence metadata differs from signed inventory' >&2; return 1;
+    }
+  fi
   [[ ! -e "$path" && ! -L "$path" ]] || {
     echo 'cold-cache-store: restore target appeared before publish' >&2; return 1;
   }
