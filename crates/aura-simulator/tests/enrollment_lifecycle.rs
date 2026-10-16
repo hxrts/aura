@@ -121,6 +121,7 @@ async fn issued_through_broker() -> (
         LocalBootstrapBrokerService, TaskSupervisor,
     };
     use aura_core::invitation::{BootstrapBrokerInvitation, InvitationPurpose};
+    let clock = Arc::new(ManualPhysicalClock::new(5_000));
     let broker = LocalBootstrapBrokerService::bind(
         "127.0.0.1:0",
         Duration::from_secs(120),
@@ -128,7 +129,8 @@ async fn issued_through_broker() -> (
         BootstrapBrokerLanBindPolicy::LoopbackOnly,
     )
     .await
-    .expect("actual production broker bind");
+    .expect("actual production broker bind")
+    .with_mailbox_time_provider(clock.clone());
     let supervisor = TaskSupervisor::new();
     let group = supervisor.group("genuine_enrollment_broker");
     broker.start(&group);
@@ -137,7 +139,8 @@ async fn issued_through_broker() -> (
         .with_base_url(broker.public_url())
         .with_auth_token("genuine-batch-auth")
         .with_invitation_retrieval_token("genuine-recipient-once");
-    let (fixture, roots) = issued_with_broker(Some(config)).await;
+    let (fixture, roots, _clock) =
+        issued_with_broker_clock_and_sender(Some(config), false, clock).await;
     let recipient = fixture.recipient().clone();
     let authority = recipient.authority_id();
     let device = recipient.runtime().effects().config().device_id;
