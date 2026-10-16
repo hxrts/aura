@@ -435,13 +435,54 @@ pub struct IssuerEnrollmentReturnRegistration {
 
 /// Only exact verification against an independently admitted original baseline
 /// can mint this temporary routing capability. It never authorizes membership.
+/// The complete signed input is retained so a later protected-birth owner can
+/// authenticate its original proof without reconstructing it from a statement.
+///
+/// This owner is neither cloneable nor deserializable by an external caller:
+///
+/// ```compile_fail
+/// use aura_invitation::enrollment_mailbox::VerifiedIssuerEnrollmentReturnRegistration;
+/// fn duplicate(owner: VerifiedIssuerEnrollmentReturnRegistration) {
+///     let _ = owner.clone();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use aura_invitation::enrollment_mailbox::VerifiedIssuerEnrollmentReturnRegistration;
+/// fn fabricate() -> VerifiedIssuerEnrollmentReturnRegistration {
+///     VerifiedIssuerEnrollmentReturnRegistration {
+///         original: panic!(),
+///         signed_transcript: panic!(),
+///     }
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use aura_invitation::enrollment_mailbox::VerifiedIssuerEnrollmentReturnRegistration;
+/// fn decode(bytes: &[u8]) -> VerifiedIssuerEnrollmentReturnRegistration {
+///     serde_json::from_slice(bytes).unwrap()
+/// }
+/// ```
 pub struct VerifiedIssuerEnrollmentReturnRegistration {
-    statement: IssuerEnrollmentReturnStatement,
+    original: IssuerEnrollmentReturnRegistration,
+    signed_transcript: Vec<u8>,
 }
 
 impl VerifiedIssuerEnrollmentReturnRegistration {
     pub fn statement(&self) -> &IssuerEnrollmentReturnStatement {
-        &self.statement
+        &self.original.statement
+    }
+
+    /// The original signed registration is evidence to reverify under the
+    /// retained approved baseline, not an independent birth or retirement
+    /// capability. Its signature and signer metadata are not regenerated.
+    pub fn original_signed_registration(&self) -> &IssuerEnrollmentReturnRegistration {
+        &self.original
+    }
+
+    /// Exact domain-separated bytes accepted by the original verifier.
+    pub fn signed_transcript_bytes(&self) -> &[u8] {
+        &self.signed_transcript
     }
 }
 
@@ -572,7 +613,8 @@ impl IssuerEnrollmentReturnRegistration {
             return Err(PendingEnrollmentMailboxError::InvalidSignature);
         }
         Ok(VerifiedIssuerEnrollmentReturnRegistration {
-            statement: self.statement,
+            original: self,
+            signed_transcript: bytes,
         })
     }
 }

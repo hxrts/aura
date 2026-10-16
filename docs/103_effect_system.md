@@ -355,6 +355,16 @@ Providers without the atomic-create contract return a typed unsupported failure.
 
 Secure storage distinguishes atomic initial mutable publication from lifetime immutable publication. Both preserve an existing original. Mutable records permit subsequent updates under their domain owner. Immutable records carry authenticated provider protection in the same atomic publication and reject generic replacement, deletion, and key-generation writes. Legacy sealing preserves the exact original bytes. A capability list or caller-supplied retirement label cannot override lifetime protection. Unsupported providers fail with a typed error. Interrupted writes have an uncertain publication outcome; successful retries validate and acknowledge the original record. Ordinary storage has no authority over the secure provider's physical subtree.
 
+An enrollment mailbox record may acquire a retirement birth only in its first
+immutable publication. The birth must be authorized by the original approved
+issuer registration under its independently retained baseline and setup proof,
+and bound to the actual selected profile provider, exact record location and
+bytes, and the registration's signed expiry. A later registration, raw signed
+bytes, self-certified signer package, or caller-selected expiry cannot amend an
+existing immutable record. Issuer credential and setup records published before
+the registration is signed require separate original birth authority; the
+registration cannot retroactively authorize their deletion.
+
 Required secure retrieval reports an absent record through a typed logical
 absence cause with the exact requested location. This differs from a provider
 I/O failure, whose concrete native cause remains intact. Observational existence

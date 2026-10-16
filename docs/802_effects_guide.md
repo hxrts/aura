@@ -388,6 +388,44 @@ Obtain `prepare_authenticated_enrollment_rotation` from the actual effect owner 
 
 Use `secure_create_mutable` for the first allocation of records that an existing domain owner must later checkpoint. Check `Created` versus `AlreadyExists` and validate retained original state; an existing result does not mean caller bytes match. Use `secure_store_immutable` for first decisions and durable evidence that must not be overwritten or deleted by generic storage calls. Sealing an existing legacy record preserves its original payload. See [the effect contract](103_effect_system.md) for publication and protection guarantees.
 
+For enrollment mailbox retirement, keep the original verified issuer return
+registration as a move-only owner with its complete signed registration and
+exact accepted domain-separated transcript bytes. A statement or reserialized
+signature copied out of that owner is evidence to reverify, not birth authority.
+The current L3 V3 writer is private: do not expose its raw
+descriptor, location, expiry or verifier closure to L6. The next writer packet
+must first move the independently admitted baseline/setup verifier and its
+private-field proof to a layer the selected provider can consume, or define a
+single constrained L6 transaction whose L3 atomic publication method accepts
+only an unforgeable provider-bound proof. Rust crate visibility cannot grant
+`aura-agent` friend access to a private `aura-effects` writer. A public core
+constructor, externally implementable proof trait, feature-gated raw writer,
+or caller-supplied closure would reopen forgeable birth authority.
+
+For a lower-layer implementation, migrate the admitted-original checks now in
+`aura-invitation/src/enrollment_mailbox.rs` together with the independently
+approved baseline and setup-verifier origins now in `enrollment_manifest.rs`
+and `enrollment_setup.rs`. The destination must be at or below the selected
+provider's dependency boundary and expose a private-field, non-deserializable,
+move-only verified proof. `aura-effects/src/secure.rs` may then consume only
+that proof under its existing `record_gate`, derive the signed expiry and exact
+registration bytes itself, and atomically publish the V3 value. The L6
+`runtime_bridge/enrollment_issuance.rs` callsite would transfer the proof,
+selected provider and value without naming a birth location or deadline. Until
+those proof origins migrate, leave `publish_retirement_birth` private and L6
+unwired. A higher-layer alternative needs a new narrowly owned storage
+transaction that internalizes the L3 gate; exposing a generic exact-CAS or
+delete effect is not that transaction.
+
+The writer fixture must attempt external proof construction, deserialization
+and cloning; foreign selected provider, altered signed bytes, caller-selected
+expiry/location, and birth after a legacy immutable publication. A genuine
+signed issuer registration must publish its V3 descriptor and payload under
+one record gate, with exact replay/readback after interruption. Credential and
+setup records are published earlier and need their own original birth policy;
+the later registration cannot authorize retroactive V3 metadata. Keep
+terminal-proof and browser retirement as separate acceptance steps.
+
 Recover failed publication by retrieving and validating the actual original through the selected provider. Do not create replacement wrapping keys when prior encrypted records or provider allocation evidence exist. Treat an IndexedDB compare-and-swap conflict as a typed storage conflict; the domain owner decides a bounded recovery. Ordinary profile keys cannot address the infrastructure `secure_store` subtree, and ordinary clear does not remove secure evidence.
 
 ### Required participant envelope recovery

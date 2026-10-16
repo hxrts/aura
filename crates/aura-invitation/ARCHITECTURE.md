@@ -48,6 +48,12 @@ Invitation protocol for establishing relationships between authorities, includin
 
 - Facts with known context must reduce under their matching `ContextId`.
 - Invitation identifiers are treated as stable binding keys.
+- The admitted-original issuer return verifier retains the complete original
+  signed registration inside its private, move-only verified owner. Its
+  statement and signed-registration accessors are evidence for later exact
+  revalidation, not provider birth or deletion authority. The selected secure
+  provider still lacks a verifier-bound atomic V3 birth handoff; raw signed
+  bytes cannot substitute for that missing cross-layer capability.
 - `enrollment_setup` owns bounded versioned setup-code decoding and a dedicated
   canonical signing transcript. `VerifiedEnrollmentSetupPossession` is minted
   only after validity, policy, proof binding and cryptographic verification; it
