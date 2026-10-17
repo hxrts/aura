@@ -56,6 +56,13 @@ if source "$fixture/checkout-block.sh" > "$fixture/status-failure.log" 2>&1; the
 fi
 [[ ! -d "$positive/target" && ! -d "$positive/.nix-ship" ]]
 unset FIXTURE_FAIL_STATUS
+printf 'dirty\n' > "$positive/source"
+if source "$fixture/checkout-block.sh" > "$fixture/dirty-failure.log" 2>&1; then
+  echo 'dirty remote checkout admitted' >&2; exit 1
+fi
+rg -q -- 'remote checkout has tracked changes' "$fixture/dirty-failure.log"
+[[ ! -d "$positive/target" && ! -d "$positive/.nix-ship" && ! -e "$ROOT_CALLS" ]]
+git -C "$positive" checkout -- source
 mkdir -p "$positive/.nix-ship"
 printf 'old-root\n' > "$positive/.nix-ship/runtime-old"
 printf 'outer-glob\n' > "$positive/runtime-outer"
@@ -70,5 +77,6 @@ remote_root="$negative"
 if source "$fixture/checkout-block.sh" > "$fixture/negative.log" 2>&1; then
   echo 'ahead source accepted old candidate' >&2; exit 1
 fi
+rg -q -- 'remote checkout does not match requested commit' "$fixture/negative.log"
 [[ ! -d "$negative/target" && ! -e "$ROOT_CALLS" && -f "$negative/.nix-ship/runtime-old" ]]
 echo 'prepared ship exact-source/path quoting/refusal cases passed'

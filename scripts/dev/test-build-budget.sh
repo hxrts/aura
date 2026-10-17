@@ -33,6 +33,7 @@ export AURA_BUILD_TARGET_CAP_GIB=8
 # ship.sh export one) must not turn an expected refusal into a long wait.
 export AURA_BUILD_WAIT_SECONDS=0
 unset AURA_BUILD_BUDGET_HELD
+unset AURA_BUILD_MIN_RESERVE_GIB
 export PROJECT_ROOT="$project"
 export AURA_BUILD_SHARED_DIR="$test_root/shared"
 export PATH="$fakebin:$PATH"
@@ -644,6 +645,43 @@ printf '%s\n' $((22 * 1024 * 1024)) > "$FREE_FILE"
 expect_status 0 run_budget --no-prune -- sh -c 'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 6291456'
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.incoming_reservation_kib==6291456 and .disk.measured_growth_kib==0' "$receipt" >/dev/null
+
+# An explicit conservative floor survives smaller measured history in preview,
+# refusal and the actual held reservation. A smaller floor never replaces the
+# larger measured estimate. Refusal must not start the command.
+expect_status 0 env AURA_BUILD_MIN_RESERVE_GIB=8 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --dry-run -- sh -c 'exit 0'
+rg -q 'incoming-reservation=8388608 KiB.*outcome=refused' "$test_root/output"
+expect_status 1 env AURA_BUILD_MIN_RESERVE_GIB=8 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --no-prune -- sh -c 'touch "$FREE_FILE.minimum-ran"'
+[[ ! -e "$FREE_FILE.minimum-ran" ]]
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.minimum_reservation_kib==8388608 and
+  .admission.refusal.incoming_reservation_kib==8388608' "$receipt" >/dev/null
+printf '%s\n' $((24 * 1024 * 1024)) > "$FREE_FILE"
+expect_status 0 env AURA_BUILD_MIN_RESERVE_GIB=8 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --no-prune -- sh -c \
+  'set -- "$AURA_BUILD_SHARED_DIR"/reservations/*; test "$#" -eq 1 && test "$(cat "$1")" = 8388608'
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.minimum_reservation_kib==8388608 and
+  .admission.incoming_reservation_kib==8388608' "$receipt" >/dev/null
+expect_status 0 env AURA_BUILD_MIN_RESERVE_GIB=2 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --dry-run -- sh -c 'exit 0'
+rg -q 'incoming-reservation=6291456 KiB' "$test_root/output"
+for invalid_minimum in -1 1.5 08 2147483648 8796093022208 999999999999999999999999; do
+  expect_status 2 env AURA_BUILD_MIN_RESERVE_GIB="$invalid_minimum" \
+    bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --lane test --dry-run -- sh -c 'exit 0'
+done
+
+# The same floor applies without measured history, retaining cold fallback
+# behavior when the explicit minimum is lower.
+reset_case
+expect_status 0 env AURA_BUILD_MIN_RESERVE_GIB=8 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --dry-run -- sh -c 'exit 0'
+rg -q 'incoming-reservation=8388608 KiB' "$test_root/output"
+expect_status 0 env AURA_BUILD_MIN_RESERVE_GIB=2 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test --dry-run -- sh -c 'exit 0'
+rg -q 'incoming-reservation=4194304 KiB' "$test_root/output"
 
 # Measured 11.3 GiB growth plus two active 9/10 GiB worktrees cannot fit a
 # nominal 35 GiB free volume while preserving the 15 GiB floor. The command

@@ -1654,7 +1654,12 @@ after the reservations of other admitted builds and the incoming build's
 estimated growth. `AURA_BUILD_RESERVE_GIB` (default 4) GiB is the fallback
 without prior measurements. Admission uses the greater of same-lane receipt
 growth and recent TSV growth for the same profile and target triple, plus 1 GiB
-for sampling margin. A failed build that stopped before linking therefore cannot
+for sampling margin. Set `AURA_BUILD_MIN_RESERVE_GIB` to an explicitly estimated
+minimum when cold inputs require more space than the recorded workload; it
+raises the measured or fallback reservation and never lowers either one. The
+receipt records this minimum separately from the effective reservation. This
+estimate does not certify measured growth or change either disk floor.
+A failed build that stopped before linking therefore cannot
 replace stronger completed-build evidence. Each admitted build holds that amount
 under `~/.cache/aura-build/reservations` until it exits. The admission lock is
 held only while checking and reserving,
@@ -3379,6 +3384,11 @@ helper paths and exact process/run identity checks remain in force. The remote
 does not build a binary. Run the retention lifecycle and ship fixtures to verify
 contention, dead-holder release, descriptor noninheritance, missing-tool refusal
 and old-checkout bootstrap before another LAN confirmation batch.
+The remote checkout explicitly refuses tracked changes and a HEAD different
+from the requested candidate before creating artifact directories or replacing
+runtime roots. These predicates use explicit failure exits because remote Bash
+versions do not consistently apply `errexit` to conditional commands. The exact
+checkout fixture covers dirty, ahead, failed-status and matching checkouts.
 
 The browser WASM test lane uses `scripts/verify/wasm-browser.sh` to validate the
 selected Chromium and ChromeDriver build versions, write private capabilities,

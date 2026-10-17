@@ -377,6 +377,7 @@
             findutils
             gawk
             gnused
+            zsh # LAN checkout fixtures verify the actual Zsh invocation path
 
             # Formal verification and protocol modeling
             quint
@@ -524,6 +525,7 @@
             findutils
             gawk
             gnused
+            zsh # LAN checkout fixtures verify the actual Zsh invocation path
 
             # WASM tools (for agent-wasm CI)
             wasm-pack

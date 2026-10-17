@@ -149,10 +149,10 @@ public=$4
 shift 4
 git fetch -q origin
 status=$(git status --porcelain --untracked-files=no)
-[[ -z "$status" ]]
+[[ -z "$status" ]] || { printf "%s\n" "remote checkout has tracked changes" >&2; exit 1; }
 git checkout -q main
 git merge -q --ff-only "$expected"
-[[ $(git rev-parse HEAD) == "$expected" ]]
+[[ $(git rev-parse HEAD) == "$expected" ]] || { printf "%s\n" "remote checkout does not match requested commit" >&2; exit 1; }
 mkdir -p bin target/release "$public" crates/aura-web/public/assets .nix-ship
 find .nix-ship -maxdepth 1 -name "runtime-*" -delete
 index=0

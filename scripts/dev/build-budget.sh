@@ -15,6 +15,7 @@ min_free_gib="${AURA_BUILD_MIN_FREE_GIB:-15}"
 emergency_gib="${AURA_BUILD_EMERGENCY_FREE_GIB:-5}"
 poll_seconds="${AURA_BUILD_POLL_SECONDS:-2}"
 reserve_gib="${AURA_BUILD_RESERVE_GIB:-4}"
+minimum_reserve_gib="${AURA_BUILD_MIN_RESERVE_GIB:-0}"
 shared_dir="${AURA_BUILD_SHARED_DIR:-$HOME/.cache/aura-build}"
 # Debug caches accumulate across rebuilds. Keep the measured bounded default,
 # with an explicit opt-in for workloads that benefit from incremental reuse.
@@ -32,7 +33,8 @@ Usage: build-budget.sh [--root PATH] [--lane NAME] [--dry-run]
 Defaults: per-checkout target soft cap 10 GiB, volume admission floor 15 GiB free
 (after other admitted builds' and incoming measured-growth reservations), emergency floor
 5 GiB free. Override with AURA_BUILD_TARGET_CAP_GIB, AURA_BUILD_MIN_FREE_GIB,
-AURA_BUILD_EMERGENCY_FREE_GIB, AURA_BUILD_RESERVE_GIB (fallback integer GiB) and
+AURA_BUILD_EMERGENCY_FREE_GIB, AURA_BUILD_RESERVE_GIB (fallback integer GiB),
+AURA_BUILD_MIN_RESERVE_GIB (minimum incoming reservation, default 0 GiB) and
 AURA_BUILD_SHARED_DIR (default ~/.cache/aura-build). Run inside nix develop.
 Cargo output always goes to this checkout's target/ (CARGO_TARGET_DIR is unset).
 Incremental compilation defaults to 0; set CARGO_INCREMENTAL=1 to opt in.
@@ -89,9 +91,14 @@ if [[ "$dry_run" -eq 0 && "$#" -eq 0 ]]; then
   echo 'build-budget: command required after --' >&2
   exit 2
 fi
-for value in "$cap_gib" "$min_free_gib" "$emergency_gib" "$poll_seconds" "$reserve_gib"; do
+for value in "$cap_gib" "$min_free_gib" "$emergency_gib" "$poll_seconds" "$reserve_gib" "$minimum_reserve_gib"; do
   [[ "$value" =~ ^[0-9]+$ ]] || { echo 'build-budget: budgets and poll interval must be whole numbers' >&2; exit 2; }
 done
+[[ "$minimum_reserve_gib" =~ ^(0|[1-9][0-9]{0,9})$ ]] &&
+  (( minimum_reserve_gib <= 2147483647 )) || {
+  echo 'build-budget: minimum reservation must be canonical integer GiB in 0..2147483647' >&2
+  exit 2
+}
 (( cap_gib > 0 && min_free_gib > emergency_gib && emergency_gib > 0 && poll_seconds > 0 )) || {
   echo 'build-budget: invalid budget ordering' >&2
   exit 2
@@ -251,6 +258,12 @@ estimate_incoming_growth() {
     # One GiB covers sparse peak sampling and gives even a zero-growth command
     # a useful reservation; the 4 GiB setting remains the cold-start fallback.
     incoming_reservation_kib=$((largest + 1024 * 1024))
+  fi
+  # A deliberately larger cold-workload estimate must survive smaller measured
+  # history. This floor can only increase the normal admission reservation.
+  local minimum_kib=$((minimum_reserve_gib * 1024 * 1024))
+  if (( incoming_reservation_kib < minimum_kib )); then
+    incoming_reservation_kib="$minimum_kib"
   fi
 }
 other_reservations_kib() {
@@ -490,7 +503,8 @@ if (( dry_run == 0 )); then
   fi
   estimate_incoming_growth
   aura_receipt_update --argjson incoming "$incoming_reservation_kib" \
-    '.admission.incoming_reservation_kib=$incoming'
+    --argjson minimum "$((minimum_reserve_gib * 1024 * 1024))" \
+    '.admission.incoming_reservation_kib=$incoming | .admission.minimum_reservation_kib=$minimum'
   export AURA_BUILD_CLEANUP_STAGE=pre-admission
   trap 'receipt_status=$?; aura_receipt_finish "$receipt_status"' EXIT
 fi

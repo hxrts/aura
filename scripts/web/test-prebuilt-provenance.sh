@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/prebuilt-provenance.sh"
-fixture=$(mktemp -d /private/tmp/aura-web-prebuilt.XXXXXX)
+fixture=$(mktemp -d "${TMPDIR:-/tmp}/aura-web-prebuilt.XXXXXX")
 fixture=$(cd "$fixture" && pwd -P)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/target/public/assets"
