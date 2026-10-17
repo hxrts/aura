@@ -3,8 +3,9 @@
 # Dioxus may reuse byte-identical output without refreshing index.html mtime.
 
 aura_web_clean_commit() {
-    local repo_root=$1
-    [[ -z "$(git -C "$repo_root" status --porcelain --untracked-files=normal)" ]] || return 1
+    local repo_root=$1 status
+    status=$(git -C "$repo_root" status --porcelain --untracked-files=normal) || return 1
+    [[ -z "$status" ]] || return 1
     git -C "$repo_root" rev-parse --verify HEAD
 }
 

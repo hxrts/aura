@@ -5,6 +5,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
 source "$repo_root/scripts/web/prebuilt-provenance.sh"
+source "$repo_root/scripts/web/prebuilt-transfer.sh"
 start_commit="$(aura_web_clean_commit "$repo_root" || true)"
 start_tree="$(aura_web_clean_tree "$repo_root" || true)"
 start_config="$(aura_web_build_config_digest "$repo_root" || true)"
@@ -26,4 +27,8 @@ public_dir="$repo_root/target/dx/aura-web/release/web/public"
 mkdir -p "$public_dir/assets"
 ln -sfn "$web_root/public/assets/tailwind.css" "$public_dir/assets/tailwind.css"
 aura_web_write_prebuilt_provenance "$repo_root" "$public_dir" "$tool_inventory" "$start_commit" "$start_tree" "$start_config"
+if [[ -n "$start_commit" && ( -e "$repo_root/artifacts/aura-web/transferred-provenance/selected" || \
+      -L "$repo_root/artifacts/aura-web/transferred-provenance/selected" ) ]]; then
+    aura_web_select_local_producer "$repo_root" "$public_dir"
+fi
 printf 'Web bundle: %s\n' "$public_dir"

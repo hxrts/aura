@@ -59,11 +59,23 @@ if [[ -t 1 && -z "${AURA_DX_LOG_REDIRECTED:-}" && "${AURA_DX_ALLOW_TTY:-0}" != "
   exec >>"$AURA_DX_LOG_FILE" 2>&1
 fi
 
+metadata_args=(metadata --manifest-path "$manifest_path" --format-version 1)
+if [[ "${1:-}" == --selected-tool-inventory ]]; then
+  # Admission is read-only: it cannot resolve a new lockfile or fetch inputs.
+  metadata_args+=(--locked --offline)
+fi
+if ! package_metadata=$(cargo "${metadata_args[@]}"); then
+  echo '[dx-runner] ERROR: failed to read package metadata' >&2
+  exit 1
+fi
+
 resolve_package_version() {
   local package_name="$1"
-  cargo metadata --manifest-path "$manifest_path" --format-version 1 2>/dev/null |
-    jq -r --arg pkg "$package_name" '.packages[] | select(.name == $pkg) | .version' |
-    head -n 1
+  # A conflicting package-version selection is unsupported, not first-match.
+  jq -er --arg pkg "$package_name" '
+    [.packages[] | select(.name == $pkg) | .version] | unique |
+    if length == 1 then .[0] else error("ambiguous or missing tool version") end
+  ' <<< "$package_metadata"
 }
 
 dioxus_version="$(resolve_package_version dioxus)"

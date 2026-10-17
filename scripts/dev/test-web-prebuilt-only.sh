@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Refuse implicit web compilation/cache deletion after a LAN harness starts.
 set -euo pipefail
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+prepared="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(git -C "$prepared" rev-parse --show-toplevel)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/aura-web-prebuilt-test.XXXXXX")"
 scratch="$(cd "$scratch" && pwd -P)"
 trap 'rm -rf "$scratch"' EXIT
@@ -13,6 +14,7 @@ mkdir -p "$project/scripts/web" "$project/scripts/dev" "$project/crates/aura-web
 cp "$repo_root/scripts/web/serve-static.sh" "$repo_root/scripts/web/log-bootstrap.sh" \
   "$repo_root/scripts/web/prebuilt-provenance.sh" "$project/scripts/web/"
 cp "$repo_root/scripts/dev/policy-dependency-inputs.sh" "$project/scripts/dev/"
+cp "$repo_root/scripts/web/prebuilt-transfer.sh" "$project/scripts/web/"
 : > "$project/Cargo.toml"
 : > "$project/Cargo.lock"
 printf 'pinned-toolchain=v1\n' > "$project/flake.lock"
@@ -72,9 +74,9 @@ expect() {
   [[ "$(cat "$public/evidence")" == preserved ]]
 }
 valid_bundle
-expect 0
-rg -q '^node$' "$CALLS_FILE"
-rg -q 'reusing prebuilt release' "$scratch/output"
+expect 1
+[[ ! -s "$CALLS_FILE" ]]
+[[ ! -e "$public/assets/tailwind.css" ]]
 valid_bundle
 rm "$public/index.html"
 expect 1
@@ -91,6 +93,17 @@ AURA_HARNESS_WEB_PREBUILT_ONLY=0 aura_web_write_prebuilt_provenance "$project" "
   "$(aura_web_clean_commit "$project")" "$(aura_web_clean_tree "$project")" \
   "$(aura_web_build_config_digest "$project")"
 expect 0
+rg -q '^node$' "$CALLS_FILE"
+! rg -q '^npm$' "$CALLS_FILE"
+[[ ! -e "$public/assets/tailwind.css" ]]
+[[ ! -d "$project/target/dx/aura-web/debug" ]]
+rg -q 'reusing admitted prebuilt release' "$scratch/output"
+rm -rf "$project/crates/aura-web/node_modules/ws"
+: > "$CALLS_FILE"
+expect 1
+[[ ! -s "$CALLS_FILE" ]]
+rg -q 'missing prebuilt server runtime dependency ws' "$scratch/output"
+mkdir -p "$project/crates/aura-web/node_modules/ws"
 printf 'changed source\n' > "$project/crates/aura-web/src/main.rs"
 expect 1
 git -C "$project" checkout -q -- crates/aura-web/src/main.rs

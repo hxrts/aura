@@ -366,6 +366,55 @@ static server accepts that exact build when Dioxus reuses byte-identical assets
 without updating their mtimes. A changed source tree or changed asset rejects
 the marker; browser startup never rebuilds inside a live harness run.
 
+Prebuilt admission always requires this evidence, including when file mtimes
+look fresh. It runs before npm, Tailwind, CSS-link changes or Dioxus configuration
+changes. Provision the static server's Node and local `ws` dependency before
+starting the harness; prebuilt mode refuses missing dependencies and never
+installs them. Tool-inventory admission reads Cargo metadata once with
+`--locked --offline`, refusing unavailable or ambiguous package versions.
+
+Use the existing fixed-commit ship owner to transfer a completed build:
+
+```sh
+AURA_E2E_REMOTE=user@host bash scripts/harness/lan/ship.sh --no-build
+```
+
+The producer must pass strict local tool/configuration and output checks first.
+Ship sends the original marker and protected tool inventory over authenticated
+SSH, with the producer-selected evidence digest supplied separately from its
+input stream. The consumer retains them under
+`artifacts/aura-web/transferred-provenance`, outside served assets, in owned
+0700 directories and 0600 files. It checks its exact clean source/tree, lock,
+platform, build command and emitted bytes, while preserving the producer's
+configuration and tool identities. It does not relabel consumer tools as build
+inputs or manufacture a completion marker. This contract supports the ship
+owner's same-platform transfer; it does not prove a cross-platform build.
+
+A protected selection record binds transferred admission to that checkout and
+original marker. Missing, changed or unsafe selected evidence refuses; it cannot
+fall back to local producer checks. Inspect admission without serving:
+
+```sh
+bash scripts/web/prebuilt-transfer.sh verify "$PWD" \
+  "$PWD/target/dx/aura-web/release/web/public"
+```
+
+Publication uses one owned lock, bounded input and private staging. Interrupted
+staging never authorizes serving; an identical valid ship can retry, including
+after ready evidence was published before selection. An uncatchable process
+kill may leave private unpublished staging for diagnosis. Retain it until its
+owner is known to have stopped; do not treat it as admission. A successful local
+guarded web rebuild can explicitly return to strict local-producer admission,
+retiring selection while retaining historical transfer evidence. Changing
+mtimes, copying another checkout's admission or deleting refusal evidence is
+not a recovery procedure.
+
+The exact shell regressions run through `just ci-build-cache-policy`. They cover
+producer/consumer identity and integrity, interrupted publication, private
+custody, no-fallback selection, upload quoting, and the full ship orchestration
+with isolated SSH/Nix facades. Those fixtures establish the local contract;
+retain real ship receipts and independent browser/network evidence separately.
+
 The browser driver raises a semantic revision floor for mutating commands. The
 canonical immediate `ExportDeviceEnrollmentSetup` command is a runtime read:
 its typed page-owned queue result completes the export, and the following

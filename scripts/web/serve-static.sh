@@ -9,6 +9,7 @@ web_root="$repo_root/crates/aura-web"
 build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
 prebuilt_only="${AURA_HARNESS_WEB_PREBUILT_ONLY:-0}"
 source "$script_dir/prebuilt-provenance.sh"
+source "$script_dir/prebuilt-transfer.sh"
 [[ "$prebuilt_only" == 0 || "$prebuilt_only" == 1 ]] || {
     echo 'AURA_HARNESS_WEB_PREBUILT_ONLY must be 0 or 1' >&2; exit 2;
 }
@@ -27,22 +28,6 @@ restore_dioxus_config() {
 }
 
 cd "$web_root"
-if [ ! -d node_modules ] || [ ! -d node_modules/ws ]; then
-    npm ci
-fi
-npm run tailwind:build >/dev/null
-mkdir -p \
-    "$repo_root/target/dx/aura-web/release/web/public/assets" \
-    "$repo_root/target/dx/aura-web/release/web/public/fonts" \
-    "$repo_root/target/dx/aura-web/debug/web/public/assets" \
-    "$repo_root/target/dx/aura-web/debug/web/public/fonts"
-# Symlink CSS so changes are immediately visible without rebuild
-source_css="$web_root/public/assets/tailwind.css"
-for profile in debug release; do
-    target_css="$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
-    rm -f "$target_css"
-    ln -s "$source_css" "$target_css"
-done
 
 # Check if any web-relevant source is newer than the build output.
 # If so, clear the dx cache so the next build picks up changes.
@@ -83,13 +68,36 @@ if [[ "$prebuilt_only" == 1 ]]; then
         echo "[serve-web-static] unsupported profile: $build_profile" >&2; exit 1;
     }
     prebuilt_dir="$repo_root/target/dx/aura-web/$build_profile/web/public"
-    if { web_sources_stale "$prebuilt_dir/index.html" &&
-         ! aura_web_prebuilt_provenance_matches "$repo_root" "$prebuilt_dir"; } ||
+    if ! aura_web_admitted_prebuilt_matches "$repo_root" "$prebuilt_dir" ||
          ! web_build_has_harness_support "$prebuilt_dir"; then
         echo '[serve-web-static] missing, stale or non-harness web bundle; stop the harness and run scripts/harness/lan/build.sh web first' >&2
         exit 1
     fi
+    public_dir="$prebuilt_dir"
+    if [[ ! -d "$web_root/node_modules/ws" ]]; then
+        echo '[serve-web-static] missing prebuilt server runtime dependency ws; provision dependencies before starting the harness' >&2
+        exit 1
+    fi
+    echo "[serve-web-static] reusing admitted prebuilt $build_profile web assets at $public_dir"
 fi
+
+if [[ "$prebuilt_only" == 0 ]]; then
+if [ ! -d node_modules ] || [ ! -d node_modules/ws ]; then
+    npm ci
+fi
+npm run tailwind:build >/dev/null
+mkdir -p \
+    "$repo_root/target/dx/aura-web/release/web/public/assets" \
+    "$repo_root/target/dx/aura-web/release/web/public/fonts" \
+    "$repo_root/target/dx/aura-web/debug/web/public/assets" \
+    "$repo_root/target/dx/aura-web/debug/web/public/fonts"
+# Development rebuilds keep CSS linked to their current generated source.
+source_css="$web_root/public/assets/tailwind.css"
+for profile in debug release; do
+    target_css="$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
+    rm -f "$target_css"
+    ln -s "$source_css" "$target_css"
+done
 
 for profile in debug release; do
     [[ "$prebuilt_only" == 0 ]] || break
@@ -153,6 +161,7 @@ esac
 
 restore_dioxus_config
 trap - EXIT
+fi
 
 if [[ ! -f "$public_dir/index.html" ]]; then
     echo "[serve-web-static] expected build output at $public_dir/index.html" >&2

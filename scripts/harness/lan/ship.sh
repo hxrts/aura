@@ -14,8 +14,8 @@
 # rooted on both hosts under .nix-ship/, together with the dev shell itself,
 # so `just nix-store-gc --apply` keeps them (Task 194). The web release
 # bundle stays on dx (build.sh web-live) and is rsynced with the untracked
-# tailwind.css it links to. Installed files are touched after the remote
-# checkout moves so the web freshness check sees them as current.
+# tailwind.css it links to. Web admission retains the original producer's
+# protected evidence; file modification times do not attest build completion.
 #
 # `nix copy` needs the remote user to be a Nix trusted-user (or a signing key
 # the remote trusts). AURA_NIX_REMOTE_PROGRAM overrides the remote daemon path
@@ -46,6 +46,17 @@ remote_platform="$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" 'uname -sm')"
 }
 
 remote_root="$AURA_E2E_REMOTE_ROOT"
+# Quote remote paths once for legacy remote-shell argument handling. Pin this
+# behavior for modern upload senders too; older rsync ignores these variables.
+# Do not reuse old-args for downloads: it disables a remote-sender file-list check.
+ship_remote_destination() {
+  local quoted
+  printf -v quoted '%q' "$1"
+  printf '%s:%s\n' "$AURA_E2E_REMOTE" "$quoted"
+}
+ship_remote_rsync() {
+  RSYNC_OLD_ARGS=1 RSYNC_PROTECT_ARGS=0 rsync "$@"
+}
 # Bootstrap the exact candidate's portable lock closure before stopping an old
 # checkout: older Darwin hosts have neither lockf nor flock. No remote build.
 nix_bin="${AURA_NIX_BIN:-$(command -v nix || printf '/nix/var/nix/profiles/default/bin/nix')}"
@@ -98,6 +109,18 @@ for f in "$aura_bin" "$repl_bin" "$web_public/index.html" "$tailwind"; do
   [ -e "$f" ] || { echo "ship: missing artifact $f (run without --no-build)" >&2; exit 1; }
 done
 
+# Only the original producer may attest this build. A remote consumer retains
+# these original bytes; it must never regenerate a successful build marker.
+umask 077
+web_transfer_evidence=$(mktemp "${TMPDIR:-/tmp}/aura-web-transfer.XXXXXX")
+trap 'rm -f -- "$web_transfer_evidence"' EXIT
+if ! bash "$AURA_E2E_ROOT/scripts/web/prebuilt-transfer.sh" export \
+    "$AURA_E2E_ROOT" "$AURA_E2E_ROOT/$web_public" "$web_transfer_evidence"; then
+  echo 'ship: web producer provenance does not match this clean candidate' >&2
+  exit 1
+fi
+web_transfer_digest=$(sha256sum "$web_transfer_evidence" | cut -d' ' -f1)
+
 # The run-time closure: Nix store paths the binaries reference.
 runtime_refs=()
 while IFS= read -r ref; do
@@ -106,11 +129,9 @@ done < <(bash "$here/runtime-refs.sh" "$aura_bin" "$repl_bin")
 
 remote_bin="${AURA_NIX_REMOTE_BIN:-/nix/var/nix/profiles/default/bin}"
 rm -f "$links"/runtime-*
-root_cmds=''
 i=0
 for ref in "${runtime_refs[@]}"; do
   "$(dirname "$nix_bin")/nix-store" --add-root "$links/runtime-$i" -r "$ref" >/dev/null
-  root_cmds+="$remote_bin/nix-store --add-root .nix-ship/runtime-$i -r '$ref' >/dev/null && "
   i=$((i + 1))
 done
 if [ "${#runtime_refs[@]}" -gt 0 ]; then
@@ -119,19 +140,45 @@ if [ "${#runtime_refs[@]}" -gt 0 ]; then
     "${runtime_refs[@]}"
 fi
 
-ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && git fetch -q origin && \
-  [ -z \"\$(git status --porcelain --untracked-files=no)\" ] && git checkout -q main && git merge -q --ff-only $commit && \
-  mkdir -p bin target/release $web_public crates/aura-web/public/assets .nix-ship && \
-  find .nix-ship -maxdepth 1 -name 'runtime-*' -delete && ${root_cmds}true"
-rsync -a "$aura_bin" "$AURA_E2E_REMOTE:$remote_root/bin/aura"
-rsync -a "$repl_bin" "$AURA_E2E_REMOTE:$remote_root/target/release/tool_repl"
-rsync -a "$tailwind" "$AURA_E2E_REMOTE:$remote_root/$tailwind"
-bash "$here/ship-web-assets.sh" "$AURA_E2E_ROOT" "$web_public" \
-  "$AURA_E2E_REMOTE:$remote_root/$web_public/"
+printf -v remote_checkout_cmd '%q ' bash -c '
+set -euo pipefail
+cd "$1"
+store_bin=$2
+expected=$3
+public=$4
+shift 4
+git fetch -q origin
+status=$(git status --porcelain --untracked-files=no)
+[[ -z "$status" ]]
+git checkout -q main
+git merge -q --ff-only "$expected"
+[[ $(git rev-parse HEAD) == "$expected" ]]
+mkdir -p bin target/release "$public" crates/aura-web/public/assets .nix-ship
+find .nix-ship -maxdepth 1 -name "runtime-*" -delete
+index=0
+for ref in "$@"; do
+    "$store_bin/nix-store" --add-root ".nix-ship/runtime-$index" -r "$ref" >/dev/null
+    index=$((index + 1))
+done
+' bash "$remote_root" "$remote_bin" "$commit" "$web_public" "${runtime_refs[@]}"
+ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "$remote_checkout_cmd"
+ship_remote_rsync -a "$aura_bin" "$(ship_remote_destination "$remote_root/bin/aura")"
+ship_remote_rsync -a "$repl_bin" "$(ship_remote_destination "$remote_root/target/release/tool_repl")"
+ship_remote_rsync -a "$tailwind" "$(ship_remote_destination "$remote_root/$tailwind")"
+RSYNC_OLD_ARGS=1 RSYNC_PROTECT_ARGS=0 bash "$here/ship-web-assets.sh" "$AURA_E2E_ROOT" "$web_public" \
+  "$(ship_remote_destination "$remote_root/$web_public/")"
 
-ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && \
-  find bin/aura target/release/tool_repl $web_public -exec touch {} + && \
-  test \"\$(git rev-parse HEAD)\" = $commit"
+# The expected digest is selected by the validated producer and delivered in
+# the authenticated command, independently of the protected input stream.
+printf -v remote_provenance_cmd '%q ' bash -c \
+  'cd "$1" && root=$(pwd -P) && exec "$2/nix" develop "$root" --command bash "$root/scripts/web/prebuilt-transfer.sh" install "$root" "$root/$3" "$4"' \
+  bash "$remote_root" "$remote_bin" "$web_public" "$web_transfer_digest"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$AURA_E2E_REMOTE" \
+  "$remote_provenance_cmd" < "$web_transfer_evidence"
+
+printf -v remote_verify_cmd '%q ' bash -c \
+  'cd "$1" && test "$(git rev-parse HEAD)" = "$2"' bash "$remote_root" "$commit"
+ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "$remote_verify_cmd"
 
 # Run the same binaries locally as on the remote host.
 mkdir -p bin target/release
