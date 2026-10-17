@@ -139,7 +139,9 @@ expect_status() {
   if "$@" > "$test_root/output" 2>&1; then actual=0; else actual=$?; fi
   if [[ "$actual" -ne "$expected" ]]; then
     cat "$test_root/output" >&2
-    echo "expected exit $expected, got $actual" >&2
+    printf 'expect_status line %s: expected exit %s, got %s; command:' "${BASH_LINENO[0]}" "$expected" "$actual" >&2
+    printf ' %q' "$@" >&2
+    printf '\n' >&2
     exit 1
   fi
 }
@@ -846,7 +848,7 @@ git -C "$project" -c user.name=fixture -c user.email=fixture@example.invalid com
 git -C "$project" update-ref refs/remotes/origin/main "$original_base"
 cat > "$fakebin/just" <<'EOF'
 #!/usr/bin/env bash
-[[ "$1" == ci-user-flow-policy ]] || exit 2
+case "$1" in ci-user-flow-policy|ci-build-cache-policy) ;; *) exit 2 ;; esac
 EOF
 chmod +x "$fakebin/just"
 mkdir -p "$project/artifacts/disk-budget/receipts/run.broad"
@@ -992,5 +994,150 @@ expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" 
 receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
 jq -e '.admission.workload==null and
   .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+
+# The exact cache-policy command has its own identity. It cannot inherit
+# unrelated same-profile peaks or another canonical command's measurements.
+printf 'ci-build-cache-policy:\n    @true\n' >> "$project/justfile"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-build-cache-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e --arg other "$canonical_key" '.admission.incoming_reservation_kib==4194304 and
+  .admission.workload.name=="ci-build-cache-policy" and
+  .admission.workload.identity!=$other and .final_exit_status==0' "$receipt" >/dev/null
+cache_key="$(jq -r .admission.workload.identity "$receipt")"
+mkdir -p "$project/artifacts/disk-budget/receipts/run.cache-same"
+jq -n --arg root "$project" --arg identity "$cache_key" \
+  '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
+    command_exit_status:0,disk:{measured_growth_kib:2097152}}' \
+  > "$project/artifacts/disk-budget/receipts/run.cache-same/receipt.json"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --dry-run --no-prune -- just ci-build-cache-policy
+rg -q "incoming-reservation=3145728 KiB.*identity=certified workload=$cache_key" "$test_root/output"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-build-cache-policy extra
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.workload==null and .admission.admitted==false' "$receipt" >/dev/null
+mkdir -p "$project/artifacts/disk-budget/receipts/run.cache-failed"
+jq -n --arg root "$project" --arg identity "$cache_key" \
+  '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
+    command_exit_status:101,disk:{measured_growth_kib:5242880}}' \
+  > "$project/artifacts/disk-budget/receipts/run.cache-failed/receipt.json"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- just ci-build-cache-policy
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.refusal.incoming_reservation_kib==6291456 and
+  .admission.admitted==false' "$receipt" >/dev/null
+
+# Failed or malformed digest observations cannot certify a workload key.
+export WORKLOAD_REAL_SHA256="$(command -v sha256sum)"
+cat > "$fakebin/sha256sum" <<'EOF'
+#!/usr/bin/env bash
+if [[ -n "${WORKLOAD_HASH_FAILURE_PATH:-}" && "${1:-}" == "$WORKLOAD_HASH_FAILURE_PATH" ]]; then
+  if [[ "$WORKLOAD_HASH_MODE" == malformed ]]; then printf 'invalid-digest\n'; exit 0; fi
+  exit 47
+fi
+exec "$WORKLOAD_REAL_SHA256" "$@"
+EOF
+chmod +x "$fakebin/sha256sum"
+for WORKLOAD_HASH_FAILURE_PATH in "$fakebin/just" "$project/justfile"; do
+  export WORKLOAD_HASH_FAILURE_PATH
+  for WORKLOAD_HASH_MODE in failure malformed; do
+    export WORKLOAD_HASH_MODE
+    expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+      --lane gates --dry-run --no-prune -- just ci-build-cache-policy
+    rg -q 'canonical workload identity unavailable' "$test_root/output"
+    rg -q 'outcome=unknown identity=uncertified-canonical workload=generic' "$test_root/output"
+    expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+      --lane gates --no-prune -- just ci-build-cache-policy
+    receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+    jq -e '.admission.workload==null and .admission.admitted==false and
+      .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+  done
+done
+unset WORKLOAD_HASH_FAILURE_PATH WORKLOAD_HASH_MODE
+
+# _policy-check invokes this exact raw Cargo command. Its genuine security
+# inventory includes nested discovery/execution; only the argv identity is
+# narrower than unrelated native gates, not the work being performed.
+security_argv=(cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml --
+  check security-boundary-policy)
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- "${security_argv[@]}"
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e --arg cache "$cache_key" --arg user "$canonical_key" \
+  '.admission.incoming_reservation_kib==4194304 and
+   .admission.workload.name=="security-boundary-policy" and
+   .admission.workload.identity!=$cache and
+   .admission.workload.identity!=$user and .final_exit_status==0' "$receipt" >/dev/null
+security_key="$(jq -r .admission.workload.identity "$receipt")"
+mkdir -p "$project/artifacts/disk-budget/receipts/run.security-same"
+jq -n --arg root "$project" --arg identity "$security_key" \
+  '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
+    command_exit_status:0,disk:{measured_growth_kib:2097152}}' \
+  > "$project/artifacts/disk-budget/receipts/run.security-same/receipt.json"
+expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --dry-run --no-prune -- "${security_argv[@]}"
+rg -q "incoming-reservation=3145728 KiB.*identity=certified workload=$security_key" "$test_root/output"
+mkdir -p "$project/artifacts/disk-budget/receipts/run.security-failed"
+jq -n --arg root "$project" --arg identity "$security_key" \
+  '{root:$root,lane:"gates",admission:{workload:{identity:$identity}},
+    command_exit_status:101,disk:{measured_growth_kib:5242880}}' \
+  > "$project/artifacts/disk-budget/receipts/run.security-failed/receipt.json"
+expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+  --lane gates --no-prune -- "${security_argv[@]}"
+receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+jq -e '.admission.refusal.incoming_reservation_kib==6291456 and
+  .admission.admitted==false' "$receipt" >/dev/null
+for unapproved in outer extra-arg alternate-check alternate-manifest cargo-check; do
+  case "$unapproved" in
+    outer) argv=(just _policy-check check security-boundary-policy) ;;
+    extra-arg) argv=("${security_argv[@]}" --verbose) ;;
+    alternate-check) argv=(cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check ownership-policy) ;;
+    alternate-manifest) argv=(cargo run --quiet --manifest-path other/Cargo.toml -- check security-boundary-policy) ;;
+    cargo-check) argv=(cargo check --manifest-path toolkit/xtask/Cargo.toml) ;;
+  esac
+  expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --dry-run --no-prune -- "${argv[@]}"
+  rg -q 'incoming-reservation=11534336 KiB.*outcome=refused identity=generic workload=generic' "$test_root/output"
+done
+for override in JUST_JUSTFILE JUST_WORKING_DIRECTORY; do
+  export "$override"=other-recipe
+  expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --dry-run --no-prune -- "${security_argv[@]}"
+  rg -q 'outcome=unknown identity=uncertified-canonical workload=generic' "$test_root/output"
+  unset "$override"
+done
+for changed in security-recipe security-source; do
+  case "$changed" in
+    security-recipe) printf '# changed security recipe\n' >> "$project/justfile" ;;
+    security-source) printf '# changed lock\n' >> "$project/Cargo.lock" ;;
+  esac
+  expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+    --lane gates --dry-run --no-prune -- "${security_argv[@]}"
+  rg -q 'incoming-reservation=4194304 KiB.*identity=certified' "$test_root/output"
+  if rg -q "workload=$security_key" "$test_root/output"; then
+    echo 'changed security input reused prior workload identity' >&2; exit 1
+  fi
+  if [[ "$changed" == security-recipe ]]; then
+    printf 'ci-user-flow-policy:\n    @true\nci-build-cache-policy:\n    @true\n' > "$project/justfile"
+  else
+    printf 'fixture Cargo.lock\n' > "$project/Cargo.lock"
+  fi
+done
+for WORKLOAD_HASH_FAILURE_PATH in "$fakebin/just" "$project/justfile"; do
+  export WORKLOAD_HASH_FAILURE_PATH
+  for WORKLOAD_HASH_MODE in failure malformed; do
+    export WORKLOAD_HASH_MODE
+    expect_status 0 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+      --lane gates --dry-run --no-prune -- "${security_argv[@]}"
+    rg -q 'outcome=unknown identity=uncertified-canonical workload=generic' "$test_root/output"
+    expect_status 1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" \
+      --lane gates --no-prune -- "${security_argv[@]}"
+    receipt="$(sed -n 's/^Build receipt: //p' "$test_root/output")"
+    jq -e '.admission.workload==null and .admission.admitted==false and
+      .admission.refusal.incoming_reservation_kib==11534336' "$receipt" >/dev/null
+  done
+done
+unset WORKLOAD_HASH_FAILURE_PATH WORKLOAD_HASH_MODE
 
 echo 'build-budget safety tests passed'

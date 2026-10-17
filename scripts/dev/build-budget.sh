@@ -140,11 +140,28 @@ active_consumers() {
 reservation=''
 incoming_reservation_kib=$((reserve_gib * 1024 * 1024))
 workload_identity=''
+canonical_workload_name() {
+  [[ "$lane" == gates ]] || return 1
+  if [[ $# == 2 && "$1" == just ]]; then
+    case "$2" in ci-user-flow-policy|ci-build-cache-policy)
+      printf '%s\n' "$2"; return 0;;
+    esac
+  fi
+  # Actual _policy-check recipe argv, not an arbitrary Cargo check or a
+  # different just wrapper. The real Cargo child compiles and executes the toolkit policy check.
+  if [[ $# == 8 && "$1" == cargo && "$2" == run && "$3" == --quiet &&
+        "$4" == --manifest-path && "$5" == toolkit/xtask/Cargo.toml &&
+        "$6" == -- && "$7" == check && "$8" == security-boundary-policy ]]; then
+    printf '%s\n' security-boundary-policy; return 0
+  fi
+  return 1
+}
 canonical_workload_identity() {
-  [[ "$lane" == gates && $# == 2 && "$1" == just && "$2" == ci-user-flow-policy ]] || return 1
+  local name argv_hash
+  name="$(canonical_workload_name "$@")" || return 1
   [[ -z "${JUST_JUSTFILE:-}" && -z "${JUST_WORKING_DIRECTORY:-}" ]] || return 1
   [[ -f "$root/justfile" && ! -L "$root/justfile" ]] || return 1
-  local selector_hash tool_hash just_binary just_hash inputs_hash relative
+  local selector_hash tool_hash just_binary just_hash inputs_hash relative recipe_hash digest
   local refs_hash graft_path
   local -a input_paths=(Cargo.toml Cargo.lock flake.nix flake.lock
     toolkit/xtask/Cargo.toml toolkit/xtask/Cargo.lock crates/aura-macros/Cargo.toml)
@@ -166,20 +183,25 @@ canonical_workload_identity() {
   tool_hash="$(policy_tool_identity "$root" "$root")" || return 1
   just_binary="$(command -v just)" || return 1
   [[ -f "$just_binary" && ! -L "$just_binary" ]] || return 1
-  just_hash="$(sha256sum "$just_binary" | awk '{print $1}')"
+  just_hash="$(sha256sum "$just_binary" | awk '{print $1}')" || return 1
+  recipe_hash="$(sha256sum "$root/justfile" | awk '{print $1}')" || return 1
+  argv_hash="$(printf '%s\0' "$@" | sha256sum | awk '{print $1}')" || return 1
   selector_hash="$(printf '%s\0' \
     "${AURA_BUILD_PACKAGES:-}" "${CARGO_BUILD_TARGET:-}" "${RUSTFLAGS:-}" \
     "${CARGO_ENCODED_RUSTFLAGS:-}" "${RUSTC:-}" "${RUSTC_WRAPPER:-}" \
     "${RUSTC_WORKSPACE_WRAPPER:-}" "${AURA_UX_POLICY_DIFF_RANGE:-}" \
     "${AURA_UX_GUIDANCE_DIFF_RANGE:-}" "${GITHUB_BASE_REF:-}" \
     "${AURA_UX_GUIDANCE_CHANGED_FILES+x}" "${AURA_UX_GUIDANCE_CHANGED_FILES:-}" \
-    "${GIT_NO_REPLACE_OBJECTS:-}" "${GIT_REPLACE_REF_BASE:-}" | sha256sum | awk '{print $1}')"
-  jq -cn --arg recipe "$(sha256sum "$root/justfile" | awk '{print $1}')" \
+    "${GIT_NO_REPLACE_OBJECTS:-}" "${GIT_REPLACE_REF_BASE:-}" | sha256sum | awk '{print $1}')" || return 1
+  for digest in "$refs_hash" "$inputs_hash" "$tool_hash" "$just_hash" "$recipe_hash" "$selector_hash" "$argv_hash"; do
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  done
+  jq -cn --arg name "$name" --arg argv "$argv_hash" --arg recipe "$recipe_hash" \
     --arg profile "$profile" --arg features "$features" --arg target "$target_triple" \
     --arg incremental "$CARGO_INCREMENTAL" --arg selector "$selector_hash" \
     --arg source "$source_fingerprint" --arg tool "$tool_hash" --arg just "$just_hash" \
     --arg inputs "$inputs_hash" --arg refs "$refs_hash" \
-    '{command:["just","ci-user-flow-policy"],recipe_sha256:$recipe,
+    '{command_name:$name,command_argv_sha256:$argv,recipe_sha256:$recipe,
       profile:$profile,features:$features,target:$target,
       incremental:$incremental,selector_hash:$selector,
       source_fingerprint:$source,input_hash:$inputs,refs_hash:$refs,
@@ -460,9 +482,10 @@ if (( dry_run == 0 )); then
   source_fingerprint="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
   workload_identity="$(canonical_workload_identity "$@" || true)"
   if [[ -n "$workload_identity" ]]; then
-    aura_receipt_update --arg identity "$workload_identity" \
+    workload_name="$(canonical_workload_name "$@")"
+    aura_receipt_update --arg identity "$workload_identity" --arg name "$workload_name" \
       --arg profile "$profile" --arg features "$features" --arg target "$target_triple" \
-      '.admission.workload={name:"ci-user-flow-policy",identity:$identity,
+      '.admission.workload={name:$name,identity:$identity,
         profile:$profile,features:$features,target:$target}'
   fi
   estimate_incoming_growth
@@ -483,7 +506,7 @@ if [[ "$dry_run" -eq 1 ]]; then
     source_fingerprint="$(GIT_OPTIONAL_LOCKS=0 aura_receipt_source_fingerprint "$root" || true)"
     workload_identity="$(GIT_OPTIONAL_LOCKS=0 canonical_workload_identity "$@" || true)"
     preview_identity_status=generic
-    if [[ "$lane" == gates && $# == 2 && "$1" == just && "$2" == ci-user-flow-policy ]]; then
+    if canonical_workload_name "$@" >/dev/null; then
       if [[ -n "$workload_identity" ]]; then preview_identity_status=certified
       else preview_identity_status=uncertified-canonical; fi
     fi

@@ -1704,7 +1704,17 @@ to `scripts/dev/build-budget.sh --dry-run --no-prune --lane <lane> -- <command>`
 The preview reads the current source/workload identity, measured receipt peaks,
 and live reservations, then prints free space, incoming growth reservation,
 the 15 GiB floor, margin, and an advisory admission outcome. With no command,
-the incoming reservation is unknown. If the exact canonical user-flow identity
+the incoming reservation is unknown. The exact `gates` commands
+`just ci-user-flow-policy`, `just ci-build-cache-policy`, and the actual
+`_policy-check` child argv `cargo run --quiet --manifest-path
+toolkit/xtask/Cargo.toml -- check security-boundary-policy` have distinct
+source/tool/recipe-bound workload identities. Each retains the conservative
+4 GiB cold-start reservation until its own receipts provide measured peaks;
+an unrelated native aggregate's profile peak cannot stand in for that command.
+Failed runs' measured growth still counts. Extra arguments or command overrides
+do not qualify for this exact-command treatment. The outer `just _policy-check`
+invocation is a different argv and remains generic; the recognized security
+child still compiles and executes the real toolkit policy check. If a canonical identity
 cannot be certified, preview reports `unknown` with a conservative generic
 estimate; it does not claim admission. Preview creates no receipt, reservation,
 or lock, runs no command, and removes no stale reservation or cache. Capacity
