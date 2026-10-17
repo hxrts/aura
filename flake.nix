@@ -111,7 +111,19 @@
         warmVendor = craneVendorLib.vendorCargoDeps { cargoLock = ./Cargo.lock; };
         warmVendorPath = warmVendor.outPath;
         warmCC = if pkgs.stdenv.isDarwin then "clang" else "gcc";
-        warmWrapper = "${pkgs.sccache}/bin/sccache";
+        # Cargo's generated OUT_DIR differs when Nix rebuilds into a .check
+        # output. rustversion's include!(env!("OUT_DIR")) proves that the
+        # pre-rewrite path can enter rustc metadata and signed proc macros.
+        # Remap only that declared output root before rustc hashes its spans;
+        # keep the ordinary sccache compiler dispatch behind this wrapper.
+        warmRemapWrapper = pkgs.writeShellScript "aura-warm-rustc-wrapper"
+          (builtins.replaceStrings [ "@sccache@" ] [ "${pkgs.sccache}/bin/sccache" ]
+            (builtins.readFile ./scripts/dev/warm-rustc-wrapper.sh.in));
+        warmWrapper = if pkgs.stdenv.isDarwin then "${warmRemapWrapper}" else "${pkgs.sccache}/bin/sccache";
+        # Rust's Darwin rpath install name keeps signed proc-macro dylibs
+        # independent of the temporary Nix check-output path. ld64's UUID
+        # otherwise changes across two builds of the same derivation.
+        warmRustFlags = if pkgs.stdenv.isDarwin then "-C rpath -C link-arg=-Wl,-no_uuid" else "";
         warmDebugArgs = {
           dummySrc = warmDummySrc;
           cargoLock = ./Cargo.lock;
@@ -123,8 +135,34 @@
           CC = warmCC;
           CARGO_INCREMENTAL = "0";
           RUSTC_WRAPPER = warmWrapper;
+          RUSTFLAGS = warmRustFlags;
+          installCargoArtifactsMode = "use-symlink";
           nativeBuildInputs = [ pkgs.sccache pkgs.jq ];
+          # Keep Crane's test-dependency compilation. Cargo identifies the
+          # disposable local dummy test executable in its JSON artifact log;
+          # the real dependency artifacts and fingerprints remain installed.
+          preCheck = ''
+            export AURA_WARM_TEST_ARTIFACT_LOG="$TMPDIR/aura-warm-test-artifacts.jsonl"
+          '';
+          checkPhaseCargoCommand = ''
+            cargoWithProfile test --locked -p hxrts-aura-core --no-run --message-format=json > "$AURA_WARM_TEST_ARTIFACT_LOG" || exit $?
+          '';
+          postCheck = ''
+            if [ "$(uname -s)" = Darwin ]; then
+              bash ${./scripts/dev/remove-warm-dummy-test-executable.sh} \
+                "$AURA_WARM_TEST_ARTIFACT_LOG" "$CARGO_TARGET_DIR" ${warmDummySrc}/Cargo.toml
+            fi
+          '';
           preBuild = ''
+            # Crane unpacks dummySrc into a fresh sandbox directory. Cargo
+            # records that varying manifest/source path in depfiles and rustc
+            # metadata, so compile from the identical immutable dummy source.
+            cd ${warmDummySrc}
+            # Keep Cargo's recorded OUT_DIR and depfile paths on the declared
+            # output. The post-install hook moves this raw tree to $out/target.
+            export AURA_RUSTC_REMAP_FROM="$out"
+            export CARGO_TARGET_DIR="$out/build/target"
+            mkdir -p "$out/build"
             # A sandbox compiler must never reuse the developer-owned daemon:
             # that process cannot write the sandbox's target directory.
             export SCCACHE_SERVER_UDS="$TMPDIR/aura-sccache.sock"
@@ -133,10 +171,18 @@
             trap 'sccache --stop-server >/dev/null 2>&1 || true' EXIT
           '';
           postBuild = ''
-            if [ -f target/.rustc_info.json ]; then
-              jq -S . target/.rustc_info.json > target/.rustc_info.json.canonical
-              mv target/.rustc_info.json.canonical target/.rustc_info.json
+            if [ -f "$CARGO_TARGET_DIR/.rustc_info.json" ]; then
+              jq -S . "$CARGO_TARGET_DIR/.rustc_info.json" > "$CARGO_TARGET_DIR/.rustc_info.json.canonical"
+              mv "$CARGO_TARGET_DIR/.rustc_info.json.canonical" "$CARGO_TARGET_DIR/.rustc_info.json"
             fi
+          '';
+          postFixup = ''
+            # Restore the original recorded path after Crane's post-install
+            # move. This relative link keeps generated OUT_DIR files in the
+            # immutable output without copying or rewriting compiler data.
+            test -d "$out/target"
+            test ! -e "$out/build/target"
+            ln -s ../target "$out/build/target"
           '';
         };
         warmDebug = craneLib.buildDepsOnly warmDebugArgs;
@@ -152,16 +198,22 @@
           profile = "dev";
           features = [ "default" ];
           target = pkgs.stdenv.hostPlatform.config;
-          rustflags = "";
+          rustflags = warmRustFlags;
           cc = warmCC;
           wrapper = warmWrapper;
           incremental = false;
           buildEnv = {
+            # Include the entire Crane recipe and hooks in the consumer key.
+            PRODUCER_DRV_PATH = warmDebug.drvPath;
             CARGO_PROFILE = "dev";
             CC = warmCC;
             CARGO_INCREMENTAL = "0";
             RUSTC_WRAPPER = warmWrapper;
+            RUSTFLAGS = warmRustFlags;
+            RUSTC_REMAP_POLICY = "darwin-declared-output-root";
             SCCACHE_SERVER_UDS_POLICY = "sandbox-local";
+            CARGO_TARGET_DIR_POLICY = "raw-output-self-reference";
+            INSTALL_CARGO_ARTIFACTS_MODE = "use-symlink";
           };
         };
 

@@ -498,6 +498,9 @@ ci-policy-toolkit-clippy:
 
 # Verify cache guards, evidence retention, and a tiny isolated compiler probe.
 ci-build-cache-policy:
+    bash scripts/dev/test-build-cache-key.sh
+    bash scripts/dev/test-warm-rustc-wrapper.sh
+    bash scripts/dev/test-remove-warm-dummy-test-executable.sh
     bash scripts/dev/check-shell-syntax.sh scripts/dev/*.sh scripts/ci/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/harness/lan/ship.sh scripts/harness/lan/ship-web-assets.sh scripts/harness/lan/test-ship-web-assets.sh scripts/harness/lan/runtime-refs.sh scripts/web/dx.sh scripts/web/test-binaryen-selection.sh scripts/web/serve-static.sh scripts/web/prebuilt-provenance.sh scripts/web/prebuilt-transfer.sh scripts/web/test-prebuilt-provenance.sh
     bash scripts/dev/test-shell-syntax-inventory.sh
     bash scripts/ci/test-main-smoke.sh

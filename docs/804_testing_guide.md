@@ -1587,10 +1587,18 @@ build-script environment. `scripts/dev/build-cache-key.sh --debug` queries the
 flake's evaluated debug-lane producer key. The opt-in `vendor-deps` and
 `deps-debug` flake outputs materialize an immutable full-lock vendor directory
 and one debug dependency tree; neither changes the dev-shell Cargo dispatcher
-or rehydrates a worktree. Darwin same-derivation rebuild validation remains
-required before the debug tree can be used for rehydration: Cargo build-script
-output and dependency files may retain the Nix sandbox's changing build root.
-The other profiles and the dispatcher integration remain separate work. An
+or rehydrates a worktree. The Darwin debug producer compiles from immutable
+dummy source, retains the raw Cargo target and generated `OUT_DIR` files, and
+uses declared Rust remap, rpath, and linker inputs. Its check phase still
+compiles test dependencies; a checked Cargo artifact record identifies only
+the disposable local dummy test executable for omission. The pinned Darwin
+producer passed a same-derivation rebuild, and a fresh writable copy ran its
+exact `check --all-targets` and `build --lib` command graph with external
+dependencies fresh. This does not certify other Cargo commands, profiles, or
+Linux. Copied depfiles retain the original producer store path, so that output
+and its closure must remain GC-rooted for valid consumption. Rehydration and
+dispatcher integration remain disabled until command compatibility, integrity,
+and recovery checks pass. An
 absent vendor path or any unrecorded producer input
 must prevent future warm-tree reuse rather than fall back to a guessed key.
 

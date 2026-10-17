@@ -21,7 +21,7 @@ cat > "$scratch/base.json" <<'JSON'
   "cc": "/nix/store/ffffffffffffffffffffffffffffffff-clang/bin/clang",
   "wrapper": "/nix/store/11111111111111111111111111111111-sccache/bin/sccache",
   "incremental": false,
-  "buildEnv": { "CFLAGS": "-O0", "AR": "/nix/store/ar/bin/ar" }
+  "buildEnv": { "CFLAGS": "-O0", "AR": "/nix/store/ar/bin/ar", "PRODUCER_DRV_PATH": "/nix/store/22222222222222222222222222222222-debug-producer.drv" }
 }
 JSON
 query() { bash "$repo_root/scripts/dev/build-cache-key.sh" "$1"; }
@@ -46,6 +46,10 @@ jq '.buildEnv.CFLAGS = "-O2"' "$scratch/base.json" > "$scratch/changed.json"
 [[ "$(query "$scratch/changed.json")" != "$base" ]] || {
   echo 'key omitted build-script environment' >&2; exit 1;
 }
+jq '.buildEnv.PRODUCER_DRV_PATH = "/nix/store/33333333333333333333333333333333-debug-producer.drv"' "$scratch/base.json" > "$scratch/changed.json"
+[[ "$(query "$scratch/changed.json")" != "$base" ]] || {
+  echo 'key omitted producer derivation' >&2; exit 1;
+}
 for expression in 'del(.vendorPath)' '.unexpected = "x"' '.features = "default"' '.buildEnv = []'; do
   jq "$expression" "$scratch/base.json" > "$scratch/changed.json"
   if query "$scratch/changed.json" > "$scratch/output" 2>&1; then
@@ -60,7 +64,7 @@ direct="$(cd "$repo_root" && nix eval --raw --impure --expr '
 [[ "$direct" == "$base" ]] || { echo 'shell and direct Nix keys differ' >&2; exit 1; }
 flake="$(cd "$repo_root" && nix eval --raw --impure --expr '
   let
-    outputs = builtins.getFlake (toString ./.);
+    outputs = builtins.getFlake ("git+file://" + toString ./.);
     input = builtins.fromJSON (builtins.readFile (builtins.getEnv "AURA_BUILD_CACHE_KEY_INPUT"));
   in outputs.lib.${builtins.currentSystem}.buildCacheKey input
 ')"

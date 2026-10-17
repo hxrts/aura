@@ -1,0 +1,16 @@
+#!/bin/bash
+# Rendered by the debug dependency producer with one pinned sccache path.
+set -euo pipefail
+
+if [[ $# -lt 1 || -z ${AURA_RUSTC_REMAP_FROM:-} || ${AURA_RUSTC_REMAP_FROM:-} != /* || ${AURA_RUSTC_REMAP_FROM:-} == / ]]; then
+  printf '%s\n' 'warm-rustc-wrapper: missing compiler or absolute output root' >&2
+  exit 2
+fi
+if [[ ! -x @sccache@ ]]; then
+  printf '%s\n' 'warm-rustc-wrapper: pinned compiler cache unavailable' >&2
+  exit 2
+fi
+rustc=$1
+shift
+exec "@sccache@" "$rustc" \
+  "--remap-path-prefix=$AURA_RUSTC_REMAP_FROM=/aura-warm-output" "$@"
