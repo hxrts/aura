@@ -87,6 +87,9 @@ rg -q 'shares the source APFS free-space pool' "$fixture/output"
 STORE_POOL='' expect_fail --export
 rg -q 'cannot verify independent APFS container capacity' "$fixture/output"
 [[ -f "$project/target/dylint/cache" ]]
+expect_fail --export --compression gzip-1
+rg -q 'compressed archive requires remote ext4' "$fixture/output"
+[[ -f "$project/target/dylint/cache" ]]
 ln -s "$fixture" "$store/aura-cold-cache"
 expect_fail --export
 rm "$store/aura-cold-cache"

@@ -35,6 +35,17 @@ expect_status() {
 }
 expect_status 0 prune --lane wasm-debug --dry-run
 [[ -f "$project/target/wasm32-unknown-unknown/debug/data" ]]
+for consumer in tool_repl aura-harness aura; do
+  printf '%s\n' "$consumer" > "$ACTIVE_FILE"
+  expect_status 1 prune --lane debug --apply
+  rg -q 'active' "$test_root/output"
+done
+rm "$ACTIVE_FILE"
+printf '%s\n' "$project/target/debug/data" > "$OPEN_FILE"
+expect_status 1 prune --lane debug --apply
+rg -q 'open files' "$test_root/output"
+rm "$OPEN_FILE"
+[[ -f "$project/target/debug/data" ]]
 
 printf 'cargo\n' > "$ACTIVE_FILE"
 expect_status 1 prune --lane wasm-debug --apply

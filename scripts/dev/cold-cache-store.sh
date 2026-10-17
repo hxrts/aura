@@ -5,6 +5,7 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 action='' lane='' root="$repo_root" lock_owner='' run_host='' run_id='' evidence=0
+compression=plain
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --export|--restore) action="${1#--}"; shift ;;
@@ -13,6 +14,7 @@ while [[ $# -gt 0 ]]; do
     --run-host) run_host="${2:?missing run host}"; shift 2 ;;
     --run-id) run_id="${2:?missing run id}"; shift 2 ;;
     --lock-owned-by) lock_owner="${2:?missing owner}"; shift 2 ;;
+    --compression) compression="${2:?missing compression}"; shift 2 ;;
     *) echo 'usage: cold-cache-store.sh --export|--restore --lane LANE [--root PATH] [--lock-owned-by PID]' >&2; exit 2 ;;
   esac
 done
@@ -26,6 +28,7 @@ if [[ -n "$run_host" || -n "$run_id" ]]; then
   relative=".tmp/e2e/run/$run_host/artifacts/runs/$run_id"
 else
 case "$lane" in
+  debug) relative=target/debug ;;
   debug-incremental) relative=target/debug/incremental ;;
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
   wasm-profile) relative=target/wasm32-unknown-unknown/wasm ;;
@@ -37,6 +40,15 @@ case "$lane" in
 esac
 fi
 [[ -n "$action" ]] || { echo 'cold-cache-store: action required' >&2; exit 2; }
+[[ "$compression" == plain || "$compression" == gzip-1 ]] || {
+  echo 'cold-cache-store: unsupported compression' >&2; exit 2;
+}
+[[ "$action" == export || "$compression" == plain ]] || {
+  echo 'cold-cache-store: restore selects its signed archive format' >&2; exit 2;
+}
+[[ "$evidence" == 0 || "$compression" == plain ]] || {
+  echo 'cold-cache-store: evidence compression is not supported' >&2; exit 2;
+}
 root="$(cd "$root" && pwd -P)"
 remote_host="${AURA_COLD_CACHE_REMOTE_HOST:-}"
 remote_dir="${AURA_COLD_CACHE_REMOTE_DIR:-}"
@@ -160,20 +172,40 @@ fi
 path="$root/$relative"
 evidence_runs="$root/.tmp/e2e/run/$run_host/artifacts/runs"
 evidence_lock=''
-evidence_members() {
-  local base="$1" member relative kind bytes digest
+evidence_members() (
+  local base="$1" member relative kind bytes digest mode mtime list
+  list="$(mktemp "$shared_dir/cold-keys/.inventory.XXXXXX")" || return 1
+  trap 'rm -f -- "$list"' EXIT
+  find "$base" -print0 | LC_ALL=C sort -z > "$list" || return 1
   while IFS= read -r -d '' member; do
     relative="${member#"$base"}"
     [[ "$relative" != *$'\n'* && "$relative" != *$'\r'* &&
        "$relative" != *$'\t'* ]] || return 1
     if [[ -d "$member" ]]; then kind=d; bytes=0; digest=-
     elif [[ -f "$member" && ! -L "$member" ]]; then
-      kind=f; bytes="$(stat_size "$member")"
-      digest="$(sha256sum "$member" | awk '{print $1}')"
+      kind=f; bytes="$(stat_size "$member")" || return 1
+      digest="$(sha256sum "$member" | awk '{print $1}')" || return 1
+      [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
     else return 1; fi
+    mode="$(stat_mode "$member")" || return 1
+    mtime="$(stat_mtime "$member")" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ && "$mtime" =~ ^[0-9]+$ ]] || return 1
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$relative" "$kind" \
-      "$(stat_mode "$member")" "$(stat_mtime "$member")" "$bytes" "$digest"
-  done < <(find "$base" -print0 | LC_ALL=C sort -z)
+      "$mode" "$mtime" "$bytes" "$digest" || return 1
+  done < "$list"
+)
+gzip_tool_identity() {
+  local selected
+  selected="$(command -v gzip 2>/dev/null || true)"
+  [[ "$selected" == /nix/store/*/bin/gzip && -f "$selected" && ! -L "$selected" ]] || {
+    echo 'cold-cache-store: pinned Nix gzip required' >&2; return 1;
+  }
+  gzip_bin="$selected"
+  gzip_sha="$(sha256sum "$gzip_bin" | awk '{print $1}')"
+  [[ "$gzip_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+}
+archive_members() {
+  evidence_members "$1"
 }
 evidence_validate_payload() {
   local candidate="$1" check_newest="$2" manifest="$1/.aura-retention.json"
@@ -325,15 +357,26 @@ REMOTE
 remote_snapshot="$remote_dir/aura-cold-cache/$root_key/$revision/$lane"
 remote_ready="$remote_snapshot/ready"
 remote_pending="$remote_snapshot/.pending"
+archive_name=archive.tar
+gzip_bin='' gzip_sha=''
+if [[ "$compression" == gzip-1 ]]; then
+  (( remote_mode == 1 )) || {
+    echo 'cold-cache-store: compressed archive requires remote ext4' >&2; exit 2;
+  }
+  archive_name=archive.tar.gz
+  gzip_tool_identity
+fi
 remote_location="$bucket/location.json"
 remote_location_sig="$bucket/location.sig"
 remote_verify_ready() {
-  remote_ssh "bash -s -- $remote_ready $evidence" <<'REMOTE'
+  remote_ssh "bash -s -- $remote_ready $evidence $archive_name $compression" <<'REMOTE'
 set -euo pipefail
-ready=$1; evidence=$2
+ready=$1; evidence=$2; archive_name=$3; compression=$4
 [[ -d "$ready" && ! -L "$ready" && "$(stat -c %a "$ready")" == 700 ]]
-names=(archive.tar manifest.json manifest.sig location.json location.sig)
+[[ "$archive_name" == archive.tar || "$archive_name" == archive.tar.gz ]]
+names=("$archive_name" manifest.json manifest.sig location.json location.sig)
 [[ "$evidence" == 0 ]] || names+=(members.tsv)
+[[ "$compression" == plain ]] || names+=(members.tsv)
 for name in "${names[@]}"; do
   file="$ready/$name"
   [[ -f "$file" && ! -L "$file" && "$(stat -c %a "$file")" == 600 &&
@@ -374,13 +417,20 @@ remote_export() {
     echo 'cold-cache-store: existing location receipt refuses overwrite' >&2; return 1;
   }
   local archive_bytes source_allocated_kib remote_floor expected_sha actual_sha remote_bytes metadata_sha='' rollback_text
+  local tar_bytes='' tar_sha=''
   rollback_text="cold-cache-store.sh --restore --lane $lane --root $root with the same remote configuration and revision $revision"
   if (( evidence == 1 )); then
     rollback_text="cold-cache-store.sh --restore --root $root --run-host $run_host --run-id $run_id with the same remote configuration and revision $revision"
   fi
   # Tar's logical bytes can greatly exceed allocated blocks for sparse files.
   # Measure the stream itself before admission rather than reserving from du.
-  archive_bytes="$(tar -C "$path" -cf - . | wc -c | tr -d ' ')"
+  if [[ "$compression" == gzip-1 ]]; then
+    tar_bytes="$(tar -C "$path" -cf - . | wc -c | tr -d ' ')"
+    tar_sha="$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')"
+    archive_bytes="$(tar -C "$path" -cf - . | "$gzip_bin" -1 -c | wc -c | tr -d ' ')"
+  else
+    archive_bytes="$(tar -C "$path" -cf - . | wc -c | tr -d ' ')"
+  fi
   source_allocated_kib="$(du -sk "$path" | awk 'NR==1 {print $1}')"
   [[ "$archive_bytes" =~ ^[0-9]+$ && "$archive_bytes" -gt 0 ]] || {
     echo 'cold-cache-store: cannot measure archive bytes' >&2; return 1;
@@ -426,7 +476,11 @@ REMOTE
   fi
   # A first pass binds the original idle lane. Any change before the streamed
   # upload makes the remote hash differ and preserves the source.
-  expected_sha="$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')"
+  if [[ "$compression" == gzip-1 ]]; then
+    expected_sha="$(tar -C "$path" -cf - . | "$gzip_bin" -1 -c | sha256sum | awk '{print $1}')"
+  else
+    expected_sha="$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')"
+  fi
   remote_ssh "bash -s -- $remote_dir $root_key $revision $lane" <<'REMOTE'
 set -euo pipefail
 umask 077
@@ -442,18 +496,23 @@ bucket="$base/aura-cold-cache/$key/$rev/$lane"
    ! -e "$bucket/.pending" && ! -L "$bucket/.pending" ]]
 mkdir -m 700 "$bucket/.pending"
 REMOTE
-  tar -C "$path" -cf - . | remote_ssh "umask 077; cat > $remote_pending/archive.tar"
+  if [[ "$compression" == gzip-1 ]]; then
+    tar -C "$path" -cf - . | "$gzip_bin" -1 -c |
+      remote_ssh "umask 077; cat > $remote_pending/$archive_name"
+  else
+    tar -C "$path" -cf - . | remote_ssh "umask 077; cat > $remote_pending/$archive_name"
+  fi
   read -r actual_sha remote_bytes < <(remote_ssh \
-    "sha256sum $remote_pending/archive.tar; wc -c < $remote_pending/archive.tar" |
+    "sha256sum $remote_pending/$archive_name; wc -c < $remote_pending/$archive_name" |
     awk 'NR==1 {sha=$1} NR==2 {bytes=$1} END {print sha, bytes}')
   [[ "$expected_sha" == "$actual_sha" && "$remote_bytes" == "$archive_bytes" ]] || {
     echo 'cold-cache-store: remote archive differs from original lane' >&2; return 1;
   }
   umask 077
   pending="$(mktemp -d "$shared_dir/cold-keys/.remote.XXXXXX")"
-  if (( evidence == 1 )); then
-    evidence_members "$path" > "$pending/members.tsv" || {
-      echo 'cold-cache-store: evidence metadata inventory failed' >&2; return 1;
+  if (( evidence == 1 )) || [[ "$compression" == gzip-1 ]]; then
+    archive_members "$path" > "$pending/members.tsv" || {
+      echo 'cold-cache-store: source member inventory failed' >&2; return 1;
     }
     metadata_sha="$(sha256sum "$pending/members.tsv" | awk '{print $1}')"
     remote_ssh "umask 077; cat > $remote_pending/members.tsv" < "$pending/members.tsv"
@@ -461,11 +520,17 @@ REMOTE
   jq -n --arg revision "$revision" --arg root "$root" --arg lane "$lane" \
     --arg sha "$actual_sha" --argjson bytes "$remote_bytes" \
     --argjson allocated "$source_allocated_kib" --arg metadata "$metadata_sha" \
-    --arg relative "${relative:-}" \
-    '{schema:1,source_revision:$revision,source_root:$root,lane:$lane,
+    --arg relative "${relative:-}" --arg compression "$compression" \
+    --arg tar_sha "$tar_sha" --argjson tar_bytes "${tar_bytes:-0}" \
+    --arg gzip_tool "$gzip_bin" --arg gzip_sha "$gzip_sha" \
+    '{schema:(if $compression=="plain" then 1 else 2 end),source_revision:$revision,source_root:$root,lane:$lane,
       sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated} +
+      (if $compression=="plain" then {} else
+        {compression:$compression,tar_sha256:$tar_sha,tar_bytes:$tar_bytes,
+         gzip_tool:$gzip_tool,gzip_sha256:$gzip_sha} end) +
       (if $metadata=="" then {} else
-        {metadata_sha256:$metadata,source_relative:$relative} end)' \
+        {metadata_sha256:$metadata} +
+        (if $compression=="plain" then {source_relative:$relative} else {} end) end)' \
     > "$pending/manifest.json"
   openssl dgst -sha256 -sign "$signing_key" -out "$pending/manifest.sig" "$pending/manifest.json"
   remote_ssh "umask 077; cat > $remote_pending/manifest.json" < "$pending/manifest.json"
@@ -482,24 +547,33 @@ REMOTE
     --arg device "$remote_device" --arg sha "$actual_sha" --argjson bytes "$remote_bytes" \
     --argjson allocated "$source_allocated_kib" --arg metadata "$metadata_sha" \
     --arg relative "${relative:-}" --arg rollback "$rollback_text" \
-    '{schema:1,source_revision:$revision,source_root:$root,lane:$lane,
+    --arg compression "$compression" --arg tar_sha "$tar_sha" \
+    --argjson tar_bytes "${tar_bytes:-0}" --arg gzip_tool "$gzip_bin" \
+    --arg gzip_sha "$gzip_sha" \
+    '{schema:(if $compression=="plain" then 1 else 2 end),source_revision:$revision,source_root:$root,lane:$lane,
       remote_host:$host,remote_dir:$dir,remote_machine:$machine,remote_device:$device,
       sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated,
       rollback:$rollback} +
+      (if $compression=="plain" then {} else
+        {compression:$compression,tar_sha256:$tar_sha,tar_bytes:$tar_bytes,
+         gzip_tool:$gzip_tool,gzip_sha256:$gzip_sha} end) +
       (if $metadata=="" then {} else
-        {metadata_sha256:$metadata,source_relative:$relative} end)' \
+        {metadata_sha256:$metadata} +
+        (if $compression=="plain" then {source_relative:$relative} else {} end) end)' \
     > "$pending/location.json"
   openssl dgst -sha256 -sign "$signing_key" -out "$pending/location.sig" "$pending/location.json"
   remote_ssh "umask 077; cat > $remote_pending/location.json" < "$pending/location.json"
   remote_ssh "umask 077; cat > $remote_pending/location.sig" < "$pending/location.sig" || {
     echo 'cold-cache-store: remote location upload stopped before ready' >&2; return 1;
   }
-  remote_ssh "bash -s -- $remote_pending $remote_ready $evidence" <<'REMOTE'
+  remote_ssh "bash -s -- $remote_pending $remote_ready $evidence $archive_name $compression" <<'REMOTE'
 set -euo pipefail
-pending=$1; ready=$2; evidence=$3
+pending=$1; ready=$2; evidence=$3; archive_name=$4; compression=$5
 [[ -d "$pending" && ! -L "$pending" && ! -e "$ready" && ! -L "$ready" ]]
-names=(archive.tar manifest.json manifest.sig location.json location.sig)
+[[ "$archive_name" == archive.tar || "$archive_name" == archive.tar.gz ]]
+names=("$archive_name" manifest.json manifest.sig location.json location.sig)
 [[ "$evidence" == 0 ]] || names+=(members.tsv)
+[[ "$compression" == plain ]] || names+=(members.tsv)
 for name in "${names[@]}"; do
   file="$pending/$name"
   [[ -f "$file" && ! -L "$file" && "$(stat -c %a "$file")" == 600 &&
@@ -513,24 +587,44 @@ REMOTE
   cmp "$pending/manifest.sig" <(remote_ssh "cat $remote_ready/manifest.sig")
   cmp "$pending/location.json" <(remote_ssh "cat $remote_ready/location.json")
   cmp "$pending/location.sig" <(remote_ssh "cat $remote_ready/location.sig")
-  if (( evidence == 1 )); then
+  if (( evidence == 1 )) || [[ "$compression" == gzip-1 ]]; then
     cmp "$pending/members.tsv" <(remote_ssh "cat $remote_ready/members.tsv")
   fi
   remote_verify_ready
-  [[ "$expected_sha" == "$(remote_ssh "cat $remote_ready/archive.tar" | sha256sum | awk '{print $1}')" ]] || {
+  [[ "$expected_sha" == "$(remote_ssh "cat $remote_ready/$archive_name" | sha256sum | awk '{print $1}')" ]] || {
     echo 'cold-cache-store: remote readback hash mismatch' >&2; return 1;
   }
+  if [[ "$compression" == gzip-1 ]]; then
+    local readback_tar_sha
+    readback_tar_sha="$(remote_ssh "cat $remote_ready/$archive_name" | "$gzip_bin" -dc | sha256sum | awk '{print $1}')" || {
+      echo 'cold-cache-store: remote compressed readback failed' >&2; return 1;
+    }
+    [[ "$tar_sha" == "$readback_tar_sha" ]] || {
+      echo 'cold-cache-store: remote compressed payload differs from signed tar' >&2; return 1;
+    }
+  fi
   mv "$pending/location.json" "$remote_location"
   mv "$pending/location.sig" "$remote_location_sig"
+  local final_sha
+  if [[ "$compression" == gzip-1 ]]; then
+    final_sha="$(tar -C "$path" -cf - . | "$gzip_bin" -1 -c | sha256sum | awk '{print $1}')"
+  else
+    final_sha="$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')"
+  fi
   [[ "$(git -C "$root" rev-parse HEAD)" == "$revision" &&
      -z "$(git -C "$root" status --porcelain --untracked-files=normal)" &&
-     "$expected_sha" == "$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')" ]] || {
+     "$expected_sha" == "$final_sha" ]] || {
     echo 'cold-cache-store: source changed before guarded prune' >&2; return 1;
   }
-  if (( evidence == 1 )); then
-    evidence_validate_source || { echo 'cold-cache-store: evidence changed before guarded prune' >&2; return 1; }
-    cmp "$pending/members.tsv" <(evidence_members "$path") || {
-      echo 'cold-cache-store: evidence metadata changed before guarded prune' >&2; return 1;
+  if (( evidence == 1 )) || [[ "$compression" == gzip-1 ]]; then
+    if (( evidence == 1 )); then
+      evidence_validate_source || { echo 'cold-cache-store: evidence changed before guarded prune' >&2; return 1; }
+    fi
+    archive_members "$path" > "$pending/final-members.tsv" || {
+      echo 'cold-cache-store: final source inventory failed' >&2; return 1;
+    }
+    cmp "$pending/members.tsv" "$pending/final-members.tsv" || {
+      echo 'cold-cache-store: source metadata changed before guarded prune' >&2; return 1;
     }
     open_files="$(lsof -n -P 2>/dev/null)" || {
       echo 'cold-cache-store: final open-file scan failed' >&2; return 1;
@@ -538,6 +632,8 @@ REMOTE
     if printf '%s\n' "$open_files" | grep -F -- "$path" >/dev/null; then
       echo 'cold-cache-store: evidence became open before guarded prune' >&2; return 1
     fi
+  fi
+  if (( evidence == 1 )); then
     [[ -f "$remote_location" && -f "$remote_location_sig" ]] || return 1
     rm -rf -- "$path"
   else
@@ -568,7 +664,6 @@ remote_restore() {
      -f "$signing_key" && ! -L "$signing_key" ]] || {
     echo 'cold-cache-store: protected location receipt absent' >&2; return 1;
   }
-  remote_verify_ready
   public_key="$(mktemp "$shared_dir/cold-keys/.pub.XXXXXX")"
   openssl pkey -in "$signing_key" -pubout -out "$public_key" 2>/dev/null
   [[ "$(stat_mode "$remote_location")" == 600 &&
@@ -577,18 +672,47 @@ remote_restore() {
   }
   openssl dgst -sha256 -verify "$public_key" -signature "$remote_location_sig" \
     "$remote_location" >/dev/null || { echo 'cold-cache-store: location signature mismatch' >&2; return 1; }
+  local signed_schema signed_compression tar_bytes tar_sha signed_gzip_tool signed_gzip_sha
+  signed_schema="$(jq -r '.schema' "$remote_location")"
+  case "$signed_schema" in
+    1) compression=plain; archive_name=archive.tar ;;
+    2)
+      compression="$(jq -r '.compression' "$remote_location")"
+      [[ "$compression" == gzip-1 && "$evidence" == 0 ]] || {
+        echo 'cold-cache-store: unsupported signed compressed format' >&2; return 1;
+      }
+      archive_name=archive.tar.gz
+      gzip_tool_identity
+      signed_gzip_tool="$(jq -r '.gzip_tool' "$remote_location")"
+      signed_gzip_sha="$(jq -r '.gzip_sha256' "$remote_location")"
+      [[ "$gzip_bin" == "$signed_gzip_tool" && "$gzip_sha" == "$signed_gzip_sha" ]] || {
+        echo 'cold-cache-store: pinned gzip identity changed' >&2; return 1;
+      }
+      ;;
+    *) echo 'cold-cache-store: unsupported signed archive schema' >&2; return 1 ;;
+  esac
+  remote_verify_ready
   jq -e --arg rev "$revision" --arg root "$root" --arg lane "$lane" \
     --arg host "$remote_host" --arg dir "$remote_dir" --arg machine "$remote_machine" \
     --arg device "$remote_device" --argjson evidence "$evidence" \
     --arg relative "${relative:-}" \
-    '.schema==1 and .source_revision==$rev and .source_root==$root and .lane==$lane and
+    '(.schema==1 or .schema==2) and .source_revision==$rev and .source_root==$root and .lane==$lane and
      .remote_host==$host and .remote_dir==$dir and .remote_machine==$machine and
      .remote_device==$device and (.sha256|test("^[0-9a-f]{64}$")) and
      (.bytes|type=="number" and .>0 and .<1099511627776) and
      (.source_allocated_kib|type=="number" and .>=0 and .<1073741824) and
+     (if .schema==2 then
+       .compression=="gzip-1" and
+       (.tar_sha256|test("^[0-9a-f]{64}$")) and
+       (.tar_bytes|type=="number" and .>0 and .<68719476736) and
+       (.gzip_tool|type=="string" and startswith("/nix/store/")) and
+       (.gzip_sha256|test("^[0-9a-f]{64}$")) and
+       (.metadata_sha256|test("^[0-9a-f]{64}$"))
+      else true end) and
      (if $evidence==1 then
        (.metadata_sha256|test("^[0-9a-f]{64}$")) and .source_relative==$relative
-      else (.metadata_sha256==null and .source_relative==null) end)' \
+      else (if .schema==2 then .source_relative==null
+        else (.metadata_sha256==null and .source_relative==null) end) end)' \
     "$remote_location" >/dev/null || { echo 'cold-cache-store: location identity mismatch' >&2; return 1; }
   local bytes expected allocated free floor others file pid kib archive_kib extract_kib metadata_sha
   local reserve_kib acquired holder attempt
@@ -596,6 +720,8 @@ remote_restore() {
   expected="$(jq -r '.sha256' "$remote_location")"
   allocated="$(jq -r '.source_allocated_kib' "$remote_location")"
   metadata_sha="$(jq -r '.metadata_sha256 // empty' "$remote_location")"
+  tar_bytes="$(jq -r '.tar_bytes // 0' "$remote_location")"
+  tar_sha="$(jq -r '.tar_sha256 // empty' "$remote_location")"
   mkdir -p "$shared_dir/reservations"
   admission_lock="$shared_dir/admission.lock"
   acquired=0
@@ -627,6 +753,10 @@ remote_restore() {
   archive_kib=$(( (bytes + 1023) / 1024 ))
   extract_kib="$allocated"
   (( archive_kib > extract_kib )) && extract_kib="$archive_kib"
+  if [[ "$signed_schema" == 2 ]]; then
+    local tar_kib=$(( (tar_bytes + 1023) / 1024 ))
+    (( tar_kib > extract_kib )) && extract_kib="$tar_kib"
+  fi
   # The archive download and extracted tree coexist until atomic publish.
   reserve_kib=$(( archive_kib + extract_kib + 1024 * 1024 ))
   (( free - others - reserve_kib >= floor )) || {
@@ -650,19 +780,24 @@ remote_restore() {
   jq -e --arg rev "$revision" --arg root "$root" --arg lane "$lane" \
     --arg sha "$expected" --argjson bytes "$bytes" --argjson allocated "$allocated" \
     --arg metadata "$metadata_sha" --arg relative "${relative:-}" \
-    '.schema==1 and .source_revision==$rev and .source_root==$root and .lane==$lane and
+    --argjson schema "$signed_schema" --argjson tar_bytes "$tar_bytes" \
+    --arg tar_sha "$tar_sha" --arg gzip_tool "$gzip_bin" --arg gzip_sha "$gzip_sha" \
+    '.schema==$schema and .source_revision==$rev and .source_root==$root and .lane==$lane and
      .sha256==$sha and .bytes==$bytes and .source_allocated_kib==$allocated and
      (.metadata_sha256 // "")==$metadata and
-     (if $metadata=="" then .source_relative==null else .source_relative==$relative end)' \
+     (if $schema==2 then .compression=="gzip-1" and .tar_bytes==$tar_bytes and
+       .tar_sha256==$tar_sha and .gzip_tool==$gzip_tool and
+       .gzip_sha256==$gzip_sha and .source_relative==null
+      elif $metadata=="" then .source_relative==null else .source_relative==$relative end)' \
     "$pending/manifest.json" >/dev/null || {
       echo 'cold-cache-store: remote manifest differs from location receipt' >&2; return 1;
     }
-  remote_ssh "cat $remote_ready/archive.tar" > "$pending/archive.tar"
-  [[ "$expected" == "$(sha256sum "$pending/archive.tar" | awk '{print $1}')" &&
-     "$bytes" == "$(wc -c < "$pending/archive.tar" | tr -d ' ')" ]] || {
+  remote_ssh "cat $remote_ready/$archive_name" > "$pending/$archive_name"
+  [[ "$expected" == "$(sha256sum "$pending/$archive_name" | awk '{print $1}')" &&
+     "$bytes" == "$(wc -c < "$pending/$archive_name" | tr -d ' ')" ]] || {
     echo 'cold-cache-store: remote archive hash or size mismatch' >&2; return 1;
   }
-  if (( evidence == 1 )); then
+  if (( evidence == 1 )) || [[ "$signed_schema" == 2 ]]; then
     remote_ssh "cat $remote_ready/members.tsv" > "$pending/members.tsv"
     [[ "$metadata_sha" == "$(sha256sum "$pending/members.tsv" | awk '{print $1}')" ]] || {
       echo 'cold-cache-store: evidence metadata manifest mismatch' >&2; return 1;
@@ -670,8 +805,32 @@ remote_restore() {
   fi
   member_list="$(mktemp "$shared_dir/cold-keys/.members.XXXXXX")"
   kind_list="$(mktemp "$shared_dir/cold-keys/.kinds.XXXXXX")"
-  tar -tf "$pending/archive.tar" > "$member_list"
-  tar -tvf "$pending/archive.tar" | cut -c1 > "$kind_list"
+  if [[ "$signed_schema" == 2 ]]; then
+    # Read at most one byte beyond the signed limit before a full integrity
+    # pass. The early gzip producer may get SIGPIPE when head reaches the
+    # bound; its integrity status is checked in the following complete pass.
+    local bounded_count
+    bounded_count="$({ set +o pipefail; "$gzip_bin" -dc "$pending/$archive_name" |
+      head -c "$((tar_bytes + 1))" | wc -c; } | tr -d ' ')"
+    [[ "$bounded_count" =~ ^[0-9]+$ && "$bounded_count" -le "$tar_bytes" ]] || {
+      echo 'cold-cache-store: compressed expansion exceeds signed bound' >&2; return 1;
+    }
+    local expanded_bytes expanded_sha
+    expanded_bytes="$("$gzip_bin" -dc "$pending/$archive_name" | wc -c | tr -d ' ')" || {
+      echo 'cold-cache-store: compressed stream integrity failed' >&2; return 1;
+    }
+    expanded_sha="$("$gzip_bin" -dc "$pending/$archive_name" | sha256sum | awk '{print $1}')" || {
+      echo 'cold-cache-store: compressed stream integrity failed' >&2; return 1;
+    }
+    [[ "$tar_bytes" == "$expanded_bytes" && "$tar_sha" == "$expanded_sha" ]] || {
+      echo 'cold-cache-store: compressed expansion differs from signed tar' >&2; return 1;
+    }
+    "$gzip_bin" -dc "$pending/$archive_name" | tar -tf - > "$member_list"
+    "$gzip_bin" -dc "$pending/$archive_name" | tar -tvf - | cut -c1 > "$kind_list"
+  else
+    tar -tf "$pending/$archive_name" > "$member_list"
+    tar -tvf "$pending/$archive_name" | cut -c1 > "$kind_list"
+  fi
   while IFS= read -r member; do
     [[ "$member" == . || "$member" == ./* ]] && [[ ! "$member" =~ (^|/)\.\.(/|$) ]] || {
       echo 'cold-cache-store: unsafe remote archive member' >&2; return 1;
@@ -685,13 +844,21 @@ remote_restore() {
   restore_stage="$(mktemp -d "$root/target/.cold-restore.XXXXXX")"
   chmod 700 "$restore_stage"
   mkdir -m 700 "$restore_stage/payload"
-  tar -C "$restore_stage/payload" -pxf "$pending/archive.tar" || {
-    echo 'cold-cache-store: staged extraction failed' >&2; return 1;
-  }
-  if (( evidence == 1 )); then
-    evidence_validate_payload "$restore_stage/payload" 0 || {
-      echo 'cold-cache-store: restored evidence metadata or permissions refused' >&2; return 1;
+  if [[ "$signed_schema" == 2 ]]; then
+    "$gzip_bin" -dc "$pending/$archive_name" | tar -C "$restore_stage/payload" -pxf - || {
+      echo 'cold-cache-store: staged compressed extraction failed' >&2; return 1;
     }
+  else
+    tar -C "$restore_stage/payload" -pxf "$pending/$archive_name" || {
+    echo 'cold-cache-store: staged extraction failed' >&2; return 1;
+    }
+  fi
+  if (( evidence == 1 )) || [[ "$signed_schema" == 2 ]]; then
+    if (( evidence == 1 )); then
+      evidence_validate_payload "$restore_stage/payload" 0 || {
+      echo 'cold-cache-store: restored evidence metadata or permissions refused' >&2; return 1;
+      }
+    fi
     # Extraction writes children after creating '.', so restore its signed
     # directory mtime before comparing the full metadata inventory.
     local root_epoch root_stamp
@@ -700,7 +867,10 @@ remote_restore() {
     root_stamp="$(date -u -r "$root_epoch" +%Y%m%d%H%M.%S 2>/dev/null ||
       date -u -d "@$root_epoch" +%Y%m%d%H%M.%S)" || return 1
     TZ=UTC touch -t "$root_stamp" "$restore_stage/payload"
-    cmp "$pending/members.tsv" <(evidence_members "$restore_stage/payload") || {
+    archive_members "$restore_stage/payload" > "$pending/restored-members.tsv" || {
+      echo 'cold-cache-store: restored member inventory failed' >&2; return 1;
+    }
+    cmp "$pending/members.tsv" "$pending/restored-members.tsv" || {
       echo 'cold-cache-store: restored evidence metadata differs from signed inventory' >&2; return 1;
     }
   fi

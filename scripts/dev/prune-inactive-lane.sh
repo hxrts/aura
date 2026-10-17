@@ -109,7 +109,7 @@ fi
 source "$repo_root/scripts/dev/scoped-builders.sh"
 builders="$(aura_scoped_processes "$root" 'cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|cargo-kani|kani-driver' "$$")"
 [[ -z "$builders" ]] || refuse_cleanup active-builder "builder active: $builders"
-if [[ "$lane" == release || "$lane" == wasm-profile || "$lane" == wasm-root-profile || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
+if [[ "$lane" == debug || "$lane" == release || "$lane" == wasm-profile || "$lane" == wasm-root-profile || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
   consumers="$(aura_scoped_processes "$root" 'tool_repl|aura-harness|aura' "$$")"
   [[ -z "$consumers" ]] || refuse_cleanup active-consumer "harness consumer active: $consumers"
 fi

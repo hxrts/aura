@@ -1714,6 +1714,27 @@ not establish the build revision of each cached binary. Preserve the original
 build receipts and web provenance markers for artifact admission.
 The LAN ship owner remains responsible for shipping deployable artifacts.
 
+For a large idle compiler lane on the authenticated SSH backend, pass
+`--compression gzip-1` to `--export`. This writes a schema 2 archive using the
+Nix-selected gzip executable and signs its exact tool identity, compressed
+bytes, expanded tar bytes, and a private content/mode/mtime member inventory.
+Plain schema 1 snapshots remain supported; restore selects the format from
+the signed location receipt without a compression flag. Before extracting a
+compressed archive, restore verifies the signed compressed bytes, refuses an
+expanded stream beyond the signed bound, checks the full decoder exit status,
+validates tar member kinds and paths, and compares the restored member
+inventory in private staging before publishing the absent lane. The normal
+remote 15 GiB floor plus 1 GiB margin and local 15 GiB floor remain in force;
+restore reserves compressed download plus the larger of original allocation
+and logical tar size plus 1 GiB. For a complete debug profile, the same
+live-builder, live-consumer, open-file, link and clean-source checks apply.
+Export is explicit and does not make any cached binary's archive revision its
+build provenance. The authenticated compressed roundtrip and refusal fixture
+runs separately from `just ci-build-cache-policy` with
+`AURA_COLD_CACHE_TEST_REMOTE_HOST=user@host`
+`AURA_COLD_CACHE_TEST_REMOTE_BASE=/private/ext4/path`
+`nix develop --command bash scripts/dev/test-cold-cache-compressed.sh`.
+
 Completed LAN run evidence has a separate, explicit SSH archive mode. Use
 `scripts/dev/cold-cache-store.sh --export --root /absolute/clean/checkout --run-host <host-id> --run-id <run-id>`
 with the same remote settings above. It accepts only a canonical
