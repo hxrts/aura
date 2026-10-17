@@ -4586,16 +4586,212 @@ fn compute_diff_range(env_var: &str) -> Result<Option<String>> {
 
 /// Return the list of files changed in `diff_range` (via `git diff --name-only`).
 fn diff_names(diff_range: &str) -> Result<BTreeSet<String>> {
-    let output = Command::new("git")
-        .args(["diff", "--name-only", diff_range])
-        .output()
-        .context("running git diff --name-only")?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    diff_names_at(&repo_root()?, diff_range)
+}
+
+fn diff_names_at(root: &Path, diff_range: &str) -> Result<BTreeSet<String>> {
+    let endpoints: Vec<&str> = if let Some((base, head)) = diff_range.split_once("...") {
+        vec![base, head]
+    } else if let Some((base, head)) = diff_range.split_once("..") {
+        vec![base, head]
+    } else {
+        vec![diff_range]
+    };
+    if endpoints.iter().any(|endpoint| {
+        endpoint.is_empty()
+            || endpoint.starts_with('-')
+            || !endpoint
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_./^~-".contains(&byte))
+    }) {
+        anyhow::bail!("invalid Git revision range: {diff_range}");
+    }
+    for endpoint in endpoints {
+        command_stdout(
+            "git",
+            &[
+                "-C".into(),
+                root.display().to_string(),
+                "rev-parse".into(),
+                "--verify".into(),
+                "--end-of-options".into(),
+                format!("{endpoint}^{{commit}}"),
+            ],
+        )
+        .with_context(|| format!("validating Git revision endpoint {endpoint}"))?;
+    }
+    let text = command_stdout(
+        "git",
+        &[
+            "-C".into(),
+            root.display().to_string(),
+            "diff".into(),
+            "--name-only".into(),
+            diff_range.into(),
+            "--".into(),
+        ],
+    )
+    .context("reading changed user-flow files")?;
     Ok(text
         .lines()
         .filter(|l| !l.is_empty())
         .map(str::to_owned)
         .collect())
+}
+
+#[cfg(test)]
+mod user_flow_diff_names_tests {
+    use super::diff_names_at;
+    use std::{fs, path::PathBuf};
+
+    struct GitFixture(PathBuf);
+    impl GitFixture {
+        fn new() -> anyhow::Result<Self> {
+            let template = std::env::temp_dir().join("aura-user-flow-diff.XXXXXX");
+            let root = PathBuf::from(
+                super::command_stdout("mktemp", &["-d".into(), template.display().to_string()])?
+                    .trim(),
+            );
+            let fixture = Self(root);
+            super::run_ok(
+                "git",
+                &["-C".into(), fixture.0.display().to_string(), "init".into()],
+            )?;
+            fs::write(fixture.0.join("source.rs"), "original\n")?;
+            super::run_ok(
+                "git",
+                &[
+                    "-C".into(),
+                    fixture.0.display().to_string(),
+                    "add".into(),
+                    "source.rs".into(),
+                ],
+            )?;
+            super::run_ok(
+                "git",
+                &[
+                    "-C".into(),
+                    fixture.0.display().to_string(),
+                    "-c".into(),
+                    "user.name=Fixture".into(),
+                    "-c".into(),
+                    "user.email=fixture@example.invalid".into(),
+                    "-c".into(),
+                    "commit.gpgsign=false".into(),
+                    "commit".into(),
+                    "-m".into(),
+                    "initial".into(),
+                ],
+            )?;
+            Ok(fixture)
+        }
+    }
+    impl Drop for GitFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn invalid_range_refuses_instead_of_becoming_empty_guidance() -> anyhow::Result<()> {
+        let fixture = GitFixture::new()?;
+        let error = diff_names_at(&fixture.0, "missing-user-flow-ref...HEAD")
+            .expect_err("invalid Git range must refuse");
+        let message = format!("{error:#}");
+        assert!(message.contains("git") && message.contains("missing-user-flow-ref"));
+        assert!(message.contains("failed with status"));
+        assert!(message.contains("fatal:") || message.contains("unknown revision"));
+        Ok(())
+    }
+
+    #[test]
+    fn valid_empty_range_remains_empty() -> anyhow::Result<()> {
+        let fixture = GitFixture::new()?;
+        assert!(diff_names_at(&fixture.0, "HEAD...HEAD")?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn populated_range_returns_exact_changed_file() -> anyhow::Result<()> {
+        let fixture = GitFixture::new()?;
+        fs::write(fixture.0.join("source.rs"), "changed\n")?;
+        assert_eq!(
+            diff_names_at(&fixture.0, "HEAD")?,
+            ["source.rs".to_owned()].into_iter().collect()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn option_and_path_ranges_refuse_instead_of_hiding_staged_changes() -> anyhow::Result<()> {
+        let fixture = GitFixture::new()?;
+        fs::create_dir(fixture.0.join("docs"))?;
+        fs::write(fixture.0.join("docs/guide.md"), "original\n")?;
+        super::run_ok(
+            "git",
+            &[
+                "-C".into(),
+                fixture.0.display().to_string(),
+                "add".into(),
+                "docs/guide.md".into(),
+            ],
+        )?;
+        super::run_ok(
+            "git",
+            &[
+                "-C".into(),
+                fixture.0.display().to_string(),
+                "-c".into(),
+                "user.name=Fixture".into(),
+                "-c".into(),
+                "user.email=fixture@example.invalid".into(),
+                "-c".into(),
+                "commit.gpgsign=false".into(),
+                "commit".into(),
+                "-m".into(),
+                "docs".into(),
+            ],
+        )?;
+        fs::write(fixture.0.join("changed.rs"), "staged\n")?;
+        super::run_ok(
+            "git",
+            &[
+                "-C".into(),
+                fixture.0.display().to_string(),
+                "add".into(),
+                "changed.rs".into(),
+            ],
+        )?;
+        let blob = super::command_stdout(
+            "git",
+            &[
+                "-C".into(),
+                fixture.0.display().to_string(),
+                "rev-parse".into(),
+                "HEAD:docs/guide.md".into(),
+            ],
+        )?;
+        super::run_ok(
+            "git",
+            &[
+                "-C".into(),
+                fixture.0.display().to_string(),
+                "tag".into(),
+                "blob-ref".into(),
+                blob.trim().into(),
+            ],
+        )?;
+        assert_eq!(
+            diff_names_at(&fixture.0, "HEAD")?,
+            ["changed.rs".to_owned()].into_iter().collect()
+        );
+        for invalid in ["--stat", "docs", "blob-ref", "HEAD..", "...HEAD"] {
+            assert!(diff_names_at(&fixture.0, invalid).is_err(), "{invalid}");
+        }
+        assert!(diff_names_at(&fixture.0, "HEAD..HEAD")?.is_empty());
+        assert!(diff_names_at(&fixture.0, "HEAD...HEAD")?.is_empty());
+        Ok(())
+    }
 }
 
 /// Resolve the changed-file list for guidance-sync checks.

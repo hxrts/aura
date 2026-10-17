@@ -507,6 +507,8 @@ ci-build-cache-policy:
     bash scripts/dev/test-run-exact-fixtures.sh
     bash scripts/dev/test-run-ownership-fast.sh
     bash scripts/dev/test-policy-dependencies.sh
+    bash scripts/dev/test-policy-static-git-inputs.sh
+    bash scripts/dev/test-policy-static-extension.sh
     bash scripts/dev/test-arch-lane-dispatch.sh
     bash scripts/dev/test-cargo-in-nix.sh
     bash scripts/dev/test-cargo-incremental-default.sh

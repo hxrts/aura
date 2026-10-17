@@ -120,6 +120,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
 - **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `toolkit/xtask` via `just ci-user-flow-policy`
 - **Shared user-flow contributor sync**: when shared UX policy checks change (Rust in `toolkit/xtask/src/checks/policy.rs` or shell wrappers in `scripts/check/`), keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
+- **User-flow diff evidence**: an empty valid Git diff is permitted; a failed Git diff or invalid selected range must fail the guidance check, not be interpreted as no changed files
 - **Enrollment verifier custody**: quorum signature verification retains the
   original approved native threshold policy or sealed issued/retained enrollment
   owner. Raw verifier bytes and self-certified manifest fields cannot replace

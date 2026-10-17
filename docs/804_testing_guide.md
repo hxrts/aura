@@ -525,7 +525,7 @@ The authoritative written update map for these surfaces now lives in Aura's `too
 
 Prefer `trybuild` compile-fail coverage when the misuse is fundamentally an API-shape or visibility violation. Prefer Rust-native lint binaries in `aura-macros` when the misuse is a syntax-level boundary or naming and flow-shape rule. Keep shell scripts for repo-wide governance, integration topology, or end-to-end harness policy that cannot realistically be proved at compile time. When a stronger contract lands, remove the superseded legacy helper, compatibility branch, migration shim, or stale regression fixture rather than leaving both paths active.
 
-The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references enforced by Aura's `toolkit/xtask` user-flow policy guardrails. The diff-aware user-flow policy lane must tolerate empty local diff sets so `just ci-user-flow-policy` fails on real policy drift rather than environment-specific diff resolution.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references enforced by Aura's `toolkit/xtask` user-flow policy guardrails. The diff-aware user-flow policy lane accepts a valid empty local diff, but an invalid range or failed Git diff is an error rather than evidence of no changed files.
 
 Changes to the browser harness bridge request, response, or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit.
 
@@ -2583,7 +2583,15 @@ that compile receipt and resume with
 on a current checked source and the original binary. For the
 browser driver contract's static policy check, `just ci-policy-static
 browser-driver-contract-sync` similarly separates toolkit compilation from the
-selected typed check and records its three canonical Rust/TS inputs. These
+selected typed check and records its three canonical Rust/TS inputs. The same
+owner accepts `user-flow-policy-guardrails` and `user-flow-guidance-sync` as
+fast individual checks. Their execution receipts bind the current source,
+Git index/ref map, effective Git configuration and diff selectors, then rerun
+the Rust check against that source using the original verified toolkit binary.
+An invalid diff range or external Git diff/config input refuses this fast lane.
+Run the complete `just ci-user-flow-policy` recipe at its integration checkpoint;
+it also includes the harness ownership check. `security-boundary-policy` runs
+required Rust tests and is not eligible for static execution. These
 preflights do not replace `just ci-ownership-policy`; an integrated checkpoint
 must retain a successful full-source aggregate receipt. For exact
 native fixtures, use `just ci-ownership-exact --package hxrts-aura-agent

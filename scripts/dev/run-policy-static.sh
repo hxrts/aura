@@ -11,14 +11,21 @@ root="$repo_root"
 if [[ "${1:-}" == --root ]]; then root="${2:?missing root}"; shift 2; fi
 compile_receipt=''
 if [[ "${1:-}" == --compile-receipt ]]; then compile_receipt="${2:?missing receipt}"; shift 2; fi
-[[ "${1:-}" == browser-driver-contract-sync && $# == 1 ]] || exit 2
+case "${1:-}" in
+  browser-driver-contract-sync|user-flow-policy-guardrails|user-flow-guidance-sync) [[ $# == 1 ]] || exit 2 ;;
+  *) exit 2 ;;
+esac
 check="$1"
 root="$(cd "$root" && pwd -P)"
 source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
 source "$repo_root/scripts/dev/build-receipt.sh"
-scope=(crates/aura-web/src/harness/driver_contract.rs
-  crates/aura-harness/playwright-driver/src/driver_contract.ts
-  crates/aura-harness/playwright-driver/src/playwright_driver.ts)
+if [[ "$check" == browser-driver-contract-sync ]]; then
+  scope=(crates/aura-web/src/harness/driver_contract.rs
+    crates/aura-harness/playwright-driver/src/driver_contract.ts
+    crates/aura-harness/playwright-driver/src/playwright_driver.ts)
+else
+  scope=(toolkit/xtask/src/checks/policy.rs justfile)
+fi
 if [[ "$stage" == packet ]]; then
   mkdir -p "$root/artifacts/disk-budget/receipts"
   umask 077
@@ -72,16 +79,21 @@ jq -e --arg root "$root" --arg toolkit "$toolkit_hash" --arg tool "$tool_hash" \
    "$(sha256sum "$binary" | awk '{print $1}')" == \
      "$(jq -r '.metadata.policy_toolkit.binary_hash' "$compile_receipt")" ]] || exit 1
 scope_hash="$(policy_hash_files "$root" "${scope[@]}")"
+git_hash=''
+if [[ "$check" != browser-driver-contract-sync ]]; then
+  git_hash="$(policy_static_git_identity "$root" "$check")" || exit 1
+fi
 scope_json="$(printf '%s\n' "${scope[@]}" | jq -Rs 'split("\n")|map(select(length>0))')"
 AURA_RECEIPT_EVENT_KIND=dependency aura_receipt_update --arg check "$check" --argjson scope "$scope_json" \
-  --arg scope_hash "$scope_hash" --arg toolkit "$toolkit_hash" --arg tool "$tool_hash" \
+  --arg scope_hash "$scope_hash" --arg git_hash "$git_hash" --arg toolkit "$toolkit_hash" --arg tool "$tool_hash" \
   --arg dependency "$compile_receipt" \
   --arg binary "$(jq -r '.metadata.policy_toolkit.binary_hash' "$compile_receipt")" \
-  '.metadata.policy_static={check:$check,scope:$scope,scope_hash:$scope_hash,
+  '.metadata.policy_static={check:$check,scope:$scope,scope_hash:$scope_hash,git_identity_hash:$git_hash,
     toolkit_hash:$toolkit,tool_identity_hash:$tool,
     compile_receipt:$dependency,binary_hash:$binary}'
 bash "$repo_root/scripts/dev/build-phase.sh" execution -- "$binary" check "$check"
 [[ "$scope_hash" == "$(policy_hash_files "$root" "${scope[@]}")" &&
+   ( "$check" == browser-driver-contract-sync || "$git_hash" == "$(policy_static_git_identity "$root" "$check")" ) &&
    "$toolkit_hash" == "$(policy_toolkit_inputs "$root")" &&
    "$tool_hash" == "$(policy_tool_identity "$root" "$root")" &&
    "$frozen" == "$(aura_receipt_source_fingerprint "$root")" &&

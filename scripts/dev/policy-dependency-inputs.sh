@@ -52,6 +52,108 @@ policy_toolkit_inputs() {
   policy_hash_files "$root" "${paths[@]}"
 }
 
+# Identity of Git's effective input to the diff-aware static policy checks.
+# Keep selector values out of receipts: only this digest is published.
+policy_static_git_identity() {
+  local root="$1" check="${2:-}" git_dir common_dir index_path key value config unsafe_config range base_ref
+  for key in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL \
+    GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS GIT_CONFIG_NOSYSTEM GIT_COMMON_DIR \
+    GIT_NAMESPACE GIT_SHALLOW_FILE GIT_REPLACE_REF_BASE GIT_EXTERNAL_DIFF \
+    GIT_ATTR_NOSYSTEM GIT_ATTR_SOURCE; do
+    [[ -z "${!key-}" ]] || return 2
+  done
+  [[ "$(git -C "$root" rev-parse --is-inside-work-tree)" == true ]] || return 2
+  [[ "$(git -C "$root" rev-parse --show-toplevel)" == "$root" ]] || return 2
+  git_dir="$(git -C "$root" rev-parse --absolute-git-dir)" || return 2
+  common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)" || return 2
+  policy_no_link_components "$git_dir" || return 2
+  policy_no_link_components "$common_dir" || return 2
+  [[ -d "$git_dir" && -d "$common_dir" ]] || return 2
+  for config in "$git_dir/shallow" "$git_dir/info/grafts" \
+    "$common_dir/shallow" "$common_dir/info/grafts" \
+    "$git_dir/info/attributes" "$common_dir/info/attributes"; do
+    [[ ! -e "$config" && ! -L "$config" ]] || return 2
+  done
+  [[ -z "$(git -C "$root" for-each-ref --format='%(refname)' refs/replace)" ]] || return 2
+  # These can execute mutable external helpers or change diff input outside
+  # the source/selector identity. The Rust check does not own that behavior.
+  unsafe_config="$(git -C "$root" config --get-regexp \
+    '^(diff\..*\.(textconv|command)|diff\.external|filter\..*\.(clean|process)|core\.(attributesfile|fsmonitor|sparsecheckout)|include\..*|includeif\..*)$' \
+    2>/dev/null)" || { [[ $? == 1 ]] || return 2; }
+  [[ -z "$unsafe_config" ]] || return 2
+  # The Rust guidance owner historically treats a failed `git diff` as an
+  # empty list. A fast preflight must refuse that failure before executing it.
+  case "$check" in
+    user-flow-policy-guardrails|user-flow-guidance-sync)
+      range=''
+      if [[ "$check" == user-flow-policy-guardrails ]]; then
+        range="${AURA_UX_POLICY_DIFF_RANGE:-}"
+      elif [[ -n "${AURA_UX_GUIDANCE_CHANGED_FILES+x}" ]]; then
+        range=''
+      else
+        range="${AURA_UX_GUIDANCE_DIFF_RANGE:-}"
+      fi
+      if [[ -z "$range" ]] && ! {
+        [[ "$check" == user-flow-guidance-sync && -n "${AURA_UX_GUIDANCE_CHANGED_FILES+x}" ]]
+      }; then
+        base_ref="${GITHUB_BASE_REF:-}"
+        if [[ -n "$base_ref" ]] && git -C "$root" rev-parse --verify "origin/$base_ref" >/dev/null 2>&1; then
+          range="origin/$base_ref...HEAD"
+        else
+          range=HEAD
+        fi
+      fi
+      if [[ -n "$range" ]]; then
+        [[ "$range" =~ ^[A-Za-z0-9_./^~-]+$ && "$range" != -* ]] || return 2
+        local first="$range" second=''
+        if [[ "$range" == *...* ]]; then
+          first="${range%%...*}"
+          second="${range#*...}"
+        elif [[ "$range" == *..* ]]; then
+          first="${range%%..*}"
+          second="${range#*..}"
+        fi
+        [[ -n "$first" ]] || return 2
+        git -C "$root" rev-parse --verify --end-of-options "${first}^{commit}" >/dev/null 2>&1 || return 2
+        if [[ -n "$second" ]]; then
+          git -C "$root" rev-parse --verify --end-of-options "${second}^{commit}" >/dev/null 2>&1 || return 2
+        elif [[ "$first" != "$range" ]]; then
+          return 2
+        fi
+        git -C "$root" diff --name-only "$range" -- >/dev/null || return 2
+      fi
+      ;;
+    '') ;;
+    *) return 2 ;;
+  esac
+  index_path="$(git -C "$root" rev-parse --git-path index)" || return 2
+  [[ "$index_path" == /* ]] || index_path="$root/$index_path"
+  policy_no_link_components "$index_path" || return 2
+  [[ -f "$index_path" ]] || return 2
+  {
+    for key in AURA_UX_POLICY_DIFF_RANGE AURA_UX_GUIDANCE_DIFF_RANGE \
+      AURA_UX_GUIDANCE_CHANGED_FILES GITHUB_BASE_REF; do
+      value="${!key-}"
+      printf '%s\0%s\0%s\0' "$key" "${!key+x}" "$value"
+    done
+    git -C "$root" rev-parse HEAD || return 2
+    git -C "$root" for-each-ref --format='%(refname) %(objectname)' refs || return 2
+    sha256sum "$index_path" || return 2
+    # Effective values from system/global/local configuration are hashed,
+    # never written to a receipt. Includes and external drivers are refused.
+    git -C "$root" config --null --show-origin --list || return 2
+    # A linked worktree has private config/index and a shared ref/config store.
+    for config in "$common_dir/config" "$git_dir/config.worktree"; do
+      [[ ! -e "$config" && ! -L "$config" ]] && continue
+      policy_no_link_components "$config" || return 2
+      [[ -f "$config" ]] || return 2
+      printf '%s\0' "$config"
+      sha256sum "$config" || return 2
+    done
+  } | sha256sum | awk '{print $1}'
+}
+
 policy_no_link_components() {
   local path="$1" current='' component
   local -a components=()
