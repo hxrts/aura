@@ -2632,6 +2632,9 @@ fingerprint, then discovers and executes each name under one guarded build
 lifetime. Its receipt records the inventory and each compile, discovery and
 execution result; a source change, missing fixture, failure or ignored test
 fails the batch. Run the full ownership aggregate at the combined checkpoint.
+The budget fixture restores the caller's exact base-selector environment after
+its negative identity case, including whether the variable was originally unset.
+An inherited PR base must not become a different baseline for failed-run history.
 
 Before that aggregate, freeze the integrated source and compile the affected
 native targets and web target with the guarded build wrapper. Fix compiler
