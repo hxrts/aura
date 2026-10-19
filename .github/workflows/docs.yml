@@ -29,6 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export GITHUB_BASE_REF=main
           printf 'image=%s version=%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
           result=0
           /usr/bin/git config --show-origin --show-scope --name-only --get-regexp '^filter\.' || result=$?
@@ -52,21 +53,24 @@ jobs:
             result=$?
             if (( result != 1 )); then exit "$result"; fi
           fi
-      - name: Execute focused native fixture after isolation
+      - name: Execute focused native fixture in PR-base context after isolation
         shell: bash
         run: |
           set -euo pipefail
+          export GITHUB_BASE_REF=main
           bash scripts/dev/test-policy-static-git-inputs.sh 2>&1 | tee /tmp/ci-git-native-after.log
       - uses: ./.github/actions/setup-nix
       - name: Execute focused fixture with pinned Nix Git
         shell: bash
         run: |
           set -euo pipefail
+          export GITHUB_BASE_REF=main
           nix develop .#ci --command bash scripts/dev/test-policy-static-git-inputs.sh 2>&1 | tee /tmp/ci-git-nix-after.log
       - name: Execute existing cache-policy gate after the focused checkpoint
         shell: bash
         run: |
           set -euo pipefail
+          export GITHUB_BASE_REF=main
           nix develop .#ci --command just ci-build-cache-policy 2>&1 | tee /tmp/ci-git-cache-policy.log
       - name: Retain diagnostic evidence
         if: always()
@@ -77,6 +81,7 @@ jobs:
           if-no-files-found: warn
 
   links:
+    if: github.event_name != 'workflow_dispatch'
     name: Docs Links
     runs-on: ubuntu-latest
     steps:
@@ -91,6 +96,7 @@ jobs:
           replay-command: nix develop .#ci --command just ci-docs-links
 
   crate-links:
+    if: github.event_name != 'workflow_dispatch'
     name: Crate Doc Links
     runs-on: ubuntu-latest
     steps:
@@ -105,6 +111,7 @@ jobs:
           replay-command: nix develop .#ci --command just ci-crates-doc-links
 
   text-formatting:
+    if: github.event_name != 'workflow_dispatch'
     name: Text Formatting Check
     runs-on: ubuntu-latest
     steps:
@@ -119,6 +126,7 @@ jobs:
           replay-command: nix develop .#ci --command just ci-text-formatting
 
   semantic-drift:
+    if: github.event_name != 'workflow_dispatch'
     name: Semantic Drift Check
     runs-on: ubuntu-latest
     steps:
@@ -133,6 +141,7 @@ jobs:
           replay-command: nix develop .#ci --command just ci-docs-semantic-drift
 
   build:
+    if: github.event_name != 'workflow_dispatch'
     name: Docs Build
     needs: [links, crate-links, text-formatting, semantic-drift]
     runs-on: ubuntu-latest
