@@ -6,7 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 inside=0
 if [[ "${1:-}" == --inside ]]; then inside=1; shift; fi
 original=("$@")
-root="$repo_root" lane=ownership-exact package='' target='' binary='' features='' count='' timings=0
+root="$repo_root" lane=ownership-exact package='' target='' binary='' features='' count='' timings=0 decisive=''
 names=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -17,6 +17,7 @@ while [[ $# -gt 0 ]]; do
     --test) [[ -z "$target" ]] || exit 2; target=test; binary="${2:?missing binary}"; shift 2 ;;
     --features) features="${2:?missing features}"; shift 2 ;;
     --timings) timings=1; shift ;;
+    --decisive-name) [[ -z "$decisive" ]] || exit 2; decisive="${2:?missing decisive name}"; shift 2 ;;
     --expected-count) count="${2:?missing count}"; shift 2 ;;
     --name) names+=("${2:?missing test name}"); shift 2 ;;
     *) echo 'run-exact-fixtures: unknown option' >&2; exit 2 ;;
@@ -34,6 +35,11 @@ for name in "${names[@]}"; do
 done
 [[ "$(printf '%s\n' "${names[@]}" | sort -u | wc -l | tr -d ' ')" == "$count" ]] || {
   echo 'run-exact-fixtures: duplicate exact name' >&2; exit 2;
+}
+# An explicit checkpoint is the first declared member of the complete inventory.
+# Later discovery remains mandatory for batch success; default ordering is intact.
+[[ -z "$decisive" || "$decisive" == "${names[0]}" ]] || {
+  echo 'run-exact-fixtures: decisive name must be the first declared exact name' >&2; exit 2;
 }
 root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || exit 2
@@ -55,8 +61,8 @@ frozen="$(jq -r '.source.fingerprint // empty' "$AURA_BUILD_RECEIPT")"
 inventory_file="$(mktemp "$(dirname "$AURA_BUILD_RECEIPT")/inventory.XXXXXX")"
 chmod 600 "$inventory_file"
 printf '%s\n' "${names[@]}" > "$inventory_file"
-aura_receipt_update --arg file "$inventory_file" --argjson count "$count" \
-  '.artifacts.expected_inventory=$file | .metadata.expected_count=$count'
+aura_receipt_update --arg file "$inventory_file" --argjson count "$count" --arg decisive "$decisive" \
+  '.artifacts.expected_inventory=$file | .metadata.expected_count=$count | .metadata.decisive_name=(if $decisive=="" then null else $decisive end)'
 cargo_args=(test -p "$package")
 if [[ "$target" == lib ]]; then cargo_args+=(--lib); else cargo_args+=(--test "$binary"); fi
 if [[ -n "$features" ]]; then cargo_args+=(--features "$features"); fi
@@ -90,13 +96,22 @@ for name in "${names[@]}"; do
   expected_files+=("$expected")
   bash "$repo_root/scripts/dev/build-phase.sh" discovery --expected-tests "$expected" -- \
     "$executable" "$name" --exact --list
+  if [[ -n "$decisive" && "$name" == "$decisive" ]]; then
+    [[ "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || {
+      echo 'run-exact-fixtures: source changed before decisive execution' >&2; exit 1;
+    }
+    bash "$repo_root/scripts/dev/build-phase.sh" execution --expected-tests "$expected" -- \
+      "$executable" "$name" --exact --format pretty --nocapture
+  fi
 done
-# Missing later declarations must fail before any fixture can execute.
+# Default mode discovers everything first. Decisive mode has executed only its
+# checkpoint; every adjacent declaration still must match before adjacent execution.
 for index in "${!names[@]}"; do
   [[ "$frozen" == "$(aura_receipt_source_fingerprint "$root")" ]] || {
     echo 'run-exact-fixtures: source changed during batch' >&2; exit 1;
   }
   name="${names[$index]}"
+  if [[ -n "$decisive" && "$name" == "$decisive" ]]; then continue; fi
   expected="${expected_files[$index]}"
   bash "$repo_root/scripts/dev/build-phase.sh" execution --expected-tests "$expected" -- \
     "$executable" "$name" --exact --format pretty --nocapture

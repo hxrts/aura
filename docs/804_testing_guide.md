@@ -2631,7 +2631,12 @@ names before starting, compiles one libtest executable for a frozen source
 fingerprint, then discovers and executes each name under one guarded build
 lifetime. Its receipt records the inventory and each compile, discovery and
 execution result; a source change, missing fixture, failure or ignored test
-fails the batch. Run the full ownership aggregate at the combined checkpoint.
+fails the batch. Add `--decisive-name module::first` when the first declared
+fixture must execute immediately after its discovery. That explicit mode compiles
+once, discovers and executes the checkpoint, then discovers the entire remaining
+inventory before adjacent execution. Missing later fixtures still fail the batch;
+a checkpoint pass alone is not acceptance. Default mode retains complete discovery
+before any execution. Run the full ownership aggregate at the combined checkpoint.
 The budget fixture restores the caller's exact base-selector environment after
 its negative identity case, including whether the variable was originally unset.
 An inherited PR base must not become a different baseline for failed-run history.
