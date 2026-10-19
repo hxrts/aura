@@ -53,6 +53,15 @@ raw_after="$(GIT_OPTIONAL_LOCKS=0 GIT_EXTERNAL_DIFF="$fixture/artifacts/unsafe-d
   echo 'source fingerprint hid changed bytes or invoked configured diff helper' >&2; exit 1;
 }
 printf 'original\n' > "$fixture/source.rs"
+# Nix/CI may put TMPDIR inside this checkout. The private enumeration must
+# still live outside source, and retain the successful legacy digest bytes.
+mkdir -p "$fixture/artifacts/tmp" "$fixture/source-tmp"
+ln -s "$fixture/source-tmp" "$fixture/artifacts/tmp-link"
+for selected_tmp in "$fixture/artifacts/tmp" "$fixture/source-tmp" "$fixture/artifacts/tmp-link"; do
+  inside_tmp="$(TMPDIR="$selected_tmp" aura_receipt_source_fingerprint "$fixture")"
+  [[ "$inside_tmp" == "$raw_before" ]] || { echo 'checkout-local TMPDIR changed source identity' >&2; exit 1; }
+  [[ -z "$(ls -A "$selected_tmp")" ]] || { echo 'source capture left checkout-local temporary input' >&2; exit 1; }
+done
 # Source capture is also called from conditional/|| contexts, where errexit
 # cannot propagate producer failures on our behalf. Never publish a partial hash.
 git() {
@@ -76,10 +85,14 @@ readlink() {
   if [[ "$AURA_SOURCE_TEST_FAULT" == symlink ]]; then return 77; fi
   command readlink "$@"
 }
+mktemp() {
+  if [[ "$AURA_SOURCE_TEST_FAULT" == temporary ]]; then return 78; fi
+  command mktemp "$@"
+}
 printf 'retained untracked input\n' > "$fixture/new fault.rs"
 ln -s source.rs "$fixture/source-link"
-for AURA_SOURCE_TEST_FAULT in diff revision untracked partial read digest symlink; do
-  case "$AURA_SOURCE_TEST_FAULT" in revision) expected=71 ;; diff) expected=72 ;; untracked) expected=73 ;; partial) expected=74 ;; read) expected=75 ;; digest) expected=76 ;; symlink) expected=77 ;; esac
+for AURA_SOURCE_TEST_FAULT in diff revision untracked partial read digest symlink temporary; do
+  case "$AURA_SOURCE_TEST_FAULT" in revision) expected=71 ;; diff) expected=72 ;; untracked) expected=73 ;; partial) expected=74 ;; read) expected=75 ;; digest) expected=76 ;; symlink) expected=77 ;; temporary) expected=78 ;; esac
   status=0
   failed_fingerprint="$(aura_receipt_source_fingerprint "$fixture")" || status=$?
   [[ "$status" == "$expected" && -z "$failed_fingerprint" ]] || {
@@ -90,7 +103,7 @@ for AURA_SOURCE_TEST_FAULT in diff revision untracked partial read digest symlin
   [[ "$status" == "$expected" ]] || { echo 'receipt initialization accepted unavailable source' >&2; exit 1; }
   [[ ! -d "$fixture/artifacts/disk-budget/receipts" ]] || { echo 'failed source capture allocated a receipt' >&2; exit 1; }
 done
-unset -f git sha256sum readlink
+unset -f git sha256sum readlink mktemp
 unset AURA_SOURCE_TEST_FAULT
 rm "$fixture/new fault.rs" "$fixture/source-link"
 aura_receipt_init "$fixture" fixture cargo check --locked -p aura-simulator --features 'signals, test'

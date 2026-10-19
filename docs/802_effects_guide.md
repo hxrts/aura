@@ -403,14 +403,15 @@ constructor, externally implementable proof trait, feature-gated raw writer,
 or caller-supplied closure would reopen forgeable birth authority.
 
 For a lower-layer implementation, migrate the admitted-original checks now in
-`aura-invitation/src/enrollment_mailbox.rs` together with the independently
-approved baseline and setup-verifier origins now in `enrollment_manifest.rs`
-and `enrollment_setup.rs`. The destination must be at or below the selected
+`crates/aura-invitation/src/enrollment_mailbox.rs` together with the independently
+approved baseline and setup-verifier origins now in
+`crates/aura-invitation/src/enrollment_manifest.rs` and
+`crates/aura-invitation/src/enrollment_setup.rs`. The destination must be at or below the selected
 provider's dependency boundary and expose a private-field, non-deserializable,
-move-only verified proof. `aura-effects/src/secure.rs` may then consume only
+move-only verified proof. `crates/aura-effects/src/secure.rs` may then consume only
 that proof under its existing `record_gate`, derive the signed expiry and exact
 registration bytes itself, and atomically publish the V3 value. The L6
-`runtime_bridge/enrollment_issuance.rs` callsite would transfer the proof,
+`crates/aura-agent/src/runtime_bridge/enrollment_issuance.rs` callsite would transfer the proof,
 selected provider and value without naming a birth location or deadline. Until
 those proof origins migrate, leave `publish_retirement_birth` private and L6
 unwired. A higher-layer alternative needs a new narrowly owned storage

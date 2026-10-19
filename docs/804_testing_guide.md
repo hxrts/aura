@@ -1842,6 +1842,9 @@ unknown; an opaque command's exit does not prove test discovery or execution.
 Source capture must succeed before a receipt is allocated: failed Git revision,
 tracked diff, untracked enumeration (including partial output), file/symlink read
 or digest production refuses initialization and emits no partial fingerprint.
+The private source-enumeration directory stays outside the checkout. When CI
+selects a checkout-local `TMPDIR` (including a symlink into it), source capture
+uses the system temporary directory instead; compiler/build `TMPDIR` is unchanged.
 The existing receipt source fingerprint retains its legacy SHA-256 encoding;
 algorithm migration requires an explicit versioned compatibility change.
 Nested scripts that call `build-phase.sh` publish each actual Cargo phase's

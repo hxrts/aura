@@ -199,13 +199,18 @@ aura_receipt_source_fingerprint() (
   # Callers deliberately use conditional contexts, which disable errexit.
   # Check each producer and publish no digest until every input is captured.
   set -o pipefail
-  local checkout="$1" revision path fingerprint capture_dir capture_root checkout_root
+  local checkout="$1" revision path fingerprint capture_dir capture_root checkout_root capture_parent
   revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" || return
   [[ -n "$revision" ]] || return 1
-  capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/aura-source-fingerprint.XXXXXX")" || return
+  checkout_root="$(cd "$checkout" && pwd -P)" || return
+  capture_parent="$(cd "${TMPDIR:-/tmp}" && pwd -P)" || return
+  # CI can select a checkout-local TMPDIR. Keep the enumeration out of its
+  # own input without changing that caller's build/compiler temporary space.
+  case "$capture_parent/" in "$checkout_root/"*) capture_parent="$(cd /tmp && pwd -P)" || return ;; esac
+  case "$capture_parent/" in "$checkout_root/"*) echo 'source capture requires a temporary directory outside the checkout' >&2; return 1 ;; esac
+  capture_dir="$(mktemp -d "$capture_parent/aura-source-fingerprint.XXXXXX")" || return
   trap 'rm -rf "$capture_dir"' EXIT
   capture_root="$(cd "$capture_dir" && pwd -P)" || return
-  checkout_root="$(cd "$checkout" && pwd -P)" || return
   case "$capture_root/" in "$checkout_root/"*) echo 'source capture requires a temporary directory outside the checkout' >&2; return 1 ;; esac
   # Capture enumeration synchronously: process-substitution failures are lost
   # on macOS system Bash, even when its reported process id is explicitly waited.
