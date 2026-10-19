@@ -2611,6 +2611,11 @@ fast individual checks. Their execution receipts bind the current source,
 Git index/ref map, effective Git configuration and diff selectors, then rerun
 the Rust check against that source using the original verified toolkit binary.
 An invalid diff range or external Git diff/config input refuses this fast lane.
+The disposable GitHub-hosted Build Cache Policy job removes only its unused
+system Git LFS helper section before capturing fixture inputs; this repository
+does not use LFS attributes. External filters and other unsupported configuration
+still refuse reuse. This setup applies to that dedicated CI worker, not a
+developer's global or system Git configuration.
 Run the complete `just ci-user-flow-policy` recipe at its integration checkpoint;
 it also includes the harness ownership check. `security-boundary-policy` runs
 required Rust tests and is not eligible for static execution. These
