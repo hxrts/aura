@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Isolated static Git-selection contract; no Cargo or workspace build.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'failure_status=$?; printf "[git-context] refusal at %s:%s in %s (exit %s)\n" "${BASH_SOURCE[0]}" "$LINENO" "${FUNCNAME[0]:-main}" "$failure_status" >&2; exit "$failure_status"' ERR
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
 source "$repo_root/scripts/dev/build-receipt.sh"
+printf '[git-context] Git selector names present (values omitted):\n' >&2
+export -p | awk '/^declare -x GIT_[A-Za-z0-9_]*(=|$)/ { sub(/^declare -x /, ""); sub(/=.*/, ""); print }' >&2
+git --version >&2
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/aura-static-git.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 project="$fixture/project"
@@ -14,6 +18,9 @@ printf 'one\n' > "$project/source.rs"
 git -C "$project" add source.rs
 git -C "$project" -c user.name=Fixture -c user.email=fixture@example.invalid \
   -c commit.gpgsign=false commit -qm initial
+git -C "$project" config --name-only --get-regexp \
+  '^(diff\..*\.(textconv|command)|diff\.external|filter\..*\.(clean|process)|core\.(attributesfile|fsmonitor|sparsecheckout)|include\..*|includeif\..*)$' \
+  | awk -F. '{ printf "[git-context] unsupported-config-category=%s", $1; if ($1=="core") printf ".%s", $2; printf "\n" }' >&2 || true
 base="$(policy_static_git_identity "$project")"
 [[ "$base" =~ ^[a-f0-9]{64}$ ]]
 changed="$(AURA_UX_POLICY_DIFF_RANGE=HEAD policy_static_git_identity "$project")"

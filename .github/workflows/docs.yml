@@ -19,6 +19,18 @@ env:
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
+  git-context-diagnostic:
+    name: Git fixture context diagnostic (not acceptance)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+      - run: nix develop .#ci --command bash scripts/dev/test-policy-static-git-inputs.sh
+
   links:
     name: Docs Links
     runs-on: ubuntu-latest
