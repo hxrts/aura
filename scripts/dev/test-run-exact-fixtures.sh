@@ -43,7 +43,7 @@ aura_receipt_init "$project" ownership-exact bash exact-fixtures
 run_exact() {
   bash "$repo_root/scripts/dev/run-exact-fixtures.sh" --inside --root "$project" \
     --package fixture --test smoke --expected-count 2 \
-    --name suite::one --name suite::two
+    --name suite::one --name suite::two "$@"
 }
 run_exact > "$fixture/output"
 [[ "$(wc -l < "$COMPILE_COUNTER" | tr -d ' ')" == 1 ]]
@@ -75,4 +75,9 @@ jq -e '([.phases[] | select(.phase=="discovery")] | length)==1 and
   ([.phases[] | select(.phase=="execution")] | length)==0' \
   "$AURA_BUILD_RECEIPT" >/dev/null
 cp "$fixture/original-Cargo.toml" "$project/Cargo.toml"
+aura_receipt_init "$project" ownership-exact bash exact-fixtures-timings
+run_exact --timings > "$fixture/output"
+jq -e '.phases[0].command_argv==["cargo","test","-p","fixture","--test","smoke","--timings","--no-run","--message-format=json"] and
+  ([.phases[].phase]==["compile","discovery","discovery","execution","execution"])' \
+  "$AURA_BUILD_RECEIPT" >/dev/null
 echo 'exact fixtures: one compile, declared inventory, exact discovery/execution, duplicate/missing/failure refusal passed'

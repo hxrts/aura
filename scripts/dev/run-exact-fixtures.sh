@@ -6,7 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 inside=0
 if [[ "${1:-}" == --inside ]]; then inside=1; shift; fi
 original=("$@")
-root="$repo_root" lane=ownership-exact package='' target='' binary='' features='' count=''
+root="$repo_root" lane=ownership-exact package='' target='' binary='' features='' count='' timings=0
 names=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,6 +16,7 @@ while [[ $# -gt 0 ]]; do
     --lib) [[ -z "$target" ]] || exit 2; target=lib; shift ;;
     --test) [[ -z "$target" ]] || exit 2; target=test; binary="${2:?missing binary}"; shift 2 ;;
     --features) features="${2:?missing features}"; shift 2 ;;
+    --timings) timings=1; shift ;;
     --expected-count) count="${2:?missing count}"; shift 2 ;;
     --name) names+=("${2:?missing test name}"); shift 2 ;;
     *) echo 'run-exact-fixtures: unknown option' >&2; exit 2 ;;
@@ -59,6 +60,7 @@ aura_receipt_update --arg file "$inventory_file" --argjson count "$count" \
 cargo_args=(test -p "$package")
 if [[ "$target" == lib ]]; then cargo_args+=(--lib); else cargo_args+=(--test "$binary"); fi
 if [[ -n "$features" ]]; then cargo_args+=(--features "$features"); fi
+if (( timings == 1 )); then cargo_args+=(--timings); fi
 bash "$repo_root/scripts/dev/build-phase.sh" compile -- cargo "${cargo_args[@]}" --no-run --message-format=json
 compile_log="$(jq -r '[.phases[] | select(.phase=="compile") | .log][-1]' "$AURA_BUILD_RECEIPT")"
 executables=()

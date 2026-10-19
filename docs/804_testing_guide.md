@@ -1903,6 +1903,9 @@ command's original exit status, including 101. The canonical
 exact name before running any fixture, then executes those names with
 fail-fast behavior. A missing later declaration prevents all execution; a
 source change during discovery or execution refuses the batch.
+Pass `--timings` to collect Cargo's timing report during that same necessary
+compilation. The compile phase records the option in its command arguments;
+discovery, exact inventories, execution and failure handling remain unchanged.
 Use a separate `disposal` phase for an actual native shutdown/cleanup command;
 its result remains independent of semantic or compile failure. Completion
 prints the final status and receipt path, so coordinators can inspect one
@@ -1950,9 +1953,12 @@ CARGO_INCREMENTAL=1 bash scripts/dev/build-budget.sh --lane agent-loop -- \
   cargo test -p hxrts-aura-agent --test runtime_integration <module>::
 ```
 
-A one-file edit then recompiles in about 10-30 s instead of 1-2 minutes. The
+Measure rebuild time and target-directory growth on the selected host; warm
+dependencies alone do not establish a fast changed-crate rebuild. Use the
+existing exact-fixture runner's `--timings` option on a necessary compilation
+before considering changes to test targets or compiler configuration. The
 incremental cache costs several GiB; `just prune-inactive-lane
-debug-incremental` reclaims it. CI and gates stay non-incremental.
+debug-incremental` reclaims an idle lane. CI and gates stay non-incremental.
 
 `aura-agent` sets `autotests = false` and aggregates its integration tests
 into a few binaries: `runtime_integration`, `home_flows` (also the
