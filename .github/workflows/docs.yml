@@ -19,6 +19,54 @@ env:
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
+  git-lfs-fixture-diagnostic:
+    name: Hosted Git fixture / cache-policy diagnostic
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record filter key origins and reproduce the original refusal
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'image=%s version=%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          result=0
+          /usr/bin/git config --show-origin --show-scope --name-only --get-regexp '^filter\.' || result=$?
+          if (( result != 0 && result != 1 )); then exit "$result"; fi
+          baseline=0
+          bash scripts/dev/test-policy-static-git-inputs.sh > /tmp/ci-git-native-baseline.log 2>&1 || baseline=$?
+          printf 'original-fixture-exit=%s\n' "$baseline"
+          if (( baseline != 2 )); then
+            echo 'Expected original refusal was not reproduced; this is not acceptance.' >&2
+            exit 3
+          fi
+      - name: Isolate Git fixture inputs from runner Git LFS helpers
+        shell: bash
+        run: |
+          # This job uses a disposable GitHub-hosted runner and no LFS files.
+          # Retain the policy's refusal of external filters; remove only the
+          # runner's unused system LFS configuration before capturing inputs.
+          if /usr/bin/git config --system --name-only --get-regexp '^filter\.lfs\.' >/dev/null; then
+            sudo /usr/bin/git config --system --remove-section filter.lfs
+          else
+            result=$?
+            if (( result != 1 )); then exit "$result"; fi
+          fi
+      - name: Execute focused native fixture after isolation
+        run: bash scripts/dev/test-policy-static-git-inputs.sh 2>&1 | tee /tmp/ci-git-native-after.log
+      - uses: ./.github/actions/setup-nix
+      - name: Execute focused fixture with pinned Nix Git
+        run: nix develop .#ci --command bash scripts/dev/test-policy-static-git-inputs.sh 2>&1 | tee /tmp/ci-git-nix-after.log
+      - name: Execute existing cache-policy gate after the focused checkpoint
+        run: nix develop .#ci --command just ci-build-cache-policy 2>&1 | tee /tmp/ci-git-cache-policy.log
+      - name: Retain diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-git-fixture-diagnostic
+          path: /tmp/ci-git-*.log
+          if-no-files-found: warn
+
   links:
     name: Docs Links
     runs-on: ubuntu-latest
