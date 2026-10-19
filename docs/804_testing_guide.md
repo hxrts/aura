@@ -1839,6 +1839,11 @@ wrapper, driver and active phase command identities, current phase,
 command/final exit statuses, cache cleanup
 observations and artifact paths. Missing metadata and unexecuted phases remain
 unknown; an opaque command's exit does not prove test discovery or execution.
+Source capture must succeed before a receipt is allocated: failed Git revision,
+tracked diff, untracked enumeration (including partial output), file/symlink read
+or digest production refuses initialization and emits no partial fingerprint.
+The existing receipt source fingerprint retains its legacy SHA-256 encoding;
+algorithm migration requires an explicit versioned compatibility change.
 Nested scripts that call `build-phase.sh` publish each actual Cargo phase's
 package, features, target and filter under `metadata.phase_commands`; the
 exact expected inventory is attached to its discovery and execution phases.

@@ -40,6 +40,8 @@ export AURA_TEST_DIFF_MARKER="$fixture/artifacts/diff-helper-called"
 touch -t 202001020304 "$fixture/source.rs"
 index_before="$(sha256sum "$fixture/.git/index")"
 raw_before="$(GIT_OPTIONAL_LOCKS=0 aura_receipt_source_fingerprint "$fixture")"
+legacy_clean="$(printf '%s\n' "$(git -C "$fixture" rev-parse HEAD)" | sha256sum)"
+[[ "$raw_before" == "${legacy_clean%% *}" ]] || { echo 'legacy source hash encoding changed' >&2; exit 1; }
 [[ "$index_before" == "$(sha256sum "$fixture/.git/index")" &&
    ! -e "$AURA_TEST_DIFF_MARKER" ]] || {
   echo 'source fingerprint changed Git index or invoked configured diff helper' >&2; exit 1;
@@ -51,6 +53,46 @@ raw_after="$(GIT_OPTIONAL_LOCKS=0 GIT_EXTERNAL_DIFF="$fixture/artifacts/unsafe-d
   echo 'source fingerprint hid changed bytes or invoked configured diff helper' >&2; exit 1;
 }
 printf 'original\n' > "$fixture/source.rs"
+# Source capture is also called from conditional/|| contexts, where errexit
+# cannot propagate producer failures on our behalf. Never publish a partial hash.
+git() {
+  local argument
+  for argument in "$@"; do
+    case "$AURA_SOURCE_TEST_FAULT:$argument" in
+      revision:rev-parse) return 71 ;;
+      diff:diff) return 72 ;;
+      untracked:ls-files) return 73 ;;
+      partial:ls-files) printf 'new fault.rs\0'; return 74 ;;
+    esac
+  done
+  command git "$@"
+}
+sha256sum() {
+  if [[ "$AURA_SOURCE_TEST_FAULT" == read && "${1:-}" == "$fixture/new fault.rs" ]]; then return 75; fi
+  if [[ "$AURA_SOURCE_TEST_FAULT" == digest && $# == 0 ]]; then return 76; fi
+  command sha256sum "$@"
+}
+readlink() {
+  if [[ "$AURA_SOURCE_TEST_FAULT" == symlink ]]; then return 77; fi
+  command readlink "$@"
+}
+printf 'retained untracked input\n' > "$fixture/new fault.rs"
+ln -s source.rs "$fixture/source-link"
+for AURA_SOURCE_TEST_FAULT in diff revision untracked partial read digest symlink; do
+  case "$AURA_SOURCE_TEST_FAULT" in revision) expected=71 ;; diff) expected=72 ;; untracked) expected=73 ;; partial) expected=74 ;; read) expected=75 ;; digest) expected=76 ;; symlink) expected=77 ;; esac
+  status=0
+  failed_fingerprint="$(aura_receipt_source_fingerprint "$fixture")" || status=$?
+  [[ "$status" == "$expected" && -z "$failed_fingerprint" ]] || {
+    echo "source capture accepted failed $AURA_SOURCE_TEST_FAULT input (exit $status)" >&2; exit 1;
+  }
+  status=0
+  aura_receipt_init "$fixture" refused-source sh -c 'exit 0' || status=$?
+  [[ "$status" == "$expected" ]] || { echo 'receipt initialization accepted unavailable source' >&2; exit 1; }
+  [[ ! -d "$fixture/artifacts/disk-budget/receipts" ]] || { echo 'failed source capture allocated a receipt' >&2; exit 1; }
+done
+unset -f git sha256sum readlink
+unset AURA_SOURCE_TEST_FAULT
+rm "$fixture/new fault.rs" "$fixture/source-link"
 aura_receipt_init "$fixture" fixture cargo check --locked -p aura-simulator --features 'signals, test'
 jq -e '.command_argv==["cargo","check","--locked","-p","aura-simulator","--features","signals, test"]' "$AURA_BUILD_RECEIPT" >/dev/null
 jq -e '.metadata.packages=="aura-simulator" and .metadata.features=="signals, test" and

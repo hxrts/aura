@@ -10,6 +10,11 @@ fakebin="$test_root/fakebin"
 project="$test_root/project"
 mkdir -p "$fakebin" "$project/target"
 : > "$project/Cargo.toml"
+git -C "$project" init -q
+printf '/target/\n/artifacts/\n' > "$project/.gitignore"
+git -C "$project" add Cargo.toml .gitignore
+git -C "$project" -c core.hooksPath=/dev/null -c commit.gpgsign=false \
+  -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial
 export FREE_FILE="$test_root/free_kib"
 export SIZE_FILE="$test_root/size_kib"
 export CALLS_FILE="$test_root/calls"

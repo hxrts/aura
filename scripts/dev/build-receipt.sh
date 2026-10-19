@@ -195,34 +195,47 @@ aura_receipt_first_failure() {
     '.failure_excerpt=$failure'
 }
 
-aura_receipt_source_fingerprint() {
-  local checkout="$1" revision path
-  revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
+aura_receipt_source_fingerprint() (
+  # Callers deliberately use conditional contexts, which disable errexit.
+  # Check each producer and publish no digest until every input is captured.
+  set -o pipefail
+  local checkout="$1" revision path fingerprint capture_dir capture_root checkout_root
+  revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" || return
   [[ -n "$revision" ]] || return 1
-  {
+  capture_dir="$(mktemp -d "${TMPDIR:-/tmp}/aura-source-fingerprint.XXXXXX")" || return
+  trap 'rm -rf "$capture_dir"' EXIT
+  capture_root="$(cd "$capture_dir" && pwd -P)" || return
+  checkout_root="$(cd "$checkout" && pwd -P)" || return
+  case "$capture_root/" in "$checkout_root/"*) echo 'source capture requires a temporary directory outside the checkout' >&2; return 1 ;; esac
+  # Capture enumeration synchronously: process-substitution failures are lost
+  # on macOS system Bash, even when its reported process id is explicitly waited.
+  git -C "$checkout" ls-files --others --exclude-standard -z > "$capture_dir/paths" || return
+  fingerprint="$({
     printf '%s\n' "$revision"
-    git -C "$checkout" -c diff.autoRefreshIndex=false diff HEAD --binary --no-ext-diff --no-textconv
+    git -C "$checkout" -c diff.autoRefreshIndex=false diff HEAD --binary --no-ext-diff --no-textconv || exit "$?"
     while IFS= read -r -d '' path; do
       printf '%s\0' "$path"
-      if [[ -L "$checkout/$path" ]]; then readlink "$checkout/$path";
-      elif [[ -f "$checkout/$path" ]]; then sha256sum "$checkout/$path";
+      if [[ -L "$checkout/$path" ]]; then readlink "$checkout/$path" || exit "$?"
+      elif [[ -f "$checkout/$path" ]]; then sha256sum "$checkout/$path" || exit "$?"
       else printf 'missing\n'; fi
-    done < <(git -C "$checkout" ls-files --others --exclude-standard -z)
-  } | sha256sum | awk '{print $1}'
-}
+    done < "$capture_dir/paths"
+  } | sha256sum)" || return
+  printf '%s\n' "${fingerprint%% *}"
+)
 
 aura_receipt_init() {
   local checkout="$1" build_lane="$2" directory fingerprint revision identity argv path command_log
   shift 2
   command -v jq >/dev/null || { echo 'build-budget: jq required for receipts' >&2; return 2; }
+  revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" || return
+  [[ -n "$revision" ]] || return 1
+  # Include tracked edits and new nonignored modules; cache artifacts are ignored.
+  fingerprint="$(aura_receipt_source_fingerprint "$checkout")" || return
   mkdir -p "$checkout/artifacts/disk-budget/receipts"
   directory="$(mktemp -d "$checkout/artifacts/disk-budget/receipts/run.XXXXXX")"
   export AURA_BUILD_RECEIPT="$directory/receipt.json"
   command_log="$(mktemp "$directory/command.XXXXXX.log")"
   export AURA_BUILD_COMMAND_LOG="$command_log"
-  revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
-  # Include tracked edits and new nonignored modules; cache artifacts are ignored.
-  fingerprint="$(aura_receipt_source_fingerprint "$checkout" || true)"
   identity="$(ps -p "$$" -o lstart= 2>/dev/null || true)"
   argv="$(jq -cn --args '$ARGS.positional' -- "$@")"
   aura_receipt_cargo_metadata "$@"
