@@ -24,8 +24,11 @@ changed="$(AURA_UX_GUIDANCE_CHANGED_FILES='' policy_static_git_identity "$projec
 [[ "$base" != "$changed" ]] || {
   echo 'empty guidance override was conflated with unset' >&2; exit 1;
 }
+# A pull-request runner already exports GITHUB_BASE_REF=main. Compare controlled
+# different values instead of accidentally requiring identical inputs to differ.
+base_selector="$(GITHUB_BASE_REF='' policy_static_git_identity "$project")"
 changed="$(GITHUB_BASE_REF=main policy_static_git_identity "$project")"
-[[ "$base" != "$changed" ]] || { echo 'Git base selector was unbound' >&2; exit 1; }
+[[ "$base_selector" != "$changed" ]] || { echo 'Git base selector was unbound' >&2; exit 1; }
 if AURA_UX_GUIDANCE_DIFF_RANGE=missing-revision \
     policy_static_git_identity "$project" user-flow-guidance-sync > "$fixture/output" 2>&1; then
   echo 'invalid guidance range was accepted' >&2; exit 1

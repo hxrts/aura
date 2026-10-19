@@ -2616,6 +2616,9 @@ system Git LFS helper section before capturing fixture inputs; this repository
 does not use LFS attributes. External filters and other unsupported configuration
 still refuse reuse. This setup applies to that dedicated CI worker, not a
 developer's global or system Git configuration.
+The selector fixture compares controlled empty/nonempty base-ref values, so a PR
+runner already exporting `GITHUB_BASE_REF=main` does not compare identical inputs.
+This isolation changes the fixture, while production selector binding stays strict.
 Run the complete `just ci-user-flow-policy` recipe at its integration checkpoint;
 it also includes the harness ownership check. `security-boundary-policy` runs
 required Rust tests and is not eligible for static execution. These
