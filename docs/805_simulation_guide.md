@@ -283,6 +283,15 @@ finish. After forward progress, use an actual provider read for refusal
 assertions, so an artificial earlier timestamp cannot create the rollback being
 asserted.
 
+When a runtime owner must identify one specific relative retry, observe that
+owner's `PhysicalTimeEffects::sleep_ms_with_registration_observer` callback.
+The selected manual provider issues the generation and target only after actual
+timer admission; other providers may report `Unsupported` while sleeping
+normally. A simulator can conditionally step that exact still-live registration
+under the provider's synchronized gate, after independently checking the
+authenticated broker and owning task state. The callback alone never proves
+registration, quiescence or protocol completion.
+
 ### Fault Injection
 
 ```rust
@@ -617,30 +626,32 @@ receipt supplies the full source fingerprint and exact discovered/executed
 inventory. The replay receipt records only a fixture source digest, seed,
 selected clock, operation/owner, named fault, ordered broker milestones,
 typed result, exact first-message ACK, reopen result, and elapsed times.
-The current three-branch benchmark is diagnostic: recent local runs measured
-roughly 7.8–8.0 seconds with checkpoint capture and three restores against
-6.9–7.2 seconds for three fresh setups. Restore of the two original profile
-inventories costs roughly 0.5–0.9 seconds per branch, so this fixture does
-not yet establish a speedup. Preserve the effect owner's authenticated
-inventory, exclusive lease, and incomplete-restore marker when optimizing it.
+The three-branch benchmark is diagnostic. A source-bound Linux run measured
+14.470 seconds for capture, three restores and signed branches, versus 12.712
+seconds for three full setups: the checkpoint path was about 13.8% slower.
+Capture cost 701 ms, restores 652/982/911 ms, and signed branches
+3919/3742/3561 ms. Full setups cost 4260/4325/4124 ms. There was no time saving;
+use full fresh setup as the speed default.
 
-Use the receipt's `checkpoint_capture_ms`, `restore_ms`, `signed_branch_ms`,
-and `full_setup_ms` to calculate the break-even branch count for the same
-compiled fixture. For `n` branches, compare `capture + n × (restore + branch)`
-with `n × full_setup`, using representative phase timings from repeated runs.
-If `restore + branch >= full_setup`, this checkpoint has no positive
-break-even count. Recent unoptimized receipts have representative phases of
-about 0.54 seconds capture, 0.73 seconds restore, 1.70 seconds signed branch,
-and 2.31 seconds full setup; the per-branch checkpoint path is slower even
-before capture. An unmerged exact-byte retention experiment reduced restore
-time, but its four-run median total was still about 7.65 seconds versus
-7.02 seconds for three fresh setups. Its phase medians suggest a tentative
-break-even near twelve branches, too variable to make it a default speed
-lane. Prefer a genuinely quiescent boundary after a more expensive signed
-setup or a workflow needing many branches, and remeasure capture, restore,
-branch, and full setup on one fixed source. Restore only through fresh canonical
-owners when their durable continuation and broker state can be authenticated;
-fail closed if that later boundary cannot be recovered.
+That build receipt is `run.GZwWyH`, source fingerprint
+`0d76c3ee300b30e5e5d96f63e9efc91421e20d65734e119bf7de7369ad7bb5af`,
+SHA-256 `d2cf069ab0c246e8951484437df58808e7db4060d22f305146b4dc4adce927af`.
+Its redacted benchmark JSON has SHA-256
+`4f5a671c4eaadd540a2986d515d025381cdfa3590874df18fbb6fc6a32039948`.
+This example describes the quiescent pre-issuance, empty-broker boundary with
+the runtime-selected filesystem fallback. It does not establish platform
+keyring, independent-process or cross-host delivery. Keep your generated
+receipts with their actual source and compiler identity.
+
+Use `checkpoint_capture_ms`, `restore_ms`, `signed_branch_ms` and `full_setup_ms`
+to assess the same compiled fixture at a particular branch count. Compare
+`capture + n × (restore + branch)` with `n × full_setup`, using representative
+phase timings. If `restore + branch >= full_setup`, there is no positive
+break-even count for those timings. The example averages about 4.589 seconds
+for restore plus branch versus 4.236 seconds for full setup, so extra branches
+do not recover capture cost. Remeasure after a meaningful source or boundary
+change. Preserve authenticated inventory, exclusive leases and incomplete-restore
+markers; fail closed when original continuation or broker custody is unavailable.
 
 The named `BrokerOwnerShutdownAfterFirstQueue` branch reuses the same protected
 quiescent profiles. It starts the ordinary signed VM/app/broker owners,
@@ -668,7 +679,8 @@ required host-write refusal after exact receiver ACK and same-profile reopen.
 
 For actual FROST one-use custody, the separately scoped threshold-service
 fixture injects the same retirement effect into original and restored owners
-and refuses an identical real public commitment in the second owner:
+and refuses an identical real public commitment in the second owner. This is
+shared retirement history, not independent restored branch custody:
 
 ```bash
 scripts/dev/run-exact-fixtures.sh --root "$PWD" --lane debug \
@@ -679,7 +691,11 @@ scripts/dev/run-exact-fixtures.sh --root "$PWD" --lane debug \
 
 There is no simulator nonce-counter selector yet, so there is no duplicate
 counter warning or byte-identical crypto replay claim. Reusing an actual
-one-time commitment is a hard refusal. The 1-of-1 enrollment fast path uses
+one-time commitment within one live or shared-history custody remains a hard
+refusal. Future isolated restored branches may start from the same signer and
+counter state with a developer warning; another branch's start state alone
+must not reject an independent branch. That branch facility is not implemented.
+The 1-of-1 enrollment fast path uses
 normal signing but does not exercise FROST retirement. This checkpoint is only
 for quiescent pre-issuance selected filesystem profiles with an empty broker;
 each branch creates its broker registration and queue through the normal issue
@@ -730,6 +746,16 @@ refused. Capture binds the original verified pending epoch; restore remains
 limited to the same original selected-profile context because a fresh issuer
 does not yet rederive that approval witness. Cross-profile or fresh-issuer
 continuation restore remains unsupported.
+Original issuer protocol execution and required cleanup share one registered
+task binding. Cancellation retains the same VM slot and signed terminal custody;
+resource cleanup requires actual close and subtree-disposal acknowledgments.
+Unsigned interruption is fenced under the original decision gate and closes
+only resources, with no synthesized cancellation, terminal signature or generation
+retirement. After changing this owner, validate the default agent library's exact
+`handlers::invitation::tests::verified_request_required_cancellation_disposes_original_without_confirmation`
+fixture before expanding its required regression inventory. Source changes and
+test declarations alone are not passing checkpoint evidence.
+
 The signed broker handoff fixture also reaches a real receiver envelope through
 the public app workflow and checks that the stopped original broker refuses
 queued, retrieval-selected, and retained receiver-ACK history. The served

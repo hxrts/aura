@@ -2665,9 +2665,10 @@ with optional architecture-specific hardware acceleration
           "default" = [ "terminal" ];
           "development" = [ "terminal" "testing" "aura-app/debug-serialize" "aura-app/instrumented" "dep:aura-simulator" "dep:aura-testkit" "aura-app/app-internals" ];
           "lan-http-dev" = [ "terminal" "aura-agent/lan-http-dev" ];
+          "production-build" = [ "aura-agent/production-build" "aura-effects/production-build" ];
           "testing" = [ "terminal" "aura-app/app-internals" "aura-agent/simulation" ];
         };
-        resolvedDefaultFeatures = [ "default" "development" "lan-http-dev" "proptest" "terminal" "testing" ];
+        resolvedDefaultFeatures = [ "default" "development" "lan-http-dev" "production-build" "proptest" "terminal" "testing" ];
       };
       "aura-testkit" = rec {
         crateName = "aura-testkit";
@@ -3161,9 +3162,10 @@ with optional architecture-specific hardware acceleration
           }
         ];
         features = {
+          "production-build" = [ "aura-agent/production-build" "aura-effects/production-build" ];
           "web" = [ "dioxus/web" ];
         };
-        resolvedDefaultFeatures = [ "default" "harness" "web" ];
+        resolvedDefaultFeatures = [ "default" "harness" "production-build" "web" ];
       };
       "autocfg" = rec {
         crateName = "autocfg";
@@ -12760,11 +12762,13 @@ library used by the other higher-level Hickory DNS crates.
         features = {
           "choreo-backend-telltale-machine" = [ "dep:telltale-machine" "aura-effects/telltale-runtime-capability" ];
           "default" = [ "choreo-backend-telltale-machine" ];
+          "development-keys" = [ "aura-effects/development-keys" ];
+          "production-build" = [ "aura-effects/production-build" ];
           "simulation" = [ "aura-core/simulation" "aura-journal/simulation" "aura-effects/simulation" ];
           "simulator-checkpoint" = [ "simulation" "aura-effects/simulator-checkpoint" ];
           "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" "aura-social/transparent_onion" "aura-sync/transparent_onion" ];
         };
-        resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "lan-http-dev" "real-android-keystore" "simulation" "simulator-checkpoint" "transparent_onion" "web" ];
+        resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "development-keys" "ios" "lan-http-dev" "production-build" "real-android-keystore" "simulation" "simulator-checkpoint" "transparent_onion" "web" ];
       };
       "hxrts-aura-amp" = rec {
         crateName = "hxrts-aura-amp";
@@ -13225,13 +13229,14 @@ library used by the other higher-level Hickory DNS crates.
           "ios" = [ "uniffi" "mobile" ];
           "mobile" = [ "uniffi" "callbacks" ];
           "native" = [ "signals" ];
+          "production-build" = [ "aura-effects/production-build" ];
           "signals" = [ "dep:futures-signals" ];
           "uniffi" = [ "dep:uniffi" "callbacks" ];
           "wasm" = [ "dep:wasm-bindgen" "dep:js-sys" "dep:web-sys" "dep:console_error_panic_hook" ];
           "web-dominator" = [ "wasm" "signals" "dep:dominator" ];
           "web-js" = [ "wasm" ];
         };
-        resolvedDefaultFeatures = [ "android" "app-internals" "callbacks" "debug-serialize" "default" "host" "instrumented" "ios" "mobile" "native" "signals" "test-support" "uniffi" "wasm" "web-dominator" "web-js" ];
+        resolvedDefaultFeatures = [ "android" "app-internals" "callbacks" "debug-serialize" "default" "host" "instrumented" "ios" "mobile" "native" "production-build" "signals" "test-support" "uniffi" "wasm" "web-dominator" "web-js" ];
       };
       "hxrts-aura-authentication" = rec {
         crateName = "hxrts-aura-authentication";
@@ -14166,12 +14171,14 @@ library used by the other higher-level Hickory DNS crates.
           }
         ];
         features = {
-          "simulation" = [ "aura-core/simulation" ];
+          "simulation" = [ "aura-core/simulation" "development-keys" ];
           "simulator-checkpoint" = [ "simulation" ];
           "telltale-runtime-capability" = [ "dep:telltale-machine" ];
+          "test-keyring" = [ "development-keys" ];
+          "test-support" = [ "development-keys" ];
           "transparent_onion" = [ "aura-core/transparent_onion" ];
         };
-        resolvedDefaultFeatures = [ "default" "os-keychain-diagnostic" "simulation" "simulator-checkpoint" "telltale-runtime-capability" "test-keyring" "test-support" "transparent_onion" ];
+        resolvedDefaultFeatures = [ "default" "development-keys" "os-keychain-diagnostic" "production-build" "simulation" "simulator-checkpoint" "telltale-runtime-capability" "test-keyring" "test-support" "transparent_onion" ];
       };
       "hxrts-aura-guards" = rec {
         crateName = "hxrts-aura-guards";

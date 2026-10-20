@@ -253,7 +253,7 @@ enum RendezvousCommand {
     ClearBootstrapBroker {
         reply: oneshot::Sender<()>,
     },
-    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
     TakeBootstrapBrokerForCheckpoint {
         reply: oneshot::Sender<Option<Arc<LocalBootstrapBrokerService>>>,
     },
@@ -527,7 +527,11 @@ impl RendezvousManager {
                         state.bootstrap_broker = None;
                         let _ = reply.send(());
                     }
-                    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+                    #[cfg(all(
+                        test,
+                        not(target_arch = "wasm32"),
+                        feature = "simulator-checkpoint"
+                    ))]
                     RendezvousCommand::TakeBootstrapBrokerForCheckpoint { reply } => {
                         let _ = reply.send(state.bootstrap_broker.take());
                     }
@@ -1253,7 +1257,7 @@ impl RendezvousManager {
     /// simulator checkpoint. A retained snapshot or in-flight caller clone
     /// refuses the handoff; the private broker gate then disposes its exact
     /// dedicated task group. No production import/export is exposed.
-    #[cfg(all(not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "simulator-checkpoint"))]
     pub(crate) async fn stop_original_bootstrap_broker_for_simulation(
         &self,
         timeout: Duration,

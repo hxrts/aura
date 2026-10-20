@@ -12,6 +12,7 @@ use aura_protocol::effects::{
     ChoreographyMetrics, RoleIndex,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
 use crate::runtime::subsystems::choreography::SessionStartError;
@@ -24,6 +25,34 @@ pub(crate) struct SessionEndTimeFailure {
     #[source]
     source: aura_core::effects::TimeError,
     cleanup: Option<crate::runtime::subsystems::choreography::SessionEndError>,
+    retirement: Option<Arc<SessionEndResourceRetirement>>,
+}
+
+/// Read-only evidence of actual binding and fragment retirement. Neither ids
+/// nor the absence of a binding can construct this original claim witness.
+#[derive(Debug)]
+pub(in crate::runtime) struct SessionEndResourceRetirement {
+    owner: crate::runtime::subsystems::choreography::SessionOwnerCapability,
+}
+impl SessionEndResourceRetirement {
+    pub(in crate::runtime) fn matches_owner(
+        &self,
+        owner: &crate::runtime::RuntimeSessionOwner,
+    ) -> bool {
+        self.owner == owner.capability && self.owner.session_id() == owner.session_id
+    }
+}
+impl SessionEndTimeFailure {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RuntimeSessionOwner", receiver_type = SessionEndTimeFailure, family = "runtime_helper")]
+    pub(in crate::runtime) fn original_retirement(
+        &self,
+        owner: &crate::runtime::RuntimeSessionOwner,
+    ) -> Option<Arc<SessionEndResourceRetirement>> {
+        self.retirement
+            .as_ref()
+            .filter(|actual| actual.matches_owner(owner))
+            .map(Arc::clone)
+    }
 }
 
 fn current_session_snapshot(
@@ -504,23 +533,25 @@ impl ChoreographicEffects for AuraEffectSystem {
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
         let clock = self.physical_time().await;
-        let ended = {
+        let (ended, retired_owner) = {
             let mut state = self.choreography_state.write();
-            state.end_session_observed(clock.as_ref().ok().map(|time| time.ts_ms))
-        };
-        match &ended {
-            Ok(session_id)
-            | Err(
-                crate::runtime::subsystems::choreography::SessionEndError::MissingBoundSession(
-                    session_id,
-                ),
-            ) => {
-                self.release_vm_fragments_for_session(*session_id);
+            let original = state
+                .current_session_id()
+                .and_then(|session| state.session_owner(session))
+                .map(|owner| owner.capability.clone());
+            let ended = state.end_session_observed(clock.as_ref().ok().map(|time| time.ts_ms));
+            // Keep the original state -> fragment lock order through both
+            // retirements. Replacement admission cannot reuse the id between
+            // binding removal and release of the original fragments.
+            match &ended {
+                Ok(session_id)
+                | Err(crate::runtime::subsystems::choreography::SessionEndError::MissingBoundSession(session_id)) => {
+                    self.release_vm_fragments_for_session(*session_id);
+                }
+                Err(crate::runtime::subsystems::choreography::SessionEndError::MissingCurrentBinding) => {}
             }
-            Err(
-                crate::runtime::subsystems::choreography::SessionEndError::MissingCurrentBinding,
-            ) => {}
-        }
+            (ended, original)
+        };
         match clock {
             Ok(_) => ended
                 .map(|_| ())
@@ -529,6 +560,12 @@ impl ChoreographicEffects for AuraEffectSystem {
                 operation: "session_end",
                 source: Box::new(SessionEndTimeFailure {
                     source,
+                    retirement: match (&ended, retired_owner) {
+                        (Ok(session), Some(owner)) if owner.session_id() == *session => {
+                            Some(Arc::new(SessionEndResourceRetirement { owner }))
+                        }
+                        _ => None,
+                    },
                     cleanup: ended.err(),
                 }),
             }),

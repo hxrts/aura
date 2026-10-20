@@ -5,7 +5,7 @@ mod quiescent_clock;
 #[cfg(not(target_arch = "wasm32"))]
 mod stall_watchdog;
 
-pub use manual_physical_clock::ManualPhysicalClock;
+pub use manual_physical_clock::{ManualPhysicalClock, RegisteredDeadlineRefusal};
 #[cfg(not(target_arch = "wasm32"))]
 pub use quiescent_clock::QuiescentClock;
 #[cfg(not(target_arch = "wasm32"))]

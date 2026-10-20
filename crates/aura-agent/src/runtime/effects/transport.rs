@@ -8,6 +8,8 @@ use aura_core::effects::transport::{
 };
 use aura_core::effects::TransportEffects;
 use aura_core::service::{EstablishPath, LinkEndpoint, LinkProtocol, PeerPathKind, Route};
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+use aura_core::DeviceId;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::{AuthorityId, ContextId};
@@ -50,6 +52,318 @@ const ENCRYPTED_AURA_CONTENT_TYPES: &[&str] = &[
     "application/aura-opaque-object",
     "application/aura-encrypted-envelope",
 ];
+
+fn original_enrollment_transport_failure(
+    operation: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> TransportError {
+    TransportError::BackendFailure {
+        operation: operation.into(),
+        source: aura_core::AuraError::Internal {
+            message: "original enrollment transport adapter failed".into(),
+            source: Some(std::sync::Arc::new(source)),
+        },
+    }
+}
+
+#[cfg(test)]
+mod original_enrollment_transport_failure_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn original_broker_adapter_retains_network_and_native_source() {
+        let original =
+            crate::runtime::services::rendezvous_manager::RendezvousManagerError::BootstrapBroker(
+                aura_core::AuraError::Network {
+                    message: "original broker response read failed".into(),
+                    source: Some(std::sync::Arc::new(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "original response ended",
+                    ))),
+                },
+            );
+        let error = original_enrollment_transport_failure("original broker response", original);
+        let mut cause: Option<&(dyn Error + 'static)> = Some(&error);
+        let mut network = false;
+        let mut native = false;
+        while let Some(current) = cause {
+            network |= matches!(
+                current.downcast_ref::<aura_core::AuraError>(),
+                Some(aura_core::AuraError::Network { .. })
+            );
+            native |= current
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|source| source.kind() == std::io::ErrorKind::UnexpectedEof);
+            cause = current.source();
+        }
+        assert!(network && native, "original broker causes remain concrete");
+    }
+}
+
+/// An observation of the original issuer's *actual* pending-registration
+/// sleep. It carries no registration or send authority. The lexical sleep
+/// owner clears the generation on completion or cancellation.
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+#[derive(Default)]
+pub(crate) struct OriginalPendingMailboxRetryOwner {
+    state: std::sync::Arc<parking_lot::Mutex<OriginalPendingMailboxRetryState>>,
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+#[derive(Default)]
+struct OriginalPendingMailboxRetryState {
+    generation: u64,
+    current: Option<OriginalPendingMailboxRetry>,
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+struct OriginalPendingMailboxRetry {
+    selector: (AuthorityId, DeviceId, [u8; 32]),
+    task: tokio::task::Id,
+    registration: aura_core::effects::time::PhysicalSleepRegistration,
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+struct OriginalPendingMailboxRetryLease {
+    state: std::sync::Arc<parking_lot::Mutex<OriginalPendingMailboxRetryState>>,
+    generation: u64,
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+impl Drop for OriginalPendingMailboxRetryLease {
+    fn drop(&mut self) {
+        let mut state = self.state.lock();
+        if state.generation == self.generation {
+            state.current = None;
+        }
+    }
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+impl OriginalPendingMailboxRetryOwner {
+    fn begin(
+        &self,
+        selector: (AuthorityId, DeviceId, [u8; 32]),
+        registration: aura_core::effects::time::PhysicalSleepRegistration,
+    ) -> Option<OriginalPendingMailboxRetryLease> {
+        let task = tokio::task::try_id()?;
+        let mut state = self.state.lock();
+        // Two concurrent sends cannot be represented by one retry witness.
+        // Their ordinary transport behavior is unaffected; observation fails closed.
+        if state.current.is_some() {
+            return None;
+        }
+        state.generation = state.generation.checked_add(1)?;
+        let generation = state.generation;
+        state.current = Some(OriginalPendingMailboxRetry {
+            selector,
+            task,
+            registration,
+        });
+        Some(OriginalPendingMailboxRetryLease {
+            state: std::sync::Arc::clone(&self.state),
+            generation,
+        })
+    }
+
+    pub(crate) fn observe(
+        &self,
+        selector: (AuthorityId, DeviceId, [u8; 32]),
+    ) -> OriginalPendingMailboxRetryObservation {
+        let state = self.state.lock();
+        let Some(current) = state.current.as_ref() else {
+            return OriginalPendingMailboxRetryObservation::NoPendingRetry;
+        };
+        if current.selector != selector {
+            return OriginalPendingMailboxRetryObservation::ForeignSelector;
+        }
+        OriginalPendingMailboxRetryObservation::Pending(OriginalPendingMailboxRetryWitness {
+            state: std::sync::Arc::clone(&self.state),
+            generation: state.generation,
+            selector,
+        })
+    }
+
+    pub(crate) fn observe_selected(
+        &self,
+        time: &crate::runtime::time_handler::EnhancedTimeHandler,
+        selected: &std::sync::Arc<dyn PhysicalTimeEffects>,
+        selector: (AuthorityId, DeviceId, [u8; 32]),
+    ) -> OriginalPendingMailboxRetryObservation {
+        if !time.selected_provider_is(selected) {
+            return OriginalPendingMailboxRetryObservation::ForeignSelectedProvider;
+        }
+        self.observe(selector)
+    }
+}
+
+/// Simulator-only observation of a retained original issuer retry. The task
+/// identity remains private and can be borrowed only while the sleep is live.
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+pub struct OriginalPendingMailboxRetryWitness {
+    state: std::sync::Arc<parking_lot::Mutex<OriginalPendingMailboxRetryState>>,
+    generation: u64,
+    selector: (AuthorityId, DeviceId, [u8; 32]),
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+impl OriginalPendingMailboxRetryWitness {
+    pub fn with_current_registration<T>(
+        &self,
+        inspect: impl FnOnce(aura_core::effects::time::PhysicalSleepRegistration, tokio::task::Id) -> T,
+    ) -> Option<T> {
+        let state = self.state.lock();
+        let current = state.current.as_ref()?;
+        if state.generation != self.generation || current.selector != self.selector {
+            return None;
+        }
+        Some(inspect(current.registration, current.task))
+    }
+}
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+pub enum OriginalPendingMailboxRetryObservation {
+    ForeignSelectedProvider,
+    ForeignSelector,
+    NoPendingRetry,
+    Pending(OriginalPendingMailboxRetryWitness),
+}
+
+#[cfg(all(test, feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+mod original_pending_mailbox_retry_tests {
+    use super::*;
+    use aura_core::effects::time::PhysicalSleepRegistrationObservation;
+
+    async fn observed_retry(
+        owner: std::sync::Arc<OriginalPendingMailboxRetryOwner>,
+        clock: aura_testkit::time::ManualPhysicalClock,
+        selector: (AuthorityId, DeviceId, [u8; 32]),
+        ready: tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (sender, registered) = tokio::sync::oneshot::channel();
+        let sleep = clock.sleep_ms_with_registration_observer(
+            100,
+            Box::new(move |observation| {
+                let _ = sender.send(observation);
+            }),
+        );
+        tokio::pin!(sleep);
+        tokio::select! {
+            result = &mut sleep => result.expect("selected sleep"),
+            observation = registered => {
+                let registration = match observation.expect("selected observation") {
+                    PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                    PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider supports registration"),
+                };
+                let _lease = owner.begin(selector, registration).expect("actual retry task");
+                let _ = ready.send(());
+                sleep.await.expect("selected sleep");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn original_retry_witness_refuses_foreign_selector_and_cancelled_generation() {
+        let owner = std::sync::Arc::new(OriginalPendingMailboxRetryOwner::default());
+        let selector = (
+            AuthorityId::new_from_entropy([41; 32]),
+            DeviceId::new_from_entropy([42; 32]),
+            [43; 32],
+        );
+        let foreign = (selector.0, selector.1, [44; 32]);
+        let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+        let (ready, observed) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(observed_retry(
+            owner.clone(),
+            clock.clone(),
+            selector,
+            ready,
+        ));
+        observed.await.expect("original registration observed");
+        assert!(matches!(
+            owner.observe(foreign),
+            OriginalPendingMailboxRetryObservation::ForeignSelector
+        ));
+        let witness = match owner.observe(selector) {
+            OriginalPendingMailboxRetryObservation::Pending(witness) => witness,
+            _ => panic!("exact original retry was not observed"),
+        };
+        assert!(witness.with_current_registration(|_, _| ()).is_some());
+        task.abort();
+        let _ = task.await;
+        assert!(witness.with_current_registration(|_, _| ()).is_none());
+        assert!(matches!(
+            owner.observe(selector),
+            OriginalPendingMailboxRetryObservation::NoPendingRetry
+        ));
+        let (ready, observed) = tokio::sync::oneshot::channel();
+        let next = tokio::spawn(observed_retry(
+            owner.clone(),
+            clock.clone(),
+            selector,
+            ready,
+        ));
+        observed.await.expect("replacement registration observed");
+        assert!(witness.with_current_registration(|_, _| ()).is_none());
+        next.abort();
+        let _ = next.await;
+    }
+
+    #[tokio::test]
+    async fn original_retry_witness_tracks_actual_selected_sleep_and_cancellation() {
+        let owner = std::sync::Arc::new(OriginalPendingMailboxRetryOwner::default());
+        let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+        let selector = (
+            AuthorityId::new_from_entropy([51; 32]),
+            DeviceId::new_from_entropy([52; 32]),
+            [53; 32],
+        );
+        let (ready, observed) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(observed_retry(
+            owner.clone(),
+            clock.clone(),
+            selector,
+            ready,
+        ));
+        let deadline = aura_testkit::infrastructure::time::assertions::assert_completes_within(
+            std::time::Duration::from_secs(2),
+            async { Ok::<_, aura_core::AuraError>(clock.wait_for_registered_deadline().await) },
+        )
+        .await
+        .expect("actual original retry sleep registered");
+        assert_eq!(deadline.value(), 5_100);
+        observed.await.expect("actual retry owner observed");
+        let witness = match owner.observe(selector) {
+            OriginalPendingMailboxRetryObservation::Pending(witness) => witness,
+            _ => panic!("actual selected retry sleep was not observed"),
+        };
+        let original_provider: std::sync::Arc<dyn PhysicalTimeEffects> =
+            std::sync::Arc::new(clock.clone());
+        let foreign_provider: std::sync::Arc<dyn PhysicalTimeEffects> =
+            std::sync::Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let selected_owner = crate::runtime::time_handler::EnhancedTimeHandler::with_provider(
+            original_provider.clone(),
+        );
+        assert!(matches!(
+            owner.observe_selected(&selected_owner, &foreign_provider, selector),
+            OriginalPendingMailboxRetryObservation::ForeignSelectedProvider
+        ));
+        assert!(matches!(
+            owner.observe_selected(&selected_owner, &original_provider, selector),
+            OriginalPendingMailboxRetryObservation::Pending(_)
+        ));
+        assert_eq!(
+            witness.with_current_registration(
+                |registration, task| clock.try_advance_registered_timer(registration, task)
+            ),
+            Some(true)
+        );
+        task.await.expect("selected retry completed");
+        assert!(witness.with_current_registration(|_, _| ()).is_none());
+        assert!(clock.next_registered_deadline().await.is_none());
+    }
+}
 
 /// One original inbound frame and its reserved return slot. Dropping a
 /// borrowed receive restores the exact frame; successful processing must
@@ -624,9 +938,10 @@ async fn send_planned_envelope(
                 effects.rendezvous_manager(),
             ) {
                 retained.require_runtime_owner(effects).map_err(|source| {
-                    TransportError::ProtocolError {
-                        details: source.to_string(),
-                    }
+                    original_enrollment_transport_failure(
+                        "verify original mailbox runtime owner",
+                        source,
+                    )
                 })?;
                 let manifest = retained.manifest();
                 // The issuer starts its original VM before the invitee can import
@@ -639,7 +954,7 @@ async fn send_planned_envelope(
                         Ok(registration) => break registration,
                         Err(crate::runtime::services::rendezvous_manager::RendezvousManagerError::PendingMailboxRegistrationUnavailable) => {
                             let now = effects.time_effects().physical_time().await.map_err(|source|
-                                TransportError::ProtocolError { details: source.to_string() }
+                                original_enrollment_transport_failure("read original mailbox retry clock", source)
                             )?.ts_ms;
                             let remaining = manifest.expires_at_ms.saturating_sub(now);
                             if remaining == 0 {
@@ -647,23 +962,52 @@ async fn send_planned_envelope(
                                     destination: envelope.destination,
                                 });
                             }
-                            effects.time_effects().sleep_ms(remaining.min(100)).await.map_err(|source|
-                                TransportError::ProtocolError { details: source.to_string() }
+                            #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+                            let wait = async {
+                                use aura_core::effects::time::PhysicalSleepRegistrationObservation;
+                                let (sender, registered) = tokio::sync::oneshot::channel();
+                                let sleep = effects.time_effects().sleep_ms_with_registration_observer(
+                                    remaining.min(100), Box::new(move |observation| {
+                                        let _ = sender.send(observation);
+                                    }),
+                                );
+                                tokio::pin!(sleep);
+                                tokio::select! {
+                                    result = &mut sleep => result,
+                                    observation = registered => {
+                                        let _retry_owner = match observation {
+                                            Ok(PhysicalSleepRegistrationObservation::Registered(registration)) =>
+                                                effects.original_pending_mailbox_retry.begin((
+                                                    manifest.subject, manifest.invitee_device, retained.digest(),
+                                                ), registration),
+                                            Ok(PhysicalSleepRegistrationObservation::Unsupported) | Err(_) => None,
+                                        };
+                                        sleep.await
+                                    }
+                                }
+                            }.await;
+                            #[cfg(not(all(feature = "simulator-checkpoint", not(target_arch = "wasm32"))))]
+                            let wait = effects.time_effects().sleep_ms(remaining.min(100)).await;
+                            wait.map_err(|source|
+                                original_enrollment_transport_failure("wait original mailbox registration", source)
                             )?;
                         }
-                        Err(other) => return Err(TransportError::ProtocolError {
-                            details: other.to_string(),
-                        }),
+                        Err(source) => return Err(original_enrollment_transport_failure(
+                            "read original pending mailbox registration", source,
+                        )),
                     }
                 };
                 let route = crate::handlers::invitation::enrollment_trust::verify_original_pending_mailbox_sender_route(
                     retained.as_ref(), registration,
-                ).await.map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;
+                ).await.map_err(|source| original_enrollment_transport_failure("verify original mailbox sender route", source))?;
                 manager
                     .send_original_pending_mailbox_envelope(effects, &route, envelope)
                     .await
-                    .map_err(|source| TransportError::ProtocolError {
-                        details: source.to_string(),
+                    .map_err(|source| {
+                        original_enrollment_transport_failure(
+                            "send original pending mailbox envelope",
+                            source,
+                        )
                     })?;
                 return Ok(());
             }
@@ -681,7 +1025,7 @@ async fn send_planned_envelope(
             if manager.config().bootstrap_broker.enabled {
                 let admissions = crate::handlers::invitation::enrollment_manifest_admission::load_recoverable_negative_admissions(effects)
                     .await
-                    .map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;
+                    .map_err(|source| original_enrollment_transport_failure("load original return mailbox admissions", source))?;
                 for admitted in admissions {
                     let manifest = admitted.manifest();
                     if session != aura_invitation::enrollment_mailbox_session::original_enrollment_session_id(&manifest.invitation)
@@ -708,8 +1052,11 @@ async fn send_planned_envelope(
                             admitted.manifest_digest(),
                         )
                         .await
-                        .map_err(|source| TransportError::ProtocolError {
-                            details: source.to_string(),
+                        .map_err(|source| {
+                            original_enrollment_transport_failure(
+                                "read original issuer return mailbox registration",
+                                source,
+                            )
                         })?
                         .ok_or(TransportError::DestinationUnreachable {
                             destination: envelope.destination,
@@ -720,8 +1067,11 @@ async fn send_planned_envelope(
                             admitted.local_setup(),
                         )
                         .await
-                        .map_err(|source| TransportError::ProtocolError {
-                            details: source.to_string(),
+                        .map_err(|source| {
+                            original_enrollment_transport_failure(
+                                "verify original return mailbox registration",
+                                source,
+                            )
                         })?;
                     let authorization = signer
                         .sign_envelope(
@@ -732,8 +1082,11 @@ async fn send_planned_envelope(
                             &envelope,
                         )
                         .await
-                        .map_err(|source| TransportError::ProtocolError {
-                            details: source.to_string(),
+                        .map_err(|source| {
+                            original_enrollment_transport_failure(
+                                "authorize original return mailbox envelope",
+                                source,
+                            )
                         })?;
                     manager.send_original_issuer_return_vm_envelope(
                         crate::runtime::services::bootstrap_broker::BootstrapIssuerReturnMailboxEnvelope {
@@ -742,7 +1095,9 @@ async fn send_planned_envelope(
                             authorization,
                             envelope,
                         },
-                    ).await.map_err(|source| TransportError::ProtocolError { details: source.to_string() })?;
+                    ).await.map_err(|source| original_enrollment_transport_failure(
+                        "send original issuer return mailbox envelope", source,
+                    ))?;
                     return Ok(());
                 }
             }

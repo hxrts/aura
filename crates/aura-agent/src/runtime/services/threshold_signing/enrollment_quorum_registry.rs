@@ -46,6 +46,10 @@ pub(super) type OriginalIssuerCompletion = Result<
     AuraError,
 >;
 
+pub(super) type OriginalIssuerCompletionSlot = Arc<
+    super::super::issuer_error_custody::SynchronousCustodyCell<Option<OriginalIssuerCompletion>>,
+>;
+
 type OriginalReadyResult =
     Result<crate::runtime_bridge::enrollment_quorum::OriginalPreparedIssuerReady, AuraError>;
 struct OriginalInitialReadiness {
@@ -69,11 +73,7 @@ pub(super) struct PreparedIssuerEntry {
     initial_ready: Mutex<OriginalInitialReadiness>,
     launch_observation: super::super::enrollment_window::OriginalIssuerLaunchObservation,
     completed: Mutex<Option<oneshot::Receiver<()>>>,
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-    )]
-    completed_result: Arc<parking_lot::Mutex<Option<OriginalIssuerCompletion>>>,
+    completed_result: OriginalIssuerCompletionSlot,
     group: TaskGroup,
     #[allow(
         clippy::disallowed_types,
@@ -298,11 +298,7 @@ impl PreparedIssuerEntry {
         initial_ready: oneshot::Receiver<OriginalReadyResult>,
         launch_observation: super::super::enrollment_window::OriginalIssuerLaunchObservation,
         completed: oneshot::Receiver<()>,
-        #[allow(
-            clippy::disallowed_types,
-            reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-        )]
-        completed_result: Arc<parking_lot::Mutex<Option<OriginalIssuerCompletion>>>,
+        completed_result: OriginalIssuerCompletionSlot,
         group: TaskGroup,
         task: crate::task_registry::OriginalRequiredTaskHandle,
     ) -> Self {
@@ -373,8 +369,11 @@ impl PreparedIssuerEntry {
     > {
         // Native execution failure is already authoritative and keeps its exact
         // source; observing it cannot be replaced by a later clock failure.
-        if let Some(Err(source)) = self.completed_result.lock().as_ref() {
-            return Err(source.clone());
+        if let Some(source) = self.completed_result.with(|slot| match slot.as_ref() {
+            Some(Err(source)) => Some(source.clone()),
+            _ => None,
+        }) {
+            return Err(source);
         }
         let metadata = self
             .metadata
@@ -393,8 +392,7 @@ impl PreparedIssuerEntry {
             .await?;
         // No await follows exact-once extraction from retained entry custody.
         self.completed_result
-            .lock()
-            .take()
+            .with(Option::take)
             .ok_or_else(|| rejected(RegistryFailure::Missing))?
     }
 

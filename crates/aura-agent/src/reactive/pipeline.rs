@@ -48,6 +48,8 @@ pub struct ReactivePipeline {
     tasks: TaskGroup,
     diagnostics: Arc<RuntimeDiagnosticSink>,
     _owned_supervisor: Option<TaskSupervisor>,
+    #[cfg(feature = "simulator-checkpoint")]
+    batch_deadline_observer: super::scheduler::SchedulerBatchDeadlineObserver,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -142,6 +144,8 @@ impl ReactivePipeline {
                 effects: Arc::downgrade(&effects),
             },
         );
+        #[cfg(feature = "simulator-checkpoint")]
+        let batch_deadline_observer = scheduler.batch_deadline_observer();
 
         // Register UI-facing signal views (scheduler → signals).
         scheduler.register_view(Arc::new(ChatSignalView::new(
@@ -181,6 +185,8 @@ impl ReactivePipeline {
             tasks,
             diagnostics,
             _owned_supervisor: owned_supervisor,
+            #[cfg(feature = "simulator-checkpoint")]
+            batch_deadline_observer,
         }
     }
 
@@ -235,6 +241,13 @@ impl ReactivePipeline {
     /// Subscribe to scheduler view updates.
     pub fn subscribe(&self) -> broadcast::Receiver<ViewUpdate> {
         self.updates.resubscribe()
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(crate) fn current_batch_deadline_witness(
+        &self,
+    ) -> Option<super::SchedulerBatchDeadlineWitness> {
+        self.batch_deadline_observer.current()
     }
 
     /// Direct sender for injecting facts (useful for tests).

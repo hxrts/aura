@@ -1576,6 +1576,47 @@ cargo test --package aura-terminal --test unit_state_machine
 Use `just test` for the full suite. Use `just test-crate` for focused iteration on a single crate.
 
 ### Build and Caching
+Canonical terminal/app-host/browser shipping builds enable `production-build`.
+Native software-key storage requires `development-keys`; simulation and test
+keyring features imply it. Combining production and development key features
+fails compilation. The browser WebCrypto/IndexedDB provider stays available.
+Use `scripts/check/simulator-checkpoint-reachability.sh` to inspect the three
+shipping feature graphs before a build. `just build-terminal-release`,
+`just build-app-host` and the web release helper run that check themselves.
+The full-workspace release build is a validation build, not a deployable graph.
+For unattended native process integrations, use the existing explicit development
+lane: `scripts/harness/lan/build.sh terminal-dev` (or
+`just e2e-build-terminal-dev`). Select its software-key provider through the
+normal effects/configuration path and retain the genuine signed protocol and
+profile owner. A production terminal cannot re-enable excluded development keys
+through `AURA_HARNESS_MODE` or a storage-backend environment override. Keep the
+production terminal lane for its actual platform provider, with OS credential
+service integration isolated as described in the effects guide.
+
+
+The existing mandatory secret-lifetime/security lane runs these provider guards
+before the larger lifetime inventory. For focused iteration, use
+`just _policy-check check production-key-provider`: it checks shipping graphs,
+warning-denied production compilation, exact API doctest discovery/execution (including a positive external production
+consumer) and
+the intended conflicting-feature compiler failure. Its Cargo JSON validation
+requires the original exit101, exactly one root effects-library guard diagnostic
+and a failed build terminal; unrelated failures cannot satisfy the gate.
+
+When changing this boundary, check the effects production library first with
+`scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-effects --lib --features production-build`.
+Discover and execute both `ProductionSecureStorageHandler` production compile-fail
+doctests, then verify that `production-build,development-keys` fails with the
+intended development-provider compiler error. An unknown feature, dependency
+failure, zero-match doctest invocation or graph-only check is insufficient.
+The native `secure_immutable_publication` target and the handler encryption
+roundtrip require `--features development-keys`; they use the actual software-key
+provider rather than a mock. Run the affected real native development fixtures
+and browser configuration;
+keep actual OS credential-service testing in its isolated opt-in lane described
+in [Effects Guide](802_effects_guide.md). Use the build-budget wrapper and retain
+source, features and terminal receipts for each configuration.
+
 
 `nix/build-cache-key.nix` is the single pure key definition for the proposed
 dependency-only warm tree. `flake.nix` exports that function, and
@@ -1911,9 +1952,12 @@ command's original exit status, including 101. The canonical
 exact name before running any fixture, then executes those names with
 fail-fast behavior. A missing later declaration prevents all execution; a
 source change during discovery or execution refuses the batch.
-Pass `--timings` to collect Cargo's timing report during that same necessary
-compilation. The compile phase records the option in its command arguments;
-discovery, exact inventories, execution and failure handling remain unchanged.
+Pass `--timings` to this existing runner when profiling a necessary compilation.
+It forwards Cargo's HTML timing report option on that one compile and records
+the actual argument in its compile phase; it does not launch a second build.
+Retain the resulting `target/cargo-timings` report with the original source-bound
+receipt before cache cleanup. The option leaves the incremental/acceptance
+configuration and all discovery, execution and ownership requirements intact.
 Use a separate `disposal` phase for an actual native shutdown/cleanup command;
 its result remains independent of semantic or compile failure. Completion
 prints the final status and receipt path, so coordinators can inspect one
@@ -2611,6 +2655,11 @@ fast individual checks. Their execution receipts bind the current source,
 Git index/ref map, effective Git configuration and diff selectors, then rerun
 the Rust check against that source using the original verified toolkit binary.
 An invalid diff range or external Git diff/config input refuses this fast lane.
+The VM lifecycle gate checks all selected agent-suite source declarations before
+starting dependency/core compilation. It still requires actual feature-specific
+harness discovery and execution; declaration presence does not prove cfg
+applicability or cleanup. Keep checkpoint-restoration fixture inventories with
+their owning producer child and retain that child's complete acceptance.
 The disposable GitHub-hosted Build Cache Policy job removes only its unused
 system Git LFS helper section before capturing fixture inputs; this repository
 does not use LFS attributes. External filters and other unsupported configuration
@@ -3479,16 +3528,50 @@ foreign custody and successful cleanup from failed domain execution. Pure or
 component evidence does not establish genuine signed enrollment, platform
 persistence, reopen correctness or final independent-process network behavior.
 
-For original issuer reconciliation, exercise genuine cancellation and actual
-cancelled-generation retirement before retrying cleanup through the retained
-control. Drop an in-flight reconciliation attempt and verify the canonical entry
-still owns that exact control; reject a same-named foreign task. Assert no new
-spawn, provider or budget birth, and preserve concrete operation failures apart
-from final negative-budget validation. Cover already disposed resource
-observation without granting positive authority, and active-execution refusal
-without unbounded polling or a fabricated ACK. Complete durable cleanup and
-original-window validation before asserting full resource acknowledgment.
+For original issuer reconciliation, hold the actual original-epoch retirement
+fault through the asserted no-ACK boundary. Release that fault and retry through
+the public cancellation API, preserving the original registration. Require genuine
+issuer and cancellation task disposal, the actual sealed issuer subtree receipt,
+the selected budget's observation-owner identity, and the same original native
+source allocation. A failed operation may have acknowledged cleanup; assert those
+outcomes separately. Reject a same-named foreign task and require no new spawn,
+provider or budget birth.
+
+To test observer abandonment, hold the real original cleanup after its retirement
+receipt and before its negative checkpoint. Await that producer acknowledgment,
+drop only the public observer, and prove neither owner has disposed before
+releasing the same pending cleanup. Drop of an observer must not destroy the
+original native or browser-local cleanup future. Shared-supervisor fixtures also
+exercise an abandoned request that actually completed with failure, then explicitly
+request the next same-original attempt. Complete that attempt before polling its
+async observer and verify observation does not submit an extra attempt. Retain
+concrete operation failures separately from final original-budget validation and
+require genuine original task/group disposal before claiming resource settlement.
+
+Use an actual worker process boundary for restart while failed original custody
+still owns a profile lease. Dropping an agent value alone does not release retained
+owners. After acknowledged in-process cleanup, release every actual observation
+holding that original profile before reopening it. Keep full agent WASM-libtest
+support explicit: portable local-supervisor fixture declarations do not establish
+the broader stage when existing modules still include native process/fault tests.
 These requirements are fixture scope, not evidence that the candidate ran.
+The exact native regression
+`handlers::invitation::tests::original_issuer_progress_time_failure_survives_committed_cancellation`
+uses the original admitted task gate and the selected `ManualPhysicalClock`'s
+task-scoped read failure. It observes the actual protocol error before committing
+cancellation, then requires signed delivery, original disposal and same-clock
+profile reopen before asserting the same native error allocation survives.
+Retain a fatal progress error in the original custodian before the first awaited
+arbitration read; a post-disposal diagnostic must not hold live owner capability.
+The existing component error-order tests cover an earlier finalizer and later
+finalizer separately. Discover and execute the required names from the same
+source-bound binary; replay its first failure before editing.
+
+The invitation large-stack helper boxes and erases each fixture future before
+entering one shared thread/runtime executor. It preserves the current-thread
+runtime, 32 MiB stack, `Send + 'static` bound, panic propagation and selected
+providers. This reduces distinct executor specializations; actual rebuild-time
+benefit requires measurement and is not implied by the type change.
 
 Run security-boundary policy first and strict Clippy once for the complete
 integration checkpoint, with required syntax, ownership, absolute-time,

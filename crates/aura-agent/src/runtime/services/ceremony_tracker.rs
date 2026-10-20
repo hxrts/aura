@@ -185,6 +185,7 @@ pub(crate) struct RegisteredEnrollmentWindowCapability {
         crate::handlers::invitation::enrollment_trust::VerifiedEnrollmentRejectionCapability,
     >,
     positive_decision: std::sync::OnceLock<OriginalEnrollmentPositiveDecisionReceipt>,
+    interrupted_resources: std::sync::OnceLock<()>,
     #[cfg(test)]
     #[allow(
         clippy::disallowed_types,
@@ -435,6 +436,15 @@ pub(crate) struct OriginalIssuerDeliveryObservation {
     disposal: crate::task_registry::OriginalRequiredTaskDisposalObserver,
 }
 impl OriginalIssuerDeliveryObservation {
+    #[cfg(test)]
+    pub(crate) async fn await_disposal_or_cleanup_failure_for_test(
+        &self,
+    ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObservation, AuraError> {
+        self.disposal
+            .await_disposal_or_cleanup_failure_for_test()
+            .await
+    }
+
     /// Caller bounds this wait with the once-issued shortcut operation window.
     /// Cancellation drops only this observer, never the retained task control.
     pub(crate) async fn await_disposal(
@@ -442,7 +452,7 @@ impl OriginalIssuerDeliveryObservation {
     ) -> crate::task_registry::OriginalRequiredTaskDisposalObservation {
         self.disposal.await_disposal().await
     }
-    #[cfg(feature = "simulation")]
+    #[cfg(any(test, feature = "simulation"))]
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalIssuerDeliveryObservation", receiver_type = OriginalIssuerDeliveryObservation, family = "runtime_helper")]
     pub(crate) fn require_failed_disposal(
         &self,
@@ -482,7 +492,7 @@ impl OriginalIssuerDeliveryObservation {
             )),
         }
     }
-    #[cfg(feature = "simulation")]
+    #[cfg(any(test, feature = "simulation"))]
     pub(crate) fn original_simulated_subtree_disposal(
         &self,
         disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
@@ -619,12 +629,106 @@ fn original_invitation_binding(
 }
 
 impl RegisteredEnrollmentWindowCapability {
+    /// Fence the disposed original producer under the same first-decision gate.
+    /// This proves resource interruption only; it creates no domain decision,
+    /// terminal signature or generation-retirement authority.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "RegisteredEnrollmentWindowCapability", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
+    pub(super) async fn fence_original_interrupted_resources(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        destination: &super::issuer_terminal_destination::OriginalIssuerTerminalDestination,
+        disposal: &crate::task_registry::TaskGroupDisposalAcknowledgment,
+        children: &crate::task_registry::TaskGroup,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, AuraError> {
+        self.require_issued_notice_control(issued)?;
+        disposal.require_original_group(children)?;
+        destination.require_unsigned_vm_disposed(issued)?;
+        let tracker = self.tracker.upgrade()?;
+        let guard = Arc::clone(&tracker.shared.enrollment_decision_gate)
+            .lock_owned()
+            .await;
+        let current = tracker.get(&self.state.ceremony_id).await?;
+        if current.terminal_outcome.is_some()
+            || self.positive_decision.get().is_some()
+            || self.negative_decision.get().is_some()
+            || tracker
+                .retained_terminal_decision(&self.state.ceremony_id)
+                .await?
+                .is_some()
+        {
+            return Err(AuraError::permission_denied(
+                "interrupted issuer resources cannot replace an original terminal decision",
+            ));
+        }
+        use aura_core::effects::{SecureStorageEffects, SecureStorageLocation};
+        if self
+            .tracker
+            .effects
+            .secure_exists(&SecureStorageLocation::new(
+                "device_enrollment_activation_v1",
+                self.state.ceremony_id.to_string(),
+            ))
+            .await?
+        {
+            return Err(AuraError::permission_denied(
+                "interrupted issuer resources require original activation reconciliation",
+            ));
+        }
+        self.interrupted_resources.get_or_init(|| ());
+        Ok(guard)
+    }
+
+    pub(super) fn require_original_interrupted_resources(
+        &self,
+        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> Result<(), AuraError> {
+        self.require_issued_notice_control(issued)?;
+        if self.interrupted_resources.get().is_none()
+            || self.positive_decision.get().is_some()
+            || self.negative_decision.get().is_some()
+        {
+            return Err(AuraError::permission_denied(
+                "original interruption fence missing or decided",
+            ));
+        }
+        Ok(())
+    }
     /// Original selected endpoint retained for the separate shortcut operation.
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "RegisteredEnrollmentWindowCapability", receiver_type = RegisteredEnrollmentWindowCapability, family = "runtime_helper")]
     pub(crate) fn post_enrollment_budget(&self) -> Option<aura_core::TimeoutBudget> {
         self.state.shortcut_budget.clone()
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn install_progress_error_gate_for_test(
+        self: &Arc<Self>,
+    ) -> Result<
+        crate::runtime::services::issuer_terminal_destination::OriginalProgressErrorObservationGate,
+        aura_core::AuraError,
+    > {
+        let tracker = self.tracker.upgrade()?;
+        let state = tracker
+            .shared
+            .state
+            .try_read()
+            .map_err(|source| AuraError::Internal {
+                message: "observe original progress error gate owner".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let running = state
+            .ceremonies
+            .get(&self.state.ceremony_id)
+            .and_then(|entry| entry.running.as_ref())
+            .ok_or_else(|| original_tracker_refusal(OriginalEnrollmentTrackerError::OwnerLost))?;
+        if !Arc::ptr_eq(&running.original, self) {
+            return Err(original_tracker_refusal(
+                OriginalEnrollmentTrackerError::OwnerLost,
+            ));
+        }
+        running
+            .retirement_destination
+            .install_progress_error_gate_for_test()
+    }
     #[cfg(test)]
     pub(crate) fn install_cancelled_notice_gate_for_test(
         self: &Arc<Self>,
@@ -770,6 +874,10 @@ impl RegisteredEnrollmentWindowCapability {
             (None, Some(_)) => {
                 self.require_original_verified_rejection(issued)?;
                 Ok(super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected)
+            }
+            (None, None) if self.interrupted_resources.get().is_some() => {
+                self.require_original_interrupted_resources(issued)?;
+                Ok(super::enrollment_window::OriginalIssuerResourceDecision::Interrupted)
             }
             _ => Err(AuraError::permission_denied(
                 "original resource cleanup requires one exclusive protected decision",
@@ -917,6 +1025,8 @@ impl RegisteredEnrollmentWindowCapability {
             retained_decision,
         })
     }
+    /// Observe only the actual original retirement receipt, independently of
+    /// its retained domain failure.
     #[cfg(test)]
     pub(crate) fn observes_retained_retirement_acknowledgment(
         self: &Arc<Self>,
@@ -945,9 +1055,25 @@ impl RegisteredEnrollmentWindowCapability {
             .retains_original_retirement_acknowledgment())
     }
     #[cfg(test)]
+    pub(crate) fn require_original_issuer_subtree_disposal_for_test(
+        self: &Arc<Self>,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), AuraError> {
+        self.observe_original_delivery()?
+            .original_simulated_subtree_disposal(disposal)
+            .map(|_| ())
+    }
+    #[cfg(test)]
     pub(crate) async fn original_cancellation_disposal_for_test(
         self: &Arc<Self>,
     ) -> Result<crate::task_registry::OriginalRequiredTaskDisposalObserver, AuraError> {
+        let original = self.original_cancellation_registration_for_test()?;
+        original.disposal_observer().await
+    }
+    #[cfg(test)]
+    pub(crate) fn original_cancellation_registration_for_test(
+        self: &Arc<Self>,
+    ) -> Result<Arc<OriginalCancellationTaskRegistration>, AuraError> {
         let tracker = self.tracker.upgrade()?;
         let original = {
             let state = tracker
@@ -982,7 +1108,7 @@ impl RegisteredEnrollmentWindowCapability {
                     .original,
             )
         };
-        original.disposal_observer().await
+        Ok(original)
     }
     #[cfg(test)]
     pub(crate) fn install_original_receipt_test_hook(
@@ -1289,6 +1415,7 @@ impl RegisteredEnrollmentWindowCapability {
             retirement_destination,
         })
     }
+
     /// Move the same acknowledged root into its original entry only after all
     /// checks succeed. A failed lock or binding check leaves caller custody intact.
     pub(super) fn retain_issuer_acknowledgment(
@@ -1340,6 +1467,9 @@ impl RegisteredEnrollmentWindowCapability {
                         "positive decision cannot admit rejected resource cleanup",
                     ))
                 }
+                super::enrollment_window::OriginalIssuerResourceDecision::Interrupted => Err(
+                    AuraError::permission_denied("interruption is not verified rejection"),
+                ),
             })
     }
 
@@ -1411,6 +1541,14 @@ impl RegisteredEnrollmentWindowCapability {
                         )
                     })?
                     .require_original(self, issued)?;
+            }
+            super::enrollment_window::OriginalIssuerResourceDecision::Interrupted => {
+                self.require_original_interrupted_resources(issued)?;
+                if generation.is_some() {
+                    return Err(AuraError::permission_denied(
+                        "unsigned interruption cannot retire the original generation",
+                    ));
+                }
             }
         }
         retired.require_original(issued, child)?;
@@ -1889,6 +2027,7 @@ impl CeremonyTracker {
                 negative_decision: std::sync::OnceLock::new(),
                 verified_rejection: std::sync::OnceLock::new(),
                 positive_decision: std::sync::OnceLock::new(),
+                interrupted_resources: std::sync::OnceLock::new(),
                 #[cfg(test)]
                 committed_confirmation_gate: parking_lot::Mutex::default(),
                 _original_allocation: original_allocation,
@@ -2298,29 +2437,108 @@ impl RetainedOriginalIssuerTask {
         Ok(())
     }
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "RetainedOriginalIssuerTask", receiver_type = RetainedOriginalIssuerTask, family = "runtime_helper")]
-    async fn reconcile(&self) -> Result<(), AuraError> {
+    async fn reconcile_original_disposal(
+        &self,
+    ) -> Result<OriginalIssuerCancellationSettlement, AuraError> {
         use aura_core::effects::task::RequiredTaskControl;
         use futures::FutureExt;
         let mut control = self.control.lock().await;
         control.await_original_attempt_disposition().await?;
-        // A completed original obligation needs no second cleanup. This observes
-        // only its actual resource disposition, never positive domain authority.
-        if control
-            .disposal_observer()
-            .await_disposal()
-            .now_or_never()
-            .is_some()
-        {
-            return Ok(());
+        let observer = control.disposal_observer();
+        let mut reconciliation_failure = None;
+        if observer.await_disposal().now_or_never().is_none() {
+            // This physical retry is a new explicit request, so it may advance
+            // a previously completed failed target abandoned by an observer.
+            control.request_resident_cleanup_retry()?;
+            #[cfg(not(target_arch = "wasm32"))]
+            let actual = control.reconcile().await;
+            #[cfg(target_arch = "wasm32")]
+            let actual = control.reconcile_local().await;
+            reconciliation_failure = actual.err();
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            control.reconcile().await
+        let Some(disposal) = observer.await_disposal().now_or_never() else {
+            return Err(reconciliation_failure.unwrap_or_else(|| {
+                AuraError::invalid("original issuer cleanup returned without actual disposal")
+            }));
+        };
+        disposal.require_original(&control)?;
+        Ok(OriginalIssuerCancellationSettlement {
+            disposal,
+            independent: reconciliation_failure.into_iter().collect(),
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("original issuer cleanup: {primary}; independent observation: {secondary}")]
+struct OriginalIssuerCleanupObservationFailure {
+    #[source]
+    primary: AuraError,
+    secondary: AuraError,
+}
+fn original_issuer_cleanup_observation_failure(
+    primary: AuraError,
+    secondary: AuraError,
+) -> AuraError {
+    AuraError::Internal {
+        message: "original issuer cleanup and observation failures retained".into(),
+        source: Some(Arc::new(OriginalIssuerCleanupObservationFailure {
+            primary,
+            secondary,
+        })),
+    }
+}
+
+/// Actual same-control disposal, separate from the original failed domain result.
+/// No receipt is synthesized from a successful reconciliation Result.
+pub(crate) struct OriginalIssuerCancellationSettlement {
+    disposal: crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    independent: Vec<AuraError>,
+}
+#[derive(thiserror::Error)]
+#[error("original issuer disposed but retirement observation refused: {source}")]
+struct RejectedOriginalIssuerCancellationSettlement {
+    #[source]
+    source: AuraError,
+    _retirement_refusal: AuraError,
+    _retained: OriginalIssuerCancellationSettlement,
+}
+impl std::fmt::Debug for RejectedOriginalIssuerCancellationSettlement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RejectedOriginalIssuerCancellationSettlement")
+    }
+}
+impl OriginalIssuerCancellationSettlement {
+    pub(crate) fn cleanup_failure(&self) -> Option<AuraError> {
+        use aura_core::effects::task::RequiredTaskExit;
+        match self.disposal.outcome() {
+            RequiredTaskExit::Failed(source) => {
+                use std::error::Error as _;
+                // The issuer's ordinary signed Cancelled terminal is a failed
+                // issuer domain, while the requested cancellation may succeed.
+                // Exclude ONLY this exact completed-execution terminal shape;
+                // native execution, retirement, VM and independent causes keep
+                // their concrete diagnostic and are not classified by text.
+                let expected_cancel = source.source()
+                    .and_then(|actual| actual.downcast_ref::<aura_core::effects::task::RequiredTaskTerminalFailure>())
+                    .is_some_and(|actual| {
+                        matches!(actual.execution(), RequiredTaskExit::Completed)
+                            && matches!(actual.terminal().source()
+                                .and_then(|actual| actual.downcast_ref::<crate::handlers::invitation::EnrollmentVmAdmissionError>()),
+                                Some(crate::handlers::invitation::EnrollmentVmAdmissionError::TerminalFailed(
+                                    aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+                                )))
+                    });
+                (!expected_cancel).then_some(source)
+            }
+            RequiredTaskExit::Completed | RequiredTaskExit::Cancelled => None,
+            RequiredTaskExit::Panicked => {
+                Some(AuraError::invalid("original issuer disposed after panic"))
+            }
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            control.reconcile_local().await
-        }
+    }
+    pub(crate) fn independent_failures(&self) -> &[AuraError] {
+        &self.independent
     }
 }
 
@@ -2350,42 +2568,78 @@ impl RunningIssuerObservation {
         &self,
         effects: &AuraEffectSystem,
         issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-    ) -> crate::core::AgentResult<()> {
+    ) -> Result<OriginalIssuerCancellationSettlement, AuraError> {
+        self.original.require_effects(effects)?;
+        self.original.require_issued_notice_control(issued)?;
         if self.original.original_committed_decision(effects, issued)? {
             let (observation, disposal) = self.original.await_original_resource_disposal().await?;
             observation.require_positive(&disposal)?;
-            Ok(())
-        } else {
-            self.original.require_effects(effects)?;
-            self.original.require_issued_notice_control(issued)?;
-            self.observer
-                .observe_original_negative_retirement(
-                    effects,
-                    &self.original,
-                    issued,
-                    &self.retirement_destination,
-                )
-                .await?;
-            let actual = aura_core::time::timeout::execute_negative_cleanup_with_timeout_budget(
-                effects,
-                self.original.negative_cleanup_budget(),
-                issued,
-                || self.control.reconcile(),
-            )
-            .await;
-            let completed = match actual.operation {
-                Some(Ok(())) => true,
-                Some(Err(source)) => return Err(source.into()),
-                None => false,
-            };
-            actual.validation.map_err(AuraError::from)?;
-            if !completed {
-                return Err(
-                    AuraError::invalid("original issuer reconciliation did not execute").into(),
-                );
-            }
-            Ok(())
+            return Ok(OriginalIssuerCancellationSettlement {
+                disposal,
+                independent: Vec::new(),
+            });
         }
+        // Reconcile the actual original executor before observing its failed
+        // domain result. The resident supervisor owns any pending cleanup future.
+        let mut original_cleanup = Box::pin(self.control.reconcile_original_disposal());
+        let borrowed_cleanup = original_cleanup.as_mut();
+        let actual = aura_core::time::timeout::execute_negative_cleanup_with_timeout_budget(
+            effects,
+            self.original.negative_cleanup_budget(),
+            issued,
+            || borrowed_cleanup,
+        )
+        .await;
+        let validation = actual.validation.err().map(AuraError::from);
+        let mut settlement = match actual.operation {
+            Some(Ok(actual)) => actual,
+            Some(Err(source)) => {
+                return Err(match validation {
+                    Some(later) => original_issuer_cleanup_observation_failure(source, later),
+                    None => source,
+                })
+            }
+            None => {
+                // Deadline failure is an operation outcome, never permission to
+                // discard the actual original cleanup future. The same original
+                // cancellation supervisor retains this mandatory continuation.
+                match original_cleanup.await {
+                    Ok(actual) => actual,
+                    Err(source) => {
+                        return Err(match validation {
+                            Some(earlier) => {
+                                original_issuer_cleanup_observation_failure(earlier, source)
+                            }
+                            None => source,
+                        })
+                    }
+                }
+            }
+        };
+        // The storage proof must be the original producer-issued receipt even
+        // when its earlier domain failure is intentionally sticky.
+        if let Some(source) = validation {
+            settlement.independent.push(source);
+        }
+        if let Err(retirement_refusal) = self
+            .retirement_destination
+            .require_original_retirement_cleanup_acknowledgment(&self.original, issued)
+        {
+            let source = settlement
+                .cleanup_failure()
+                .or_else(|| settlement.independent.first().cloned())
+                .unwrap_or_else(|| retirement_refusal.clone());
+            return Err(AuraError::Internal {
+                message: "actual original issuer disposition and retirement refusal retained"
+                    .into(),
+                source: Some(Arc::new(RejectedOriginalIssuerCancellationSettlement {
+                    source,
+                    _retirement_refusal: retirement_refusal,
+                    _retained: settlement,
+                })),
+            });
+        }
+        Ok(settlement)
     }
     pub(crate) async fn observe_original_retirement(
         &self,
@@ -3506,6 +3760,19 @@ impl CeremonyTracker {
     ) -> Result<(), AuraError> {
         if current.kind != CeremonyKind::DeviceEnrollment {
             return Ok(());
+        }
+        {
+            let state = self.shared.state.read().await;
+            if state
+                .ceremonies
+                .get(&current.ceremony_id)
+                .and_then(|entry| entry.running.as_ref())
+                .is_some_and(|running| running.original.interrupted_resources.get().is_some())
+            {
+                return Err(AuraError::permission_denied(
+                    "disposed original issuer cannot publish a later terminal decision",
+                ));
+            }
         }
         let Some(effects) = &self.shared.persistence else {
             return Ok(());
@@ -8582,6 +8849,7 @@ pub(crate) struct OriginalCancellationTaskRegistration {
     completion:
         std::sync::OnceLock<Result<crate::handlers::invitation::InvitationResult, AuraError>>,
     completion_changed: tokio::sync::Notify,
+    cleanup_observation: std::sync::OnceLock<Arc<OriginalCancellationRetryFailure>>,
     tracker: OriginalEnrollmentTrackerReference,
     original_entry: Arc<()>,
     ceremony: CeremonyId,
@@ -8656,6 +8924,7 @@ impl CeremonyTracker {
         Ok(Arc::new(OriginalCancellationTaskRegistration {
             completion: std::sync::OnceLock::new(),
             completion_changed: tokio::sync::Notify::new(),
+            cleanup_observation: std::sync::OnceLock::new(),
             tracker: OriginalEnrollmentTrackerReference::from_original(self)?,
             original_entry: Arc::clone(&entry.original_entry),
             ceremony: manifest.ceremony.clone(),
@@ -8722,6 +8991,28 @@ impl CeremonyTracker {
     pub(crate) fn original_actor_alive_for_test(&self) -> impl Fn() -> bool {
         let original = Arc::downgrade(&self.shared);
         move || original.upgrade().is_some()
+    }
+}
+#[derive(thiserror::Error)]
+#[error("original cancellation failed: {source}; actual cleanup observations remain retained")]
+struct OriginalCancellationRetryFailure {
+    #[source]
+    source: AuraError,
+    observations: super::issuer_error_custody::SynchronousCustodyCell<(
+        Vec<AuraError>,
+        Option<crate::task_registry::OriginalRequiredTaskDisposalObservation>,
+    )>,
+}
+impl std::fmt::Debug for OriginalCancellationRetryFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (independent, disposed) = self
+            .observations
+            .with(|retained| (retained.0.clone(), retained.1.is_some()));
+        f.debug_struct("OriginalCancellationRetryFailure")
+            .field("source", &self.source)
+            .field("independent", &independent)
+            .field("original_disposal_retained", &disposed)
+            .finish()
     }
 }
 impl OriginalCancellationTaskRegistration {
@@ -8796,27 +9087,186 @@ impl OriginalCancellationTaskRegistration {
         self: &Arc<Self>,
         effects: &crate::runtime::AuraEffectSystem,
     ) -> Result<crate::handlers::invitation::InvitationResult, AuraError> {
-        let _original_control = self.retained()?;
+        let original_control = self.retained()?;
         if !std::ptr::eq(self.tracker.effects.as_ref(), effects) {
             return Err(original_tracker_refusal(
                 OriginalEnrollmentTrackerError::MissingProvider,
             ));
         }
-        aura_core::execute_with_timeout_budget(effects, &self.original_budget, || async {
-            loop {
-                let changed = self.completion_changed.notified();
-                tokio::pin!(changed);
-                changed.as_mut().enable();
-                if let Some(actual) = self.completion.get() {
-                    return actual.clone();
+        let mut selected_completion = None;
+        let observed = match self.completion.get() {
+            Some(Err(source)) => Err(source.clone()),
+            _ => aura_core::execute_with_timeout_budget(effects, &self.original_budget, || async {
+                loop {
+                    let changed = self.completion_changed.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    if let Some(actual) = self.completion.get() {
+                        let actual = actual.clone();
+                        selected_completion = Some(actual.clone());
+                        return actual;
+                    }
+                    changed.await;
                 }
-                changed.await;
+            })
+            .await
+            .map_err(|source| match source {
+                aura_core::TimeoutRunError::Operation(source) => source,
+                aura_core::TimeoutRunError::Timeout(source) => {
+                    let later = AuraError::from(source);
+                    match selected_completion.as_ref() {
+                        Some(Err(earlier)) => {
+                            original_issuer_cleanup_observation_failure(earlier.clone(), later)
+                        }
+                        _ => later,
+                    }
+                }
+            }),
+        };
+        let Err(original_failure) = observed else {
+            return observed;
+        };
+        if let Some(actual) = self
+            .cleanup_observation
+            .get()
+            .filter(|actual| actual.observations.with(|retained| retained.1.is_some()))
+        {
+            return Err(AuraError::Internal {
+                message: "original cancellation domain failure and actual cleanup observation"
+                    .into(),
+                source: Some(actual.clone()),
+            });
+        }
+        // Issue the actual original cleanup request before observing its old
+        // success window. Even an expired/failed selected read cannot suppress
+        // mandatory work on the retained original executor.
+        let requested = original_control
+            ._control
+            .try_lock()
+            .map_err(|source| AuraError::Internal {
+                message: "original cancellation control is already borrowed".into(),
+                source: Some(Arc::new(source)),
+            })
+            .and_then(|mut control| {
+                use futures::FutureExt;
+                control.request_resident_cleanup_retry()?;
+                let actual = control.disposal_observer().await_disposal().now_or_never();
+                if let Some(actual) = &actual {
+                    actual.require_original(&control)?;
+                }
+                Ok(actual)
+            });
+        if let Err(source) = requested {
+            // A refused observer borrow/request is not a new host-cleanup
+            // producer occurrence. Return it with the original source without
+            // appending it to the canonical cleanup occurrence inventory.
+            return Err(original_issuer_cleanup_observation_failure(
+                original_failure,
+                source,
+            ));
+        }
+        if let Ok(Some(disposal)) = requested {
+            let independent = match disposal.outcome() {
+                aura_core::effects::task::RequiredTaskExit::Failed(source) => vec![source],
+                _ => Vec::new(),
+            };
+            let actual = self.cleanup_observation.get_or_init(|| {
+                Arc::new(OriginalCancellationRetryFailure {
+                    source: original_failure,
+                    observations: super::issuer_error_custody::SynchronousCustodyCell::new((
+                        Vec::new(),
+                        None,
+                    )),
+                })
+            });
+            actual.observations.with(|retained| {
+                if retained.1.is_none() {
+                    retained.0.extend(independent);
+                    retained.1 = Some(disposal);
+                }
+            });
+            return Err(AuraError::Internal {
+                message: "original cancellation domain failure and actual cleanup observation"
+                    .into(),
+                source: Some(actual.clone()),
+            });
+        }
+        // A cached domain error does not settle the original physical owner.
+        // Only its resident original supervisor polls the actual cleanup future;
+        // cancellation of this bounded observer cannot cancel that host work.
+        let mut completed = None;
+        let validation =
+            aura_core::execute_with_timeout_budget(effects, &self.original_budget, || async {
+                use aura_core::effects::task::RequiredTaskControl;
+                use futures::FutureExt;
+                let mut control = original_control._control.lock().await;
+                let observer = control.disposal_observer();
+                let (disposal, retry_failure) =
+                    if let Some(disposal) = observer.await_disposal().now_or_never() {
+                        disposal.require_original(&control)?;
+                        (Some(disposal), None)
+                    } else {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let retry = control.reconcile().await;
+                        #[cfg(target_arch = "wasm32")]
+                        let retry = control.reconcile_local().await;
+                        let disposal = observer.await_disposal().now_or_never();
+                        if let Some(actual) = &disposal {
+                            actual.require_original(&control)?;
+                        }
+                        let failure = retry.err().or_else(|| {
+                            disposal.is_none().then(|| {
+                                AuraError::invalid(
+                                    "original cancellation cleanup has no actual disposal",
+                                )
+                            })
+                        });
+                        (disposal, failure)
+                    };
+                completed = Some((disposal, retry_failure));
+                Ok::<_, AuraError>(())
+            })
+            .await;
+        let mut independent = Vec::new();
+        let mut disposal = None;
+        if let Some((actual, failure)) = completed {
+            if let Some(source) = failure {
+                independent.push(source);
             }
-        })
-        .await
-        .map_err(|source| match source {
-            aura_core::TimeoutRunError::Operation(source) => source,
-            aura_core::TimeoutRunError::Timeout(source) => source.into(),
+            if let Some(actual) = actual {
+                if let aura_core::effects::task::RequiredTaskExit::Failed(source) = actual.outcome()
+                {
+                    independent.push(source);
+                }
+                disposal = Some(actual);
+            }
+        }
+        if let Err(source) = validation {
+            independent.push(match source {
+                aura_core::TimeoutRunError::Operation(source) => source,
+                aura_core::TimeoutRunError::Timeout(source) => source.into(),
+            });
+        }
+        let actual = self.cleanup_observation.get_or_init(|| {
+            Arc::new(OriginalCancellationRetryFailure {
+                source: original_failure,
+                observations: super::issuer_error_custody::SynchronousCustodyCell::new((
+                    Vec::new(),
+                    None,
+                )),
+            })
+        });
+        actual.observations.with(|retained| {
+            // One actual disposal receipt is immutable evidence; reobserving it
+            // does not create another failed-domain occurrence.
+            if retained.1.is_none() {
+                retained.0.extend(independent);
+                retained.1 = disposal;
+            }
+        });
+        Err(AuraError::Internal {
+            message: "original cancellation domain failure and actual cleanup observation".into(),
+            source: Some(actual.clone()),
         })
     }
     #[aura_macros::capability_boundary(
@@ -8956,6 +9406,15 @@ impl OriginalCancellationTaskRegistration {
             ));
         }
         Ok(Arc::clone(actual))
+    }
+    #[cfg(test)]
+    pub(crate) async fn require_original_disposal_for_test(
+        self: &Arc<Self>,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), AuraError> {
+        let actual = self.retained()?;
+        let control = actual._control.lock().await;
+        disposal.require_original(&control)
     }
     #[cfg(test)]
     pub(crate) async fn disposal_observer(
@@ -9320,20 +9779,32 @@ mod retained_issuer_control_tests {
     struct ActualRequiredIssuer {
         execution: Option<tokio::sync::oneshot::Receiver<()>>,
         cleanup: Option<tokio::sync::oneshot::Receiver<()>>,
+        cleanup_entered: Option<tokio::sync::oneshot::Sender<()>>,
         attempts: Arc<AtomicUsize>,
+        identity: Option<crate::task_registry::OwnedRuntimeTaskIdentity>,
+        executor_task: Option<tokio::task::Id>,
+        resource: Option<Arc<()>>,
+        execution_failure: Arc<std::io::Error>,
+        cleanup_refusal: Arc<std::io::Error>,
+        terminal_failure: Arc<std::io::Error>,
     }
     impl RequiredTaskCustody for ActualRequiredIssuer {
         fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), AuraError>> {
             Box::pin(async {
+                self.identity = crate::task_registry::current_owned_runtime_task();
+                assert!(self.identity.is_some(), "actual registered original owner");
+                self.executor_task =
+                    Some(tokio::task::try_id().expect("actual original native executor"));
                 self.execution
                     .as_mut()
                     .expect("actual execution gate")
                     .await
                     .expect("release actual original execution");
                 self.execution = None;
-                Err(AuraError::internal(
-                    "actual original issuer execution failure",
-                ))
+                Err(AuraError::Internal {
+                    message: "actual original issuer execution failure".into(),
+                    source: Some(self.execution_failure.clone()),
+                })
             })
         }
         fn cleanup<'a>(
@@ -9341,17 +9812,37 @@ mod retained_issuer_control_tests {
             _exit: &'a RequiredTaskExit,
         ) -> futures::future::BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
             Box::pin(async {
+                assert_eq!(
+                    crate::task_registry::current_owned_runtime_task(),
+                    self.identity
+                );
+                assert_eq!(tokio::task::try_id(), self.executor_task);
                 if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-                    return Err(AuraError::internal(
-                        "actual original issuer first cleanup refusal",
-                    ));
+                    return Err(AuraError::Internal {
+                        message: "actual original issuer first cleanup refusal".into(),
+                        source: Some(self.cleanup_refusal.clone()),
+                    });
+                }
+                if let Some(entered) = self.cleanup_entered.take() {
+                    entered
+                        .send(())
+                        .expect("acknowledge actual original cleanup pending");
                 }
                 if let Some(gate) = self.cleanup.as_mut() {
                     gate.await.expect("release same retained cleanup gate");
                     self.cleanup = None;
                 }
+                assert_eq!(
+                    crate::task_registry::current_owned_runtime_task(),
+                    self.identity
+                );
+                assert_eq!(tokio::task::try_id(), self.executor_task);
+                drop(self.resource.take());
                 Ok(RequiredTaskSettlement::ResolvedWithDomainFailure(
-                    AuraError::internal("actual negative issuer outcome"),
+                    AuraError::Internal {
+                        message: "actual negative issuer outcome".into(),
+                        source: Some(self.terminal_failure.clone()),
+                    },
                 ))
             })
         }
@@ -9362,14 +9853,27 @@ mod retained_issuer_control_tests {
         let group = supervisor.group("retained-issuer-reconciliation");
         let (execute, execution) = tokio::sync::oneshot::channel();
         let (release, cleanup) = tokio::sync::oneshot::channel();
+        let (cleanup_started, cleanup_entered) = tokio::sync::oneshot::channel();
         let attempts = Arc::new(AtomicUsize::new(0));
+        let resource = Arc::new(());
+        let observed_resource = Arc::downgrade(&resource);
+        let execution_failure = Arc::new(std::io::Error::other("actual execution native cause"));
+        let cleanup_refusal = Arc::new(std::io::Error::other("actual cleanup native cause"));
+        let terminal_failure = Arc::new(std::io::Error::other("actual negative terminal cause"));
         let original = group
-            .spawn_original_required_custody(
+            .spawn_original_required_custody_with_resident_cleanup(
                 "same-original-issuer".into(),
                 Box::new(ActualRequiredIssuer {
                     execution: Some(execution),
                     cleanup: Some(cleanup),
+                    cleanup_entered: Some(cleanup_started),
                     attempts: Arc::clone(&attempts),
+                    identity: None,
+                    executor_task: None,
+                    resource: Some(resource),
+                    execution_failure: execution_failure.clone(),
+                    cleanup_refusal: cleanup_refusal.clone(),
+                    terminal_failure: terminal_failure.clone(),
                 }),
                 None,
             )
@@ -9381,7 +9885,10 @@ mod retained_issuer_control_tests {
             .disposal_observer()
             .expect("actual original disposal observer");
         assert!(
-            holder.reconcile().now_or_never().is_none(),
+            holder
+                .reconcile_original_disposal()
+                .now_or_never()
+                .is_none(),
             "live first attempt has no retry disposition"
         );
         execute.send(()).expect("release actual first execution");
@@ -9393,11 +9900,27 @@ mod retained_issuer_control_tests {
             .await
             .expect("actual failed first cleanup yielded original custody");
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        let mut retry = Box::pin(holder.reconcile());
+        let first_refusal = holder
+            .control
+            .lock()
+            .await
+            .await_original_cleanup_decision()
+            .await
+            .expect_err("actual first refused cleanup diagnostic before retry");
+        let diagnostic = std::error::Error::source(&first_refusal)
+            .and_then(|source| {
+                source.downcast_ref::<crate::task_registry::OriginalRequiredCleanupDiagnostic>()
+            })
+            .expect("canonical actual first cleanup diagnostic");
+
+        let mut retry = Box::pin(holder.reconcile_original_disposal());
         assert!(
             futures::poll!(retry.as_mut()).is_pending(),
             "actual retry waits on retained domain cleanup gate"
         );
+        cleanup_entered
+            .await
+            .expect("original executor entered actual pending cleanup");
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
         drop(retry);
         assert!(
@@ -9408,14 +9931,65 @@ mod retained_issuer_control_tests {
             observer.await_disposal().now_or_never().is_none(),
             "dropping retry cannot issue resource ACK"
         );
+        assert!(
+            observed_resource.upgrade().is_some(),
+            "dropping observer retains actual original resource until cleanup ACK"
+        );
         release
             .send(())
             .expect("same domain gate survives dropped retry");
-        holder
-            .reconcile()
+        let settlement = holder
+            .reconcile_original_disposal()
             .await
             .expect("same retained control completes actual original cleanup");
-        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        holder
+            .require_disposal(&settlement.disposal)
+            .expect("actual physical API retains exact original disposition");
+        assert!(
+            observed_resource.upgrade().is_none(),
+            "actual original resource retired before physical API returned disposal"
+        );
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            2,
+            "abandoned observer cannot restart the pending original cleanup future"
+        );
+        let retained_failure = settlement
+            .cleanup_failure()
+            .expect("actual failed issuer domain remains distinct from resource disposal");
+        let terminal = std::error::Error::source(&retained_failure)
+            .and_then(|source| {
+                source.downcast_ref::<aura_core::effects::task::RequiredTaskTerminalFailure>()
+            })
+            .expect("actual refined execution and terminal domain outcome");
+        let RequiredTaskExit::Failed(execution) = terminal.execution() else {
+            panic!("actual failed original execution remains failed after cleanup ACK");
+        };
+        let original_execution = std::error::Error::source(execution)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("original execution native source");
+        assert!(std::ptr::eq(original_execution, execution_failure.as_ref()));
+        let original_terminal = std::error::Error::source(terminal.terminal())
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("independent actual terminal native source");
+        assert!(std::ptr::eq(original_terminal, terminal_failure.as_ref()));
+        assert!(
+            settlement.independent_failures().is_empty(),
+            "successful physical retry adds no new refusal observation"
+        );
+        assert_eq!(
+            diagnostic.cleanup_failures().count(),
+            1,
+            "one actual refused attempt remains recorded after same-future successful disposal"
+        );
+        let refusal = diagnostic
+            .cleanup_failures()
+            .next()
+            .expect("actual original refusal");
+        let original_refusal = std::error::Error::source(refusal.cleanup_failure())
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("retained independent first cleanup native cause");
+        assert!(std::ptr::eq(original_refusal, cleanup_refusal.as_ref()));
         let disposal = observer
             .await_disposal()
             .now_or_never()

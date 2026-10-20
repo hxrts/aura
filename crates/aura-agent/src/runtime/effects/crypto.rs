@@ -4,7 +4,9 @@ mod confirmed_activation;
 /// Exact retained package location and original storage cause, without
 /// changing absence into another layout after a failed required read.
 #[derive(Debug, thiserror::Error)]
-#[error("read retained parent package for authority {authority}, epoch {epoch}, location {location:?}: {source}")]
+#[error(
+    "read retained parent package for authority {authority}, epoch {epoch}, location {location:?}: {source}"
+)]
 struct ParentInventoryStorageError {
     authority: AuthorityId,
     epoch: u64,
@@ -828,6 +830,30 @@ enum EnrollmentRetirementStorageDisposition {
 #[derive(Debug, thiserror::Error)]
 #[error("retirement storage unavailable")]
 pub(crate) struct InjectedEnrollmentRetirementFailure;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) type EnrollmentRetirementFault = (u64, Option<Arc<()>>);
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) struct ScopedEnrollmentRetirementRefusal {
+    effects: Arc<AuraEffectSystem>,
+    identity: Arc<()>,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl Drop for ScopedEnrollmentRetirementRefusal {
+    fn drop(&mut self) {
+        let mut fault = self
+            .effects
+            .enrollment_retirement_fault
+            .lock()
+            .expect("retirement fault lock");
+        if fault
+            .as_ref()
+            .and_then(|(_, scope)| scope.as_ref())
+            .is_some_and(|scope| Arc::ptr_eq(scope, &self.identity))
+        {
+            *fault = None;
+        }
+    }
+}
 
 pub(crate) struct AcknowledgedEnrollmentRetirement {
     disposition: EnrollmentRetirementStorageDisposition,
@@ -908,42 +934,12 @@ impl OriginalEnrollmentAllocationAcknowledgment {
         effects: &AuraEffectSystem,
         generation: &RegisteredEnrollmentGenerationCapability<'_>,
     ) -> Result<(), AuraError> {
-        generation.require_effects(effects)?;
-        let invitation = generation.canonical_invitation();
-        let aura_invitation::InvitationType::DeviceEnrollment {
-            subject_authority,
-            ceremony_id,
-            pending_epoch,
-            setup_binding,
-            initiator_device_id,
-            device_id,
-            ..
-        } = &invitation.invitation_type
-        else {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::InvitationKind,
-            ));
-        };
-        if !Arc::ptr_eq(
+        require_original_allocation_generation_binding(
             &self.runtime_identity,
-            &effects.crypto.lifetime_owner_identity(),
-        ) || self.original.authority != invitation.sender_id
-            || self.original.authority != *subject_authority
-            || self.original.ceremony != *ceremony_id
-            || self.original.invitation != invitation.invitation_id
-            || self.original.pending_epoch != *pending_epoch
-            || self.original.setup_digest != setup_binding.digest
-            || *initiator_device_id != effects.device_id()
-            || !self
-                .original
-                .participants
-                .contains(&ParticipantIdentity::device(*device_id))
-        {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::Binding,
-            ));
-        }
-        Ok(())
+            &self.original,
+            effects,
+            generation,
+        )
     }
     pub(in crate::runtime) fn require_issued_control(
         &self,
@@ -958,26 +954,78 @@ impl OriginalEnrollmentAllocationAcknowledgment {
         effects: &AuraEffectSystem,
         manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     ) -> Result<(), AuraError> {
-        if !std::sync::Arc::ptr_eq(
+        require_original_allocation_manifest_binding(
             &self.runtime_identity,
-            &effects.crypto.lifetime_owner_identity(),
-        ) || self.original.authority != manifest.subject
-            || self.original.ceremony != manifest.ceremony
-            || self.original.invitation != manifest.invitation
-            || self.original.pending_epoch != manifest.pending_epoch
-            || self.original.setup_digest != manifest.setup.digest
-            || manifest.initiator_device != effects.device_id()
-            || !self
-                .original
-                .participants
-                .contains(&ParticipantIdentity::device(manifest.invitee_device))
-        {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::Binding,
-            ));
-        }
-        Ok(())
+            &self.original,
+            effects,
+            manifest,
+        )
     }
+}
+
+fn require_original_allocation_generation_binding(
+    runtime_identity: &Arc<()>,
+    original: &StoredEnrollmentGenerationProfile,
+    effects: &AuraEffectSystem,
+    generation: &RegisteredEnrollmentGenerationCapability<'_>,
+) -> Result<(), AuraError> {
+    generation.require_effects(effects)?;
+    let invitation = generation.canonical_invitation();
+    let aura_invitation::InvitationType::DeviceEnrollment {
+        subject_authority,
+        ceremony_id,
+        pending_epoch,
+        setup_binding,
+        initiator_device_id,
+        device_id,
+        ..
+    } = &invitation.invitation_type
+    else {
+        return Err(held_registration_error(
+            HeldEnrollmentRegistrationError::InvitationKind,
+        ));
+    };
+    if !Arc::ptr_eq(runtime_identity, &effects.crypto.lifetime_owner_identity())
+        || original.authority != invitation.sender_id
+        || original.authority != *subject_authority
+        || original.ceremony != *ceremony_id
+        || original.invitation != invitation.invitation_id
+        || original.pending_epoch != *pending_epoch
+        || original.setup_digest != setup_binding.digest
+        || *initiator_device_id != effects.device_id()
+        || !original
+            .participants
+            .contains(&ParticipantIdentity::device(*device_id))
+    {
+        return Err(held_registration_error(
+            HeldEnrollmentRegistrationError::Binding,
+        ));
+    }
+    Ok(())
+}
+
+fn require_original_allocation_manifest_binding(
+    runtime_identity: &Arc<()>,
+    original: &StoredEnrollmentGenerationProfile,
+    effects: &AuraEffectSystem,
+    manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+) -> Result<(), AuraError> {
+    if !std::sync::Arc::ptr_eq(runtime_identity, &effects.crypto.lifetime_owner_identity())
+        || original.authority != manifest.subject
+        || original.ceremony != manifest.ceremony
+        || original.invitation != manifest.invitation
+        || original.pending_epoch != manifest.pending_epoch
+        || original.setup_digest != manifest.setup.digest
+        || manifest.initiator_device != effects.device_id()
+        || !original
+            .participants
+            .contains(&ParticipantIdentity::device(manifest.invitee_device))
+    {
+        return Err(held_registration_error(
+            HeldEnrollmentRegistrationError::Binding,
+        ));
+    }
+    Ok(())
 }
 
 struct RotatedKeyMaterial {
@@ -1243,7 +1291,9 @@ pub(crate) enum EnrollmentAllocationConflict {
 }
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum HeldEnrollmentRegistrationError {
-    #[error("response quorum binding differs: expected {expected_required}/{expected_total}, observed {observed_required}/{observed_total}")]
+    #[error(
+        "response quorum binding differs: expected {expected_required}/{expected_total}, observed {observed_required}/{observed_total}"
+    )]
     ResponsePolicyBinding {
         expected_required: u16,
         expected_total: u16,
@@ -2297,8 +2347,13 @@ impl AuraEffectSystem {
             .enrollment_retirement_fault
             .lock()
             .expect("retirement fault lock");
-        if *fault == Some(epoch) {
-            *fault = None;
+        if fault
+            .as_ref()
+            .is_some_and(|(selected, _)| *selected == epoch)
+        {
+            if fault.as_ref().is_some_and(|(_, scope)| scope.is_none()) {
+                *fault = None;
+            }
             true
         } else {
             false
@@ -2829,7 +2884,28 @@ impl AuraEffectSystem {
         *self
             .enrollment_retirement_fault
             .lock()
-            .expect("retirement fault lock") = Some(epoch);
+            .expect("retirement fault lock") = Some((epoch, None));
+    }
+    /// Hold the actual epoch's final retirement write refused across all retries.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn refuse_enrollment_retirement_until_released_for_test(
+        self: &Arc<Self>,
+        epoch: u64,
+    ) -> ScopedEnrollmentRetirementRefusal {
+        let identity = Arc::new(());
+        let mut fault = self
+            .enrollment_retirement_fault
+            .lock()
+            .expect("retirement fault lock");
+        assert!(
+            fault.is_none(),
+            "an original retirement fault is already admitted"
+        );
+        *fault = Some((epoch, Some(identity.clone())));
+        ScopedEnrollmentRetirementRefusal {
+            effects: self.clone(),
+            identity,
+        }
     }
     #[aura_macros::capability_boundary(
         category = "capability_gated",
@@ -3826,12 +3902,12 @@ impl AuraEffectSystem {
                 Some(node) => {
                     return Err(final_inventory_error(
                         EnrollmentFinalInventoryError::NonrootInventoryUnavailable(node),
-                    ))
+                    ));
                 }
                 None => {
                     return Err(final_inventory_error(
                         EnrollmentFinalInventoryError::MissingLeafParent,
-                    ))
+                    ));
                 }
             }
         }
@@ -4541,7 +4617,7 @@ impl AuraEffectSystem {
             _ => {
                 return Err(AuraError::crypto(
                     "LAN signer participant does not own current physical identity",
-                ))
+                ));
             }
         }
         let solo = Self::solo_signing_key_location(authority, current_epoch);

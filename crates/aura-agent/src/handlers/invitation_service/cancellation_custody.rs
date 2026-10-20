@@ -75,6 +75,38 @@ fn cancellation_native_source(source: AgentError) -> aura_core::AuraError {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "original cancellation failed: {primary}; independent original issuer cleanup: {secondary}"
+)]
+pub(crate) struct OriginalCancellationCleanupFailure {
+    #[source]
+    primary: aura_core::AuraError,
+    secondary: aura_core::AuraError,
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl OriginalCancellationCleanupFailure {
+    pub(crate) fn primary(&self) -> &aura_core::AuraError {
+        &self.primary
+    }
+    pub(crate) fn secondary(&self) -> &aura_core::AuraError {
+        &self.secondary
+    }
+}
+
+fn retain_cancellation_cleanup_cause(
+    primary: aura_core::AuraError,
+    secondary: aura_core::AuraError,
+) -> aura_core::AuraError {
+    aura_core::AuraError::Internal {
+        message: "original cancellation and original issuer cleanup failures retained".into(),
+        source: Some(Arc::new(OriginalCancellationCleanupFailure {
+            primary,
+            secondary,
+        })),
+    }
+}
+
 struct OriginalCancellationTaskCustody {
     service: Option<InvitationServiceApi>,
     registration:
@@ -88,6 +120,8 @@ struct OriginalCancellationTaskCustody {
     original_retirement:
         Option<Arc<crate::runtime::services::ceremony_tracker::RunningIssuerObservation>>,
     retirement_observed: bool,
+    original_issuer_settlement:
+        Option<crate::runtime::services::ceremony_tracker::OriginalIssuerCancellationSettlement>,
     notice: Option<crate::handlers::invitation::RetainedCancelledNotice>,
     acknowledged_notice: Option<crate::handlers::invitation::AcknowledgedCancelledNotice>,
     completion:
@@ -266,13 +300,15 @@ impl OriginalCancellationTaskCustody {
                 }
             } else if !self.retirement_observed {
                 if let Some(original) = &self.original_retirement {
-                    original
+                    let actual = original
                         .observe_original_cancellation_settlement(
                             service.effects.as_ref(),
                             &self.publication.issued,
                         )
-                        .await
-                        .map_err(cancellation_native_source)?;
+                        .await?;
+                    // Retain the actual same-control receipt before marking the
+                    // physical phase complete; its failed outcome is independent.
+                    self.original_issuer_settlement = Some(actual);
                     self.retirement_observed = true;
                 } else {
                     return Err(self.first_failure.clone().unwrap_or_else(|| {
@@ -292,7 +328,19 @@ impl OriginalCancellationTaskCustody {
                     .as_ref()
                     .and_then(|actual| actual.domain_failure())
             });
-        let failure = failure.cloned();
+        let mut failure = failure.cloned();
+        if let Some(actual) = &self.original_issuer_settlement {
+            for source in actual
+                .cleanup_failure()
+                .into_iter()
+                .chain(actual.independent_failures().iter().cloned())
+            {
+                failure = Some(match failure {
+                    Some(primary) => retain_cancellation_cleanup_cause(primary, source),
+                    None => source,
+                });
+            }
+        }
         self.service = None;
         Ok(match failure {
             Some(source) => RequiredTaskSettlement::ResolvedWithDomainFailure(source),
@@ -540,6 +588,7 @@ impl InvitationServiceApi {
             checkpoint: None,
             original_retirement: None,
             retirement_observed: false,
+            original_issuer_settlement: None,
             notice: None,
             acknowledged_notice: None,
             completion: Some(sender),
@@ -548,11 +597,11 @@ impl InvitationServiceApi {
         let tasks = self.tasks.group("invitation_service.original_cancellation");
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let admitted = tasks.spawn_original_local_required_custody(
+                let admitted = tasks.spawn_original_local_required_custody_with_resident_cleanup(
                     "original-enrollment-cancellation".into(), Box::new(custody), None,
                 ).map_err(|rejected| retain_rejected_local_issuer(rejected.into_local()))?;
             } else {
-                let admitted = tasks.spawn_original_required_custody(
+                let admitted = tasks.spawn_original_required_custody_with_resident_cleanup(
                     "original-enrollment-cancellation".into(), Box::new(custody), None,
                 ).map_err(|rejected| retain_rejected_native_issuer(rejected.into_native()))?;
             }
@@ -564,7 +613,7 @@ impl InvitationServiceApi {
                 source: Some(Arc::new(UnpublishedIssuerTaskCustody {
                     source,
                     #[allow(clippy::disallowed_types)] // Error retains rejected custody; no lock is awaited or acquired.
-                    retained: parking_lot::Mutex::new(pending),
+                    retained: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell::new(pending),
                 })),
             }));
         }
@@ -636,11 +685,11 @@ impl InvitationServiceApi {
             .group("invitation_service.original_cancelled_notice");
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let admitted = tasks.spawn_original_local_required_custody(
+                let admitted = tasks.spawn_original_local_required_custody_with_resident_cleanup(
                     "original-cancelled-notice".into(), Box::new(custody), None,
                 ).map_err(|rejected| retain_rejected_local_issuer(rejected.into_local()))?;
             } else {
-                let admitted = tasks.spawn_original_required_custody(
+                let admitted = tasks.spawn_original_required_custody_with_resident_cleanup(
                     "original-cancelled-notice".into(), Box::new(custody), None,
                 ).map_err(|rejected| retain_rejected_native_issuer(rejected.into_native()))?;
             }
@@ -652,7 +701,7 @@ impl InvitationServiceApi {
                 source: Some(Arc::new(UnpublishedIssuerTaskCustody {
                     source,
                     #[allow(clippy::disallowed_types)] // Error retains rejected custody; no lock is awaited or acquired.
-                    retained: parking_lot::Mutex::new(pending),
+                    retained: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell::new(pending),
                 })),
             }));
         }

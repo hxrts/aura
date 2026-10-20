@@ -324,11 +324,15 @@ pub use runtime::EffectSystemFactory;
 #[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
 pub use runtime::simulation_factory::rekey_simulated_channel;
 
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+pub use runtime::effects::OriginalPendingMailboxRetryObservation;
 #[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
 pub use runtime::simulation_factory::enrollment::{
     EnrollmentLifecycleFailure, EnrollmentParticipantProfile, ReopenedEnrollment,
     SimulatedEnrollment, StoppedEnrollmentProfiles,
 };
+#[cfg(feature = "simulator-checkpoint")]
+pub use runtime::system::SelectedSchedulerBatchObservation;
 
 // Re-export core types for convenience (authority-first)
 #[cfg(feature = "choreo-backend-telltale-machine")]

@@ -155,8 +155,8 @@ fn component(name: &std::ffi::OsStr) -> Result<String, AuraError> {
     let encoded = name
         .to_str()
         .ok_or_else(|| invalid("legacy secure record path is not UTF-8"))?;
-    let decoded = FilesystemFallbackSecureStorageHandler::decode_component(encoded)?;
-    if FilesystemFallbackSecureStorageHandler::encode_component(&decoded) != encoded {
+    let decoded = crate::secure::SecureRecordCodec::decode_component(encoded)?;
+    if crate::secure::SecureRecordCodec::encode_component(&decoded) != encoded {
         return Err(invalid("legacy secure record path is not canonical"));
     }
     Ok(decoded)
@@ -170,7 +170,7 @@ fn authenticate_leaf(
     count: &mut usize,
     total_bytes: &mut usize,
 ) -> Result<(), AuraError> {
-    FilesystemFallbackSecureStorageHandler::validate_location(&location)?;
+    crate::secure::SecureRecordCodec::validate_location(&location)?;
     *count = count
         .checked_add(1)
         .ok_or_else(|| invalid("legacy secure inventory count overflow"))?;

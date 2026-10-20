@@ -38,6 +38,14 @@ record inventory and secure retrieval failures preserve their native causes.
 
 ## Invariants
 
+- Native filesystem hot-key storage is compiled only for unit tests or the explicit
+  `development-keys` feature. `production-build` and `development-keys` are
+  mutually exclusive at compilation; simulation and file-backed test keyrings
+  imply development keys. Native selectors fail closed when that implementation
+  is absent. Browser WebCrypto/IndexedDB remains a separate production provider.
+  Production doctests reject both public import paths for the native hot-key
+  handler. Actual OS credential-service diagnostics remain separately selected.
+
 - Concurrent immutable filesystem publication reports `AlreadyExists` only
   after authenticating the winning protected record and acknowledging its
   directory. Missing, corrupt, or mutable winners fail closed; the losing
@@ -155,8 +163,8 @@ Handler isolation and purity are the primary testing concerns. Each handler must
 ### Commands
 
 ```
-cargo test -p hxrts-aura-effects
-cargo test -p hxrts-aura-effects -- --nocapture   # with handler output
+cargo test -p hxrts-aura-effects --features development-keys
+cargo test -p hxrts-aura-effects --features development-keys -- --nocapture   # with handler output
 just lint-arch-syntax
 just check-arch
 ```

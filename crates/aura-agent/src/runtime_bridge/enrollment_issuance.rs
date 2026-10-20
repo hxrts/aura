@@ -634,6 +634,15 @@ impl OriginalIssuedEnrollmentContinuation {
             .observe_original_running_owner_for_test(effects, tracker)
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn install_progress_error_gate_for_test(
+        &self,
+    ) -> Result<
+        crate::runtime::services::issuer_terminal_destination::OriginalProgressErrorObservationGate,
+        aura_core::AuraError,
+    > {
+        self.original.install_progress_error_gate_for_test()
+    }
     #[cfg(test)]
     pub(crate) fn install_cancelled_notice_gate_for_test(
         &self,
@@ -713,6 +722,23 @@ impl OriginalIssuedEnrollmentContinuation {
         hook: crate::handlers::invitation_service::OriginalTerminalReceiptTestHook,
     ) -> Result<(), aura_core::AuraError> {
         self.original.install_original_receipt_test_hook(hook)
+    }
+    #[cfg(test)]
+    pub(crate) fn require_original_issuer_subtree_disposal_for_test(
+        &self,
+        disposal: &crate::task_registry::OriginalRequiredTaskDisposalObservation,
+    ) -> Result<(), aura_core::AuraError> {
+        self.original
+            .require_original_issuer_subtree_disposal_for_test(disposal)
+    }
+    #[cfg(test)]
+    pub(crate) fn original_cancellation_registration_for_test(
+        &self,
+    ) -> Result<
+        Arc<crate::runtime::services::ceremony_tracker::OriginalCancellationTaskRegistration>,
+        aura_core::AuraError,
+    > {
+        self.original.original_cancellation_registration_for_test()
     }
     #[cfg(test)]
     pub(crate) async fn original_cancellation_disposal_for_test(

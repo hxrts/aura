@@ -111,6 +111,30 @@ pub enum TimeProviderOperation {
 /// Handle for timeout operations.
 pub type TimeoutHandle = Uuid;
 
+/// An observed registration of one selected-provider physical sleep. The
+/// ephemeral provider identity and generation identify one provider-owned
+/// timer, not domain completion, durable identity, or an authorization token.
+/// Consumers must revalidate it with that same selected provider.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PhysicalSleepRegistration {
+    /// Opaque selected-provider instance identity, distinct across providers.
+    pub provider_id: u64,
+    pub generation: u64,
+    pub deadline: WindowPosition<PhysicalMillis>,
+}
+
+/// The selected provider reports an actual timer registration once. Providers
+/// without registration observation explicitly report `Unsupported` while
+/// preserving their ordinary sleep behavior.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhysicalSleepRegistrationObservation {
+    Registered(PhysicalSleepRegistration),
+    Unsupported,
+}
+
+pub type PhysicalSleepRegistrationObserver =
+    Box<dyn FnOnce(PhysicalSleepRegistrationObservation) + Send + 'static>;
+
 /// Wake conditions for cooperative scheduling.
 #[derive(Debug, Clone)]
 pub enum WakeCondition {
@@ -128,6 +152,19 @@ pub enum WakeCondition {
 pub trait PhysicalTimeEffects: Send + Sync {
     async fn physical_time(&self) -> Result<PhysicalTime, TimeError>;
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError>;
+
+    /// Observe the provider's actual timer admission without changing its
+    /// delay or endpoint. The callback runs before a supported wait suspends;
+    /// cancellation still removes the timer. This observation cannot advance
+    /// physical time and never acknowledges protocol work.
+    async fn sleep_ms_with_registration_observer(
+        &self,
+        ms: u64,
+        observer: PhysicalSleepRegistrationObserver,
+    ) -> Result<(), TimeError> {
+        observer(PhysicalSleepRegistrationObservation::Unsupported);
+        self.sleep_ms(ms).await
+    }
 
     /// Wait for an existing fixed physical endpoint and return its actual observation.
     ///
@@ -210,6 +247,14 @@ impl_arc_effect!(PhysicalTimeEffects {
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         (**self).sleep_ms(ms).await
+    }
+
+    async fn sleep_ms_with_registration_observer(
+        &self,
+        ms: u64,
+        observer: PhysicalSleepRegistrationObserver,
+    ) -> Result<(), TimeError> {
+        (**self).sleep_ms_with_registration_observer(ms, observer).await
     }
 
     async fn wait_until_physical_deadline(

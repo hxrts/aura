@@ -21,6 +21,11 @@ unversioned membership mutation failure; it supplies no successor capability.
 
 Single source of truth for domain types and effect trait definitions. Provides foundational algebraic types with zero dependencies on other Aura crates.
 
+Required-task panic diagnostics retain the exact caught process-local payload
+and producer phase through nonblocking, nonconsuming observation. They do not
+reconstruct authority or acknowledge cleanup. Runtime producers decide which
+actual phase was caught; a diagnostic alone proves no asynchronous settlement.
+
 ## Scope
 
 | Belongs here | Does not belong here |
@@ -65,6 +70,9 @@ Single source of truth for domain types and effect trait definitions. Provides f
   standard `Error::source`, including after cloning. Source traversal exposes
   the original error rather than its shared storage wrapper. Serialized errors
   retain their category and message but omit process-local source objects.
+- `TransportError::BackendFailure` retains the provider's source-bearing
+  `AuraError` through transport and choreography adapters. Native provider
+  failures must not be reduced to `ProtocolError` diagnostic strings.
 - `crypto::tree_signing::validate_retained_threshold_key_package` checks a native
   FROST package against the exact signer index, authenticated threshold policy,
   complete public participant inventory, group key and derived verifying share.
@@ -218,6 +226,13 @@ Required clock and sleep failures retain their original causes through `TimeoutB
 The public profile effect trait is an infrastructure adapter interface, not an unforgeable trust witness. Production runtime construction accepts only the selected audited adapter's concrete private lease type. Browser errors explicitly convert foreign JS objects into typed operation/name/message diagnostics; those values never authorize domain outcomes. Deadline exhaustion and historical plaintext profile ambiguity are distinct typed failures.
 
 ### Required deadline observations
+
+`PhysicalTimeEffects::sleep_ms_with_registration_observer` reports a provider-owned
+relative timer registration through a runtime-neutral one-shot callback. An
+unsupported provider reports `Unsupported` and still performs its ordinary
+sleep. The reported generation and target are observations, not protocol
+completion or permission to change time; any simulator step must revalidate
+the live registration with the same selected provider.
 
 Timeout budgets retain their original deadline and share a latched physical-clock high-water observation across clones and child budgets. Rollback after progress is a typed required-clock failure, even when the new observation remains above the start. Timer exhaustion and rollback survive validated serialization; legacy records lacking observation state fail closed. Nonblocking observation contention is a separate ownership fault. Snapshot and expiration updates acquire the same short-lived guards atomically and never hold guards across await.
 

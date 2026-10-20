@@ -1343,3 +1343,22 @@ cannot be replaced by another send under a reconstructed owner. Opaque disposal
 observations identify the exact original required task and grant no terminal
 authority. The original runtime and approved finite negative policy remain
 required for conditional negative signing (`100_crypto.md`).
+
+A producer-issued retirement acknowledgment establishes physical progress even
+when an earlier native failure remains the operation outcome. Acceptance requires
+the actual original window and issued control. Original issuer resource settlement
+requires its same-control disposal and original storage receipt; successful
+reconciliation alone establishes neither. A signed issuer `Cancelled` terminal
+is independent from the outcome of the requested cancellation operation. Native
+execution, VM, retirement and independent validation failures remain preserved.
+
+Enrollment owners may select cleanup residence before original task admission.
+After a refused attempt, the same native or browser-local supervisor retains the
+actual custodian and pending cleanup future. A public retry requests that owner
+before observing its original deadline; cancellation or timeout of the observer
+cannot cancel the retained host work or renew the success window. A retained
+pending request remains the same attempt across observer abandonment, while an
+explicit retry may advance an actually completed failed request. Actual resource
+settlement and failed operation outcome remain independently observable. Repeated
+observation of an issued disposal receipt preserves the same original diagnostic
+without manufacturing another failure occurrence.

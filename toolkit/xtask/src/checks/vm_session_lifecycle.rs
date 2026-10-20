@@ -37,6 +37,12 @@ const DEPENDENCY_SUITES: &[LifecycleSuite] = &[
 ];
 const CORE_SUITES: &[LifecycleSuite] = &[
     LifecycleSuite {
+        source: "crates/aura-core/src/effects/transport.rs",
+        functions: &["backend_failure_preserves_concrete_native_source_through_aura_boundary"],
+        harness_prefix: "effects::transport::transport_error_tests::",
+        filter: "effects::transport::transport_error_tests::backend_failure_preserves_concrete_native_source_through_aura_boundary",
+    },
+    LifecycleSuite {
         source: "crates/aura-core/src/types/facts.rs",
         functions: &[
             "required_fact_decoder_rejects_json_through_both_entry_points",
@@ -227,7 +233,613 @@ const SYNC_NATIVE_SOURCE_SUITES: &[LifecycleSuite] = &[
         filter: "core::wire::required_source_tests::",
     },
 ];
+const ENROLLMENT_NATIVE_CUSTODY_SUITES: &[LifecycleSuite] = &[
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_ack_settlement_waits_for_actual_disposition_and_native_source"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_ack_settlement_waits_for_actual_disposition_and_native_source",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["dropped_ack_wait_retains_closed_gate_until_actual_borrow_disposal"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::dropped_ack_wait_retains_closed_gate_until_actual_borrow_disposal",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_execution_failure_precedes_later_ack_failure"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_execution_failure_precedes_later_ack_failure",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_ack_borrow_blocks_replacement_after_window_permit_drop"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_ack_borrow_blocks_replacement_after_window_permit_drop",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_transport_gate_rejects_foreign_semaphore_permit"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_transport_gate_rejects_foreign_semaphore_permit",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_ack_borrows_refuse_capacity_without_early_settlement"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_ack_borrows_refuse_capacity_without_early_settlement",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_admitted_ack_rejects_foreign_manifest_without_disturbing_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_admitted_ack_rejects_foreign_manifest_without_disturbing_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/effects/transport.rs",
+        functions: &["original_broker_adapter_retains_network_and_native_source"],
+        harness_prefix: "runtime::effects::transport::original_enrollment_transport_failure_tests::",
+        filter: "runtime::effects::transport::original_enrollment_transport_failure_tests::original_broker_adapter_retains_network_and_native_source",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["original_owner_retires_before_ack_even_with_handle_and_observer_held"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::original_owner_retires_before_ack_even_with_handle_and_observer_held",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["exclusive_original_disposal_rejects_foreign_and_sibling_subtrees"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::exclusive_original_disposal_rejects_foreign_and_sibling_subtrees",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["exclusive_original_disposal_remembers_completed_dropped_descendant"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::exclusive_original_disposal_remembers_completed_dropped_descendant",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["verified_request_required_cancellation_disposes_original_without_confirmation"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::verified_request_required_cancellation_disposes_original_without_confirmation",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_issuer_progress_time_failure_survives_committed_cancellation"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_issuer_progress_time_failure_survives_committed_cancellation",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_issuer_progress_time_failure_survives_required_cancellation_before_publication"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_issuer_progress_time_failure_survives_required_cancellation_before_publication",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_issuer_progress_time_failure_survives_required_cancellation_after_terminal_retention"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_issuer_progress_time_failure_survives_required_cancellation_after_terminal_retention",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_issuer_notice_close_clock_failure_preserves_delivery_and_original_progress_error"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_issuer_notice_close_clock_failure_preserves_delivery_and_original_progress_error",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_issuer_operation_error_survives_committed_cancellation_during_vm_close"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_issuer_operation_error_survives_committed_cancellation_during_vm_close",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/issuer_task_custody.rs",
+        functions: &["original_finalizer_and_protocol_causes_survive_both_publication_orders"],
+        harness_prefix: "runtime::services::issuer_task_custody::terminal_failure_observation_tests::",
+        filter: "runtime::services::issuer_task_custody::terminal_failure_observation_tests::original_finalizer_and_protocol_causes_survive_both_publication_orders",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/issuer_task_custody.rs",
+        functions: &["late_original_finalizer_keeps_protocol_primary_after_observation"],
+        harness_prefix: "runtime::services::issuer_task_custody::terminal_failure_observation_tests::",
+        filter: "runtime::services::issuer_task_custody::terminal_failure_observation_tests::late_original_finalizer_keeps_protocol_primary_after_observation",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_verified_rejection_settles_issuer_resources_without_cancellation"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_verified_rejection_settles_issuer_resources_without_cancellation",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["verified_request_close_fault_retains_same_original_for_cleanup_retry"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::verified_request_close_fault_retains_same_original_for_cleanup_retry",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["acknowledged_retry_retains_first_cleanup_cause_and_original_cancelled_disposition"],
+        harness_prefix: "task_registry::original_cleanup_disposition_tests::",
+        filter: "task_registry::original_cleanup_disposition_tests::acknowledged_retry_retains_first_cleanup_cause_and_original_cancelled_disposition",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/session_ingress.rs",
+        functions: &["original_vm_close_clock_failure_retains_actual_retirement_and_original_cause"],
+        harness_prefix: "runtime::session_ingress::tests::",
+        filter: "runtime::session_ingress::tests::original_vm_close_clock_failure_retains_actual_retirement_and_original_cause",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["timed_enrollment_attempt_keeps_actual_vm_for_required_close"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::timed_enrollment_attempt_keeps_actual_vm_for_required_close",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/session_ingress.rs",
+        functions: &["original_session_end_fault_retains_same_vm_owner_for_retry"],
+        harness_prefix: "runtime::session_ingress::tests::",
+        filter: "runtime::session_ingress::tests::original_session_end_fault_retains_same_vm_owner_for_retry",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_candidate_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_candidate_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_eligible_before_close_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_eligible_before_close_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["public_cancellation_delivers_signed_negative_notice_without_request_acceptance"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::public_cancellation_delivers_signed_negative_notice_without_request_acceptance",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_verified_rejection_resource_cleanup_refuses_foreign_or_missing_decision"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_verified_rejection_resource_cleanup_refuses_foreign_or_missing_decision",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["two_runtime_cancelled_notice_recovers_original_window_after_restart"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::two_runtime_cancelled_notice_recovers_original_window_after_restart",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/device_enrollment.rs",
+        functions: &["failed_response_cannot_settle_before_original_notice_group_drain"],
+        harness_prefix: "handlers::invitation::device_enrollment::original_failed_response_disposal_tests::",
+        filter: "handlers::invitation::device_enrollment::original_failed_response_disposal_tests::failed_response_cannot_settle_before_original_notice_group_drain",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/device_enrollment.rs",
+        functions: &["failed_response_retains_blocked_receive_until_original_vm_close_ack"],
+        harness_prefix: "handlers::invitation::device_enrollment::original_failed_response_disposal_tests::",
+        filter: "handlers::invitation::device_enrollment::original_failed_response_disposal_tests::failed_response_retains_blocked_receive_until_original_vm_close_ack",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation_service.rs",
+        functions: &["interrupted_invitee_settlement_keeps_notice_domain_failure_separate_from_disposal"],
+        harness_prefix: "handlers::invitation_service::",
+        filter: "handlers::invitation_service::interrupted_invitee_settlement_keeps_notice_domain_failure_separate_from_disposal",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["destructor_panic_retains_original_domain_failure_without_resource_ack"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::destructor_panic_retains_original_domain_failure_without_resource_ack",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["send_retained_owner_supports_local_borrowed_execution_and_original_retry"],
+        harness_prefix: "task_registry::local_borrowed_required_custody_tests::",
+        filter: "task_registry::local_borrowed_required_custody_tests::send_retained_owner_supports_local_borrowed_execution_and_original_retry",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["local_force_abort_retains_exact_owner_until_original_retry_ack"],
+        harness_prefix: "task_registry::local_borrowed_required_custody_tests::",
+        filter: "task_registry::local_borrowed_required_custody_tests::local_force_abort_retains_exact_owner_until_original_retry_ack",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["local_outer_abort_retains_exact_owner_through_failed_retry_and_disposal"],
+        harness_prefix: "task_registry::local_borrowed_required_custody_tests::",
+        filter: "task_registry::local_borrowed_required_custody_tests::local_outer_abort_retains_exact_owner_through_failed_retry_and_disposal",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window.rs",
+        functions: &["original_pending_birth_derivatives_keep_monotone_postcheck"],
+        harness_prefix: "runtime::services::enrollment_window::admitted_clock_split_tests::",
+        filter: "runtime::services::enrollment_window::admitted_clock_split_tests::original_pending_birth_derivatives_keep_monotone_postcheck",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["unacknowledged_original_slot_retains_group_after_external_owner_drop"],
+        harness_prefix: "task_registry::registered_required_custody_tests::",
+        filter: "task_registry::registered_required_custody_tests::unacknowledged_original_slot_retains_group_after_external_owner_drop",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["actual_registered_cancellation_retains_owner_until_original_retry_ack"],
+        harness_prefix: "task_registry::registered_required_custody_tests::",
+        filter: "task_registry::registered_required_custody_tests::actual_registered_cancellation_retains_owner_until_original_retry_ack",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["actual_registered_force_abort_retains_owner_until_original_retry_ack"],
+        harness_prefix: "task_registry::registered_required_custody_tests::",
+        filter: "task_registry::registered_required_custody_tests::actual_registered_force_abort_retains_owner_until_original_retry_ack",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["actual_registered_outer_abort_retains_owner_through_failed_retry"],
+        harness_prefix: "task_registry::registered_required_custody_tests::",
+        filter: "task_registry::registered_required_custody_tests::actual_registered_outer_abort_retains_owner_through_failed_retry",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["rejected_registration_returns_actual_owner_without_poll_or_drop"],
+        harness_prefix: "task_registry::rejected_required_custody_tests::",
+        filter: "task_registry::rejected_required_custody_tests::rejected_registration_returns_actual_owner_without_poll_or_drop",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["ordinary_completed_task_does_not_retain_its_group"],
+        harness_prefix: "task_registry::rejected_required_custody_tests::",
+        filter: "task_registry::rejected_required_custody_tests::ordinary_completed_task_does_not_retain_its_group",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["original_execution_failure_survives_cleanup_panic_and_retry"],
+        harness_prefix: "task_registry::original_cleanup_disposition_tests::",
+        filter: "task_registry::original_cleanup_disposition_tests::original_execution_failure_survives_cleanup_panic_and_retry",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/threshold_signing/peer_contract_tests.rs",
+        functions: &["activated_configuration_preserves_original_pending_commitment"],
+        harness_prefix: "runtime::services::threshold_signing::peer_contract_tests::",
+        filter: "runtime::services::threshold_signing::peer_contract_tests::activated_configuration_preserves_original_pending_commitment",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/threshold_signing/peer_contract_tests.rs",
+        functions: &["original_peer_continuation_cannot_clone_or_deserialize_custody"],
+        harness_prefix: "runtime::services::threshold_signing::peer_contract_tests::",
+        filter: "runtime::services::threshold_signing::peer_contract_tests::original_peer_continuation_cannot_clone_or_deserialize_custody",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation_service.rs",
+        functions: &["required_window_rejection_retains_execution_and_settlement_sources"],
+        harness_prefix: "handlers::invitation_service::required_enrollment_task_tests::",
+        filter: "handlers::invitation_service::required_enrollment_task_tests::required_window_rejection_retains_execution_and_settlement_sources",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_candidate_selected_time_refuses_without_terminal_receipt"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_candidate_selected_time_refuses_without_terminal_receipt",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_candidate_waiter_cancellation_retains_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_candidate_waiter_cancellation_retains_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_candidate_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_candidate_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_close_fault_retries_original_child_and_retains_signed_failure"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_close_fault_retries_original_child_and_retains_signed_failure",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_candidate_runtime_tree_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_candidate_runtime_tree_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_eligible_before_close_runtime_tree_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_eligible_before_close_runtime_tree_cancellation_reconciles_same_original_owner",
+    },
+];
+const ENROLLMENT_SIMULATOR_CUSTODY_SUITES: &[LifecycleSuite] = &[
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_ack_settlement_waits_for_actual_disposition_and_native_source"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_ack_settlement_waits_for_actual_disposition_and_native_source",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["dropped_ack_wait_retains_closed_gate_until_actual_borrow_disposal"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::dropped_ack_wait_retains_closed_gate_until_actual_borrow_disposal",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_execution_failure_precedes_later_ack_failure"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_execution_failure_precedes_later_ack_failure",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_ack_borrow_blocks_replacement_after_window_permit_drop"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_ack_borrow_blocks_replacement_after_window_permit_drop",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_transport_gate_rejects_foreign_semaphore_permit"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_transport_gate_rejects_foreign_semaphore_permit",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/enrollment_window/transport_custody.rs",
+        functions: &["original_ack_borrows_refuse_capacity_without_early_settlement"],
+        harness_prefix: "runtime::services::enrollment_window::transport_custody::tests::",
+        filter: "runtime::services::enrollment_window::transport_custody::tests::original_ack_borrows_refuse_capacity_without_early_settlement",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["original_admitted_ack_rejects_foreign_manifest_without_disturbing_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::original_admitted_ack_rejects_foreign_manifest_without_disturbing_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/effects/transport.rs",
+        functions: &["original_broker_adapter_retains_network_and_native_source"],
+        harness_prefix: "runtime::effects::transport::original_enrollment_transport_failure_tests::",
+        filter: "runtime::effects::transport::original_enrollment_transport_failure_tests::original_broker_adapter_retains_network_and_native_source",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["original_owner_retires_before_ack_even_with_handle_and_observer_held"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::original_owner_retires_before_ack_even_with_handle_and_observer_held",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["exclusive_original_disposal_rejects_foreign_and_sibling_subtrees"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::exclusive_original_disposal_rejects_foreign_and_sibling_subtrees",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/task_registry/required_cleanup.rs",
+        functions: &["exclusive_original_disposal_remembers_completed_dropped_descendant"],
+        harness_prefix: "task_registry::issued_required_task_observation_tests::",
+        filter: "task_registry::issued_required_task_observation_tests::exclusive_original_disposal_remembers_completed_dropped_descendant",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_candidate_selected_time_refuses_without_terminal_receipt"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_candidate_selected_time_refuses_without_terminal_receipt",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/time_handler.rs",
+        functions: &["equal_selected_readings_do_not_bind_a_foreign_provider"],
+        harness_prefix: "runtime::time_handler::checkpoint_provider_identity_tests::",
+        filter: "runtime::time_handler::checkpoint_provider_identity_tests::equal_selected_readings_do_not_bind_a_foreign_provider",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/reactive/scheduler.rs",
+        functions: &["batch_witness_requires_actual_polled_original_sleep_and_expires"],
+        harness_prefix: "reactive::scheduler::tests::",
+        filter: "reactive::scheduler::tests::batch_witness_requires_actual_polled_original_sleep_and_expires",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/effects/transport.rs",
+        functions: &["original_retry_witness_refuses_foreign_selector_and_cancelled_generation"],
+        harness_prefix: "runtime::effects::transport::original_pending_mailbox_retry_tests::",
+        filter: "runtime::effects::transport::original_pending_mailbox_retry_tests::original_retry_witness_refuses_foreign_selector_and_cancelled_generation",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/effects/transport.rs",
+        functions: &["original_retry_witness_tracks_actual_selected_sleep_and_cancellation"],
+        harness_prefix: "runtime::effects::transport::original_pending_mailbox_retry_tests::",
+        filter: "runtime::effects::transport::original_pending_mailbox_retry_tests::original_retry_witness_tracks_actual_selected_sleep_and_cancellation",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation_service.rs",
+        functions: &["original_invitee_result_keeps_primary_and_independent_cleanup_failure"],
+        harness_prefix: "handlers::invitation_service::",
+        filter: "handlers::invitation_service::original_invitee_result_keeps_primary_and_independent_cleanup_failure",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["public_cancellation_delivers_signed_negative_notice_without_request_acceptance"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::public_cancellation_delivers_signed_negative_notice_without_request_acceptance",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["timed_enrollment_attempt_keeps_actual_vm_for_required_close"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::timed_enrollment_attempt_keeps_actual_vm_for_required_close",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/invitation_manager.rs",
+        functions: &["acknowledged_required_slot_without_caller_observer_releases_bounded_cache_capacity"],
+        harness_prefix: "runtime::services::invitation_manager::tests::",
+        filter: "runtime::services::invitation_manager::tests::acknowledged_required_slot_without_caller_observer_releases_bounded_cache_capacity",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/invitation_manager.rs",
+        functions: &["canceled_original_slot_waiter_cannot_take_root_before_manager_lock"],
+        harness_prefix: "runtime::services::invitation_manager::tests::",
+        filter: "runtime::services::invitation_manager::tests::canceled_original_slot_waiter_cannot_take_root_before_manager_lock",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/invitation_manager.rs",
+        functions: &["cancelled_original_execution_without_result_retains_exit_and_cleanup_refusal"],
+        harness_prefix: "runtime::services::invitation_manager::tests::",
+        filter: "runtime::services::invitation_manager::tests::cancelled_original_execution_without_result_retains_exit_and_cleanup_refusal",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/invitation_manager.rs",
+        functions: &["dropped_original_result_waiter_retains_same_reconciliation_control"],
+        harness_prefix: "runtime::services::invitation_manager::tests::",
+        filter: "runtime::services::invitation_manager::tests::dropped_original_result_waiter_retains_same_reconciliation_control",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/invitation_manager.rs",
+        functions: &["rejected_original_slot_admission_restores_same_root_before_error_drop"],
+        harness_prefix: "runtime::services::invitation_manager::tests::",
+        filter: "runtime::services::invitation_manager::tests::rejected_original_slot_admission_restores_same_root_before_error_drop",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/invitation_manager.rs",
+        functions: &["rejected_required_registration_rolls_back_original_invitee_root"],
+        harness_prefix: "runtime::services::invitation_manager::tests::",
+        filter: "runtime::services::invitation_manager::tests::rejected_required_registration_rolls_back_original_invitee_root",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_candidate_waiter_cancellation_retains_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_candidate_waiter_cancellation_retains_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_eligible_before_close_waiter_cancellation_retains_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_eligible_before_close_waiter_cancellation_retains_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_candidate_waiter_cancellation_retains_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_candidate_waiter_cancellation_retains_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_eligible_before_close_waiter_cancellation_retains_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_eligible_before_close_waiter_cancellation_retains_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_candidate_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_candidate_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_response_eligible_before_close_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_response_eligible_before_close_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_candidate_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_candidate_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_eligible_before_close_required_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_eligible_before_close_required_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/services/threshold_signing/device_quorum.rs",
+        functions: &["injected_original_service_refuses_reused_actual_frost_nonce_across_branches"],
+        harness_prefix: "runtime::services::threshold_signing::device_quorum::tests::",
+        filter: "runtime::services::threshold_signing::device_quorum::tests::injected_original_service_refuses_reused_actual_frost_nonce_across_branches",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_close_fault_retries_original_child_and_retains_signed_failure"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_close_fault_retries_original_child_and_retains_signed_failure",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_candidate_runtime_tree_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_candidate_runtime_tree_cancellation_reconciles_same_original_owner",
+    },
+    LifecycleSuite {
+        source: "crates/aura-agent/src/handlers/invitation/tests.rs",
+        functions: &["signed_notice_eligible_before_close_runtime_tree_cancellation_reconciles_same_original_owner"],
+        harness_prefix: "handlers::invitation::tests::",
+        filter: "handlers::invitation::tests::signed_notice_eligible_before_close_runtime_tree_cancellation_reconciles_same_original_owner",
+    },
+];
+const REGISTERED_TIMER_CUSTODY_SUITES: &[LifecycleSuite] = &[
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["unsupported_registration_observation_preserves_ordinary_sleep"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::unsupported_registration_observation_preserves_ordinary_sleep",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["cancellation_cannot_cross_a_claimed_selected_time_gate"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::cancellation_cannot_cross_a_claimed_selected_time_gate",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["cancellation_and_registered_advance_preserve_both_gate_orders"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::cancellation_and_registered_advance_preserve_both_gate_orders",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["provider_issued_registration_refuses_same_task_foreign_and_replaced_timer"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::provider_issued_registration_refuses_same_task_foreign_and_replaced_timer",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["sole_registered_advance_refuses_earlier_duplicate_and_cancelled_timers"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::sole_registered_advance_refuses_earlier_duplicate_and_cancelled_timers",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["pending_relative_registration_uses_selected_now_without_shifting_absolute_deadline"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::pending_relative_registration_uses_selected_now_without_shifting_absolute_deadline",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &["exact_two_owner_advance_refuses_extra_earlier_and_foreign_timers"],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::exact_two_owner_advance_refuses_extra_earlier_and_foreign_timers",
+    },
+];
 const AGENT_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
+    source: "crates/aura-agent/src/runtime/choreo_engine.rs",
+    functions: &["owned_admission_retains_original_capability_until_targeted_disposal"],
+    harness_prefix: "runtime::choreo_engine::tests::",
+    filter: "runtime::choreo_engine::tests::owned_admission_retains_original_capability_until_targeted_disposal",
+},
+LifecycleSuite {
+    source: "crates/aura-agent/src/runtime/choreo_engine.rs",
+    functions: &["threaded_all_done_retains_owned_session_until_actual_disposal"],
+    harness_prefix: "runtime::choreo_engine::tests::",
+    filter: "runtime::choreo_engine::tests::threaded_all_done_retains_owned_session_until_actual_disposal",
+},
+LifecycleSuite {
     source: "crates/aura-agent/src/runtime/services/threshold_signing/enrollment_transcript_signing.rs",
     functions: &["malformed_native_package_retains_original_codec_cause"],
     harness_prefix: "runtime::services::threshold_signing::enrollment_transcript_signing::native_commitment_tests::",
@@ -851,7 +1463,7 @@ pub(super) fn require_executed_tests(output: &str, required: &[String]) -> Resul
 
 /// Bind execution evidence to the exact item published by rustdoc, including
 /// its source line. Duplicate or similarly named entries cannot fill a guard.
-fn required_doctests(listing: &str, item: &str, count: usize) -> Result<Vec<String>> {
+pub(super) fn required_doctests(listing: &str, item: &str, count: usize) -> Result<Vec<String>> {
     let marker = format!(" - {item} (line ");
     let mut required = BTreeSet::new();
     for name in listing
@@ -880,12 +1492,33 @@ fn required_doctests(listing: &str, item: &str, count: usize) -> Result<Vec<Stri
     Ok(required.into_iter().collect())
 }
 
-fn run_suites(root: &Path, base: &[String], suites: &[LifecycleSuite]) -> Result<()> {
+fn require_unique_suite_tests(suites: &[LifecycleSuite]) -> Result<()> {
+    let mut required = BTreeSet::new();
+    for suite in suites {
+        for function in suite.functions {
+            let exact = format!("{}{function}", suite.harness_prefix);
+            if !required.insert(exact.clone()) {
+                bail!(
+                    "vm-session-lifecycle: duplicate required test in one configuration: {exact}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn require_suite_sources(root: &Path, suites: &[LifecycleSuite]) -> Result<()> {
+    require_unique_suite_tests(suites)?;
     for suite in suites {
         let source = fs::read_to_string(root.join(suite.source))
             .with_context(|| format!("read required lifecycle inventory {}", suite.source))?;
         require_tests(&source, suite.functions)?;
     }
+    Ok(())
+}
+
+fn run_suites(root: &Path, base: &[String], suites: &[LifecycleSuite]) -> Result<()> {
+    require_suite_sources(root, suites)?;
     let mut discovery = base.to_vec();
     discovery.extend(["--".into(), "--list".into()]);
     let listing = command_stdout("cargo", &discovery)?;
@@ -948,6 +1581,15 @@ fn released_machine_manifest(metadata: &str) -> Result<std::path::PathBuf> {
 
 pub fn run() -> Result<()> {
     let root = repo_root()?;
+    // Validate every selected agent declaration before dependency/core builds.
+    // This does not replace feature-specific harness discovery or execution.
+    for suites in [
+        AGENT_SUITES,
+        ENROLLMENT_NATIVE_CUSTODY_SUITES,
+        ENROLLMENT_SIMULATOR_CUSTODY_SUITES,
+    ] {
+        require_suite_sources(&root, suites)?;
+    }
     let target = env::var_os("CARGO_TARGET_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| root.join("target"));
@@ -999,6 +1641,7 @@ pub fn run() -> Result<()> {
     let mut testkit = common.clone();
     testkit.extend(["-p".into(), "aura-testkit".into()]);
     run_suites(&root, &testkit, ABSOLUTE_PROVIDER_SUITES)?;
+    run_suites(&root, &testkit, REGISTERED_TIMER_CUSTODY_SUITES)?;
     run_suites(&root, &testkit, &[LifecycleSuite {
         source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
         functions: &["provider_faults_are_one_shot_and_wake_original_waiting_sleep"],
@@ -1059,6 +1702,10 @@ pub fn run() -> Result<()> {
     let mut agent = common;
     agent.extend(["-p".into(), "hxrts-aura-agent".into()]);
     run_suites(&root, &agent, AGENT_SUITES)?;
+    run_suites(&root, &agent, ENROLLMENT_NATIVE_CUSTODY_SUITES)?;
+    let mut agent_simulator = agent.clone();
+    agent_simulator.extend(["--features".into(), "simulator-checkpoint".into()]);
+    run_suites(&root, &agent_simulator, ENROLLMENT_SIMULATOR_CUSTODY_SUITES)?;
     let owner_docs = vec![
         "test".into(),
         "--doc".into(),
@@ -1185,6 +1832,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn required_agent_suite_sources_are_declared_before_compilation() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        for suites in [
+            AGENT_SUITES,
+            ENROLLMENT_NATIVE_CUSTODY_SUITES,
+            ENROLLMENT_SIMULATOR_CUSTODY_SUITES,
+        ] {
+            require_suite_sources(root, suites).unwrap();
+        }
+    }
+
+    #[test]
     fn released_machine_requires_unique_registry_release_provenance() {
         let package = serde_json::json!({
             "name": "telltale-machine", "version": "17.0.1",
@@ -1240,6 +1903,35 @@ mod tests {
     }
 
     #[test]
+    fn suite_inventory_rejects_repeated_tests_within_one_configuration() {
+        let original = LifecycleSuite {
+            source: "src/original.rs",
+            functions: &["required"],
+            harness_prefix: "owner::",
+            filter: "owner::required",
+        };
+        let same_test_other_source = LifecycleSuite {
+            source: "src/other.rs",
+            functions: &["required"],
+            harness_prefix: "owner::",
+            filter: "owner::",
+        };
+        assert!(require_unique_suite_tests(std::slice::from_ref(&original)).is_ok());
+        // Requiring a test in another feature configuration remains valid.
+        assert!(require_unique_suite_tests(std::slice::from_ref(&original)).is_ok());
+        assert!(require_unique_suite_tests(&[original, same_test_other_source]).is_err());
+        let repeated_in_one_suite = LifecycleSuite {
+            source: "src/original.rs",
+            functions: &["required", "required"],
+            harness_prefix: "owner::",
+            filter: "owner::",
+        };
+        assert!(require_unique_suite_tests(&[repeated_in_one_suite]).is_err());
+        assert!(require_unique_suite_tests(ENROLLMENT_NATIVE_CUSTODY_SUITES).is_ok());
+        assert!(require_unique_suite_tests(ENROLLMENT_SIMULATOR_CUSTODY_SUITES).is_ok());
+    }
+
+    #[test]
     fn required_suites_select_their_actual_package_harness() {
         assert!(!DEPENDENCY_SUITES.is_empty());
         assert!(!AGENT_SUITES.is_empty());
@@ -1262,7 +1954,10 @@ mod tests {
         for suite in APP_OBSERVATION_SUITES {
             assert!(suite.source.starts_with("crates/aura-app/"));
         }
-        for suite in ABSOLUTE_PROVIDER_SUITES {
+        for suite in ABSOLUTE_PROVIDER_SUITES
+            .iter()
+            .chain(REGISTERED_TIMER_CUSTODY_SUITES)
+        {
             assert!(suite.source.starts_with("crates/aura-testkit/"));
         }
         for suite in NATIVE_ABSOLUTE_PROVIDER_SUITES {
@@ -1271,7 +1966,11 @@ mod tests {
         for suite in DEPENDENCY_SUITES {
             assert!(suite.source.starts_with("tests/"));
         }
-        for suite in AGENT_SUITES {
+        for suite in AGENT_SUITES
+            .iter()
+            .chain(ENROLLMENT_NATIVE_CUSTODY_SUITES)
+            .chain(ENROLLMENT_SIMULATOR_CUSTODY_SUITES)
+        {
             assert!(suite.source.starts_with("crates/aura-agent/"));
         }
         let contact = AGENT_SUITES
@@ -1342,12 +2041,45 @@ mod tests {
     #[test]
     fn required_quorum_window_and_control_evidence_rejects_missing_ignored_or_zero_execution() {
         for name in [
+            "owned_admission_retains_original_capability_until_targeted_disposal",
+            "threaded_all_done_retains_owned_session_until_actual_disposal",
+            "original_ack_settlement_waits_for_actual_disposition_and_native_source",
+            "dropped_ack_wait_retains_closed_gate_until_actual_borrow_disposal",
+            "original_execution_failure_precedes_later_ack_failure",
+            "original_ack_borrow_blocks_replacement_after_window_permit_drop",
+            "original_transport_gate_rejects_foreign_semaphore_permit",
+            "original_ack_borrows_refuse_capacity_without_early_settlement",
+            "original_admitted_ack_rejects_foreign_manifest_without_disturbing_original_owner",
+            "original_broker_adapter_retains_network_and_native_source",
+            "original_owner_retires_before_ack_even_with_handle_and_observer_held",
+            "exclusive_original_disposal_rejects_foreign_and_sibling_subtrees",
+            "exclusive_original_disposal_remembers_completed_dropped_descendant",
+            "signed_notice_close_fault_retries_original_child_and_retains_signed_failure",
+            "signed_notice_candidate_runtime_tree_cancellation_reconciles_same_original_owner",
+            "signed_notice_eligible_before_close_runtime_tree_cancellation_reconciles_same_original_owner",
             "original_completion_observation_releases_execution_lease_without_renewing_clock",
             "actual_admitted_vm_control_and_acceptance_reject_foreign_decisions",
             "malformed_native_package_retains_original_codec_cause",
+            "verified_request_required_cancellation_disposes_original_without_confirmation",
+            "original_issuer_progress_time_failure_survives_committed_cancellation",
+            "original_issuer_progress_time_failure_survives_required_cancellation_before_publication",
+            "original_issuer_progress_time_failure_survives_required_cancellation_after_terminal_retention",
+            "original_issuer_notice_close_clock_failure_preserves_delivery_and_original_progress_error",
+            "original_issuer_operation_error_survives_committed_cancellation_during_vm_close",
+            "verified_request_close_fault_retains_same_original_for_cleanup_retry",
+            "original_verified_rejection_settles_issuer_resources_without_cancellation",
+            "original_finalizer_and_protocol_causes_survive_both_publication_orders",
+            "late_original_finalizer_keeps_protocol_primary_after_observation",
+            "signed_response_candidate_selected_time_refuses_without_terminal_receipt",
+            "signed_notice_candidate_waiter_cancellation_retains_original_owner",
+            "signed_notice_candidate_required_cancellation_reconciles_same_original_owner",
+            "cancellation_cannot_cross_a_claimed_selected_time_gate",
         ] {
             let suite = AGENT_SUITES
                 .iter()
+                .chain(ENROLLMENT_NATIVE_CUSTODY_SUITES)
+                .chain(ENROLLMENT_SIMULATOR_CUSTODY_SUITES)
+                .chain(REGISTERED_TIMER_CUSTODY_SUITES)
                 .find(|suite| suite.functions.contains(&name))
                 .expect("actual quorum boundary fixture must remain required");
             let exact = format!("{}{name}", suite.harness_prefix);

@@ -439,7 +439,7 @@ impl RetainedFailureAdmissionCapability {
     pub(crate) fn admitted(&self) -> &AdmittedEnrollmentManifest {
         &self.admitted
     }
-    pub(super) fn frame(&self) -> &super::enrollment_vm_admission::EnrollmentControlFrame {
+    pub(crate) fn frame(&self) -> &super::enrollment_vm_admission::EnrollmentControlFrame {
         &self.frame
     }
     pub(crate) fn observed_at_ms(&self) -> u64 {
@@ -454,6 +454,60 @@ impl RetainedFailureAdmissionCapability {
 }
 pub(crate) struct DurableFailedEnrollmentCapability {
     evidence: super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability,
+}
+
+/// Readback of the exact protected receipt written under the original invitee
+/// owner. It is not a reconstructed activation capability or a serialized token.
+pub(super) struct OriginalInviteeRetentionWitness {
+    committed: bool,
+    manifest_digest: [u8; 32],
+    frame_digest: [u8; 32],
+    acknowledged_at_ms: u64,
+    frozen_budget_digest: [u8; 32],
+}
+impl OriginalInviteeRetentionWitness {
+    fn from_record(
+        committed: bool,
+        manifest_digest: [u8; 32],
+        frame: &super::enrollment_vm_admission::EnrollmentControlFrame,
+        acknowledged: &crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
+    ) -> Result<Self, EnrollmentManifestError> {
+        let bytes = aura_core::util::serialization::to_vec(frame).map_err(boundary)?;
+        Ok(Self {
+            committed,
+            manifest_digest,
+            frame_digest: aura_core::hash::hash(&bytes),
+            acknowledged_at_ms: acknowledged.acknowledged_at_ms(),
+            frozen_budget_digest: aura_core::hash::hash(acknowledged.frozen_budget_bytes()),
+        })
+    }
+
+    pub(super) fn require_original(
+        &self,
+        terminal: &super::enrollment_vm_admission::VerifiedEnrollmentTerminal,
+        acknowledged: &crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
+    ) -> Result<(), EnrollmentManifestError> {
+        let (committed, digest, frame) = match terminal {
+            super::enrollment_vm_admission::VerifiedEnrollmentTerminal::Committed(proof) => {
+                (true, proof.manifest_digest(), proof.frame())
+            }
+            super::enrollment_vm_admission::VerifiedEnrollmentTerminal::Failed(proof) => {
+                (false, proof.manifest_digest(), proof.frame())
+            }
+        };
+        let bytes = aura_core::util::serialization::to_vec(frame).map_err(boundary)?;
+        if self.committed != committed
+            || self.manifest_digest != digest
+            || self.manifest_digest != acknowledged.manifest_digest()
+            || self.frame_digest != aura_core::hash::hash(&bytes)
+            || self.acknowledged_at_ms != acknowledged.acknowledged_at_ms()
+            || self.frozen_budget_digest
+                != aura_core::hash::hash(acknowledged.frozen_budget_bytes())
+        {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        Ok(())
+    }
 }
 impl DurableFailedEnrollmentCapability {
     pub(crate) fn evidence(
@@ -494,11 +548,16 @@ fn failure_location(
 )]
 pub(super) async fn retain_verified_failure(
     effects: &AuraEffectSystem,
-    failure: super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability,
-    acknowledged: crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
-) -> Result<DurableFailedEnrollmentCapability, EnrollmentManifestError> {
-    persist_verified_failure(effects, &failure, &acknowledged).await?;
-    Ok(DurableFailedEnrollmentCapability { evidence: failure })
+    failure: &super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability,
+    acknowledged: &crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
+) -> Result<OriginalInviteeRetentionWitness, EnrollmentManifestError> {
+    persist_verified_failure(effects, failure, acknowledged).await?;
+    OriginalInviteeRetentionWitness::from_record(
+        false,
+        failure.manifest_digest(),
+        failure.frame(),
+        acknowledged,
+    )
 }
 async fn persist_verified_failure(
     effects: &AuraEffectSystem,
@@ -569,6 +628,17 @@ async fn persist_verified_failure(
             .ok_or(EnrollmentManifestError::Pin)?;
     if retained.evidence().manifest_digest() != record.manifest_digest
         || retained.evidence().reason() != failure.reason()
+    {
+        return Err(EnrollmentManifestError::Pin);
+    }
+    // The canonical readout proves its signature; the original writer still
+    // requires exact bytes, including signed frame, original timestamp and
+    // frozen budget, before treating this as the same interrupted write.
+    if effects
+        .secure_retrieve(&key, &[SecureStorageCapability::Read])
+        .await
+        .map_err(boundary)?
+        != bytes
     {
         return Err(EnrollmentManifestError::Pin);
     }
@@ -668,7 +738,7 @@ impl RetainedConfirmationAdmission {
     pub(crate) fn admitted(&self) -> &AdmittedEnrollmentManifest {
         &self.admitted
     }
-    pub(super) fn frame(&self) -> &super::enrollment_vm_admission::EnrollmentControlFrame {
+    pub(crate) fn frame(&self) -> &super::enrollment_vm_admission::EnrollmentControlFrame {
         &self.frame
     }
     pub(crate) fn confirmed_at_ms(&self) -> u64 {
@@ -725,9 +795,9 @@ fn same_signed_invitation(left: &Invitation, right: &Invitation) -> bool {
 
 pub(super) async fn retain_verified_confirmation(
     effects: &AuraEffectSystem,
-    confirmed: super::enrollment_vm_admission::VerifiedEnrollmentConfirmation,
-    acknowledged: crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
-) -> Result<DurableConfirmedEnrollmentCapability, EnrollmentManifestError> {
+    confirmed: &super::enrollment_vm_admission::VerifiedEnrollmentConfirmation,
+    acknowledged: &crate::runtime::services::enrollment_window::AcknowledgedEnrollmentWindow,
+) -> Result<OriginalInviteeRetentionWitness, EnrollmentManifestError> {
     let manifest = confirmed.manifest();
     if effects.device_id() != manifest.invitee_device
         || acknowledged.manifest_digest() != confirmed.manifest_digest()
@@ -776,9 +846,20 @@ pub(super) async fn retain_verified_confirmation(
         .await
         .map_err(boundary)?;
     if outcome == aura_core::effects::secure::ImmutableSecureStoreOutcome::Created {
-        return Ok(DurableConfirmedEnrollmentCapability {
-            evidence: confirmed,
-        });
+        let stored = effects
+            .secure_retrieve(&key, &[SecureStorageCapability::Read])
+            .await
+            .map_err(boundary)?;
+        return if stored == bytes {
+            OriginalInviteeRetentionWitness::from_record(
+                true,
+                confirmed.manifest_digest(),
+                confirmed.frame(),
+                acknowledged,
+            )
+        } else {
+            Err(EnrollmentManifestError::Pin)
+        };
     }
     // Existing is not success. Reverify actual original pinned commitment and
     // require the same canonical confirmation before returning its capability.
@@ -796,7 +877,20 @@ pub(super) async fn retain_verified_confirmation(
     {
         return Err(EnrollmentManifestError::Pin);
     }
-    Ok(retained)
+    if effects
+        .secure_retrieve(&key, &[SecureStorageCapability::Read])
+        .await
+        .map_err(boundary)?
+        != bytes
+    {
+        return Err(EnrollmentManifestError::Pin);
+    }
+    OriginalInviteeRetentionWitness::from_record(
+        true,
+        confirmed.manifest_digest(),
+        confirmed.frame(),
+        acknowledged,
+    )
 }
 
 /// Locator IDs identify the receipt; they do not authorize activation. This

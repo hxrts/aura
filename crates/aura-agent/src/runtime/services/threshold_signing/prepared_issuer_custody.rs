@@ -15,13 +15,7 @@ pub(super) struct OriginalPreparedIssuerOperation {
     pub(super) setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
     pub(super) preparation: crate::runtime_bridge::enrollment_quorum::OriginalIssuerPreparation,
     pub(super) completed: tokio::sync::oneshot::Sender<()>,
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Synchronous before-Ready result deposit; no guard crosses await"
-    )]
-    pub(super) result: Arc<
-        parking_lot::Mutex<Option<super::enrollment_quorum_registry::OriginalIssuerCompletion>>,
-    >,
+    pub(super) result: super::enrollment_quorum_registry::OriginalIssuerCompletionSlot,
     pub(super) mode: crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode,
     pub(super) ready: OriginalPreparedIssuerReadySender,
 }
@@ -37,7 +31,7 @@ impl OriginalPreparedIssuerOperation {
             .await
         {
             Ok(result) => {
-                *self.result.lock() = Some(Ok(result));
+                self.result.with(|slot| *slot = Some(Ok(result)));
                 let _ = self.completed.send(());
                 if self.mode == crate::runtime_bridge::enrollment_quorum::OriginalIssuerLaunchMode::SingleSigner {
                     if let Some(ready) = self.ready.lock().take() {
@@ -51,7 +45,7 @@ impl OriginalPreparedIssuerOperation {
                     message: "original owned enrollment issuance failed".into(),
                     source: Some(Arc::new(source)),
                 };
-                *self.result.lock() = Some(Err(native.clone()));
+                self.result.with(|slot| *slot = Some(Err(native.clone())));
                 let _ = self.completed.send(());
                 Err(native)
             }

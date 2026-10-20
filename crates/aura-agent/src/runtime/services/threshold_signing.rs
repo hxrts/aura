@@ -5077,10 +5077,6 @@ impl ValidatedLocalEnrollmentSigningMaterial {
 }
 
 impl ThresholdSigningService {
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-    )]
     async fn launch_original_issuer(
         &self,
         agent: Arc<crate::core::AuraAgent>,
@@ -5112,7 +5108,9 @@ impl ThresholdSigningService {
         let ready_sender = preparation.ready.clone();
         let (start, started) = tokio::sync::oneshot::channel();
         let (completed_sender, completed) = tokio::sync::oneshot::channel();
-        let completed_result = Arc::new(parking_lot::Mutex::new(None));
+        let completed_result = Arc::new(super::issuer_error_custody::SynchronousCustodyCell::new(
+            None,
+        ));
         let task_result = completed_result.clone();
         let task_ready = ready_sender.clone();
         let operation = prepared_issuer_custody::OriginalPreparedIssuerOperation {
@@ -5138,10 +5136,10 @@ impl ThresholdSigningService {
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let task = group.spawn_original_local_required_custody("enrollment.original-prepared-issuer".into(), Box::new(custody), None)
+                let task = group.spawn_original_local_required_custody_with_resident_cleanup("enrollment.original-prepared-issuer".into(), Box::new(custody), None)
                     .map_err(|rejected| prepared_issuer_custody::retain_rejected(rejected.into_local()))?;
             } else {
-                let task = group.spawn_original_required_custody("enrollment.original-prepared-issuer".into(), Box::new(custody), None)
+                let task = group.spawn_original_required_custody_with_resident_cleanup("enrollment.original-prepared-issuer".into(), Box::new(custody), None)
                     .map_err(|rejected| prepared_issuer_custody::retain_rejected(rejected.into_native()))?;
             }
         }
@@ -5926,9 +5924,7 @@ impl OriginalEnrollmentPeerAdmission {
             test.release.notify_one();
             let observer = test
                 .disposal
-                .lock()
-                .expect("original disposal observation lock")
-                .take()
+                .with(Option::take)
                 .expect("actual original disposal observer");
             let disposed = observer.await_disposal().await;
             let aura_core::effects::task::RequiredTaskExit::Failed(actual_source) =
@@ -6104,15 +6100,12 @@ impl ThresholdSigningService {
             self.effects.device_id(),
         )?;
         if test.cleanup {
-            *test
-                .disposal
-                .lock()
-                .expect("original disposal observation lock") =
-                Some(self.shared.quorum.original_peer_disposal_for_test(
-                    subject,
-                    ceremony,
-                    self.effects.device_id(),
-                )?);
+            let observer = self.shared.quorum.original_peer_disposal_for_test(
+                subject,
+                ceremony,
+                self.effects.device_id(),
+            )?;
+            test.disposal.with(|slot| *slot = Some(observer));
         }
         original
             .execute(effects.as_ref(), || async {
@@ -6508,21 +6501,13 @@ impl std::error::Error for EnrollmentParticipantStartupFailure {
 struct RejectedSigningTaskCustody<T: ?Sized + Send> {
     #[source]
     source: AuraError,
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-    )]
-    retained: parking_lot::Mutex<Box<T>>,
+    retained: super::issuer_error_custody::SynchronousCustodyCell<Box<T>>,
 }
 impl<T: ?Sized + Send> std::fmt::Debug for RejectedSigningTaskCustody<T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("RejectedSigningTaskCustody")
     }
 }
-#[allow(
-    clippy::disallowed_types,
-    reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-)]
 fn retain_rejected_signing_custody<T: ?Sized + Send + 'static>(
     rejected: aura_core::effects::task::RejectedRequiredTask<T>,
 ) -> AuraError {
@@ -6530,7 +6515,7 @@ fn retain_rejected_signing_custody<T: ?Sized + Send + 'static>(
         message: "admit original approved signing custody".into(),
         source: Some(Arc::new(RejectedSigningTaskCustody {
             source: rejected.source,
-            retained: parking_lot::Mutex::new(rejected.obligation),
+            retained: super::issuer_error_custody::SynchronousCustodyCell::new(rejected.obligation),
         })),
     }
 }
@@ -7086,6 +7071,7 @@ impl OriginalIssuerTranscriptSigningCustody {
         if matches!(
             decision,
             super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected
+                | super::enrollment_window::OriginalIssuerResourceDecision::Interrupted
         ) {
             self.retire_original_positive_for_cleanup(child)?;
             self.retire_original_for_cleanup()?;
@@ -7903,19 +7889,13 @@ pub(crate) struct OriginalPeerCommitPostreadTest {
     completed: std::sync::atomic::AtomicBool,
     cleanup: bool,
     cleanup_source: Arc<OriginalPeerCleanupCancellation>,
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-    )]
-    disposal: std::sync::Mutex<Option<crate::task_registry::OriginalRequiredTaskDisposalObserver>>,
+    disposal: super::issuer_error_custody::SynchronousCustodyCell<
+        Option<crate::task_registry::OriginalRequiredTaskDisposalObserver>,
+    >,
     cleanup_completed: tokio::sync::Notify,
 }
 #[cfg(test)]
 impl OriginalPeerCommitPostreadTest {
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Synchronous runtime custody deposit; the lock guard never crosses an await"
-    )]
     pub(crate) fn new(clock: aura_testkit::time::ManualPhysicalClock, cleanup: bool) -> Self {
         Self {
             clock,
@@ -7926,7 +7906,7 @@ impl OriginalPeerCommitPostreadTest {
             completed: false.into(),
             cleanup,
             cleanup_source: Arc::new(OriginalPeerCleanupCancellation),
-            disposal: std::sync::Mutex::default(),
+            disposal: super::issuer_error_custody::SynchronousCustodyCell::new(None),
             cleanup_completed: tokio::sync::Notify::default(),
         }
     }

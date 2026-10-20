@@ -165,16 +165,61 @@ impl InvitationHandler {
         .await
     }
 
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentExecutionChild",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn resume_original_enrollment_cancellation(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        retained: Arc<super::enrollment_trust::RetainedEnrollmentVmControl>,
+        ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+        budget: crate::runtime::services::enrollment_window::EnrollmentExecutionChild,
+        retirement_destination: Arc<
+            crate::handlers::invitation_service::OriginalIssuerTerminalDestination,
+        >,
+        cancellation: crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
+    ) -> AgentResult<super::IssuerEnrollmentTerminalOutcome> {
+        Box::pin(
+            InvitationDeviceEnrollmentHandler::new(self).resume_original_enrollment_cancellation(
+                effects,
+                retained,
+                ceremony_runner,
+                budget,
+                retirement_destination,
+                cancellation,
+            ),
+        )
+        .await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn execute_device_enrollment_invitee(
         &self,
         effects: Arc<AuraEffectSystem>,
-        root: crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+        root: &mut crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
             super::enrollment_manifest_admission::AdmittedEnrollmentManifest,
         >,
     ) -> AgentResult<()> {
         Box::pin(
             InvitationDeviceEnrollmentHandler::new(self)
                 .execute_device_enrollment_invitee(effects, root),
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_device_enrollment_invitee_retained(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        root: &mut crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+            super::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        >,
+        terminal: &mut super::OriginalInviteeTerminalCustody,
+    ) -> AgentResult<()> {
+        Box::pin(
+            InvitationDeviceEnrollmentHandler::new(self)
+                .execute_device_enrollment_invitee_with_custody(effects, root, terminal),
         )
         .await
     }

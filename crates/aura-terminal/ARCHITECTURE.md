@@ -89,8 +89,10 @@ separate and still requires its own recovery boundary.
 - Runtime bring-up retains the original agent error as its native source.
   `AURA_SECURE_STORAGE_BACKEND` explicitly selects `platform` or
   `filesystem-fallback`; invalid values fail construction. The runtime owns
-  admission of filesystem fallback. LAN tooling requests that provider to
-  avoid credential prompts while retaining production runtime semantics.
+  admission of filesystem fallback. Unattended integrations explicitly enable
+  development keys and select their provider through the existing effects.
+  Shipping builds select `production-build` and exclude the native hot-key
+  implementation; an environment override cannot enable code that is absent.
 
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;
