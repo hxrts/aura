@@ -81,6 +81,9 @@ if [[ -z "$changed_tell" ]]; then
   exit 0
 fi
 
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/aura-protocol-compat.XXXXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+
 status=0
 for file in $changed_tell; do
   if [[ ! -f "$file" ]]; then
@@ -93,7 +96,7 @@ for file in $changed_tell; do
   fi
 
   echo "checking protocol compatibility: $file"
-  baseline_tmp="$(mktemp)"
+  baseline_tmp="$scratch/baseline.tell"
   git show "${BASE_REF}:${file}" > "$baseline_tmp"
   if has_dynamic_roles "$baseline_tmp" || has_dynamic_roles "$file"; then
     echo "skipping dynamic-role choreography without static projection support: $file"

@@ -3506,3 +3506,12 @@ Exercise the actual production scanner with production following a closed test
 module, text decoys and macro tokens; classifier-only coverage does not prove
 scanner wiring. Run `just _policy-check check security-boundary-policy` before
 broader CI.
+
+### Wrapper scratch ownership checks
+
+`just ci-preflight` runs `scripts/check/test-temporary-owner-wrappers.sh` before
+the real prerequisite checks. These fake-command contracts exercise preflight,
+protocol compatibility and quickstart scratch ownership without building Rust or
+opening an account. They retain actual command refusal statuses, check cleanup
+on success and failure, and protect unrelated PID-named temporary files. Scratch
+retirement does not certify shutdown of any native process, account or protocol.
