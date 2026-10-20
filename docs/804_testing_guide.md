@@ -1863,6 +1863,15 @@ source location when safely parseable, or a status class) and
 points to those protected logs for details. At terminal status, an atomic
 `completion.json` beside the receipt provides its path, exit status and UTC
 completion time for file watchers, after command output has flushed.
+Use `aura_receipt_validate_terminal_compile_commands` from
+`scripts/dev/build-receipt.sh` to check a terminal schema-2 receipt against a
+nonempty JSON array of expected compile argv arrays. It checks their exact order
+and count, successful phase outcomes and the separate final command-summary row.
+That summary has no compile argv. Empty phases, missing or unexpected repeated compile
+commands, pending outcomes and multiple receipt documents fail validation.
+Callers must also verify source/configuration identity, the matching completion
+record, exact test discovery/execution and protected artifact identity. This
+helper provides no resource-settlement acknowledgment.
 For coordinator wakeups, create a one-shot private subscriber with
 `bash scripts/dev/receipt-events.sh --create`, then block on
 `bash scripts/dev/receipt-events.sh --next "$FIFO"` in a separate caller-owned
@@ -3515,3 +3524,17 @@ protocol compatibility and quickstart scratch ownership without building Rust or
 opening an account. They retain actual command refusal statuses, check cleanup
 on success and failure, and protect unrelated PID-named temporary files. Scratch
 retirement does not certify shutdown of any native process, account or protocol.
+
+The static web wrapper owns a private completed Dioxus configuration backup
+before its first live edit. Its original config is restored through same-directory
+staging and atomic replacement before admitting the server. A refused restoration
+retains the complete backup and reports its path; a prior build/edit/cancellation
+status remains primary while cleanup failure is reported independently. This does
+not protect against SIGKILL, host death or an allocation lost before its path is
+observable. It requires exclusive single-invocation
+access while editing/restoring; concurrent independent config writers are unsupported.
+Symlink and non-regular configs are refused before allocation or live mutation.
+`just ci-preflight` runs `scripts/check/test-web-config-owner.sh`: fourteen actual
+wrapper cases inject allocation, partial copy/edit, TERM, build, restore-copy,
+rename, cleanup and non-regular-path refusals using fake commands. They invoke no real Dioxus/Cargo
+build or server and do not certify native tool or filesystem crash durability.

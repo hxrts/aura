@@ -327,3 +327,27 @@ aura_receipt_record_cleanup() {
       reclaimed_kib:(if $before!=null and $after!=null and $before>=$after
         then $before-$after else null end),free_before_kib:$free_before,free_after_kib:$free_after}]'
 }
+
+# Validate only terminal phase outcomes and the ordered compile command inventory.
+# Source/configuration, completion, test and resource proofs remain caller duties.
+aura_receipt_validate_terminal_compile_commands() {
+  local receipt="${1:?receipt required}" expected="${2:?expected argv JSON file required}"
+  [[ -f "$receipt" && -f "$expected" ]] || return 2
+  jq -se --slurpfile expected "$expected" '
+    def argv: type=="array" and length>0 and all(.[];type=="string") and (.[0]|length)>0;
+    if length!=1 then false else .[0] | (
+    ($expected|length)==1 and
+    ($expected[0]|type=="array" and length>0 and all(.[];argv)) and
+    .schema==2 and .current_phase=="finished" and has("active_phase") and .active_phase==null and
+    .command_exit_status==0 and .final_exit_status==0 and
+    (.phases|type=="array" and length>1 and all(.[];
+      type=="object" and .exit_status==0 and
+      (.phase=="compile" or .phase=="discovery" or .phase=="execution" or
+       .phase=="disposal" or .phase=="command") and
+      (if .phase=="command" then .command_argv==null
+       else (.command_argv|argv) and .command_exit_status==0 end))) and
+    ([.phases[]|select(.phase=="compile")|.command_argv]==$expected[0]) and
+    ([.phases[]|select(.phase=="command")]|length)==1 and
+    .phases[-1].phase=="command" and .command_phase==.phases[-1]) end
+  ' "$receipt" >/dev/null
+}

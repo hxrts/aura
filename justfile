@@ -735,7 +735,7 @@ ci-workspace-wasm-test:
         --exclude aura-terminal \
         --exclude aura-simulator \
         --exclude aura-quint \
-        --exclude aura-agent \
+        --exclude hxrts-aura-agent \
         --exclude aura-harness \
         --exclude aura-testkit
     WASM_BINDGEN_USE_BROWSER=1 \
@@ -794,6 +794,7 @@ ci-user-flow-coverage:
 # Fast environment sanity checks before the expensive matrix.
 ci-preflight:
     bash scripts/check/test-temporary-owner-wrappers.sh
+    bash scripts/check/test-web-config-owner.sh
     bash scripts/ci/preflight.sh
 
 # Verify shared user-flow policy guardrails and required docs/guidance sync
