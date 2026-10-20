@@ -17,17 +17,31 @@ command -v jq >/dev/null 2>&1 || {
   exit 1
 }
 
+# Each output has its own same-directory stage. Publication is two independent
+# atomic replacements; it is not an atomic two-artifact transaction.
+[[ "$TRACE" != "$SCENARIO" ]] || { echo 'error: trace and scenario paths must differ' >&2; exit 2; }
+[[ ! -d "$TRACE" && ! -d "$SCENARIO" ]] || { echo 'error: output destination is a directory' >&2; exit 2; }
 mkdir -p "$(dirname "$TRACE")" "$(dirname "$SCENARIO")"
-quint run --main=semantic_observation_smoke --seed="$SEED" --max-samples=1 --n-traces=1 --max-steps=16 --out-itf="$TRACE" "$SPEC" >/dev/null
+trace_identity="$(cd "$(dirname "$TRACE")" && pwd -P)/$(basename "$TRACE")"
+scenario_identity="$(cd "$(dirname "$SCENARIO")" && pwd -P)/$(basename "$SCENARIO")"
+[[ "$trace_identity" != "$scenario_identity" ]] || { echo 'error: trace and scenario destinations alias' >&2; exit 2; }
+trace_stage=''
+scenario_stage=''
+trap '[[ -z "$trace_stage" ]] || rm -rf -- "$trace_stage"; [[ -z "$scenario_stage" ]] || rm -rf -- "$scenario_stage"' EXIT
+trace_stage="$(mktemp -d "$(dirname "$TRACE")/.aura-quint-observation.XXXXXX")"
+scenario_stage="$(mktemp -d "$(dirname "$SCENARIO")/.aura-quint-observation.XXXXXX")"
+QUINT_TRACE_SEED="$SEED" QUINT_TRACE_MAIN=semantic_observation_smoke QUINT_TRACE_MAX_STEPS=16 \
+  bash "$ROOT/scripts/verify/quint-trace.sh" generate "$SPEC" "$trace_stage/trace.json" > /dev/null
 
-mapfile -t steps < <(jq -r '.states[].phase["#bigint"]' "$TRACE")
-expected=(0 1 2 3 4 5 6 7 8)
-if [[ "${steps[*]}" != "${expected[*]}" ]]; then
-  echo "error: unexpected Quint smoke trace shape: ${steps[*]}" >&2
+# Observe jq's status directly: a process-substitution failure is not the status
+# of the surrounding read/mapfile operation.
+steps="$(jq -er '[.states[].phase["#bigint"]] | map(tostring) | join(" ")' "$trace_stage/trace.json")"
+if [[ "$steps" != '0 1 2 3 4 5 6 7 8' ]]; then
+  echo "error: unexpected Quint smoke trace shape: $steps" >&2
   exit 1
 fi
 
-cat > "$SCENARIO" <<'SCENARIO_EOF'
+cat > "$scenario_stage/scenario.toml" <<'SCENARIO_EOF'
 id = "quint-semantic-observation-smoke"
 goal = "Execute a Quint-originated semantic observation flow through aura-harness."
 
@@ -86,5 +100,14 @@ actor = "alice"
 screen_id = "settings"
 timeout_ms = 30000
 SCENARIO_EOF
+
+mv -f "$trace_stage/trace.json" "$TRACE"
+if mv -f "$scenario_stage/scenario.toml" "$SCENARIO"; then
+  :
+else
+  publication_failure=$?
+  echo "error: trace published at $TRACE; scenario publication failed at $SCENARIO (outputs are not an atomic pair)" >&2
+  exit "$publication_failure"
+fi
 
 echo "wrote $SCENARIO from Quint trace $TRACE"

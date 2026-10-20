@@ -45,6 +45,13 @@ Trace generation stages output privately and replaces it only after successful
 generation/normalization; setup and trace checks retire their own temporary
 artifacts on success and failure.
 
+`quint-observation.sh` reuses the trace helper with its original main, seed,
+and 16-step limit. It validates the complete expected phase sequence and stages
+the scenario before publishing either output. Trace and scenario publication
+are individually atomic replacements, not an atomic pair: if the second rename
+fails, the command fails and reports that the trace was already published.
+Consumers must require successful completion before using the pair.
+
 `just verification-coverage --json` emits schema version 2. This is a source
 inventory, with `evidence.status` equal to `unknown` and `receipts_consumed`
 false. The former `metrics.verified_specs` field is intentionally removed;
