@@ -1039,6 +1039,7 @@ ci-harness-actor-vs-move-ownership:
 
 # Quint typecheck
 ci-quint-typecheck:
+    bash scripts/verify/test-quint-workflow.sh
     just quint check
 
 # Quint model checking
