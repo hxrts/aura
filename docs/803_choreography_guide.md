@@ -305,6 +305,24 @@ The currently published public protocol-critical surfaces are:
 These are the only current Aura-owned runtime consumers theorem-pack mapping is
 allowed to target.
 
+Treat these capability names as runtime admission surfaces. Before using an
+authority-language construct, trace its actual path through Aura's macro,
+`CompiledChoreography::global_type_json` / `local_type_r_json`,
+`CodeImage::from_local_types`, the machine compiler and the admitted role.
+Require a fixture that executes the intended issuance, consumption and terminal
+ordering. Metadata collectors and parser or obligation-checker acceptance alone
+do not establish that execution path.
+
+The inspected Telltale v19 release still rejects explicit commitment lifecycle,
+authority-local case/timeout, publication, materialization and handoff during
+the theory conversion used by Aura's VM artifacts. Its `Let` conversion traverses
+the continuation without emitting the bound authority operation. Keep those DSL
+surfaces unsupported for Aura protocol-obligation migration until their actual
+lowering and admitted-machine execution are verified. Existing runtime admission
+and owned-session APIs remain usable within their demonstrated contracts. Host
+futures, selected physical deadlines and resource cleanup remain with their
+actual Aura owners; semantic invalidation supplies no cleanup acknowledgment.
+
 ### Initial Aura Theorem-Pack Taxonomy
 
 Aura should keep the first taxonomy small:
