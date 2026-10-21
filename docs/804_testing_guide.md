@@ -1717,7 +1717,12 @@ to `scripts/dev/build-budget.sh --dry-run --no-prune --lane <lane> -- <command>`
 The preview reads the current source/workload identity, measured receipt peaks,
 and live reservations, then prints free space, incoming growth reservation,
 the 15 GiB floor, margin, and an advisory admission outcome. With no command,
-the incoming reservation is unknown. The exact `gates` commands
+the incoming reservation is unknown. A successful preview exits zero even when
+its advisory outcome is `refused`; its exit status cannot authorize a build.
+Enforce admission by running the actual command through the wrapper without
+`--dry-run`. If environment setup realizes substantial dependencies first, put
+that real admission after setup. Nested commands reuse their parent's held
+admission and do not establish fresh headroom. The exact `gates` commands
 `just ci-user-flow-policy`, `just ci-build-cache-policy`, and the actual
 `_policy-check` child argv `cargo run --quiet --manifest-path
 toolkit/xtask/Cargo.toml -- check security-boundary-policy` have distinct
