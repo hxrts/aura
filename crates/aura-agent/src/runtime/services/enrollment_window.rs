@@ -1,4 +1,5 @@
 //! Sealed durable clock owner for enrollment execution.
+mod cancelled_notice;
 use super::ceremony_tracker::RegisteredEnrollmentWindowCapability;
 use crate::handlers::invitation::enrollment_manifest_admission::{
     AdmittedEnrollmentManifest, NewEnrollmentAdmissionCapability,
@@ -9,6 +10,7 @@ use aura_core::effects::{
 };
 use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError};
+pub(crate) use cancelled_notice::OriginalCancelledNoticeWindowCapability;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, OwnedSemaphorePermit};
 
@@ -2563,41 +2565,6 @@ impl EnrollmentExecutionChild {
             _lease: self._lease.clone(),
         })
     }
-    /// Attenuate the existing owner to signed manifest validity using one owned
-    /// physical observation. No second read can shift the derived endpoint later.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "issued_notice_validity_window",
-        capability_type = EnrollmentExecutionChild,
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn issued_notice_validity_child(
-        &self,
-        effects: &AuraEffectSystem,
-        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-    ) -> Result<EnrollmentExecutionChild, AuraError> {
-        self.require_issued_notice_owner(issued)?;
-        let active = self
-            .derive_pending_birth(effects, |now, _| {
-                Ok(
-                    signed_notice_validity_remaining(now, issued.manifest().expires_at_ms)
-                        .and_then(|remaining| {
-                            self.active
-                                .child_budget(now, remaining)
-                                .map_err(AuraError::from)
-                        }),
-                )
-            })
-            .await
-            .map_err(AuraError::from)??;
-        Ok(Self {
-            active,
-            original: self.original.clone(),
-            checkpoint: self.checkpoint.clone(),
-            _lease: self._lease.clone(),
-        })
-    }
-
     pub(crate) async fn retry_delay(
         &self,
         effects: &AuraEffectSystem,

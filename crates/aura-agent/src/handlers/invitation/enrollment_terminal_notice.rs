@@ -93,6 +93,11 @@ fn pending_terminal_receive(status: AuraVmHostWaitStatus, step: &StepResult) -> 
 /// Each variant retains its protocol-specific owner; recovery has no active
 /// request/response admission authority.
 enum IssuedNoticeWindowCapability<'a> {
+    OriginalCancelled(
+        &'a crate::runtime::services::enrollment_window::OriginalCancelledNoticeWindowCapability<
+            'a,
+        >,
+    ),
     Active(&'a EnrollmentExecutionChild),
     Cancelled(
         &'a crate::runtime::services::enrollment_window::CancelledEnrollmentNoticeWindowCapability,
@@ -105,6 +110,9 @@ impl IssuedNoticeWindowCapability<'_> {
         effects: &AuraEffectSystem,
     ) -> AgentResult<()> {
         match self {
+            Self::OriginalCancelled(window) => window
+                .require_owner(issued, effects)
+                .map_err(AgentError::from),
             Self::Active(window) => window
                 .require_issued_notice_owner(issued)
                 .map_err(AgentError::from),
@@ -118,6 +126,7 @@ impl IssuedNoticeWindowCapability<'_> {
         effects: &AuraEffectSystem,
     ) -> Result<u64, aura_core::TimeoutBudgetError> {
         match self {
+            Self::OriginalCancelled(window) => window.remaining_ms(effects).await,
             Self::Active(window) => window.remaining_ms(effects).await,
             Self::Cancelled(window) => window.remaining_ms(effects).await,
         }
@@ -128,6 +137,7 @@ impl IssuedNoticeWindowCapability<'_> {
         source: TimeoutRunError<AgentError>,
     ) -> AgentError {
         match self {
+            Self::OriginalCancelled(window) => window.map_run_error(stage, source),
             Self::Active(window) => window.map_run_error(stage, source),
             Self::Cancelled(window) => window.map_run_error(stage, source),
         }
@@ -317,16 +327,31 @@ pub(super) async fn send_cancelled_notice(
 ) -> AgentResult<()> {
     let issued = terminal.issued();
     let validity = window
-        .issued_notice_validity_child(effects.as_ref(), issued)
-        .await
+        .original_cancelled_notice_window(effects.as_ref(), terminal, notice, destination)
         .map_err(AgentError::from)?;
+    #[cfg(test)]
+    {
+        let foreign = Arc::new(SignedCancelledNotice {
+            bytes: notice.bytes.clone(),
+        });
+        assert!(
+            window
+                .original_cancelled_notice_window(effects.as_ref(), terminal, &foreign, destination)
+                .is_err(),
+            "equal signed bytes cannot replace the actual retained notice owner"
+        );
+        validity
+            .require_owner(issued, effects.as_ref())
+            .expect("same actual live negative owner");
+        validity.assert_original_deadline_for_test();
+    }
     validity
         .execute(effects.as_ref(), || {
             Box::pin(async {
                 let completed = send_signed_cancelled_notice(
                     effects.clone(),
                     issued,
-                    IssuedNoticeWindowCapability::Active(&validity),
+                    IssuedNoticeWindowCapability::OriginalCancelled(&validity),
                     notice.bytes.clone(),
                     slot,
                 )
@@ -413,6 +438,9 @@ async fn send_signed_cancelled_notice(
                 NoticeIngressCapability::Issued(
                     issued,
                     match &window {
+                        IssuedNoticeWindowCapability::OriginalCancelled(owner) => {
+                            IssuedNoticeWindowCapability::OriginalCancelled(owner)
+                        }
                         IssuedNoticeWindowCapability::Active(owner) => {
                             IssuedNoticeWindowCapability::Active(owner)
                         }

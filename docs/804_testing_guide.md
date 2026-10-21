@@ -3598,3 +3598,22 @@ protocol compatibility and quickstart scratch ownership without building Rust or
 opening an account. They retain actual command refusal statuses, check cleanup
 on success and failure, and protect unrelated PID-named temporary files. Scratch
 retirement does not certify shutdown of any native process, account or protocol.
+
+For native `ManualPhysicalClock` rollback injection into one owning runtime task,
+use `script_next_current_task_observation` from that actual producer's acknowledged
+checkpoint callback. A global next-read override can be consumed by another
+runtime task sharing the selected provider. The task-bound script preserves the
+same provider and driven timer endpoints; it grants no cleanup acknowledgment.
+Keep the original signed-terminal and resource-disposal assertions after the
+injected operation returns.
+
+The live negative-notice correction keeps the two decisive cancellation rollback
+fixtures and their exact fault placement/assertions. Task-specific clock slots
+exclude foreign readers but do not isolate shared TimeoutBudget rollback state:
+a cancellation's actual final read can latch the same original high-water owner
+seen by its issuer descendants. The live signed-negative send therefore uses its
+actual negative authority throughout outer execution, inner finite-VM validity,
+per-round reads and retry delay. At the actual test issuance boundary, equal
+signed bytes in a foreign notice allocation are refused and original allocation
+start/signed-expiry-attenuated deadline are checked. These are additional
+assertions inside existing fixtures, not new discovered tests or execution proof.

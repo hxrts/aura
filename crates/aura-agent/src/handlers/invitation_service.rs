@@ -4982,6 +4982,7 @@ mod required_enrollment_task_tests {
             }
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn canonical_cancellation_negative_ack_preserves_rollback_on_same_profile_reopen() {
         let diagnostics = tracing::Dispatch::new(
@@ -5045,7 +5046,7 @@ mod required_enrollment_task_tests {
                     let selected_clock = selected_clock.clone();
                     move || {
                         selected_clock
-                            .script_next_observation(5_500)
+                            .script_next_current_task_observation(5_500)
                             .expect("script exact next physical observation at checkpoint return");
                     }
                 })))
@@ -5269,6 +5270,7 @@ mod required_enrollment_task_tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn canonical_cancellation_negative_checkpoint_write_failure_retains_original_custody_without_ack(
     ) {
@@ -5297,7 +5299,7 @@ mod required_enrollment_task_tests {
                 let clock = clock.clone();
                 move || {
                     clock
-                        .script_next_observation(5_500)
+                        .script_next_current_task_observation(5_500)
                         .expect("script selected provider's next original observation");
                 }
             })))

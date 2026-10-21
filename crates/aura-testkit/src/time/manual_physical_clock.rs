@@ -40,7 +40,8 @@ struct State {
     deadlines_changed: tokio::sync::Notify,
     observation_override: tokio::sync::Mutex<Option<Result<PhysicalTime, TimeError>>>,
     #[cfg(not(target_arch = "wasm32"))]
-    task_observation_failure: tokio::sync::Mutex<Option<(tokio::task::Id, TimeError)>>,
+    task_observation_override:
+        tokio::sync::Mutex<Option<(tokio::task::Id, Result<PhysicalTime, TimeError>)>>,
     sleep_failure: tokio::sync::Mutex<Option<TimeError>>,
     sleep_admission: tokio::sync::Mutex<SleepAdmission>,
     #[cfg(test)]
@@ -90,7 +91,7 @@ impl ManualPhysicalClock {
                 deadlines_changed: tokio::sync::Notify::new(),
                 observation_override: tokio::sync::Mutex::new(None),
                 #[cfg(not(target_arch = "wasm32"))]
-                task_observation_failure: tokio::sync::Mutex::new(None),
+                task_observation_override: tokio::sync::Mutex::new(None),
                 sleep_failure: tokio::sync::Mutex::new(None),
                 sleep_admission: tokio::sync::Mutex::new(None),
                 #[cfg(test)]
@@ -112,13 +113,42 @@ impl ManualPhysicalClock {
         let task = tokio::task::try_id().ok_or_else(|| TimeError::OperationFailed {
             reason: "selected physical fault requires a Tokio task".into(),
         })?;
-        let mut slot = self.state.task_observation_failure.lock().await;
+        let mut slot = self.state.task_observation_override.lock().await;
         if slot.is_some() {
             return Err(TimeError::OperationFailed {
                 reason: "selected physical fault already installed".into(),
             });
         }
-        *slot = Some((task, cause));
+        *slot = Some((task, Err(cause)));
+        Ok(())
+    }
+    /// Script the next read of the actual Tokio task installing this fault.
+    /// Foreign tasks sharing this provider cannot consume the observation.
+    /// This changes neither driven time nor any original timer endpoint.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn script_next_current_task_observation(&self, at_ms: u64) -> Result<(), TimeError> {
+        let task = tokio::task::try_id().ok_or_else(|| TimeError::OperationFailed {
+            reason: "selected physical observation requires a Tokio task".into(),
+        })?;
+        let mut slot = self
+            .state
+            .task_observation_override
+            .try_lock()
+            .map_err(|_| TimeError::OperationFailed {
+                reason: "selected physical observation is borrowed".into(),
+            })?;
+        if slot.is_some() {
+            return Err(TimeError::OperationFailed {
+                reason: "selected physical observation already installed".into(),
+            });
+        }
+        *slot = Some((
+            task,
+            Ok(PhysicalTime {
+                ts_ms: at_ms,
+                uncertainty: None,
+            }),
+        ));
         Ok(())
     }
     /// Script one actual physical read without changing independently driven
@@ -564,9 +594,9 @@ impl PhysicalTimeEffects for ManualPhysicalClock {
     async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(task) = tokio::task::try_id() {
-            let mut selected = self.state.task_observation_failure.lock().await;
+            let mut selected = self.state.task_observation_override.lock().await;
             if selected.as_ref().is_some_and(|(owner, _)| *owner == task) {
-                return Err(selected.take().expect("matched selected fault").1);
+                return selected.take().expect("matched selected fault").1;
             }
         }
         if let Some(observation) = self.state.observation_override.lock().await.take() {
@@ -1172,6 +1202,7 @@ mod tests {
             100
         );
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn selected_task_observation_fault_survives_other_runtime_readers() {
         let clock = ManualPhysicalClock::new(100);
@@ -1212,6 +1243,40 @@ mod tests {
         );
         resume.send(()).expect("selected task still owns fault");
         selected.await.expect("selected owner settled");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn selected_task_scripted_observation_survives_foreign_reads_without_moving_time() {
+        let clock = ManualPhysicalClock::new(6_000);
+        let owner_clock = clock.clone();
+        let (armed, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let owner = tokio::spawn(async move {
+            owner_clock
+                .script_next_current_task_observation(5_500)
+                .expect("actual owning task installs selected observation");
+            armed.send(()).expect("armed observation");
+            let _release = released.await;
+            let scripted = owner_clock.physical_time().await;
+            let subsequent = owner_clock.physical_time().await;
+            (scripted, subsequent)
+        });
+        observed.await.expect("original owning task armed");
+        let foreign_clock = clock.clone();
+        let foreign = tokio::spawn(async move { foreign_clock.physical_time().await }).await;
+        let driven = clock.now_ms();
+        let _release = release.send(());
+        let (scripted, subsequent) = owner.await.expect("same original task completes");
+        assert_eq!(
+            foreign
+                .expect("actual foreign task joins")
+                .expect("foreign reader unaffected")
+                .ts_ms,
+            6_000
+        );
+        assert_eq!(driven, 6_000);
+        assert_eq!(scripted.expect("owner selected observation").ts_ms, 5_500);
+        assert_eq!(subsequent.expect("owner one-shot consumed").ts_ms, 6_000);
     }
     #[tokio::test]
     async fn sleep_requires_explicit_observation_and_keeps_rollback_visible() {

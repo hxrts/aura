@@ -1155,8 +1155,16 @@ impl InvitationDeviceEnrollmentHandler {
         )
         .await;
         let (notice, cancelled_terminal) = settled.map_err(AgentError::from)?;
+        let negative_window = budget
+            .original_cancelled_notice_window(
+                effects.as_ref(),
+                &cancelled_terminal,
+                &notice,
+                retirement_destination.as_ref(),
+            )
+            .map_err(AgentError::from)?;
         loop {
-            let attempt = budget
+            let attempt = negative_window
                 .execute(effects.as_ref(), || {
                     Box::pin(super::enrollment_terminal_notice::send_cancelled_notice(
                         effects.clone(),
@@ -1169,7 +1177,7 @@ impl InvitationDeviceEnrollmentHandler {
                 })
                 .await
                 .map_err(|source| {
-                    budget.map_run_error("signed enrollment cancellation notice", source)
+                    negative_window.map_run_error("signed enrollment cancellation notice", source)
                 });
             match finish_original_enrollment_vm_slot(
                 attempt,
@@ -1189,15 +1197,9 @@ impl InvitationDeviceEnrollmentHandler {
                 Err(error)
                     if enrollment_notice_peer_unreachable(&error, retained.manifest().subject) =>
                 {
-                    budget
+                    negative_window
                         .retry_delay(effects.as_ref(), DEVICE_ENROLLMENT_RETRY_DELAY_MS)
-                        .await
-                        .map_err(|source| {
-                            budget.map_run_error(
-                                "enrollment cancellation notice retry",
-                                TimeoutRunError::Timeout(source),
-                            )
-                        })?;
+                        .await?;
                 }
                 Err(error) => return Err(error),
             }

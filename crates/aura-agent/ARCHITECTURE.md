@@ -2517,3 +2517,15 @@ resource ownership nor acknowledges disposal. Fixtures independently require the
 actual original disposal observation and weak resource absence afterward. A
 successful cleanup may legitimately destroy the resource cell before an external
 post-disposal observer can upgrade its weak reference.
+
+A live cancelled issuer sends its already-signed terminal notice through a
+borrowed negative-only window. Issuance requires the same original registered
+child, actual cancelled terminal, destination-retained signed notice allocation,
+and acknowledged original generation retirement. Its endpoint attenuates the
+original negative cleanup budget by the existing signed expiry; rollback history
+is retained and never cleared. Outer send, per-round validity and retry delay use
+that window. Positive enrollment operations and recovered notice capabilities
+retain their existing policies. The same notice VM cursor and original close
+continuation remain resident, and actual send completion is deposited before
+validation. A negative-only clock observation is not a positive terminal or
+resource acknowledgment; actual VM close and required subtree disposal still run.
