@@ -4703,12 +4703,9 @@ mod committed_receipt_tests {
                         futures::poll!(generation.as_mut()).is_pending(),
                         "actual original generation lease retained at cancellation boundary"
                     );
-                    probe.request_cancel().unwrap();
-                    let disposed = disposal.await_disposal().await;
-                    probe.require_original_disposal_for_test(&disposed).unwrap();
-                    drop(generation.await);
-                    let wrap_original = probe
-                        .with_retained_resources_for_test(|resources| {
+                    let wrap_born = born.is_some();
+                    let mut cleanup_observed = probe
+                        .observe_cleanup_before_retirement_for_test(move |resources| {
                             assert!(resources.reservation.is_none());
                             assert!(resources.root.is_none());
                             assert!(resources.registered.is_none());
@@ -4716,7 +4713,7 @@ mod committed_receipt_tests {
                                 .allocation
                                 .as_ref()
                                 .expect("same original producer retained");
-                            let wrap = if born.is_some() {
+                            let wrap = if wrap_born {
                                 Some(producer.acknowledged_wrap_original_for_test())
                             } else {
                                 if write_started {
@@ -4730,6 +4727,14 @@ mod committed_receipt_tests {
                             wrap
                         })
                         .unwrap();
+                    probe.request_cancel().unwrap();
+                    let disposed = disposal.await_disposal().await;
+                    probe.require_original_disposal_for_test(&disposed).unwrap();
+                    drop(generation.await);
+                    let wrap_original = cleanup_observed.try_recv().expect(
+                        "actual original producer observed successful cleanup before retirement",
+                    ).unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+                    probe.require_original_resources_retired_for_test().unwrap();
                     if let (Some(reference), Some((ceremony, authority, epoch, decision))) =
                         (born.as_ref(), wrap_original)
                     {
@@ -5007,14 +5012,8 @@ mod committed_receipt_tests {
                     println!(
                         "original-registration-drop: committed actual live profile before readback"
                     );
-                    probe.request_cancel().unwrap();
-                    let disposal = disposed.await_disposal().await;
-                    println!(
-                        "original-registration-drop: original required task actually disposed"
-                    );
-                    probe.require_original_disposal_for_test(&disposal).unwrap();
-                    probe
-                        .with_retained_resources_for_test(|resources| {
+                    let mut cleanup_observed = probe
+                        .observe_cleanup_before_retirement_for_test(|resources| {
                             assert!(
                                 resources.registered_custody.is_none(),
                                 "no signed-control custodian fabricated before readback"
@@ -5035,6 +5034,19 @@ mod committed_receipt_tests {
                                 );
                         })
                         .unwrap();
+                    probe.request_cancel().unwrap();
+                    let disposal = disposed.await_disposal().await;
+                    println!(
+                        "original-registration-drop: original required task actually disposed"
+                    );
+                    probe.require_original_disposal_for_test(&disposal).unwrap();
+                    cleanup_observed
+                        .try_recv()
+                        .expect(
+                            "actual original held cleanup assertions ran before owner retirement",
+                        )
+                        .unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+                    probe.require_original_resources_retired_for_test().unwrap();
                     drop(continue_readback);
                     return;
                 }

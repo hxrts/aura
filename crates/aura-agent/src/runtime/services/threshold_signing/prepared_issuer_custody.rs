@@ -156,6 +156,18 @@ impl OriginalPreparedIssuerTaskCustody {
         }
     }
 
+    #[cfg(test)]
+    async fn cleanup_observed_original_for_test(
+        &mut self,
+        exit: &RequiredTaskExit,
+    ) -> Result<RequiredTaskSettlement, AuraError> {
+        let settlement = self.cleanup_original(exit).await?;
+        if let Some(registration) = self.registration.get() {
+            registration.observe_cleanup_before_retirement_for_test(&self.retained)?;
+        }
+        Ok(settlement)
+    }
+
     async fn cleanup_original(
         &mut self,
         exit: &RequiredTaskExit,
@@ -379,7 +391,14 @@ impl aura_core::effects::task::RequiredTaskCustody for OriginalPreparedIssuerTas
         &'a mut self,
         exit: &'a RequiredTaskExit,
     ) -> futures::future::BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
-        Box::pin(self.cleanup_original(exit))
+        #[cfg(test)]
+        {
+            Box::pin(self.cleanup_observed_original_for_test(exit))
+        }
+        #[cfg(not(test))]
+        {
+            Box::pin(self.cleanup_original(exit))
+        }
     }
 }
 #[cfg(target_arch = "wasm32")]
@@ -391,6 +410,13 @@ impl aura_core::effects::task::LocalRequiredTaskCustody for OriginalPreparedIssu
         &'a mut self,
         exit: &'a RequiredTaskExit,
     ) -> futures::future::LocalBoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
-        Box::pin(self.cleanup_original(exit))
+        #[cfg(test)]
+        {
+            Box::pin(self.cleanup_observed_original_for_test(exit))
+        }
+        #[cfg(not(test))]
+        {
+            Box::pin(self.cleanup_original(exit))
+        }
     }
 }

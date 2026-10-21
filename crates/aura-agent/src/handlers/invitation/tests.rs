@@ -10174,6 +10174,9 @@ async fn interrupted_signed_issuance_retains_original_negative_cleanup_owner() {
             .await
             .unwrap();
         let effects = initiator.runtime().effects();
+        let (allocation_pending, resume_allocation) = effects
+            .hold_original_allocation_prewrite_for_test()
+            .unwrap();
         effects.fail_next_registration_seal_for_test().await;
         let probe = initiator
             .threshold_signing()
@@ -10181,26 +10184,11 @@ async fn interrupted_signed_issuance_retains_original_negative_cleanup_owner() {
             .await
             .expect("same original issuer task admitted before registration failure");
         let disposal = probe.disposal_observer().unwrap();
-        let failure = probe
-            .observe_initial_readiness_for_test()
+        allocation_pending
             .await
-            .expect_err("actual signed issuance interrupted at original registration seal");
-        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
-        let mut native = None;
-        while let Some(current) = source {
-            if let Some(error) = current.downcast_ref::<std::io::Error>() {
-                native = Some(error);
-                break;
-            }
-            source = current.source();
-        }
-        let native = native.expect("original registration seal IO source retained");
-        assert_eq!(native.kind(), std::io::ErrorKind::Other);
-        assert_eq!(native.to_string(), "required registration seal write");
-        let disposed = disposal.await_disposal().await;
-        probe.require_original_disposal_for_test(&disposed).unwrap();
-        probe
-            .with_retained_resources_for_test(|resources| {
+            .expect("actual original allocation is pending before registration seal fault");
+        let mut cleanup_observed = probe
+            .observe_cleanup_before_retirement_for_test(|resources| {
                 let original_failure = resources
                     .first_failure
                     .as_ref()
@@ -10222,6 +10210,29 @@ async fn interrupted_signed_issuance_retains_original_negative_cleanup_owner() {
                 assert!(resources.registered.is_none());
             })
             .unwrap();
+        resume_allocation
+            .send(())
+            .expect("release original provider after installing cleanup observation");
+        let failure = probe
+            .observe_initial_readiness_for_test()
+            .await
+            .expect_err("actual signed issuance interrupted at original registration seal");
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+        let mut native = None;
+        while let Some(current) = source {
+            if let Some(error) = current.downcast_ref::<std::io::Error>() {
+                native = Some(error);
+                break;
+            }
+            source = current.source();
+        }
+        let native = native.expect("original registration seal IO source retained");
+        assert_eq!(native.kind(), std::io::ErrorKind::Other);
+        assert_eq!(native.to_string(), "required registration seal write");
+        let disposed = disposal.await_disposal().await;
+        probe.require_original_disposal_for_test(&disposed).unwrap();
+        cleanup_observed.try_recv().expect("actual original producer observed retained failure and selected interval before retirement").unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+        probe.require_original_resources_retired_for_test().unwrap();
         drop(app);
         drop(probe);
         drop(agents);

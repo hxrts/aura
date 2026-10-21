@@ -2508,3 +2508,12 @@ and readiness publication. Test-only disposal observers move out of that cell
 before awaiting actual disposal; the original selected clock and acknowledgment
 owner are unchanged. Post-disposal assertions use the actual registered tracker
 handoff and original native failure identity, not a weak retired resource frame.
+
+Prepared-issuer cleanup fixtures observe original retained resources from a
+read-only callback in the actual cleanup producer, after successful settlement
+and before canonical required-task retirement. The callback deposits only its
+typed assertion result through a one-shot channel; it neither retains live
+resource ownership nor acknowledges disposal. Fixtures independently require the
+actual original disposal observation and weak resource absence afterward. A
+successful cleanup may legitimately destroy the resource cell before an external
+post-disposal observer can upgrade its weak reference.

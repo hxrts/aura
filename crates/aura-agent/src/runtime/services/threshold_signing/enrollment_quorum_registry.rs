@@ -57,7 +57,16 @@ struct OriginalInitialReadiness {
     retained: Option<OriginalReadyResult>,
 }
 
+#[cfg(test)]
+type OriginalCleanupObservation = Box<
+    dyn FnOnce(&crate::runtime_bridge::enrollment_quorum::OriginalPreparedIssuerResources) + Send,
+>;
 pub(super) struct PreparedIssuerEntry {
+    #[cfg(test)]
+    cleanup_observation: super::super::issuer_error_custody::SynchronousCustodyCell<
+        Option<OriginalCleanupObservation>,
+    >,
+
     #[cfg(test)]
     registered_owner: std::sync::OnceLock<
         std::sync::Weak<
@@ -162,6 +171,35 @@ impl OriginalPreparedIssuerRegistration {
             .set(digest)
             .map_err(|_| rejected(RegistryFailure::Collision))
     }
+    #[cfg(test)]
+    pub(super) fn observe_cleanup_before_retirement_for_test(
+        &self,
+        resources: &Arc<
+            tokio::sync::Mutex<
+                crate::runtime_bridge::enrollment_quorum::OriginalPreparedIssuerResources,
+            >,
+        >,
+    ) -> Result<(), AuraError> {
+        let Some(entry) = self.original.upgrade() else {
+            return Ok(());
+        };
+        let Some(observe) = entry.cleanup_observation.with(|slot| slot.take()) else {
+            return Ok(());
+        };
+        let expected = entry
+            .resources
+            .get()
+            .ok_or_else(|| rejected(RegistryFailure::Missing))?;
+        if !std::sync::Weak::ptr_eq(expected, &Arc::downgrade(resources)) {
+            return Err(rejected(RegistryFailure::Binding));
+        }
+        let borrowed = resources.try_lock().map_err(|source| AuraError::Internal {
+            message: "actual producer cleanup observation remains borrowed".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        observe(&borrowed);
+        Ok(())
+    }
     pub(crate) fn acknowledge_original_removal(&self) -> Result<(), AuraError> {
         let Some(entry) = self.original.upgrade() else {
             return Ok(());
@@ -246,23 +284,40 @@ impl OriginalPreparedIssuerProbe {
                 .ok_or_else(|| rejected(RegistryFailure::Missing))?,
         )
     }
-    pub(crate) fn with_retained_resources_for_test<R>(
+    /// Install a read-only callback while the actual original operation is held
+    /// Pending. The original task invokes it after actual cleanup success and
+    /// before returning its settlement; its result is not a disposal receipt.
+    pub(crate) fn observe_cleanup_before_retirement_for_test<R: Send + 'static>(
         &self,
-        observe: impl FnOnce(
-            &crate::runtime_bridge::enrollment_quorum::OriginalPreparedIssuerResources,
-        ) -> R,
-    ) -> Result<R, AuraError> {
-        let resources = self
+        observe: impl FnOnce(&crate::runtime_bridge::enrollment_quorum::OriginalPreparedIssuerResources) -> R
+            + Send
+            + 'static,
+    ) -> Result<oneshot::Receiver<std::thread::Result<R>>, AuraError> {
+        self.original.cleanup_observation.with(|slot| {
+            if slot.is_some() {
+                return Err(rejected(RegistryFailure::Collision));
+            }
+            let (send, receive) = oneshot::channel();
+            *slot = Some(Box::new(move |resources| {
+                let observed =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observe(resources)));
+                let _ = send.send(observed);
+            }));
+            Ok(receive)
+        })
+    }
+    pub(crate) fn require_original_resources_retired_for_test(&self) -> Result<(), AuraError> {
+        let original = self
             .original
             .resources
             .get()
-            .and_then(std::sync::Weak::upgrade)
             .ok_or_else(|| rejected(RegistryFailure::Missing))?;
-        let borrowed = resources.try_lock().map_err(|source| AuraError::Internal {
-            message: "original prepared resources remain borrowed".into(),
-            source: Some(Arc::new(source)),
-        })?;
-        Ok(observe(&borrowed))
+        if original.upgrade().is_some() {
+            return Err(AuraError::invalid(
+                "actual prepared resources remain live after original disposal",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -305,6 +360,10 @@ impl PreparedIssuerEntry {
         Self {
             #[cfg(test)]
             registered_owner: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            cleanup_observation: super::super::issuer_error_custody::SynchronousCustodyCell::new(
+                None,
+            ),
             _capacity: capacity,
             preparation,
             subject,
