@@ -91,6 +91,9 @@ wasm-bindgen-futures = "0.4"
 web-sys = { workspace = true, features = ["Window", "Location"] }
 
 [features]
+# Explicit key-provider selection; production builds cannot unify development keys.
+development-keys = ["aura-effects/development-keys"]
+production-build = ["aura-effects/production-build"]
 default = ["choreo-backend-telltale-machine"]
 real-android-keystore = []
 simulation = ["aura-core/simulation", "aura-journal/simulation", "aura-effects/simulation"]

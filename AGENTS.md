@@ -729,6 +729,18 @@ precedes root cancellation under the same original shutdown capability. Idle
 peer discovery and local session retirement do not prove peer synchronization
 or remote teardown.
 
+### Production key-provider exclusion
+
+Native software-key storage requires explicit `development-keys`; shipping
+commands and Nix terminal outputs select `production-build`, which conflicts
+with development providers. The mandatory secret-lifetime/security lane checks
+shipping graphs, warning-denied production compilation, actual discovery and
+execution of provider-exclusion/profile-owner API guards and a positive external
+production consumer, and the
+exact conflicting-feature compiler diagnostic. Unknown features, dependency
+failures, warnings, missing build terminals or exit-status mismatches cannot
+prove exclusion. Keep browser WebCrypto available and OS diagnostics isolated.
+
 ### Checked runtime entropy admission
 
 Production runtime assembly must reject deterministic seeds before profile acquisition and configured provider invocation, including custom real-crypto assembly. Deterministic crypto and RNG producers require the private checked nonproduction seed owner. Preserve the exact rooted source path, actual qualified execution-mode type, canonical Result/Option/error provenance, and factory/receiver metadata in the entropy-origin gate; comments and simulation names do not authorize its private seed source. Run `just _policy-check check security-boundary-policy` and the required secret-lifetime inventory when changing this boundary. The inventory requires actual constructor and absolute-path/adversarial AST execution evidence; excluded toolkit targets use their explicit manifest, never the workspace package selector alone.

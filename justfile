@@ -80,12 +80,14 @@ build-dev:
 
 # Build Aura terminal in release mode without dev features
 build-terminal-release:
-    cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
+    bash scripts/check/simulator-checkpoint-reachability.sh
+    cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal,production-build
     bash scripts/dev/install-aura-binary.sh
 
 # Build app-host binary
 build-app-host:
-    cargo build -p hxrts-aura-app --bin app-host --features host --release
+    bash scripts/check/simulator-checkpoint-reachability.sh
+    cargo build -p hxrts-aura-app --bin app-host --features host,production-build --release
 
 # Read-only disk inventory for the current checkout
 disk-report:
@@ -109,21 +111,21 @@ build-budget-dry-run:
 
 # Guarded Work 8 production and harness builds (run separately on each host)
 e2e-build-terminal:
-    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production -- just build-terminal-release
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production -- just build-terminal-release
 
 # Terminal build during an approved live LAN run; only idle WASM debug may be collected
 e2e-build-terminal-live:
-    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production --allow-live-harness -- just build-terminal-release
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production --allow-live-harness -- just build-terminal-release
 
 e2e-build-terminal-dev:
     AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=development nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-development -- just build-dev
 
 e2e-build-web:
-    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production -- bash scripts/dev/build-web-release.sh
+    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane web-production -- bash scripts/dev/build-web-release.sh
 
 # Web build during an approved live LAN run; preserve live release/web caches
 e2e-build-web-live:
-    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production --allow-live-harness -- bash scripts/dev/build-web-release.sh
+    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane web-production --allow-live-harness -- bash scripts/dev/build-web-release.sh
 
 e2e-build-harness:
     AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=default nice -n 10 bash scripts/dev/build-budget.sh --lane harness-tools -- cargo build -p aura-harness --release --bin tool_repl
@@ -712,9 +714,9 @@ ci-choreo-concurrency-contracts:
 # Warnings are denied by clippy or cargo-check-no-warnings.sh rather than
 # RUSTFLAGS, so these lanes reuse the dependency builds of every other lane.
 ci-agent-wasm:
-    cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
-    bash scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
-    bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features "web,harness"
+    cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib --features production-build -- -D warnings
+    bash scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-agent --target wasm32-unknown-unknown --features web,production-build
+    bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features "web,harness,production-build"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:

@@ -29,9 +29,10 @@ use telltale_machine::model::state::SessionStatus;
 use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
 use telltale_machine::{
     canonical_effect_trace, enforce_protocol_machine_runtime_gates, normalize_trace, obs_session,
-    EffectTraceEntry, EnvelopeDiffArtifactV1, FinalizationPath, ObsEvent, ProtocolMachine,
-    ProtocolMachineConfig as VMConfig, ProtocolMachineError, ProtocolMachineSemanticObjects,
-    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult, ThreadedProtocolMachine,
+    EffectTraceEntry, EnvelopeDiffArtifactV1, FinalizationPath, ObsEvent, OwnedSession,
+    ProtocolMachine, ProtocolMachineConfig as VMConfig, ProtocolMachineError,
+    ProtocolMachineSemanticObjects, RunStatus, RuntimeContracts, RuntimeGateResult, SessionId,
+    StepResult, ThreadedProtocolMachine,
 };
 use tracing::warn;
 
@@ -230,13 +231,13 @@ impl AuraVmBackend {
         }
     }
 
-    fn load_choreography(
+    fn load_choreography_owned(
         &mut self,
         image: &ProtocolMachineCodeImage,
-    ) -> Result<SessionId, ProtocolMachineError> {
+    ) -> Result<OwnedSession, ProtocolMachineError> {
         match self {
-            Self::Cooperative(vm) => vm.load_choreography(image),
-            Self::Threaded(vm) => vm.load_choreography(image),
+            Self::Cooperative(vm) => vm.load_choreography_owned(image, "aura/choreo-engine"),
+            Self::Threaded(vm) => vm.load_choreography_owned(image, "aura/choreo-engine"),
         }
     }
 
@@ -292,9 +293,14 @@ impl AuraVmBackend {
         }
     }
 
-    fn reap_closed_sessions(&mut self) {
-        if let Self::Cooperative(vm) = self {
-            let _ = vm.reap_closed_sessions();
+    fn reap_closed_sessions(&mut self) -> Vec<SessionId> {
+        match self {
+            Self::Cooperative(vm) => vm
+                .reap_closed_sessions()
+                .into_iter()
+                .map(|summary| summary.sid)
+                .collect(),
+            Self::Threaded(_) => Vec::new(),
         }
     }
 
@@ -324,6 +330,10 @@ pub struct AuraChoreoEngine<H: ProtocolMachineEffectHandler = AuraVmEffectHandle
     runtime_capabilities: RuntimeCapabilityHandler,
     capability_snapshot: Vec<(String, bool)>,
     active_sessions: BTreeSet<SessionId>,
+    /// Original machine-issued capabilities, retained independently of scheduler
+    /// activity until targeted disposal succeeds. The label is diagnostic;
+    /// physical runtime/task authority stays with `session_ingress`.
+    owned_sessions: BTreeMap<SessionId, OwnedSession>,
     session_protocol_classes: BTreeMap<SessionId, TerminationProtocolClass>,
     session_determinism_profiles: BTreeMap<SessionId, AuraVmProtocolExecutionPolicy>,
     session_runtime_selectors: BTreeMap<SessionId, AuraVmRuntimeSelector>,
@@ -405,6 +415,7 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
             runtime_capabilities,
             capability_snapshot,
             active_sessions: BTreeSet::new(),
+            owned_sessions: BTreeMap::new(),
             session_protocol_classes: BTreeMap::new(),
             session_determinism_profiles: BTreeMap::new(),
             session_runtime_selectors: BTreeMap::new(),
@@ -646,7 +657,9 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
         &mut self,
         image: &ProtocolMachineCodeImage,
     ) -> Result<SessionId, AuraChoreoEngineError> {
-        let sid = self.backend.load_choreography(image)?;
+        let owned = self.backend.load_choreography_owned(image)?;
+        let sid = owned.session_id();
+        self.owned_sessions.insert(sid, owned);
         self.active_sessions.insert(sid);
         self.session_protocol_classes
             .entry(sid)
@@ -851,6 +864,9 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
                     .map_err(|source| AuraChoreoEngineError::ThreadedSessionLifecycle { source })?;
             }
         }
+        // Neither AllDone nor capability release acknowledges disposal. Keep
+        // the original handle on every error above for same-original retry.
+        self.owned_sessions.remove(&sid);
         self.active_sessions.remove(&sid);
         self.inbound_frames
             .retain(|(session, _, _), _| *session != sid);
@@ -1078,7 +1094,9 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
             for sid in sessions_to_close {
                 let _ = vm.sessions_mut().close(sid);
             }
-            let _ = vm.reap_closed_sessions();
+            for summary in vm.reap_closed_sessions() {
+                self.owned_sessions.remove(&summary.sid);
+            }
         }
         self.refresh_active_sessions();
     }
@@ -1104,7 +1122,9 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
             self.session_protocol_classes.clear();
             self.session_determinism_profiles.clear();
             self.session_runtime_selectors.clear();
-            self.backend.reap_closed_sessions();
+            for sid in self.backend.reap_closed_sessions() {
+                self.owned_sessions.remove(&sid);
+            }
         }
     }
 
@@ -1333,6 +1353,97 @@ mod tests {
     use telltale_machine::{
         runtime::loader::CodeImage as ProtocolMachineCodeImage, RuntimeContracts,
     };
+
+    #[test]
+    fn owned_admission_retains_original_capability_until_targeted_disposal() {
+        let image = ProtocolMachineCodeImage::from_local_types(
+            &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
+            &GlobalType::End,
+        );
+        for mode in [
+            AuraVmRuntimeMode::Cooperative,
+            AuraVmRuntimeMode::ThreadedEnvelopeBounded,
+        ] {
+            let mut engine = AuraChoreoEngine::new(
+                vm_config_for_profile(AuraVmHardeningProfile::Prod),
+                Arc::new(AuraVmEffectHandler::default()),
+            );
+            // Exercise both actual backend loaders without changing scheduler
+            // policy: this fixture performs admission and targeted disposal only.
+            engine.backend = AuraVmBackend::new(
+                engine.vm_config(),
+                AuraVmRuntimeSelector {
+                    runtime_mode: mode,
+                    threaded_workers: 1,
+                    scheduler_concurrency: 1,
+                },
+            );
+            let first = engine.open_protocol_machine_session(&image).unwrap();
+            let second = engine.open_protocol_machine_session(&image).unwrap();
+            let original = engine.owned_sessions.get(&first).unwrap();
+            assert_eq!(original.session_id(), first);
+            assert_eq!(original.capability().session_id, first);
+            if let Some(vm) = engine.backend.as_cooperative() {
+                vm.sessions()
+                    .validate_ownership_capability(original.capability())
+                    .expect("original capability matches actual machine claim");
+            }
+            if let Some(vm) = engine.backend.as_cooperative_mut() {
+                vm.sessions_mut().get_mut(first).unwrap().epoch = usize::MAX;
+                assert!(matches!(
+                    engine.close_session(first),
+                    Err(AuraChoreoEngineError::CooperativeSessionLifecycle { .. })
+                ));
+                let retained = engine.owned_sessions.get(&first).unwrap();
+                assert_eq!(retained.session_id(), first);
+                engine
+                    .vm_mut()
+                    .sessions_mut()
+                    .get_mut(first)
+                    .expect("failed disposal retains original session")
+                    .epoch = 0;
+            }
+            engine.close_session(first).expect("actual target disposal");
+            assert!(!engine.owned_sessions.contains_key(&first));
+            assert!(engine.owned_sessions.contains_key(&second));
+            assert!(engine.active_sessions.contains(&second));
+            engine
+                .close_session(first)
+                .expect("idempotent original disposal");
+            engine
+                .close_session(second)
+                .expect("unrelated session still usable");
+            assert!(engine.owned_sessions.is_empty());
+        }
+    }
+
+    #[test]
+    fn threaded_all_done_retains_owned_session_until_actual_disposal() {
+        let image = ProtocolMachineCodeImage::from_local_types(
+            &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
+            &GlobalType::End,
+        );
+        let policy =
+            super::super::vm_hardening::policy_for_protocol("aura.sync.epoch_rotation", None)
+                .expect("sync policy");
+        let selector = AuraVmRuntimeSelector::for_policy(policy);
+        let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
+        super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
+        let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
+            config,
+            Arc::new(AuraVmEffectHandler::default()),
+            Some(RuntimeContracts::full()),
+            selector,
+        )
+        .expect("threaded engine");
+        let sid = engine.open_protocol_machine_session(&image).unwrap();
+        assert!(matches!(engine.run(8).unwrap(), RunStatus::AllDone));
+        assert!(engine.owned_sessions.contains_key(&sid));
+        engine
+            .close_session(sid)
+            .expect("actual disposal after status observation");
+        assert!(!engine.owned_sessions.contains_key(&sid));
+    }
 
     #[test]
     fn step_reaps_completed_sessions() {

@@ -113,6 +113,7 @@ mod amp;
 pub(crate) use amp::amp_membership_error;
 mod aura;
 mod choreography;
+pub(super) use choreography::{SessionEndResourceRetirement, SessionEndTimeFailure};
 mod crypto;
 #[cfg(test)]
 pub(crate) use crypto::EnrollmentGenerationHistoryError;
@@ -147,6 +148,8 @@ mod system;
 mod time;
 mod transport;
 pub(crate) use transport::usable_establish_paths;
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+pub use transport::OriginalPendingMailboxRetryObservation;
 pub use transport::{DeferredInboundEnvelopeReturns, InboundEnvelopeLease};
 mod tree;
 
@@ -321,6 +324,17 @@ impl PeerFactRejection {
 /// - `journal`: Indexed journal, fact registry, publication channel
 ///
 /// Remaining fields are core infrastructure used across subsystems.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) type OriginalSessionEndGate = (
+    uuid::Uuid,
+    tokio::sync::oneshot::Sender<crate::runtime::RuntimeSessionOwner>,
+    tokio::sync::oneshot::Receiver<Arc<aura_testkit::time::ManualPhysicalClock>>,
+);
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) type OriginalEnrollmentVmReadFault =
+    (uuid::Uuid, Arc<aura_testkit::time::ManualPhysicalClock>);
+
 pub struct AuraEffectSystem {
     // One actual operation admission owner shared by runtime and service clones.
     public_operation_activity: Arc<crate::runtime::system::RuntimeActivityGate>,
@@ -346,7 +360,7 @@ pub struct AuraEffectSystem {
     /// [`AuraEffectSystem::record_message_drop`]).
     message_drops: std::sync::Mutex<MessageDropLog>,
     #[cfg(all(test, not(target_arch = "wasm32")))]
-    enrollment_retirement_fault: std::sync::Mutex<Option<u64>>,
+    enrollment_retirement_fault: std::sync::Mutex<Option<crypto::EnrollmentRetirementFault>>,
     #[cfg(all(test, not(target_arch = "wasm32")))]
     original_registration_readback_gate:
         parking_lot::Mutex<Option<crypto::OriginalRegistrationReadbackGate>>,
@@ -358,6 +372,14 @@ pub struct AuraEffectSystem {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     original_allocation_prewrite_gate:
         parking_lot::Mutex<Option<crypto::OriginalRegistrationReadbackGate>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(in crate::runtime) original_session_end_fault:
+        parking_lot::Mutex<Option<RuntimeChoreographySessionId>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) original_session_end_gate: parking_lot::Mutex<Option<OriginalSessionEndGate>>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) original_enrollment_vm_read_fault:
+        parking_lot::Mutex<Option<OriginalEnrollmentVmReadFault>>,
     /// Network transport subsystem
     transport: TransportSubsystem,
     /// Journal and fact management subsystem
@@ -417,6 +439,8 @@ pub struct AuraEffectSystem {
             >,
         >,
     >,
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    original_pending_mailbox_retry: transport::OriginalPendingMailboxRetryOwner,
 
     /// Bob's actual initialized setup signer, held weakly while this runtime
     /// owns an independently protected original enrollment admission.
@@ -444,7 +468,8 @@ pub struct AuraEffectSystem {
     guardian_recovery_keypair_gate: tokio::sync::Mutex<()>,
     enrollment_manifest_admission_gate: tokio::sync::Mutex<()>,
     enrollment_profile_handoff_gate: tokio::sync::Mutex<()>,
-    enrollment_invitee_window_owner: Arc<tokio::sync::Semaphore>,
+    enrollment_invitee_window_owner:
+        Arc<crate::runtime::services::enrollment_window::OriginalAdmittedTransportGate>,
 
     /// Runtime-owned config overrides exposed through SystemEffects.
     system_config: parking_lot::RwLock<HashMap<String, String>>,
@@ -790,16 +815,60 @@ impl AuraEffectSystem {
             ));
         }
         self.enrollment_invitee_window_owner
-            .clone()
-            .try_acquire_owned()
+            .acquire()
             .map(|permit| AdmittedEnrollmentWindowLeaseCapability {
                 effects: self,
                 permit,
             })
-            .map_err(|source| aura_core::AuraError::Internal {
-                message: "admitted enrollment execution already has a window owner".into(),
-                source: Some(Arc::new(source)),
-            })
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "original_admitted_execution_window", capability_type = crate::runtime::services::enrollment_window::AcknowledgedAdmittedEnrollmentBirth,
+        family = "runtime_helper")]
+    pub(crate) fn acquire_original_admitted_window_owner(
+        &self,
+        birth: &crate::runtime::services::enrollment_window::AcknowledgedAdmittedEnrollmentBirth<
+            '_,
+        >,
+        admitted: &crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+    ) -> Result<
+        (
+            AdmittedEnrollmentWindowLeaseCapability<'_>,
+            Arc<crate::runtime::services::enrollment_window::OriginalAdmittedTransportCustody>,
+        ),
+        aura_core::AuraError,
+    > {
+        birth.require_original(self, admitted)?;
+        let (permit, transport) = self
+            .enrollment_invitee_window_owner
+            .acquire_original(admitted)?;
+        self.enrollment_invitee_window_owner
+            .require_permit(&permit)?;
+        Ok((
+            AdmittedEnrollmentWindowLeaseCapability {
+                effects: self,
+                permit,
+            },
+            transport,
+        ))
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "original_admitted_mailbox_ack", capability_type = crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        family = "runtime_helper")]
+    pub(crate) fn borrow_original_admitted_ack(
+        &self,
+        admitted: &crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+    ) -> Result<
+        Option<crate::runtime::services::enrollment_window::OriginalAdmittedAckBorrow>,
+        aura_core::AuraError,
+    > {
+        if admitted.manifest().invitee_device != self.device_id() {
+            return Err(aura_core::AuraError::permission_denied(
+                "foreign admitted ACK device",
+            ));
+        }
+        self.enrollment_invitee_window_owner.borrow_ack(admitted)
     }
 
     fn create_test_storage_namespace(
@@ -1398,6 +1467,12 @@ impl AuraEffectSystem {
             original_allocation_commit_gate: parking_lot::Mutex::new(None),
             #[cfg(all(test, not(target_arch = "wasm32")))]
             original_allocation_prewrite_gate: parking_lot::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_session_end_fault: parking_lot::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_session_end_gate: parking_lot::Mutex::new(None),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            original_enrollment_vm_read_fault: parking_lot::Mutex::new(None),
             transport,
             journal,
             composite,
@@ -1419,6 +1494,8 @@ impl AuraEffectSystem {
             relay_forwarder: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
             original_mailbox_issuers: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+            original_pending_mailbox_retry: transport::OriginalPendingMailboxRetryOwner::default(),
             original_return_signer: parking_lot::RwLock::new(None),
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
@@ -1433,7 +1510,9 @@ impl AuraEffectSystem {
             guardian_recovery_keypair_gate: tokio::sync::Mutex::new(()),
             enrollment_manifest_admission_gate: tokio::sync::Mutex::new(()),
             enrollment_profile_handoff_gate: tokio::sync::Mutex::new(()),
-            enrollment_invitee_window_owner: Arc::new(tokio::sync::Semaphore::new(1)),
+            enrollment_invitee_window_owner: Arc::new(
+                crate::runtime::services::enrollment_window::OriginalAdmittedTransportGate::new(),
+            ),
             system_config: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(not(target_arch = "wasm32"))]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
@@ -1744,6 +1823,16 @@ impl AuraEffectSystem {
         self.choreography_state.read().current_session_id()
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn fail_original_owned_session_end_once_for_test(
+        &self,
+        owner: &crate::runtime::RuntimeSessionOwner,
+    ) {
+        self.assert_owned_choreography_session(owner)
+            .expect("fault must bind the actual selected original session");
+        *self.original_session_end_fault.lock() = Some(owner.session_id);
+    }
+
     /// Attach the admitted protocol identifier to the current task-bound runtime session.
     pub(crate) fn set_current_runtime_choreography_protocol_id(
         &self,
@@ -1821,7 +1910,7 @@ impl AuraEffectSystem {
             Err(SessionOwnershipError::MissingOwner { .. })
                 if !state.contains_registered_session(capability.session_id()) =>
             {
-                return Ok(())
+                return Ok(());
             }
             Err(error) => return Err(error),
         }
@@ -2215,6 +2304,16 @@ impl AuraEffectSystem {
             .read()
             .get(&session)
             .and_then(std::sync::Weak::upgrade)
+    }
+
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    pub(crate) fn observe_original_pending_mailbox_retry(
+        &self,
+        selected: &Arc<dyn PhysicalTimeEffects>,
+        selector: (AuthorityId, aura_core::DeviceId, [u8; 32]),
+    ) -> OriginalPendingMailboxRetryObservation {
+        self.original_pending_mailbox_retry
+            .observe_selected(&self.time_handler, selected, selector)
     }
 
     pub(crate) fn retain_original_return_signer(

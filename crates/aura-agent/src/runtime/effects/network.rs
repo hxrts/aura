@@ -1346,7 +1346,7 @@ impl AuraEffectSystem {
                     return Err(aura_core::AuraError::Network {
                         message: "original signing inbox failure".into(),
                         source: Some(std::sync::Arc::new(source)),
-                    })
+                    });
                 }
             }
             match self.receive_configured_envelope().await {
@@ -1363,7 +1363,7 @@ impl AuraEffectSystem {
                     return Err(aura_core::AuraError::Network {
                         message: "original configured signing ingress failure".into(),
                         source: Some(std::sync::Arc::new(source)),
-                    })
+                    });
                 }
             }
         }

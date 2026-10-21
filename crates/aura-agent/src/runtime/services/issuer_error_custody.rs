@@ -1,13 +1,15 @@
 //! Original issuer obligations retained when task admission or terminal delivery fails.
 
+mod sync_cell;
+pub(crate) use sync_cell::SynchronousCustodyCell;
+
 #[derive(thiserror::Error)]
 #[error("original issuer registration publication failed")]
 pub(crate) struct UnpublishedIssuerTaskCustody {
     #[source]
     pub(crate) source: aura_core::AuraError,
-    #[allow(clippy::disallowed_types)] // Synchronous custody slot; no guard crosses an await.
     pub(crate) retained:
-        parking_lot::Mutex<Option<crate::task_registry::OriginalRequiredTaskHandle>>,
+        SynchronousCustodyCell<Option<crate::task_registry::OriginalRequiredTaskHandle>>,
 }
 
 impl std::fmt::Debug for UnpublishedIssuerTaskCustody {
@@ -21,8 +23,7 @@ impl std::fmt::Debug for UnpublishedIssuerTaskCustody {
 pub(crate) struct RejectedIssuerTaskCustody<T: ?Sized + Send> {
     #[source]
     pub(crate) source: aura_core::AuraError,
-    #[allow(clippy::disallowed_types)] // Synchronous custody slot; no guard crosses an await.
-    pub(crate) retained: parking_lot::Mutex<Box<T>>,
+    pub(crate) retained: SynchronousCustodyCell<Box<T>>,
 }
 
 impl<T: ?Sized + Send> std::fmt::Debug for RejectedIssuerTaskCustody<T> {
@@ -32,10 +33,11 @@ impl<T: ?Sized + Send> std::fmt::Debug for RejectedIssuerTaskCustody<T> {
 }
 
 #[derive(thiserror::Error)]
-#[error("original issuer terminal destination rejected a duplicate producer")]
+#[error("original issuer terminal destination rejected publication")]
 pub(crate) struct UndeliveredIssuerTerminal {
-    #[allow(clippy::disallowed_types)] // Synchronous custody slot; no guard crosses an await.
-    pub(crate) retained: parking_lot::Mutex<
+    #[source]
+    pub(crate) source: Option<aura_core::AuraError>,
+    pub(crate) retained: SynchronousCustodyCell<
         Option<
             crate::core::AgentResult<crate::handlers::invitation::IssuerEnrollmentTerminalOutcome>,
         >,

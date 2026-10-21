@@ -16,13 +16,16 @@ pub(crate) enum StagedPublicationRecoveryError {
     #[error("staged publication conflicts with acknowledged original")]
     ConflictingOriginal,
     #[error("unowned staged publication in selected provider")]
+    #[cfg(any(test, feature = "development-keys"))]
     UnownedStage,
     #[error("selected provider directory depth {observed_depth} exceeds secure layout depth {maximum_depth}")]
+    #[cfg(any(test, feature = "development-keys"))]
     InventoryLimit {
         maximum_depth: usize,
         observed_depth: usize,
     },
     #[error("original staged publication belongs to another selected provider or target")]
+    #[cfg(any(test, feature = "development-keys"))]
     ForeignPublicationOwner,
     #[error("recovery publication is not a private regular file with a valid link count")]
     InvalidPublicationFile,
@@ -64,6 +67,7 @@ impl ProfileDirectory {
         }
         Ok(())
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn same_directory(&self, other: &Self) -> std::io::Result<bool> {
         use std::os::unix::fs::MetadataExt;
         let a = self.file.metadata()?;
@@ -289,6 +293,7 @@ impl ProfileDirectory {
                 chain,
                 name,
                 staged,
+                #[cfg(any(test, feature = "development-keys"))]
                 observed_digest: None,
             });
         }
@@ -374,6 +379,7 @@ impl ProfileDirectory {
             }
             Err(source) => return Err(source),
         }
+        #[cfg(any(test, feature = "development-keys"))]
         let observed_digest = Some(aura_core::hash::hash(&bytes));
         Ok(Some((
             bytes,
@@ -381,12 +387,14 @@ impl ProfileDirectory {
                 chain,
                 name,
                 staged,
+                #[cfg(any(test, feature = "development-keys"))]
                 observed_digest,
             }),
         )))
     }
 
     /// Observing a differing successor grants no permission to replace a target.
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn observe_original_successor(
         &self,
         path: &Path,
@@ -434,6 +442,7 @@ impl ProfileDirectory {
         if original == next {
             return Ok(None);
         }
+        #[cfg(any(test, feature = "development-keys"))]
         let observed_digest = Some(aura_core::hash::hash(&next));
         Ok(Some(ObservedOriginalSuccessor {
             original,
@@ -442,11 +451,13 @@ impl ProfileDirectory {
                 chain,
                 name,
                 staged,
+                #[cfg(any(test, feature = "development-keys"))]
                 observed_digest,
             },
         }))
     }
 
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn observe_retained_initial_successor(
         &self,
         path: &Path,
@@ -477,6 +488,7 @@ impl ProfileDirectory {
                 chain,
                 name,
                 staged,
+                #[cfg(any(test, feature = "development-keys"))]
                 observed_digest: Some(aura_core::hash::hash(&next)),
             },
         })
@@ -484,6 +496,7 @@ impl ProfileDirectory {
 
     /// Canonical presence remains distinct from an observed pre-link stage.
     /// Only an exact source/target publication pair permits the temporary second link.
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn read_canonical_private_publication(
         &self,
         path: &Path,
@@ -558,10 +571,12 @@ impl ProfileDirectory {
     }
     /// Filename eligibility is observation only; callers authenticate every candidate.
     /// Ordinary leaves stream without imposing a new provider-wide record limit.
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn require_stage_inventory(&self, allowed: &[&Path]) -> std::io::Result<()> {
         let mut seen = Vec::with_capacity(allowed.len());
         self.require_stage_inventory_at(Path::new(""), 0, allowed, &mut seen)
     }
+    #[cfg(any(test, feature = "development-keys"))]
     fn require_stage_inventory_at(
         &self,
         prefix: &Path,
@@ -645,6 +660,7 @@ impl ProfileDirectory {
     }
     /// Observational inode checks become relevant only after the domain owner
     /// authenticates the journal from which these exact expectations came.
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn require_archived_initial_custody(
         &self,
         path: &Path,
@@ -673,6 +689,7 @@ impl ProfileDirectory {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn require_initial_custody_origins(
         &self,
         path: &Path,
@@ -701,6 +718,7 @@ impl ProfileDirectory {
         }
         Ok(())
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn visit_initial_cutover_history(
         &self,
         path: &Path,
@@ -768,9 +786,11 @@ impl ProfileDirectory {
         }
         Ok(names)
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn acknowledge_entries(&self) -> std::io::Result<()> {
         self.file.sync_all()
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn names_bounded(
         &self,
         maximum_names: usize,
@@ -821,6 +841,7 @@ impl ProfileDirectory {
         }
         self.file.sync_all()
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn files(&self) -> std::io::Result<Vec<PathBuf>> {
         self.files_inner(false)
     }
@@ -858,12 +879,14 @@ impl ProfileDirectory {
     }
 }
 /// Bounded ciphertext observation; neither deserialization nor observation authorizes mutation.
+#[cfg(any(test, feature = "development-keys"))]
 #[derive(Debug)]
 pub(crate) struct ObservedOriginalSuccessor {
     original: Vec<u8>,
     next: Vec<u8>,
     publication: PreparedProfileFile,
 }
+#[cfg(any(test, feature = "development-keys"))]
 impl ObservedOriginalSuccessor {
     pub(crate) fn original(&self) -> &[u8] {
         &self.original
@@ -881,10 +904,12 @@ pub(crate) struct PreparedProfileFile {
     chain: Vec<ProfileDirectory>,
     name: std::ffi::OsString,
     staged: String,
+    #[cfg(any(test, feature = "development-keys"))]
     observed_digest: Option<[u8; 32]>,
 }
 impl PreparedProfileFile {
     /// The authenticated initial lifecycle may exclude only its own sole stage.
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn require_only_entry_in(
         &self,
         directory: &ProfileDirectory,
@@ -911,6 +936,7 @@ impl PreparedProfileFile {
     }
 
     /// Recovery retains the original evidence until an exact existing target is proven.
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn publish_original(&self, maximum: usize) -> std::io::Result<()> {
         self.publish_original_checked(maximum, || Ok(()))
     }
@@ -922,6 +948,7 @@ impl PreparedProfileFile {
     ) -> std::io::Result<()> {
         self.publish_original_checked(maximum, before_link)
     }
+    #[cfg(any(test, feature = "development-keys"))]
     fn publish_original_checked(
         &self,
         maximum: usize,
@@ -968,6 +995,7 @@ impl PreparedProfileFile {
         unlinkat(parent.file.as_ref(), &self.staged, AtFlags::empty())?;
         self.acknowledge()
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn require_owner_target(
         &self,
         directory: &ProfileDirectory,
@@ -995,6 +1023,7 @@ impl PreparedProfileFile {
         capability_type = crate::secure::VerifiedOriginalInitializationSuccessor,
         family = "runtime_helper"
     )]
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn publish_verified_initial_successor(
         &self,
         witness: &crate::secure::VerifiedOriginalInitializationSuccessor<'_>,
@@ -1016,6 +1045,7 @@ impl PreparedProfileFile {
         capability = "VerifiedOriginalInitializationSuccessor",
         family = "runtime_helper"
     )]
+    #[cfg(any(test, feature = "development-keys"))]
     fn require_initial_cutover_custody(
         &self,
         witness: &crate::secure::VerifiedOriginalInitializationSuccessor<'_>,
@@ -1099,6 +1129,7 @@ impl PreparedProfileFile {
         capability = "VerifiedOriginalInitializationSuccessor",
         family = "runtime_helper"
     )]
+    #[cfg(any(test, feature = "development-keys"))]
     fn publish_initial_cutover_checked(
         &self,
         witness: &crate::secure::VerifiedOriginalInitializationSuccessor<'_>,
@@ -1150,6 +1181,7 @@ impl PreparedProfileFile {
         capability = "VerifiedOriginalInitializationSuccessor",
         family = "runtime_helper"
     )]
+    #[cfg(any(test, feature = "development-keys"))]
     fn acknowledge_initial_cutover_result(
         &self,
         witness: &crate::secure::VerifiedOriginalInitializationSuccessor<'_>,
@@ -1224,6 +1256,7 @@ impl PreparedProfileFile {
         capability = "VerifiedOriginalInitializationSuccessor",
         family = "runtime_helper"
     )]
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn archive_initial_cutover_journal(
         &self,
         witness: &crate::secure::VerifiedOriginalInitializationSuccessor<'_>,
@@ -1269,6 +1302,7 @@ impl PreparedProfileFile {
         crate::secure::initialization_cutover_checkpoint("archive")?;
         parent.file.sync_all()
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn initial_cutover_identity(
         &self,
         maximum: usize,
@@ -1285,6 +1319,7 @@ impl PreparedProfileFile {
         let next = next.metadata()?;
         Ok(((old.dev(), old.ino()), (next.dev(), next.ino())))
     }
+    #[cfg(any(test, feature = "development-keys"))]
     pub(crate) fn initial_stage_name(&self) -> &str {
         &self.staged
     }
@@ -1340,6 +1375,7 @@ fn recovery_publication_conflict() -> std::io::Error {
 }
 enum RecoveryLinkPolicy {
     OriginalPublicationPair,
+    #[cfg(any(test, feature = "development-keys"))]
     InitialCutoverCustody,
 }
 fn read_recovery_ciphertext(
@@ -1354,6 +1390,7 @@ fn read_recovery_ciphertext(
         RecoveryLinkPolicy::OriginalPublicationPair,
     )
 }
+#[cfg(any(test, feature = "development-keys"))]
 fn read_initial_cutover_ciphertext(
     parent: &ProfileDirectory,
     name: &std::ffi::OsStr,
@@ -1383,6 +1420,7 @@ fn read_original_ciphertext(
     let metadata = file.metadata()?;
     let maximum_links = match policy {
         RecoveryLinkPolicy::OriginalPublicationPair => 2,
+        #[cfg(any(test, feature = "development-keys"))]
         RecoveryLinkPolicy::InitialCutoverCustody => 3,
     };
     if !metadata.is_file()
@@ -1426,6 +1464,7 @@ fn read_original_ciphertext(
 }
 
 // SecureStorageLocation admits namespace/key/optional-subkey: at most two descendant directories.
+#[cfg(any(test, feature = "development-keys"))]
 fn initial_cutover_entry_matches(parent: &Path, name: &std::ffi::OsStr) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let target = if parent.as_os_str().is_empty() {
@@ -1501,7 +1540,9 @@ fn matches_initial_custody(
     }
     Ok(false)
 }
+#[cfg(any(test, feature = "development-keys"))]
 const MAX_SECURE_RECORD_DIRECTORY_DEPTH: usize = 2;
+#[cfg(any(test, feature = "development-keys"))]
 fn stage_matches_target(parent: &Path, stage: &std::ffi::OsStr, target: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     if target.parent().unwrap_or(Path::new("")) != parent {

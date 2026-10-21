@@ -11,6 +11,8 @@ homepage.workspace = true
 [lib]
 name = "aura_app"
 [features]
+# Canonical shipping builds reject development key providers throughout the graph.
+production-build = ["aura-effects/production-build"]
 default = []
 
 # Platform Features

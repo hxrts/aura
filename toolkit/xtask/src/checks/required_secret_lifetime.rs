@@ -1,8 +1,9 @@
 //! Actual source, discovery and execution evidence for selected lifetime custody.
 use super::required_compile_fail::require_discovered;
-use super::support::{command_stdout, repo_root};
-use super::vm_session_lifecycle::{require_executed_tests, require_tests};
-use anyhow::{Context, Result};
+use super::support::{command_error, command_output, command_stdout, repo_root, run_ok};
+use super::vm_session_lifecycle::{require_executed_tests, require_tests, required_doctests};
+use anyhow::{ensure, Context, Result};
+use std::path::Path;
 
 const GROUPS: &[(&str, &[&str])] = &[
     ("crates/aura-effects/src/secure/allocation_lifetime.rs", &[
@@ -64,6 +65,7 @@ const GROUPS: &[(&str, &[&str])] = &[
 ];
 pub(super) fn run() -> Result<()> {
     let root = repo_root()?;
+    require_production_key_provider_boundary(&root)?;
     let mut required = Vec::new();
     for (path, tests) in GROUPS {
         let source = std::fs::read_to_string(root.join(path))
@@ -77,6 +79,7 @@ pub(super) fn run() -> Result<()> {
     }
     let base: Vec<String> = [
         "test",
+        "--locked",
         "-p",
         "hxrts-aura-effects",
         "--lib",
@@ -92,6 +95,124 @@ pub(super) fn run() -> Result<()> {
     execution.extend(["--".into(), "--format".into(), "pretty".into()]);
     require_executed_tests(&command_stdout("cargo", &execution)?, &required)?;
     require_production_entropy_custody()
+}
+
+pub(super) fn run_production_key_provider() -> Result<()> {
+    require_production_key_provider_boundary(&repo_root()?)
+}
+
+/// Keep provider exclusion in the existing mandatory secret-lifetime lane.
+/// This configuration compiles the production library, never its unit tests.
+fn require_production_key_provider_boundary(root: &Path) -> Result<()> {
+    run_ok(
+        "bash",
+        &["scripts/check/simulator-checkpoint-reachability.sh".into()],
+    )?;
+    run_ok(
+        "bash",
+        &[
+            "scripts/dev/cargo-check-no-warnings.sh".into(),
+            "--locked".into(),
+            "-p".into(),
+            "hxrts-aura-effects".into(),
+            "--lib".into(),
+            "--features".into(),
+            "production-build".into(),
+        ],
+    )?;
+    let docs: Vec<String> = [
+        "test",
+        "-p",
+        "hxrts-aura-effects",
+        "--doc",
+        "--features",
+        "production-build",
+        "secure::",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let mut discovery = docs.clone();
+    discovery.extend(["--".into(), "--list".into()]);
+    let listing = command_stdout("cargo", &discovery)?;
+    let mut required = Vec::new();
+    for (item, count) in [
+        ("secure::ProductionSecureStorageHandler", 3),
+        (
+            "secure::ProductionSecureStorageHandler::retain_profile_owner",
+            1,
+        ),
+        ("secure::ProfileOwnedSecureStorage", 1),
+    ] {
+        required.extend(required_doctests(&listing, item, count)?);
+    }
+    require_executed_tests(&command_stdout("cargo", &docs)?, &required)?;
+
+    let conflict: Vec<String> = [
+        "check",
+        "--locked",
+        "-p",
+        "hxrts-aura-effects",
+        "--lib",
+        "--features",
+        "production-build,development-keys",
+        "--message-format=json",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let output = command_output("cargo", &conflict)?;
+    let stdout = std::str::from_utf8(&output.stdout).context("decode compiler guard output")?;
+    require_production_key_rejection(root, output.status.code(), stdout)
+        .with_context(|| command_error("cargo", &conflict, &output).to_string())?;
+    println!("required-secret-lifetime: production provider guard discovered/executed 5 API cases; conflicting features rejected with compiler exit101");
+    Ok(())
+}
+
+/// Unknown features, dependency failures and successful commands are not proof
+/// that the production/development conflict actually reached its compiler guard.
+fn require_production_key_rejection(root: &Path, status: Option<i32>, stdout: &str) -> Result<()> {
+    ensure!(
+        status == Some(101),
+        "production-key guard requires actual compiler exit101"
+    );
+    let mut errors = Vec::new();
+    let mut warnings = 0;
+    let mut terminals = Vec::new();
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let event: serde_json::Value =
+            serde_json::from_str(line).context("parse Cargo guard evidence")?;
+        if event["reason"] == "compiler-message" && event["message"]["level"] == "error" {
+            errors.push(event);
+        } else if event["reason"] == "compiler-message" && event["message"]["level"] == "warning" {
+            warnings += 1;
+        } else if event["reason"] == "build-finished" {
+            terminals.push(event["success"].clone());
+        }
+    }
+    ensure!(
+        terminals == [serde_json::Value::Bool(false)],
+        "production-key guard needs one actual failed build terminal"
+    );
+    ensure!(
+        errors.len() == 1,
+        "production-key guard needs exactly its intended compiler error"
+    );
+    ensure!(
+        warnings == 0,
+        "production-key guard cannot accept compiler warnings"
+    );
+    let error = &errors[0];
+    ensure!(
+        error["target"]["src_path"].as_str().map(Path::new)
+            == Some(root.join("crates/aura-effects/src/lib.rs").as_path())
+            && error["target"]["name"] == "aura_effects"
+            && error["target"]["kind"] == serde_json::json!(["lib"])
+            && error["message"]["message"]
+                == "production builds must not include the development hot-key provider",
+        "production-key guard observed another compiler failure"
+    );
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -118,6 +239,10 @@ fn entropy_test_command(target: EntropyTestTarget, name: &str) -> Vec<String> {
 }
 fn require_production_entropy_custody() -> Result<()> {
     for (target, source, name) in [
+        (EntropyTestTarget::Toolkit, "toolkit/xtask/src/checks/required_secret_lifetime.rs", "checks::required_secret_lifetime::production_key_guard_tests::production_key_conflict_requires_original_exit_and_failed_terminal"),
+        (EntropyTestTarget::Toolkit, "toolkit/xtask/src/checks/required_secret_lifetime.rs", "checks::required_secret_lifetime::production_key_guard_tests::production_key_conflict_requires_actual_provider_compiler_origin"),
+        (EntropyTestTarget::Toolkit, "toolkit/xtask/src/checks/required_secret_lifetime.rs", "checks::required_secret_lifetime::production_key_guard_tests::production_key_conflict_rejects_unstructured_and_additional_diagnostics"),
+
         (EntropyTestTarget::Agent, "crates/aura-agent/src/runtime/effects.rs", "runtime::effects::tests::production_seed_rejection_precedes_profile_io_with_custom_real_crypto"),
         (EntropyTestTarget::Agent, "crates/aura-agent/src/runtime/effects.rs", "runtime::effects::tests::simulation_constructor_preserves_seeded_stream_across_actual_subsystem_clones"),
         (EntropyTestTarget::Agent, "crates/aura-agent/src/runtime/effects.rs", "runtime::effects::tests::seeded_simulation_constructor_retains_configured_crypto_and_random_dispatch"),
@@ -158,5 +283,115 @@ mod entropy_command_tests {
             entropy_test_command(EntropyTestTarget::Agent, "exact_test"),
             ["test", "-p", "hxrts-aura-agent", "--lib", "exact_test"]
         );
+    }
+}
+
+#[cfg(test)]
+mod production_key_guard_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn diagnostic(root: &Path) -> Value {
+        json!({
+            "reason": "compiler-message",
+            "target": {
+                "src_path": root.join("crates/aura-effects/src/lib.rs"),
+                "name": "aura_effects", "kind": ["lib"]
+            },
+            "message": {
+                "level": "error",
+                "message": "production builds must not include the development hot-key provider"
+            }
+        })
+    }
+    fn evidence(diagnostic: &Value, success: bool) -> String {
+        format!(
+            "{diagnostic}\n{}\n",
+            json!({"reason":"build-finished", "success":success})
+        )
+    }
+
+    #[test]
+    fn production_key_conflict_requires_original_exit_and_failed_terminal() {
+        let root = Path::new("/guard-fixture");
+        let diagnostic = diagnostic(root);
+        let failed = evidence(&diagnostic, false);
+        require_production_key_rejection(root, Some(101), &failed).unwrap();
+        for status in [Some(0), Some(1), None] {
+            assert!(require_production_key_rejection(root, status, &failed).is_err());
+        }
+        assert!(
+            require_production_key_rejection(root, Some(101), &evidence(&diagnostic, true))
+                .is_err()
+        );
+        assert!(
+            require_production_key_rejection(root, Some(101), &diagnostic.to_string()).is_err()
+        );
+        let duplicate_terminal = format!(
+            "{failed}{}\n",
+            json!({"reason":"build-finished", "success":false})
+        );
+        assert!(require_production_key_rejection(root, Some(101), &duplicate_terminal).is_err());
+    }
+
+    #[test]
+    fn production_key_conflict_requires_actual_provider_compiler_origin() {
+        let root = Path::new("/guard-fixture");
+        for (field, value) in [
+            ("src_path", json!("/foreign/crates/aura-effects/src/lib.rs")),
+            ("name", json!("foreign_effects")),
+            ("kind", json!(["bin"])),
+        ] {
+            let mut wrong = diagnostic(root);
+            wrong["target"][field] = value;
+            assert!(
+                require_production_key_rejection(root, Some(101), &evidence(&wrong, false))
+                    .is_err()
+            );
+        }
+        let mut wrong = diagnostic(root);
+        wrong["message"]["message"] = json!("unknown feature production-build");
+        assert!(
+            require_production_key_rejection(root, Some(101), &evidence(&wrong, false)).is_err()
+        );
+        let mut wrong = diagnostic(root);
+        wrong["message"]["level"] = json!("warning");
+        assert!(
+            require_production_key_rejection(root, Some(101), &evidence(&wrong, false)).is_err()
+        );
+    }
+
+    #[test]
+    fn production_key_conflict_rejects_unstructured_and_additional_diagnostics() {
+        let root = Path::new("/guard-fixture");
+        let diagnostic = diagnostic(root);
+        let valid = evidence(&diagnostic, false);
+        assert!(require_production_key_rejection(
+            root,
+            Some(101),
+            "unknown feature production-build"
+        )
+        .is_err());
+        assert!(require_production_key_rejection(
+            root,
+            Some(101),
+            &format!("{valid}{diagnostic}\n")
+        )
+        .is_err());
+        let mut dependency = diagnostic.clone();
+        dependency["target"]["src_path"] = json!("/dependency/src/lib.rs");
+        assert!(require_production_key_rejection(
+            root,
+            Some(101),
+            &format!("{valid}{dependency}\n")
+        )
+        .is_err());
+        dependency["message"]["level"] = json!("warning");
+        assert!(require_production_key_rejection(
+            root,
+            Some(101),
+            &format!("{valid}{dependency}\n")
+        )
+        .is_err());
     }
 }

@@ -28,9 +28,13 @@ use indexed_db_futures::{
 use js_sys::{Array, Object, Reflect, Uint8Array};
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashSet;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 use std::fs;
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 use std::io::{Read, Write};
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -54,15 +58,15 @@ use web_sys::{AesGcmParams, CryptoKey, SubtleCrypto};
 ))]
 const PLATFORM_KEYRING_SERVICE: &str = "hxrts.aura.secure-storage";
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 const FALLBACK_RECORD_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V1";
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 const FALLBACK_PROTECTED_RECORD_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V2";
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 const FALLBACK_RETIREMENT_BIRTH_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V3";
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 const FALLBACK_NONCE_LEN: usize = 12;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 const FALLBACK_WRAPPING_KEY_FILENAME: &str = ".filesystem-fallback-wrap-key";
 #[cfg(not(target_arch = "wasm32"))]
 const SECURE_ACCESS_TOKEN_VERSION: u8 = 1;
@@ -85,7 +89,11 @@ const WASM_PROTECTED_RECORD_MAGIC: &[u8] = b"AURA-WASM-SECURE-V2";
 #[cfg(target_arch = "wasm32")]
 const WASM_SECURE_NONCE_LEN: usize = 12;
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 fn validate_private_directory_metadata(
     path: &std::path::Path,
     metadata: &fs::Metadata,
@@ -109,7 +117,11 @@ fn validate_private_directory_metadata(
     Ok(())
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 fn ensure_private_directory(path: &std::path::Path) -> Result<(), SecureStorageError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         validate_private_directory_metadata(path, &metadata)?;
@@ -126,7 +138,11 @@ fn ensure_private_directory(path: &std::path::Path) -> Result<(), SecureStorageE
     validate_private_directory_metadata(path, &metadata)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 fn validate_private_file_metadata(
     path: &std::path::Path,
     metadata: &fs::Metadata,
@@ -150,7 +166,11 @@ fn validate_private_file_metadata(
     Ok(())
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(unix),
+    any(test, feature = "development-keys")
+))]
 fn open_private_file_no_follow(
     path: &std::path::Path,
     create_new: bool,
@@ -200,7 +220,11 @@ fn libc_o_no_follow() -> i32 {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(unix),
+    any(test, feature = "development-keys")
+))]
 fn create_private_file_no_follow(
     path: &std::path::Path,
     bytes: &[u8],
@@ -225,7 +249,11 @@ fn create_private_file_no_follow(
         .map_err(|e| SecureStorageError::storage(e.to_string()))
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(unix),
+    any(test, feature = "development-keys")
+))]
 fn write_private_file_atomic_no_follow(
     path: &std::path::Path,
     bytes: &[u8],
@@ -259,7 +287,11 @@ fn write_private_file_atomic_no_follow(
     validate_private_file_metadata(path, &metadata)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 fn read_existing_private_file(
     path: &std::path::Path,
 ) -> Result<Option<Vec<u8>>, SecureStorageError> {
@@ -286,7 +318,11 @@ fn read_existing_private_file(
     Ok(Some(bytes))
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 fn publish_private_file_immutable(
     path: &std::path::Path,
     bytes: &[u8],
@@ -294,14 +330,22 @@ fn publish_private_file_immutable(
     publish_private_file_immutable_at(path, bytes, |_| Ok(()))
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 #[derive(Clone, Copy, Debug)]
 enum ImmutablePublicationCheckpoint {
     Staged,
     Published,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(not(unix), test)))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(not(unix), test),
+    any(test, feature = "development-keys")
+))]
 fn publish_private_file_immutable_at(
     path: &std::path::Path,
     bytes: &[u8],
@@ -579,7 +623,7 @@ async fn verify_authenticated_access_token(
 /// use aura_effects::secure::{ProfileOwnedSecureStorage,ProductionSecureStorageHandler};
 /// fn counterfeit(owner:std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>) {
 ///     let _ = ProfileOwnedSecureStorage {
-///         backend:Box::new(ProductionSecureStorageHandler::for_production("foreign".into())),
+///         backend:std::sync::Arc::new(ProductionSecureStorageHandler::for_production("foreign".into())),
 ///         _owner:owner,
 ///     };
 /// }
@@ -592,10 +636,17 @@ pub struct ProfileOwnedSecureStorage {
 impl ProfileOwnedSecureStorage {
     /// Observed provider category; does not expose an unowned provider clone.
     pub fn uses_filesystem_fallback(&self) -> bool {
-        matches!(
-            self.backend.as_ref(),
-            ProductionSecureStorageHandler::FilesystemFallback(_)
-        )
+        #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
+        {
+            matches!(
+                self.backend.as_ref(),
+                ProductionSecureStorageHandler::FilesystemFallback(_)
+            )
+        }
+        #[cfg(not(any(test, feature = "development-keys", target_arch = "wasm32")))]
+        {
+            false
+        }
     }
 
     /// Issue a one-use checkpoint selection proof from the actual retained
@@ -620,6 +671,33 @@ impl ProfileOwnedSecureStorage {
 /// unsupported production targets fail closed instead of silently storing
 /// plaintext secret material. Tests and simulations may explicitly construct the
 /// named filesystem fallback variant.
+#[cfg_attr(
+    all(feature = "production-build", not(target_arch = "wasm32")),
+    doc = r#"
+Native production builds cannot name or construct the development hot-key provider.
+
+```compile_fail
+use aura_effects::FilesystemFallbackSecureStorageHandler;
+let _: Option<FilesystemFallbackSecureStorageHandler> = None;
+```
+
+The secure module cannot expose it through a second import path either.
+
+```compile_fail
+use aura_effects::secure::FilesystemFallbackSecureStorageHandler;
+let _: Option<FilesystemFallbackSecureStorageHandler> = None;
+```
+
+The canonical production effect remains available to external consumers.
+
+```no_run
+use aura_core::effects::SecureStorageEffects;
+use aura_effects::ProductionSecureStorageHandler;
+fn require_secure_effect<T: SecureStorageEffects>() {}
+require_secure_effect::<ProductionSecureStorageHandler>();
+```
+"#
+)]
 #[derive(Debug)]
 pub enum ProductionSecureStorageHandler {
     /// Infrastructure writer lifetime retains the actual selected profile owner.
@@ -637,6 +715,7 @@ pub enum ProductionSecureStorageHandler {
     Platform(PlatformSecureStorageHandler),
     /// Explicit fallback adapter. On wasm this is WebCrypto plus IndexedDB; on
     /// native targets this is filesystem-backed and non-production only.
+    #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
     FilesystemFallback(FilesystemFallbackSecureStorageHandler),
     /// Fail-closed production handler for targets without platform support.
     UnavailablePlatform {
@@ -661,6 +740,7 @@ impl ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.selected_clock.select(provider),
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.selected_clock.select(provider),
             Self::UnavailablePlatform { .. } => {}
         }
@@ -710,6 +790,7 @@ impl ProductionSecureStorageHandler {
                 )?,
             );
         }
+        #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
         if let Self::FilesystemFallback(handler) = &mut self {
             #[cfg(unix)]
             {
@@ -825,42 +906,50 @@ impl ProductionSecureStorageHandler {
     pub fn filesystem_fallback_with_profile_owner(
         owner: std::sync::Arc<crate::profile_storage::OwnedProfileLease>,
     ) -> Result<Self, SecureStorageError> {
-        use aura_core::effects::profile_storage::ProfileStorageLease;
-        let physical = PathBuf::from(owner.profile_identity());
-        let directory = owner
-            .directory
-            .child(
-                std::path::Path::new(crate::profile_storage::SECURE_PROVIDER_DIRECTORY),
-                true,
-            )
-            .map_err(|e| {
-                FilesystemFallbackSecureStorageHandler::descriptor_error(
-                    "open owned secure directory",
-                    e,
+        #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
+        {
+            use aura_core::effects::profile_storage::ProfileStorageLease;
+            let physical = PathBuf::from(owner.profile_identity());
+            let directory = owner
+                .directory
+                .child(
+                    std::path::Path::new(crate::profile_storage::SECURE_PROVIDER_DIRECTORY),
+                    true,
                 )
-            })?;
-        let (wrapping_key, filesystem_error) =
-            FilesystemFallbackSecureStorageHandler::load_or_create_descriptor_wrapping_key(
-                &directory,
-            );
-        if let Some(error) = filesystem_error {
-            return Err(error);
+                .map_err(|e| {
+                    FilesystemFallbackSecureStorageHandler::descriptor_error(
+                        "open owned secure directory",
+                        e,
+                    )
+                })?;
+            let (wrapping_key, filesystem_error) =
+                FilesystemFallbackSecureStorageHandler::load_or_create_descriptor_wrapping_key(
+                    &directory,
+                );
+            if let Some(error) = filesystem_error {
+                return Err(error);
+            }
+            let handler = FilesystemFallbackSecureStorageHandler {
+                platform_config: "filesystem-fallback".into(),
+                base_path: physical.join(crate::profile_storage::SECURE_PROVIDER_DIRECTORY),
+                wrapping_key,
+                token_key: generate_secret_key(),
+                selected_clock: SelectedSecureClock::default(),
+                filesystem_error: None,
+                directory: Some(directory),
+                record_gate: owner.secure_record_gate.clone(),
+                used_tokens: Mutex::new(HashSet::new()),
+            };
+            Ok(Self::ProfileOwned(ProfileOwnedSecureStorage {
+                backend: std::sync::Arc::new(Self::FilesystemFallback(handler)),
+                _owner: owner,
+            }))
         }
-        let handler = FilesystemFallbackSecureStorageHandler {
-            platform_config: "filesystem-fallback".into(),
-            base_path: physical.join(crate::profile_storage::SECURE_PROVIDER_DIRECTORY),
-            wrapping_key,
-            token_key: generate_secret_key(),
-            selected_clock: SelectedSecureClock::default(),
-            filesystem_error: None,
-            directory: Some(directory),
-            record_gate: owner.secure_record_gate.clone(),
-            used_tokens: Mutex::new(HashSet::new()),
-        };
-        Ok(Self::ProfileOwned(ProfileOwnedSecureStorage {
-            backend: std::sync::Arc::new(Self::FilesystemFallback(handler)),
-            _owner: owner,
-        }))
+        #[cfg(not(any(test, feature = "development-keys", target_arch = "wasm32")))]
+        {
+            let _ = owner;
+            Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error())
+        }
     }
 
     #[cfg(all(feature = "simulator-checkpoint", unix))]
@@ -873,6 +962,7 @@ impl ProductionSecureStorageHandler {
             Self::ProfileOwned(owned) => owned
                 .backend
                 .authenticate_checkpoint_branch_record(path, bytes),
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => {
                 handler.authenticate_checkpoint_branch_record(path, bytes)
             }
@@ -901,9 +991,19 @@ impl ProductionSecureStorageHandler {
 
     /// Create explicitly non-production secure storage for tests/simulations.
     pub fn filesystem_fallback_for_non_production(base_path: PathBuf) -> Self {
-        Self::FilesystemFallback(FilesystemFallbackSecureStorageHandler::with_base_path(
-            base_path,
-        ))
+        #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
+        {
+            Self::FilesystemFallback(FilesystemFallbackSecureStorageHandler::with_base_path(
+                base_path,
+            ))
+        }
+        #[cfg(not(any(test, feature = "development-keys", target_arch = "wasm32")))]
+        {
+            let _ = base_path;
+            Self::UnavailablePlatform {
+                target: "development-key-provider-excluded",
+            }
+        }
     }
 
     fn unavailable_error(target: &'static str) -> SecureStorageError {
@@ -932,6 +1032,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_create_mutable(location, data, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => {
                 handler.secure_create_mutable(location, data, caps).await
             }
@@ -967,6 +1068,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_store_immutable(location, data, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => {
                 handler.secure_store_immutable(location, data, caps).await
             }
@@ -1002,6 +1104,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_store(location, data, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.secure_store(location, data, caps).await,
             Self::ProfileOwned(owned) => owned.backend.secure_store(location, data, caps).await,
             Self::UnavailablePlatform { target } => Err(Self::unavailable_error(target)),
@@ -1023,6 +1126,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_retrieve(location, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.secure_retrieve(location, caps).await,
             Self::ProfileOwned(owned) => owned.backend.secure_retrieve(location, caps).await,
             Self::UnavailablePlatform { target } => Err(Self::unavailable_error(target)),
@@ -1044,6 +1148,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_delete(location, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.secure_delete(location, caps).await,
             Self::ProfileOwned(owned) => owned.backend.secure_delete(location, caps).await,
             Self::UnavailablePlatform { target } => Err(Self::unavailable_error(target)),
@@ -1064,6 +1169,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_exists(location).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.secure_exists(location).await,
             Self::ProfileOwned(owned) => owned.backend.secure_exists(location).await,
             Self::UnavailablePlatform { target } => Err(Self::unavailable_error(target)),
@@ -1085,6 +1191,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_list_keys(namespace, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.secure_list_keys(namespace, caps).await,
             Self::ProfileOwned(owned) => owned.backend.secure_list_keys(namespace, caps).await,
             Self::UnavailablePlatform { target } => Err(Self::unavailable_error(target)),
@@ -1107,6 +1214,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_generate_key(location, key_type, caps).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => {
                 handler.secure_generate_key(location, key_type, caps).await
             }
@@ -1140,6 +1248,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                     .secure_create_time_bound_token(location, caps, expires_at)
                     .await
             }
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => {
                 handler
                     .secure_create_time_bound_token(location, caps, expires_at)
@@ -1170,6 +1279,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.secure_access_with_token(token, location).await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => {
                 handler.secure_access_with_token(token, location).await
             }
@@ -1194,6 +1304,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.get_device_attestation().await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.get_device_attestation().await,
             Self::ProfileOwned(owned) => owned.backend.get_device_attestation().await,
             Self::UnavailablePlatform { target } => Err(Self::unavailable_error(target)),
@@ -1211,6 +1322,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.is_secure_storage_available().await,
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.is_secure_storage_available().await,
             Self::ProfileOwned(owned) => owned.backend.is_secure_storage_available().await,
             Self::UnavailablePlatform { .. } => false,
@@ -1228,6 +1340,7 @@ impl SecureStorageEffects for ProductionSecureStorageHandler {
                 target_os = "openbsd"
             ))]
             Self::Platform(handler) => handler.get_secure_storage_capabilities(),
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler.get_secure_storage_capabilities(),
             Self::ProfileOwned(owned) => owned.backend.get_secure_storage_capabilities(),
             Self::UnavailablePlatform { target } => {
@@ -1290,7 +1403,7 @@ impl PlatformSecureStorageHandler {
             }),
             Err(keyring::Error::NoEntry) => {
                 if !allow_create {
-                    return Err(FilesystemFallbackSecureStorageHandler::missing_record_key());
+                    return Err(SecureRecordCodec::missing_record_key());
                 }
                 let inventory = self.entry_for_user(Self::RECORD_INVENTORY_USER)?;
                 match inventory.get_secret() {
@@ -1304,9 +1417,7 @@ impl PlatformSecureStorageHandler {
                                 }
                             })?;
                         if !original.is_empty() {
-                            return Err(
-                                FilesystemFallbackSecureStorageHandler::missing_record_key(),
-                            );
+                            return Err(SecureRecordCodec::missing_record_key());
                         }
                     }
                     Err(keyring::Error::NoEntry) => {}
@@ -1476,7 +1587,7 @@ impl PlatformSecureStorageHandler {
         &self,
         location: &SecureStorageLocation,
     ) -> Result<keyring::Entry, SecureStorageError> {
-        FilesystemFallbackSecureStorageHandler::validate_location(location)?;
+        SecureRecordCodec::validate_location(location)?;
         self.entry_for_user(&Self::user_for_location(location))
     }
 
@@ -1484,10 +1595,10 @@ impl PlatformSecureStorageHandler {
         &self,
         namespace: &str,
     ) -> Result<keyring::Entry, SecureStorageError> {
-        FilesystemFallbackSecureStorageHandler::validate_component("namespace", namespace)?;
+        SecureRecordCodec::validate_component("namespace", namespace)?;
         self.entry_for_user(&format!(
             "index:{}",
-            FilesystemFallbackSecureStorageHandler::encode_component(namespace)
+            SecureRecordCodec::encode_component(namespace)
         ))
     }
 
@@ -1500,14 +1611,12 @@ impl PlatformSecureStorageHandler {
     fn user_for_location(location: &SecureStorageLocation) -> String {
         let mut user = format!(
             "record:{}:{}",
-            FilesystemFallbackSecureStorageHandler::encode_component(&location.namespace),
-            FilesystemFallbackSecureStorageHandler::encode_component(&location.key)
+            SecureRecordCodec::encode_component(&location.namespace),
+            SecureRecordCodec::encode_component(&location.key)
         );
         if let Some(sub_key) = &location.sub_key {
             user.push(':');
-            user.push_str(&FilesystemFallbackSecureStorageHandler::encode_component(
-                sub_key,
-            ));
+            user.push_str(&SecureRecordCodec::encode_component(sub_key));
         }
         user
     }
@@ -1711,9 +1820,7 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
         match entry.get_secret() {
             Ok(original) => {
                 if self.decode_record(location, &original)?.1 {
-                    return Err(FilesystemFallbackSecureStorageHandler::immutable_mutation(
-                        "secure_store",
-                    ));
+                    return Err(SecureRecordCodec::immutable_mutation("secure_store"));
                 }
             }
             Err(keyring::Error::NoEntry) => {}
@@ -1751,9 +1858,7 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
         match entry.get_secret() {
             Ok(original) => {
                 if self.decode_record(location, &original)?.1 {
-                    return Err(FilesystemFallbackSecureStorageHandler::immutable_mutation(
-                        "secure_delete",
-                    ));
+                    return Err(SecureRecordCodec::immutable_mutation("secure_delete"));
                 }
             }
             Err(keyring::Error::NoEntry) => {}
@@ -1866,11 +1971,174 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
     }
 }
 
+// Pure record syntax shared by platform and development providers; no keys or IO.
+struct SecureRecordCodec;
+impl SecureRecordCodec {
+    fn missing_record_key() -> SecureStorageError {
+        #[derive(Debug, thiserror::Error)]
+        #[error("original wrapping key is missing while prior secure records exist")]
+        struct OriginalSecureRecordKeyMissing;
+        aura_core::AuraError::Storage {
+            message: "original secure record wrapping key is missing".into(),
+            source: Some(std::sync::Arc::new(OriginalSecureRecordKeyMissing)),
+        }
+    }
+
+    fn immutable_mutation(operation: &'static str) -> SecureStorageError {
+        aura_core::AuraError::PermissionDenied {
+            message: "immutable secure record rejects mutation".into(),
+            source: Some(std::sync::Arc::new(
+                aura_core::effects::secure::ImmutableSecureRecordMutation { operation },
+            )),
+        }
+    }
+
+    fn validate_location(location: &SecureStorageLocation) -> Result<(), SecureStorageError> {
+        if [
+            ".aura-allocation-lifetime-owner-v1",
+            ".allocation-lifetimes-v1",
+            ".aura-allocation-lifetime-born-v1",
+            ".aura-allocation-lifetime-ready-v1",
+            ".aura-allocation-lifetime-handed-v1",
+            ".allocation-lifetime-index-v1",
+        ]
+        .contains(&location.namespace.as_str())
+        {
+            return Err(SecureStorageError::invalid(
+                "allocation lifetime records are private to their selected provider owner",
+            ));
+        }
+        SecureRecordCodec::validate_component("namespace", &location.namespace)?;
+        SecureRecordCodec::validate_component("key", &location.key)?;
+        if let Some(sub_key) = &location.sub_key {
+            SecureRecordCodec::validate_component("sub_key", sub_key)?;
+        }
+        Ok(())
+    }
+
+    fn validate_component(label: &str, value: &str) -> Result<(), SecureStorageError> {
+        if label == "namespace"
+            && [
+                ".aura-allocation-lifetime-owner-v1",
+                ".allocation-lifetimes-v1",
+                ".aura-allocation-lifetime-born-v1",
+                ".aura-allocation-lifetime-ready-v1",
+                ".aura-allocation-lifetime-handed-v1",
+                ".allocation-lifetime-index-v1",
+            ]
+            .contains(&value)
+        {
+            return Err(SecureStorageError::invalid(
+                "allocation lifetime inventory requires its selected provider owner",
+            ));
+        }
+        if value.is_empty() {
+            return Err(SecureStorageError::invalid(format!(
+                "secure storage {label} cannot be empty"
+            )));
+        }
+        if value == "." || value == ".." {
+            return Err(SecureStorageError::invalid(format!(
+                "secure storage {label} cannot be a directory traversal segment"
+            )));
+        }
+        if value.contains('/') || value.contains('\\') {
+            return Err(SecureStorageError::invalid(format!(
+                "secure storage {label} cannot contain path separators"
+            )));
+        }
+        if value.contains('\0') {
+            return Err(SecureStorageError::invalid(format!(
+                "secure storage {label} cannot contain NUL bytes"
+            )));
+        }
+        if SecureRecordCodec::is_windows_drive_prefix(value) {
+            return Err(SecureStorageError::invalid(format!(
+                "secure storage {label} cannot be a Windows drive prefix"
+            )));
+        }
+        Ok(())
+    }
+
+    fn is_windows_drive_prefix(value: &str) -> bool {
+        let bytes = value.as_bytes();
+        bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn encode_component(component: &str) -> String {
+        let mut encoded = String::with_capacity(component.len());
+        for byte in component.bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                    encoded.push(byte as char);
+                }
+                _ => {
+                    encoded.push('%');
+                    encoded.push(SecureRecordCodec::hex_digit(byte >> 4));
+                    encoded.push(SecureRecordCodec::hex_digit(byte & 0x0f));
+                }
+            }
+        }
+        encoded
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
+    fn decode_component(component: &str) -> Result<String, SecureStorageError> {
+        let bytes = component.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] != b'%' {
+                decoded.push(bytes[index]);
+                index += 1;
+                continue;
+            }
+            if index + 2 >= bytes.len() {
+                return Err(SecureStorageError::invalid(
+                    "stored secure storage component has invalid escape",
+                ));
+            }
+            let high = SecureRecordCodec::hex_value(bytes[index + 1]).ok_or_else(|| {
+                SecureStorageError::invalid("stored secure storage component has invalid escape")
+            })?;
+            let low = SecureRecordCodec::hex_value(bytes[index + 2]).ok_or_else(|| {
+                SecureStorageError::invalid("stored secure storage component has invalid escape")
+            })?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        }
+        String::from_utf8(decoded).map_err(|_| {
+            SecureStorageError::invalid("stored secure storage component is not valid UTF-8")
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn hex_digit(value: u8) -> char {
+        match value {
+            0..=9 => (b'0' + value) as char,
+            10..=15 => (b'A' + (value - 10)) as char,
+            _ => '?',
+        }
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
+    fn hex_value(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        }
+    }
+}
+
 /// Explicit filesystem fallback for secure storage.
 ///
 /// This handler is not a platform secure enclave, keystore, TPM, or hardware
 /// backed implementation. It is a clearly named fallback used until a target
 /// platform wires a stronger secure-storage backend.
+#[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct FilesystemFallbackSecureStorageHandler {
     #[cfg(unix)]
@@ -1891,12 +2159,12 @@ pub struct FilesystemFallbackSecureStorageHandler {
     used_tokens: Mutex<HashSet<[u8; 32]>>,
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 #[derive(Debug)]
 struct InvalidWrappingKeyLength {
     actual: usize,
 }
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 impl std::fmt::Display for InvalidWrappingKeyLength {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -1906,29 +2174,11 @@ impl std::fmt::Display for InvalidWrappingKeyLength {
         )
     }
 }
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 impl std::error::Error for InvalidWrappingKeyLength {}
 
+#[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
 impl FilesystemFallbackSecureStorageHandler {
-    fn missing_record_key() -> SecureStorageError {
-        #[derive(Debug, thiserror::Error)]
-        #[error("original wrapping key is missing while prior secure records exist")]
-        struct OriginalSecureRecordKeyMissing;
-        aura_core::AuraError::Storage {
-            message: "original secure record wrapping key is missing".into(),
-            source: Some(std::sync::Arc::new(OriginalSecureRecordKeyMissing)),
-        }
-    }
-
-    fn immutable_mutation(operation: &'static str) -> SecureStorageError {
-        aura_core::AuraError::PermissionDenied {
-            message: "immutable secure record rejects mutation".into(),
-            source: Some(std::sync::Arc::new(
-                aura_core::effects::secure::ImmutableSecureRecordMutation { operation },
-            )),
-        }
-    }
-
     /// Create a filesystem fallback secure storage handler with a custom base path.
     ///
     /// The secure storage files will be placed in `base_path/secure_store/`.
@@ -2063,12 +2313,12 @@ impl FilesystemFallbackSecureStorageHandler {
                 if encoded.starts_with(".aura-stage-") {
                     return None;
                 }
-                let Ok(decoded) = Self::decode_component(encoded) else {
+                let Ok(decoded) = SecureRecordCodec::decode_component(encoded) else {
                     return None;
                 };
                 let label = if index == 0 { "namespace" } else { "key" };
-                (Self::validate_component(label, &decoded).is_ok()
-                    && Self::encode_component(&decoded) == encoded)
+                (SecureRecordCodec::validate_component(label, &decoded).is_ok()
+                    && SecureRecordCodec::encode_component(&decoded) == encoded)
                     .then_some(decoded)
             })
             .collect::<Option<Vec<_>>>()?;
@@ -2077,7 +2327,7 @@ impl FilesystemFallbackSecureStorageHandler {
             key: decoded[1].clone(),
             sub_key: decoded.get(2).cloned(),
         };
-        (Self::validate_location(&location).is_ok()).then_some(location)
+        (SecureRecordCodec::validate_location(&location).is_ok()).then_some(location)
     }
 
     /// Authenticate a newly produced branch record with this selected
@@ -2255,7 +2505,7 @@ impl FilesystemFallbackSecureStorageHandler {
                 .map_err(|source| Self::descriptor_error("inventory prior secure records", source))?
                 .is_empty()
             {
-                return Err(Self::missing_record_key());
+                return Err(SecureRecordCodec::missing_record_key());
             }
             let key = generate_secret_key();
             let prepared = directory
@@ -2285,12 +2535,20 @@ impl FilesystemFallbackSecureStorageHandler {
             Err(error) => ([0; 32], Some(error)),
         }
     }
-    #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(unix),
+        any(test, feature = "development-keys")
+    ))]
     fn wrapping_key_path(secure_store_path: &std::path::Path) -> PathBuf {
         secure_store_path.join(FALLBACK_WRAPPING_KEY_FILENAME)
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(unix),
+        any(test, feature = "development-keys")
+    ))]
     fn load_or_create_wrapping_key(
         secure_store_path: &std::path::Path,
     ) -> ([u8; 32], Option<SecureStorageError>) {
@@ -2371,13 +2629,13 @@ impl FilesystemFallbackSecureStorageHandler {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn path_for(&self, location: &SecureStorageLocation) -> Result<PathBuf, SecureStorageError> {
-        Self::validate_location(location)?;
+        SecureRecordCodec::validate_location(location)?;
         let mut path = self
             .base_path
-            .join(Self::encode_component(&location.namespace))
-            .join(Self::encode_component(&location.key));
+            .join(SecureRecordCodec::encode_component(&location.namespace))
+            .join(SecureRecordCodec::encode_component(&location.key));
         if let Some(sub) = &location.sub_key {
-            path = path.join(Self::encode_component(sub));
+            path = path.join(SecureRecordCodec::encode_component(sub));
         }
         Ok(path)
     }
@@ -2721,7 +2979,7 @@ impl FilesystemFallbackSecureStorageHandler {
         }
 
         if !allow_create {
-            return Err(Self::missing_record_key());
+            return Err(SecureRecordCodec::missing_record_key());
         }
         let inventory_transaction =
             db.transaction(WASM_SECURE_RECORD_STORE)
@@ -2745,7 +3003,7 @@ impl FilesystemFallbackSecureStorageHandler {
                 Self::map_atomic_idb_error("original record inventory response", source)
             })?;
         if keys.next().is_some() {
-            return Err(Self::missing_record_key());
+            return Err(SecureRecordCodec::missing_record_key());
         }
         Self::require_strict_idb_durability()?;
         let candidate = Self::wasm_generate_wrapping_key().await?;
@@ -3029,7 +3287,7 @@ impl FilesystemFallbackSecureStorageHandler {
                 .await?
                 .1
             {
-                return Err(Self::immutable_mutation("secure_store"));
+                return Err(SecureRecordCodec::immutable_mutation("secure_store"));
             }
         }
         self.wasm_compare_exchange_record(location, original.as_deref(), Some(record))
@@ -3166,7 +3424,7 @@ impl FilesystemFallbackSecureStorageHandler {
                 .await?
                 .1
             {
-                return Err(Self::immutable_mutation("secure_delete"));
+                return Err(SecureRecordCodec::immutable_mutation("secure_delete"));
             }
         }
         self.wasm_compare_exchange_record(location, original.as_deref(), None)
@@ -3205,149 +3463,11 @@ impl FilesystemFallbackSecureStorageHandler {
             })
             .collect()
     }
-
-    fn validate_location(location: &SecureStorageLocation) -> Result<(), SecureStorageError> {
-        if [
-            ".aura-allocation-lifetime-owner-v1",
-            ".allocation-lifetimes-v1",
-            ".aura-allocation-lifetime-born-v1",
-            ".aura-allocation-lifetime-ready-v1",
-            ".aura-allocation-lifetime-handed-v1",
-            ".allocation-lifetime-index-v1",
-        ]
-        .contains(&location.namespace.as_str())
-        {
-            return Err(SecureStorageError::invalid(
-                "allocation lifetime records are private to their selected provider owner",
-            ));
-        }
-        Self::validate_component("namespace", &location.namespace)?;
-        Self::validate_component("key", &location.key)?;
-        if let Some(sub_key) = &location.sub_key {
-            Self::validate_component("sub_key", sub_key)?;
-        }
-        Ok(())
-    }
-
-    fn validate_component(label: &str, value: &str) -> Result<(), SecureStorageError> {
-        if label == "namespace"
-            && [
-                ".aura-allocation-lifetime-owner-v1",
-                ".allocation-lifetimes-v1",
-                ".aura-allocation-lifetime-born-v1",
-                ".aura-allocation-lifetime-ready-v1",
-                ".aura-allocation-lifetime-handed-v1",
-                ".allocation-lifetime-index-v1",
-            ]
-            .contains(&value)
-        {
-            return Err(SecureStorageError::invalid(
-                "allocation lifetime inventory requires its selected provider owner",
-            ));
-        }
-        if value.is_empty() {
-            return Err(SecureStorageError::invalid(format!(
-                "secure storage {label} cannot be empty"
-            )));
-        }
-        if value == "." || value == ".." {
-            return Err(SecureStorageError::invalid(format!(
-                "secure storage {label} cannot be a directory traversal segment"
-            )));
-        }
-        if value.contains('/') || value.contains('\\') {
-            return Err(SecureStorageError::invalid(format!(
-                "secure storage {label} cannot contain path separators"
-            )));
-        }
-        if value.contains('\0') {
-            return Err(SecureStorageError::invalid(format!(
-                "secure storage {label} cannot contain NUL bytes"
-            )));
-        }
-        if Self::is_windows_drive_prefix(value) {
-            return Err(SecureStorageError::invalid(format!(
-                "secure storage {label} cannot be a Windows drive prefix"
-            )));
-        }
-        Ok(())
-    }
-
-    fn is_windows_drive_prefix(value: &str) -> bool {
-        let bytes = value.as_bytes();
-        bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn encode_component(component: &str) -> String {
-        let mut encoded = String::with_capacity(component.len());
-        for byte in component.bytes() {
-            match byte {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
-                    encoded.push(byte as char);
-                }
-                _ => {
-                    encoded.push('%');
-                    encoded.push(Self::hex_digit(byte >> 4));
-                    encoded.push(Self::hex_digit(byte & 0x0f));
-                }
-            }
-        }
-        encoded
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn decode_component(component: &str) -> Result<String, SecureStorageError> {
-        let bytes = component.as_bytes();
-        let mut decoded = Vec::with_capacity(bytes.len());
-        let mut index = 0;
-        while index < bytes.len() {
-            if bytes[index] != b'%' {
-                decoded.push(bytes[index]);
-                index += 1;
-                continue;
-            }
-            if index + 2 >= bytes.len() {
-                return Err(SecureStorageError::invalid(
-                    "stored secure storage component has invalid escape",
-                ));
-            }
-            let high = Self::hex_value(bytes[index + 1]).ok_or_else(|| {
-                SecureStorageError::invalid("stored secure storage component has invalid escape")
-            })?;
-            let low = Self::hex_value(bytes[index + 2]).ok_or_else(|| {
-                SecureStorageError::invalid("stored secure storage component has invalid escape")
-            })?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        }
-        String::from_utf8(decoded).map_err(|_| {
-            SecureStorageError::invalid("stored secure storage component is not valid UTF-8")
-        })
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn hex_digit(value: u8) -> char {
-        match value {
-            0..=9 => (b'0' + value) as char,
-            10..=15 => (b'A' + (value - 10)) as char,
-            _ => '?',
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn hex_value(value: u8) -> Option<u8> {
-        match value {
-            b'0'..=b'9' => Some(value - b'0'),
-            b'a'..=b'f' => Some(value - b'a' + 10),
-            b'A'..=b'F' => Some(value - b'A' + 10),
-            _ => None,
-        }
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
 impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
     async fn secure_create_mutable(
         &self,
@@ -3388,7 +3508,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Self::validate_location(location)?;
+            SecureRecordCodec::validate_location(location)?;
             Self::require_strict_idb_durability()?;
             let record = self.wasm_encrypt_record(location, data).await?;
             self.wasm_publish_record_immutable(location, &record).await
@@ -3488,7 +3608,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists
             })
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(unix),
+            any(test, feature = "development-keys")
+        ))]
         {
             Err(aura_core::AuraError::Storage {
                 message: "provider cannot enforce lifetime immutable records".into(),
@@ -3499,7 +3623,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Self::validate_location(location)?;
+            SecureRecordCodec::validate_location(location)?;
             let original = self.wasm_get_record(location).await?;
             match original {
                 Some(bytes) => {
@@ -3557,7 +3681,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         self.require_capability(caps, SecureStorageCapability::Write)?;
         #[cfg(target_arch = "wasm32")]
         {
-            Self::validate_location(location)?;
+            SecureRecordCodec::validate_location(location)?;
             let record = self.wasm_encrypt_record(location, key).await?;
             return self.wasm_put_record(location, &record).await;
         }
@@ -3600,7 +3724,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 .map_err(|e| Self::descriptor_error("acknowledge secure replacement", e))?;
             Ok(())
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(unix),
+            any(test, feature = "development-keys")
+        ))]
         {
             self.require_filesystem_available()?;
             let path = self.path_for(location)?;
@@ -3621,7 +3749,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         self.require_capability(caps, SecureStorageCapability::Read)?;
         #[cfg(target_arch = "wasm32")]
         {
-            Self::validate_location(location)?;
+            SecureRecordCodec::validate_location(location)?;
             let record = self.wasm_get_record(location).await?.ok_or_else(|| {
                 aura_core::effects::secure::SecureStorageRecordMissing::new(location.clone())
                     .into_storage_error()
@@ -3644,7 +3772,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 })?;
             self.decrypt_fallback_record(location, &record)
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(unix),
+            any(test, feature = "development-keys")
+        ))]
         {
             self.require_filesystem_available()?;
             let path = self.path_for(location)?;
@@ -3664,7 +3796,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         self.require_capability(caps, SecureStorageCapability::Delete)?;
         #[cfg(target_arch = "wasm32")]
         {
-            Self::validate_location(location)?;
+            SecureRecordCodec::validate_location(location)?;
             return self.wasm_delete_record(location).await;
         }
         #[cfg(unix)]
@@ -3697,7 +3829,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 .map_err(|e| Self::descriptor_error("remove secure value", e))?;
             Ok(())
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(unix),
+            any(test, feature = "development-keys")
+        ))]
         {
             self.require_filesystem_available()?;
             let path = self.path_for(location)?;
@@ -3714,7 +3850,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
     ) -> Result<bool, SecureStorageError> {
         #[cfg(target_arch = "wasm32")]
         {
-            Self::validate_location(location)?;
+            SecureRecordCodec::validate_location(location)?;
             return self
                 .wasm_get_record(location)
                 .await
@@ -3728,7 +3864,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 .map(|value| value.is_some())
                 .map_err(|e| Self::descriptor_error("inspect secure value", e))
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(unix),
+            any(test, feature = "development-keys")
+        ))]
         {
             self.require_filesystem_available()?;
             let path = self.path_for(location)?;
@@ -3744,7 +3884,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         caps: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<Vec<String>, SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::List)?;
-        Self::validate_component("namespace", namespace)?;
+        SecureRecordCodec::validate_component("namespace", namespace)?;
         #[cfg(target_arch = "wasm32")]
         {
             return self.wasm_list_record_keys(namespace).await;
@@ -3752,7 +3892,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         #[cfg(unix)]
         {
             let directory = match self.owned_directory()?.child(
-                std::path::Path::new(&Self::encode_component(namespace)),
+                std::path::Path::new(&SecureRecordCodec::encode_component(namespace)),
                 false,
             ) {
                 Ok(v) => v,
@@ -3768,15 +3908,21 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                     .to_str()
                     .ok_or_else(|| SecureStorageError::invalid("secure key name is not UTF-8"))?;
                 if !name.starts_with(".aura-stage-") {
-                    keys.push(Self::decode_component(name)?);
+                    keys.push(SecureRecordCodec::decode_component(name)?);
                 }
             }
             Ok(keys)
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(unix),
+            any(test, feature = "development-keys")
+        ))]
         {
             self.require_filesystem_available()?;
-            let ns_path = self.base_path.join(Self::encode_component(namespace));
+            let ns_path = self
+                .base_path
+                .join(SecureRecordCodec::encode_component(namespace));
             let metadata = match fs::symlink_metadata(&ns_path) {
                 Ok(metadata) => metadata,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -3794,7 +3940,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
             {
                 let entry = entry.map_err(|e| SecureStorageError::storage(e.to_string()))?;
                 if let Some(name) = entry.file_name().to_str() {
-                    keys.push(Self::decode_component(name)?);
+                    keys.push(SecureRecordCodec::decode_component(name)?);
                 }
             }
             Ok(keys)
@@ -5119,8 +5265,10 @@ impl ProductionSecureStorageHandler {
         location: &SecureStorageLocation,
     ) -> Result<(), SecureStorageError> {
         let handler = match self {
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler,
             Self::ProfileOwned(owned) => match owned.backend.as_ref() {
+                #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
                 Self::FilesystemFallback(handler) => handler,
                 _ => {
                     return Err(SecureStorageError::invalid(
@@ -5166,8 +5314,10 @@ impl ProductionSecureStorageHandler {
         location: &SecureStorageLocation,
     ) -> Result<bool, SecureStorageError> {
         let handler = match self {
+            #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
             Self::FilesystemFallback(handler) => handler,
             Self::ProfileOwned(owned) => match owned.backend.as_ref() {
+                #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
                 Self::FilesystemFallback(handler) => handler,
                 _ => {
                     return Err(SecureStorageError::invalid(
@@ -5637,7 +5787,7 @@ mod platform_secure_record_fault_tests {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 mod allocation_lifetime;
 #[cfg(target_arch = "wasm32")]
 mod browser_allocation_lifetime;
@@ -5652,13 +5802,13 @@ mod browser_allocation_lifetime;
     )
 ))]
 mod platform_lifetime_root;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), any(test, feature = "development-keys")))]
 mod retirement_birth;
 #[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]
 mod test_keyring;
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 pub(crate) use allocation_lifetime::InitialCutoverIdentities;
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 pub(crate) use allocation_lifetime::VerifiedOriginalInitializationSuccessor;
 
 #[cfg(unix)]
@@ -5693,16 +5843,24 @@ impl ProductionSecureStorageHandler {
         ),
         AuraError,
     > {
-        let Self::ProfileOwned(owned) = self else {
-            return Err(AuraError::invalid(
-                "secret lifetime handoff requires actual selected profile owner",
-            ));
-        };
-        let Self::FilesystemFallback(_backend) = owned.backend.as_ref() else {
-            return Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error());
-        };
-        let channel = allocation_lifetime::selected_profile_channel(&owned)?;
-        Ok((Self::ProfileOwned(owned), channel))
+        #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
+        {
+            let Self::ProfileOwned(owned) = self else {
+                return Err(AuraError::invalid(
+                    "secret lifetime handoff requires actual selected profile owner",
+                ));
+            };
+            let Self::FilesystemFallback(_backend) = owned.backend.as_ref() else {
+                return Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error());
+            };
+            let channel = allocation_lifetime::selected_profile_channel(&owned)?;
+            Ok((Self::ProfileOwned(owned), channel))
+        }
+        #[cfg(not(any(test, feature = "development-keys", target_arch = "wasm32")))]
+        {
+            let _ = self;
+            Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error())
+        }
     }
 }
 

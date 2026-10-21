@@ -61,6 +61,15 @@ pub struct TransportEnvelope {
 /// Transport operation errors
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum TransportError {
+    /// A required adapter retains its original process-local provider cause.
+    #[error("Transport backend {operation} failed: {source}")]
+    BackendFailure {
+        /// Stable operation at the transport adapter boundary.
+        operation: String,
+        /// Actual provider or protocol cause, including its native source.
+        #[source]
+        source: AuraError,
+    },
     /// The selected stateless provider cannot acknowledge receive readiness.
     #[error("Selected transport does not support receive readiness")]
     ReceiveReadinessUnsupported,
@@ -202,4 +211,37 @@ pub struct TransportStats {
     pub active_channels: u32,
     /// Average envelope size in bytes
     pub avg_envelope_size: u32,
+}
+
+#[cfg(test)]
+mod transport_error_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn backend_failure_preserves_concrete_native_source_through_aura_boundary() {
+        let native = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "original reset");
+        let error = TransportError::BackendFailure {
+            operation: "original broker response".into(),
+            source: AuraError::Network {
+                message: "original response read failed".into(),
+                source: Some(std::sync::Arc::new(native)),
+            },
+        };
+        let outer = AuraError::from(error);
+        let transport = outer
+            .source()
+            .and_then(|source| source.downcast_ref::<TransportError>())
+            .expect("outer network error exposes the concrete transport error");
+        let provider = transport
+            .source()
+            .and_then(|source| source.downcast_ref::<AuraError>())
+            .expect("transport error exposes the original provider error");
+        assert!(matches!(provider, AuraError::Network { .. }));
+        let native = provider
+            .source()
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("native cause remains directly downcastable");
+        assert_eq!(native.kind(), std::io::ErrorKind::ConnectionReset);
+    }
 }

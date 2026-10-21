@@ -108,6 +108,16 @@ impl EnhancedTimeHandler {
         self.simulated
     }
 
+    /// Read-only identity check for native fixtures and simulator observation.
+    /// selected physical provider, rather than a clock with an equal reading.
+    #[cfg(any(
+        feature = "simulator-checkpoint",
+        all(test, not(target_arch = "wasm32"))
+    ))]
+    pub(crate) fn selected_provider_is(&self, provider: &Arc<dyn PhysicalTimeEffects>) -> bool {
+        Arc::ptr_eq(&self.provider, provider)
+    }
+
     /// Sleep for a given number of milliseconds
     pub async fn sleep_ms(
         &self,
@@ -124,6 +134,24 @@ impl EnhancedTimeHandler {
 
         // Delegate to the underlying provider
         self.provider.sleep_ms(ms).await
+    }
+
+    pub async fn sleep_ms_with_registration_observer(
+        &self,
+        ms: u64,
+        observer: aura_core::effects::time::PhysicalSleepRegistrationObserver,
+    ) -> std::result::Result<(), aura_core::effects::TimeError> {
+        with_state_mut_validated(
+            &self.shared.state,
+            |state| {
+                state.stats.total_sleeps += 1;
+            },
+            |state| state.validate(),
+        )
+        .await;
+        self.provider
+            .sleep_ms_with_registration_observer(ms, observer)
+            .await
     }
 
     /// Set a timeout and return a handle
@@ -497,6 +525,25 @@ impl EnhancedTimeHandler {
     }
 }
 
+#[cfg(all(
+    test,
+    any(feature = "simulator-checkpoint", not(target_arch = "wasm32"))
+))]
+mod checkpoint_provider_identity_tests {
+    use super::*;
+
+    #[test]
+    fn equal_selected_readings_do_not_bind_a_foreign_provider() {
+        let original: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let foreign: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let owner = EnhancedTimeHandler::with_provider(original.clone());
+        assert!(owner.selected_provider_is(&original));
+        assert!(!owner.selected_provider_is(&foreign));
+    }
+}
+
 #[async_trait::async_trait]
 impl aura_core::effects::PhysicalTimeEffects for EnhancedTimeHandler {
     async fn physical_time(
@@ -507,6 +554,14 @@ impl aura_core::effects::PhysicalTimeEffects for EnhancedTimeHandler {
 
     async fn sleep_ms(&self, ms: u64) -> std::result::Result<(), aura_core::effects::TimeError> {
         EnhancedTimeHandler::sleep_ms(self, ms).await
+    }
+
+    async fn sleep_ms_with_registration_observer(
+        &self,
+        ms: u64,
+        observer: aura_core::effects::time::PhysicalSleepRegistrationObserver,
+    ) -> std::result::Result<(), aura_core::effects::TimeError> {
+        EnhancedTimeHandler::sleep_ms_with_registration_observer(self, ms, observer).await
     }
 
     async fn wait_until_physical_deadline(

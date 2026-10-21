@@ -39,6 +39,12 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 /// awaiters; short bursts should not immediately force subscribers into lag.
 const VIEW_UPDATE_CHANNEL_CAPACITY: usize = 1024;
 
+// The witness is inspected only through synchronous closures; this lock never
+// crosses an await and serializes cancellation with one selected clock step.
+#[cfg(feature = "simulator-checkpoint")]
+#[allow(clippy::disallowed_types)]
+type BatchObservationLock<T> = parking_lot::Mutex<T>;
+
 #[cfg(target_arch = "wasm32")]
 pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = Result<(), AuraError>> + 'a>>;
 #[cfg(not(target_arch = "wasm32"))]
@@ -244,6 +250,100 @@ pub struct ReactiveScheduler {
 
 struct ReactiveSchedulerShared {
     stats: RwLock<SchedulerStats>,
+    #[cfg(feature = "simulator-checkpoint")]
+    batch_timer: BatchObservationLock<BatchTimerState>,
+}
+
+/// Observation of a sleep actually polled by this original scheduler. It is
+/// not a processing acknowledgment or permission to advance selected time.
+#[cfg(feature = "simulator-checkpoint")]
+#[derive(Clone)]
+pub struct SchedulerBatchDeadlineWitness {
+    shared: Arc<ReactiveSchedulerShared>,
+    generation: u64,
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+#[derive(Clone)]
+pub struct SchedulerBatchDeadlineObserver {
+    shared: Arc<ReactiveSchedulerShared>,
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+impl SchedulerBatchDeadlineObserver {
+    pub fn current(&self) -> Option<SchedulerBatchDeadlineWitness> {
+        let state = self.shared.batch_timer.lock();
+        state
+            .active
+            .as_ref()
+            .map(|(generation, _, _)| SchedulerBatchDeadlineWitness {
+                shared: self.shared.clone(),
+                generation: *generation,
+            })
+    }
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+#[derive(Default)]
+struct BatchTimerState {
+    next_generation: u64,
+    active: Option<(u64, u64, tokio::task::Id)>,
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+impl SchedulerBatchDeadlineWitness {
+    /// Hold the original scheduler's observation lock through a synchronous
+    /// check. A cancelled or replaced sleep cannot satisfy this generation.
+    pub fn with_current_deadline<R>(
+        &self,
+        check: impl FnOnce(u64, tokio::task::Id) -> R,
+    ) -> Option<R> {
+        let state = self.shared.batch_timer.lock();
+        let (generation, deadline, task) = state.active.as_ref()?;
+        (*generation == self.generation).then(|| check(*deadline, *task))
+    }
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+struct BatchTimerRegistration {
+    shared: Arc<ReactiveSchedulerShared>,
+    generation: u64,
+    deadline: u64,
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+impl BatchTimerRegistration {
+    fn new(shared: Arc<ReactiveSchedulerShared>, deadline: u64) -> Option<Self> {
+        let mut state = shared.batch_timer.lock();
+        state.next_generation = state.next_generation.checked_add(1)?;
+        let generation = state.next_generation;
+        drop(state);
+        Some(Self {
+            shared,
+            generation,
+            deadline,
+        })
+    }
+
+    fn polled_pending(&self) {
+        if let Some(task) = tokio::task::try_id() {
+            self.shared.batch_timer.lock().active = Some((self.generation, self.deadline, task));
+        }
+    }
+}
+
+#[cfg(feature = "simulator-checkpoint")]
+impl Drop for BatchTimerRegistration {
+    fn drop(&mut self) {
+        let mut state = self.shared.batch_timer.lock();
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|(generation, _, _)| *generation == self.generation)
+        {
+            state.active = None;
+        }
+    }
 }
 
 impl ReactiveScheduler {
@@ -299,6 +399,8 @@ impl ReactiveScheduler {
             shutdown_rx,
             shared: Arc::new(ReactiveSchedulerShared {
                 stats: RwLock::new(SchedulerStats::default()),
+                #[cfg(feature = "simulator-checkpoint")]
+                batch_timer: BatchObservationLock::new(BatchTimerState::default()),
             }),
             fact_registry,
             time_effects,
@@ -318,6 +420,13 @@ impl ReactiveScheduler {
     /// Subscribe to view updates
     pub fn subscribe(&self) -> broadcast::Receiver<ViewUpdate> {
         self.update_tx.subscribe()
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(super) fn batch_deadline_observer(&self) -> SchedulerBatchDeadlineObserver {
+        SchedulerBatchDeadlineObserver {
+            shared: self.shared.clone(),
+        }
     }
 
     /// Main scheduler loop
@@ -383,6 +492,10 @@ impl ReactiveScheduler {
 
             // Clone time_effects for use in select! statement
             let time_effects = self.time_effects.clone();
+            #[cfg(feature = "simulator-checkpoint")]
+            let batch_deadline = batch_window.as_ref().map(TimeoutBudget::deadline_at_ms);
+            #[cfg(feature = "simulator-checkpoint")]
+            let batch_shared = self.shared.clone();
 
             tokio::select! {
                 // Priority 1: Receive fact from any source
@@ -430,7 +543,26 @@ impl ReactiveScheduler {
                 }
 
                 // Priority 2: Batch deadline expired (effect-based sleep for simulator control)
-                slept = time_effects.sleep_ms(sleep_ms), if batch_window.is_some() => {
+                slept = async {
+                    let sleep = time_effects.sleep_ms(sleep_ms);
+                    tokio::pin!(sleep);
+                    // Drop the generation guard before the polled provider sleep,
+                    // so cancellation cannot leave a valid witness for a removed timer.
+                    #[cfg(feature = "simulator-checkpoint")]
+                    let registration = batch_deadline.and_then(|deadline| {
+                        BatchTimerRegistration::new(batch_shared, deadline)
+                    });
+                    std::future::poll_fn(|cx| {
+                        let result = sleep.as_mut().poll(cx);
+                        #[cfg(feature = "simulator-checkpoint")]
+                        if result.is_pending() {
+                            if let Some(registration) = &registration {
+                                registration.polled_pending();
+                            }
+                        }
+                        result
+                    }).await
+                }, if batch_window.is_some() => {
                     slept.map_err(required_scheduler_source)?;
                     let remaining = if let Some(window) = &batch_window {
                         let _observation = window.acquire_observation().await;
@@ -1371,6 +1503,107 @@ mod tests {
         let (scheduler, fact_tx, shutdown_tx) =
             ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects);
         (scheduler, fact_tx, shutdown_tx)
+    }
+
+    #[cfg(feature = "simulator-checkpoint")]
+    #[tokio::test]
+    async fn batch_witness_requires_actual_polled_original_sleep_and_expires() {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let (scheduler, ingress, shutdown) = ReactiveScheduler::new(
+            SchedulerConfig {
+                batch_window: Duration::from_millis(5),
+                ..SchedulerConfig::default()
+            },
+            Arc::new(build_fact_registry()),
+            clock.clone(),
+        );
+        let observer = scheduler.batch_deadline_observer();
+        assert!(observer.current().is_none());
+        let task = tokio::spawn(async move { scheduler.run().await });
+        ingress
+            .send(FactSource::Journal(vec![make_test_fact(
+                1,
+                FactContent::Relational(RelationalFact::Generic {
+                    context_id: test_context_id(),
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![1],
+                    },
+                }),
+            )]))
+            .await
+            .expect("actual original journal ingress");
+        let witness = aura_testkit::infrastructure::time::assertions::assert_completes_within(
+            Duration::from_secs(2),
+            async {
+                loop {
+                    if let Some(witness) = observer.current() {
+                        break Ok::<_, AuraError>(witness);
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
+        .await
+        .expect("actual scheduler batch sleep was polled");
+        assert_eq!(
+            witness.with_current_deadline(|deadline, _task| deadline),
+            Some(5_005)
+        );
+        assert_eq!(
+            clock
+                .next_registered_deadline()
+                .await
+                .map(|time| time.value()),
+            Some(5_005)
+        );
+        ingress
+            .send(FactSource::Journal(Vec::new()))
+            .await
+            .expect("original scheduler wake replaces its pending sleep");
+        let replacement = aura_testkit::infrastructure::time::assertions::assert_completes_within(
+            Duration::from_secs(2),
+            async {
+                loop {
+                    if witness.with_current_deadline(|_, _| ()).is_none() {
+                        if let Some(replacement) = observer.current() {
+                            break Ok::<_, AuraError>(replacement);
+                        }
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
+        .await
+        .expect("replacement sleep invalidates the old generation");
+        assert_eq!(
+            replacement.with_current_deadline(|deadline, _task| deadline),
+            Some(5_005)
+        );
+        assert!(witness.with_current_deadline(|_, _| ()).is_none());
+        assert_eq!(
+            replacement.with_current_deadline(|deadline, task| {
+                clock.try_advance_sole_registered_deadline(deadline, task)
+            }),
+            Some(true)
+        );
+        aura_testkit::infrastructure::time::assertions::assert_completes_within(
+            Duration::from_secs(2),
+            async {
+                while replacement.with_current_deadline(|_, _| ()).is_some() {
+                    tokio::task::yield_now().await;
+                }
+                Ok::<(), AuraError>(())
+            },
+        )
+        .await
+        .expect("completed batch invalidates the exact generation");
+        shutdown.send(()).await.expect("original shutdown owner");
+        task.await
+            .expect("owned task join")
+            .expect("scheduler shutdown");
     }
 
     #[test]

@@ -75,8 +75,39 @@ impl ForcedVmRetirementFailure {
     }
 }
 
+/// Keeps the original native error allocation after acknowledged resource
+/// retirement. Ordinary close still reports the required validation failure.
+#[derive(Debug, Clone)]
+pub struct RetainedSessionCloseFailure {
+    original: Arc<SessionIngressError>,
+}
+/// Sealed original resource acknowledgment with its failed close validation.
+/// It carries the producer's claim witness, rather than using an error or a
+/// missing binding as evidence that disposal completed.
+pub(in crate::runtime) struct AcknowledgedVmResourceRetirement {
+    _retirement: Arc<super::effects::SessionEndResourceRetirement>,
+    original: Arc<SessionIngressError>,
+}
+impl AcknowledgedVmResourceRetirement {
+    pub(in crate::runtime) fn native_failure(&self) -> Arc<SessionIngressError> {
+        Arc::clone(&self.original)
+    }
+}
+impl std::fmt::Display for RetainedSessionCloseFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.original.as_ref(), formatter)
+    }
+}
+impl std::error::Error for RetainedSessionCloseFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.original.as_ref())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum SessionIngressError {
+    #[error("{0}")]
+    RetainedClose(#[source] RetainedSessionCloseFailure),
     #[error("runtime session {session_id} has no owner record")]
     MissingOwner {
         session_id: RuntimeChoreographySessionId,
@@ -149,7 +180,7 @@ impl SessionIngressError {
             Self::SessionStart { .. } => "session_start",
             Self::Round { .. } => "round",
             Self::BridgeRound { .. } => "bridge_round",
-            Self::SessionClose { .. } => "session_close",
+            Self::SessionClose { .. } | Self::RetainedClose(_) => "session_close",
             Self::ForcedRetirement { .. } => "forced_retirement",
             Self::OwnerTransfer { .. } => "owner_transfer",
         }
@@ -238,6 +269,10 @@ pub struct OwnedVmSession {
     handler: Arc<AuraQueuedVmBridgeHandler>,
     vm_session_id: SessionId,
     retirement_armed: bool,
+    acknowledged_close_failure: Option<(
+        Arc<super::effects::SessionEndResourceRetirement>,
+        Arc<SessionIngressError>,
+    )>,
 }
 
 /// Owns the claimed choreography capability until VM open transfers it to the
@@ -282,11 +317,7 @@ impl Drop for OwnedVmSession {
         self.retirement_armed = false;
         // The backend's delivery lease preserves unknown-delivery custody;
         // retirement never retries or acknowledges an in-flight frame.
-        let vm_close = if self.engine.active_sessions().contains(&self.vm_session_id) {
-            close_and_reap_vm_session(&mut self.engine, self.vm_session_id).err()
-        } else {
-            None
-        };
+        let vm_close = close_and_reap_vm_session(&mut self.engine, self.vm_session_id).err();
         let ownership = self
             .effects
             .retire_dropped_vm_owner(&self.owner.capability)
@@ -612,28 +643,77 @@ impl OwnedVmSession {
     /// Close through the actual retained owner. An interrupted close leaves the
     /// same session capability available to its required task custodian.
     pub(crate) async fn close_retained(&mut self) -> Result<(), SessionIngressError> {
+        if let Some((_, original)) = &self.acknowledged_close_failure {
+            return Err(SessionIngressError::RetainedClose(
+                RetainedSessionCloseFailure {
+                    original: Arc::clone(original),
+                },
+            ));
+        }
         self.effects
             .assert_owned_choreography_session(&self.owner)?;
-        // The engine reaps terminal sessions during step cleanup. This admitted
-        // owner still owns the runtime binding and fragments after VM completion,
-        // so releasing those must not depend on closing an already-reaped VM.
-        if self.engine.active_sessions().contains(&self.vm_session_id) {
-            close_and_reap_vm_session(&mut self.engine, self.vm_session_id).map_err(|source| {
-                SessionIngressError::SessionClose {
-                    session_id: self.owner.session_id,
-                    owner_label: self.owner.owner_label.clone(),
-                    source: SessionCloseFailure::Engine(source),
-                }
-            })?;
-        }
+        // Scheduler activity is observational. Both backends acknowledge
+        // targeted disposal, including an idempotent summary after prior reap;
+        // only that actual producer can settle the VM resource before the
+        // physical runtime binding and fragments are released.
+        close_and_reap_vm_session(&mut self.engine, self.vm_session_id).map_err(|source| {
+            SessionIngressError::SessionClose {
+                session_id: self.owner.session_id,
+                owner_label: self.owner.owner_label.clone(),
+                source: SessionCloseFailure::Engine(source),
+            }
+        })?;
         let result = self
             .effects
             .end_owned_choreography_session(&self.owner)
             .await;
-        if result.is_ok() {
-            self.retirement_armed = false;
+        match result {
+            Ok(()) => {
+                self.retirement_armed = false;
+                Ok(())
+            }
+            Err(error) => {
+                let retirement = match &error {
+                    SessionIngressError::SessionClose {
+                        source:
+                            SessionCloseFailure::Choreography(
+                                aura_protocol::effects::ChoreographyError::RequiredTime {
+                                    source,
+                                    ..
+                                },
+                            ),
+                        ..
+                    } => source
+                        .downcast_ref::<super::effects::SessionEndTimeFailure>()
+                        .and_then(|failure| failure.original_retirement(&self.owner)),
+                    _ => None,
+                };
+                if let Some(retirement) = retirement {
+                    let original = Arc::new(error);
+                    self.acknowledged_close_failure = Some((retirement, Arc::clone(&original)));
+                    self.retirement_armed = false;
+                    return Err(SessionIngressError::RetainedClose(
+                        RetainedSessionCloseFailure { original },
+                    ));
+                }
+                Err(error)
+            }
         }
-        result
+    }
+
+    /// Read-only resource evidence, separate from ordinary close validation.
+    /// Missing binding or fragments cannot construct this acknowledgment.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "OwnedVmSession", receiver_type = OwnedVmSession, family = "runtime_helper")]
+    pub(in crate::runtime) fn acknowledged_close_resource_failure(
+        &self,
+    ) -> Option<AcknowledgedVmResourceRetirement> {
+        self.acknowledged_close_failure
+            .as_ref()
+            .filter(|(retirement, _)| retirement.matches_owner(&self.owner))
+            .map(|(retirement, original)| AcknowledgedVmResourceRetirement {
+                _retirement: Arc::clone(retirement),
+                original: Arc::clone(original),
+            })
     }
 
     pub fn transfer_owner_in_place(
@@ -711,6 +791,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
             handler,
             vm_session_id,
             retirement_armed: true,
+            acknowledged_close_failure: None,
         }),
         Err(error) => {
             log_session_owner_rejected(
@@ -977,11 +1058,77 @@ impl AuraEffectSystem {
         }
     }
 
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    fn original_session_end_gate_for_test(
+        &self,
+        owner: &RuntimeSessionOwner,
+    ) -> Option<futures::future::BoxFuture<'_, ()>> {
+        let gate = {
+            let mut gate = self.original_session_end_gate.lock();
+            if gate
+                .as_ref()
+                .is_some_and(|(session, _, _)| *session == owner.session_id.as_uuid())
+            {
+                gate.take()
+            } else {
+                None
+            }
+        };
+        gate.map(|(_, entered, release)| {
+            let owner = owner.clone();
+            let original: futures::future::BoxFuture<'_, ()> = Box::pin(async move {
+                self.assert_owned_choreography_session(&owner).expect(
+                    "actual close task retains its original session binding before acknowledgment",
+                );
+                entered
+                    .send(owner)
+                    .unwrap_or_else(|_| panic!("original session-end observer remains held"));
+                if let Ok(clock) = release.await {
+                    let selected: Arc<dyn aura_core::effects::PhysicalTimeEffects> = clock.clone();
+                    assert!(
+                        self.time_effects().selected_provider_is(&selected),
+                        "session-end injection retains the actual selected physical provider"
+                    );
+                    clock
+                        .fail_next_current_task_observation(
+                            aura_core::effects::TimeError::OperationFailed {
+                                reason: "original issuer signed-notice close physical read".into(),
+                            },
+                        )
+                        .await
+                        .expect("same original task arms its actual close read");
+                }
+            });
+            original
+        })
+    }
+
     pub async fn end_owned_choreography_session(
         &self,
         owner: &RuntimeSessionOwner,
     ) -> Result<(), SessionIngressError> {
         self.assert_owned_choreography_session(owner)?;
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        if let Some(original) = self.original_session_end_gate_for_test(owner) {
+            original.await;
+        }
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        {
+            let mut fault = self.original_session_end_fault.lock();
+            if fault.as_ref() == Some(&owner.session_id) {
+                fault.take();
+                return Err(SessionIngressError::SessionClose {
+                    session_id: owner.session_id,
+                    owner_label: owner.owner_label.clone(),
+                    source: SessionCloseFailure::Choreography(
+                        aura_protocol::effects::ChoreographyError::InternalError {
+                            message: "selected original session-end fault before binding mutation"
+                                .into(),
+                        },
+                    ),
+                });
+            }
+        }
         ChoreographicEffects::end_session(self)
             .await
             .map_err(|error| SessionIngressError::SessionClose {
@@ -1545,6 +1692,7 @@ mod tests {
             handler,
             vm_session_id,
             retirement_armed: true,
+            acknowledged_close_failure: None,
         }
     }
 
@@ -1570,6 +1718,136 @@ mod tests {
         next.close()
             .await
             .expect("same physical task admits new owner after retirement");
+    }
+
+    #[tokio::test]
+    async fn original_session_end_fault_retains_same_vm_owner_for_retry() {
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                test_authority(0xc2),
+            )
+            .expect("one selected original effect owner"),
+        );
+        let mut session = live_drop_fixture(effects.clone(), 0xc2).await;
+        let original_id = session.owner().session_id;
+        *effects.original_session_end_fault.lock() = Some(original_id);
+        let first = session
+            .close_retained()
+            .await
+            .expect_err("named original end fault refuses close before binding mutation");
+        assert!(matches!(
+            first,
+            SessionIngressError::SessionClose {
+                session_id,
+                source: SessionCloseFailure::Choreography(
+                    aura_protocol::effects::ChoreographyError::InternalError { ref message }
+                ),
+                ..
+            } if session_id == original_id
+                && message == "selected original session-end fault before binding mutation"
+        ));
+        assert_eq!(
+            effects.current_runtime_choreography_session_id(),
+            Some(original_id),
+            "failed close retains the exact original binding"
+        );
+        assert_eq!(session.owner().session_id, original_id);
+        assert!(
+            session.acknowledged_close_resource_failure().is_none(),
+            "a refused close before binding mutation has no retirement receipt"
+        );
+        session
+            .close_retained()
+            .await
+            .expect("same original owner retries the one-shot close");
+        assert!(effects.current_runtime_choreography_session_id().is_none());
+    }
+
+    #[tokio::test]
+    async fn original_vm_close_clock_failure_retains_actual_retirement_and_original_cause() {
+        use aura_core::effects::{PhysicalTimeEffects, TimeError};
+        let clock = aura_testkit::time::ManualPhysicalClock::new(100);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                test_authority(0xc3),
+            )
+            .expect("original runtime effects")
+            .with_physical_time_provider(Arc::new(clock.clone())),
+        );
+        let mut session = live_drop_fixture(Arc::clone(&effects), 0xc3).await;
+        let original_owner = session.owner().clone();
+        clock
+            .fail_next_observation(TimeError::OperationFailed {
+                reason: "original VM close selected clock failure".into(),
+            })
+            .await;
+        let first = session
+            .close_retained()
+            .await
+            .expect_err("clock failure remains a close failure");
+        let acknowledgment = session
+            .acknowledged_close_resource_failure()
+            .expect("actual producer retained binding and fragment retirement");
+        let original = acknowledgment.native_failure();
+        let retirement = Arc::clone(&acknowledgment._retirement);
+        assert!(retirement.matches_owner(&original_owner));
+        assert!(effects.current_runtime_choreography_session_id().is_none());
+        assert!(effects.vm_fragment_snapshot().is_empty());
+        fn retains_original(
+            error: &(dyn std::error::Error + 'static),
+            original: &SessionIngressError,
+        ) -> bool {
+            let mut current = Some(error);
+            while let Some(cause) = current {
+                if cause
+                    .downcast_ref::<SessionIngressError>()
+                    .is_some_and(|actual| std::ptr::eq(actual, original))
+                {
+                    return true;
+                }
+                current = cause.source();
+            }
+            false
+        }
+        assert!(retains_original(&first, original.as_ref()));
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(original.as_ref());
+        let mut selected_failure = false;
+        while let Some(cause) = current {
+            selected_failure |= matches!(cause.downcast_ref::<TimeError>(),
+                Some(TimeError::OperationFailed { reason }) if reason == "original VM close selected clock failure");
+            current = cause.source();
+        }
+        assert!(
+            selected_failure,
+            "original native selected-provider cause survives"
+        );
+        clock
+            .fail_next_observation(TimeError::ServiceUnavailable)
+            .await;
+        let repeated = session
+            .close_retained()
+            .await
+            .expect_err("retirement never turns ordinary close into success");
+        assert!(retains_original(&repeated, original.as_ref()));
+        assert!(
+            matches!(
+                effects.physical_time().await,
+                Err(TimeError::ServiceUnavailable)
+            ),
+            "retry must not replace original validation with a fresh clock read"
+        );
+        drop(session);
+        let next = live_drop_fixture(Arc::clone(&effects), 0xc3).await;
+        assert_eq!(next.owner().session_id, original_owner.session_id);
+        assert!(
+            !retirement.matches_owner(next.owner()),
+            "same id and label cannot replace the original physical owner claim"
+        );
+        next.close()
+            .await
+            .expect("new independent owner closes normally");
     }
 
     #[tokio::test]
