@@ -401,8 +401,7 @@ pub fn run_ownership_annotation_ratchet(args: &[String]) -> Result<()> {
         let mut args = vec!["diff".into(), "-U3".into(), diff_range.clone(), "--".into()];
         args.extend(scope_paths.iter().map(|path| path.to_string()));
         args
-    })
-    .unwrap_or_default();
+    })?;
     let mut violations = Vec::new();
     let mut current_file = String::new();
 
@@ -4954,16 +4953,13 @@ pub fn run_browser_cache_owner() -> Result<()> {
         ),
     };
 
-    let hits = command_stdout(
-        "rg",
-        &[
+    let hits = rg_lines(&[
             "--no-heading".into(),
             "-n".into(),
             r"session\.uiStateCache = null|session\.uiStateCacheJson = null|session\.uiStateVersion = 0|session\.requiredUiStateRevision = 0".into(),
             driver.to_string_lossy().into_owned(),
         ],
-    )
-    .unwrap_or_default();
+    )?.join("\n");
 
     for hit in hits.lines().filter(|l| !l.is_empty()) {
         let line_num: u64 = hit
@@ -5639,16 +5635,13 @@ pub fn run_harness_boundary_policy() -> Result<()> {
         if !root.exists() {
             continue;
         }
-        let hits = command_stdout(
-            "rg",
-            &[
-                "-o".into(),
-                "--no-filename".into(),
-                r"scenarios/harness/[A-Za-z0-9._/-]+\.toml".into(),
-                root.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let hits = rg_lines(&[
+            "-o".into(),
+            "--no-filename".into(),
+            r"scenarios/harness/[A-Za-z0-9._/-]+\.toml".into(),
+            root.to_string_lossy().into_owned(),
+        ])?
+        .join("\n");
         for line in hits.lines().filter(|l| !l.is_empty()) {
             referenced.insert(line.trim().to_string());
         }
@@ -5844,6 +5837,388 @@ pub fn run_harness_bridge_contract() -> Result<()> {
     Ok(())
 }
 
+fn declared_smoke_command_consumer(file: &str, package: &str, source: &str) -> Result<bool> {
+    if file != "crates/aura-harness/playwright-driver/tests/smoke.mjs" {
+        return Ok(false);
+    }
+    let package: serde_json::Value =
+        serde_json::from_str(package).context("parsing Playwright package test-entry ownership")?;
+    if package["scripts"]["test"].as_str()
+        != Some("npm run build && node ./playwright_driver.mjs --selftest && node ./tests/launcher.mjs && node ./tests/smoke.mjs")
+    {
+        return Ok(false);
+    }
+    let needle = "submit_semantic_command";
+    if source.match_indices(needle).count() != 1 {
+        return Ok(false);
+    }
+    let consumer = Regex::new(
+        r#"^\s*const\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*await\s+driver\.call\('submit_semantic_command',\s*\{\s*$"#,
+    )?;
+    let mut prefix = String::new();
+    for line in source.split_inclusive('\n') {
+        if line.contains(needle) {
+            return Ok(consumer.is_match(line.trim_end_matches('\n'))
+                && javascript_prefix_ends_in_code(&prefix));
+        }
+        prefix.push_str(line);
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod command_plane_applicability_tests {
+    use super::declared_smoke_command_consumer;
+    const FILE: &str = "crates/aura-harness/playwright-driver/tests/smoke.mjs";
+    const CALL: &str = "    const setup = await driver.call('submit_semantic_command', {\n";
+    fn package() -> String {
+        serde_json::json!({"scripts":{"test":"npm run build && node ./playwright_driver.mjs --selftest && node ./tests/launcher.mjs && node ./tests/smoke.mjs"}}).to_string()
+    }
+    #[test]
+    fn original_npm_smoke_fixture_has_one_actual_consumer() {
+        assert!(declared_smoke_command_consumer(
+            FILE,
+            include_str!("../../../../crates/aura-harness/playwright-driver/package.json"),
+            include_str!("../../../../crates/aura-harness/playwright-driver/tests/smoke.mjs"),
+        )
+        .unwrap());
+    }
+    #[test]
+    fn exact_declared_smoke_consumer_does_not_authorize_other_paths_or_handlers() {
+        assert!(declared_smoke_command_consumer(FILE, &package(), CALL).unwrap());
+        for file in [
+            "tests/smoke.mjs",
+            "crates/aura-harness/playwright-driver/tests/other.mjs",
+            "crates/aura-harness/playwright-driver/playwright_driver.mjs",
+            "crates/aura-harness/playwright-driver/src/foreign.ts",
+            "./crates/aura-harness/playwright-driver/tests/smoke.mjs",
+            "/crates/aura-harness/playwright-driver/tests/smoke.mjs",
+            "crates/aura-harness/playwright-driver/tests/../tests/smoke.mjs",
+        ] {
+            assert!(
+                !declared_smoke_command_consumer(file, &package(), CALL).unwrap(),
+                "{file}"
+            );
+        }
+        for source in [
+            "case 'submit_semantic_command':",
+            "const submit_semantic_command = () => {};",
+            "// const setup = await driver.call('submit_semantic_command', {",
+            "const note = \"submit_semantic_command\";",
+        ] {
+            assert!(!declared_smoke_command_consumer(FILE, &package(), source).unwrap());
+        }
+        assert!(!declared_smoke_command_consumer(FILE, "{}", CALL).unwrap());
+        assert!(declared_smoke_command_consumer(FILE, "not json", CALL).is_err());
+    }
+    #[test]
+    fn smoke_consumer_rejects_extra_occurrences_and_quoted_or_commented_lines() {
+        for source in [
+            format!("{CALL}// submit_semantic_command\n"),
+            format!("/*\n{CALL}*/"),
+            format!("const text = `\n{CALL}`;"),
+            format!("const text = '\\\n{CALL}';"),
+            format!("const pattern = /'/;\n/* '\n{CALL}*/\n"),
+            format!("const ratio = a / b;\n{CALL}"),
+            format!("const text = `${{`nested`}}`;\n{CALL}"),
+        ] {
+            assert!(
+                !declared_smoke_command_consumer(FILE, &package(), &source).unwrap(),
+                "{source}"
+            );
+        }
+        assert!(declared_smoke_command_consumer(
+            FILE,
+            &package(),
+            &format!("const html = `fixture`;\n// observation\n{CALL}")
+        )
+        .unwrap());
+        assert!(declared_smoke_command_consumer(
+            FILE,
+            &package(),
+            &format!("const pattern = /[/'\\\\]/;\n{CALL}")
+        )
+        .unwrap());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn both_command_plane_queries_preserve_original_rg_error() {
+        use std::{
+            fs,
+            os::unix::fs::PermissionsExt,
+            process::Command,
+            sync::atomic::{AtomicU64, Ordering},
+        };
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let root = std::env::temp_dir().join(format!(
+                "aura-command-plane-rg-{}",
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&root) {
+                Ok(()) => break root,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => panic!("{e}"),
+            }
+        };
+        let rg = root.join("rg");
+        fs::write(&rg, "#!/bin/sh\ncase \"$FAIL_QUERY\" in lines) printf '%s\\n' \"$PWD/path.rs:4:hit\" '7:value' ''; exit 0;; no-match) exit 1;; partial) echo valid-looking-hit; echo original-rg-47 >&2; exit 47;; signal) kill -TERM $$; exit 99;; esac\ncase \"$2\" in *submit_semantic_command_via_ui*) if [ \"$FAIL_QUERY\" = rust ]; then echo original-rg-47 >&2; exit 47; fi; exit 1;; *) echo original-rg-47 >&2; exit 47;; esac\n").unwrap();
+        fs::set_permissions(&rg, fs::Permissions::from_mode(0o700)).unwrap();
+        for executable in ["git", "bash"] {
+            let file = root.join(executable);
+            fs::write(&file, "#!/bin/sh\ncase \"$FAIL_QUERY\" in git-empty|matrix-empty) exit 0;; matrix-match) echo scenario=sample; exit 0;; *) echo original-producer-47 >&2; exit 47;; esac\n").unwrap();
+            fs::set_permissions(file, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::create_dir_all(root.join("scenarios")).unwrap();
+        fs::create_dir_all(root.join("scripts/harness")).unwrap();
+        fs::write(root.join("scenarios/harness_inventory.toml"), "").unwrap();
+        fs::write(
+            root.join("scripts/harness/run-matrix.sh"),
+            "fixture-only marker",
+        )
+        .unwrap();
+        for query in [
+            "rust",
+            "driver",
+            "lines",
+            "no-match",
+            "partial",
+            "signal",
+            "spawn",
+            "git-empty",
+            "git-error",
+            "matrix-empty",
+            "matrix-match",
+            "matrix-error",
+        ] {
+            let search_path = if query == "spawn" {
+                root.join("absent")
+            } else {
+                root.clone()
+            };
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "checks::policy::command_plane_applicability_tests::rg_error_child",
+                    "--nocapture",
+                ])
+                .current_dir(&root)
+                .env("PATH", search_path)
+                .env("FAIL_QUERY", query)
+                .env("AURA_COMMAND_PLANE_RG_CHILD", "1")
+                .env("AURA_OWNERSHIP_RATCHET_DIFF_RANGE", "HEAD")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        }
+        command_error_stream_controls();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    fn command_error_stream_controls() {
+        use std::process::Command;
+        for script in [
+            "printf ' \\tstdout-only\\n\\n'; exit 47",
+            "printf ' \\tstderr-only\\n\\n' >&2; exit 47",
+            "printf ' \\tstdout-both\\n\\n'; printf ' \\tstderr-both\\n\\n' >&2; exit 47",
+            "exit 47",
+        ] {
+            let output = Command::new("/bin/sh")
+                .args(["-c", script])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(47));
+            let error =
+                super::super::support::command_error("/bin/sh", &[script.to_owned()], &output)
+                    .to_string();
+            assert!(error.contains("failed with status 47"));
+            assert!(error.contains(&format!(
+                "stdout (stream order not inferred):\n{}\nstderr",
+                String::from_utf8_lossy(&output.stdout)
+            )));
+            assert!(error.ends_with(String::from_utf8_lossy(&output.stderr).as_ref()));
+        }
+        let output = Command::new("/bin/sh")
+            .args(["-c", "kill -TERM $$"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), None);
+        let error = super::super::support::command_error("/bin/sh", &[], &output).to_string();
+        assert!(error.contains(&output.status.to_string()), "{error}");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn rg_error_child() {
+        if std::env::var_os("AURA_COMMAND_PLANE_RG_CHILD").is_none() {
+            return;
+        }
+        let query = std::env::var("FAIL_QUERY").unwrap();
+        if query.starts_with("git-") {
+            // The real ratchet also validates its canonical required inventory.
+            // Keep those original files; only this child's Git producer is fake.
+            std::env::set_current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).unwrap();
+            let outcome = super::run_ownership_annotation_ratchet(&["semantic-owner".to_owned()]);
+            if query == "git-empty" {
+                outcome.unwrap();
+            } else {
+                let error = format!(
+                    "{:#}",
+                    outcome.expect_err("Git failure must not become empty diff")
+                );
+                assert!(error.contains("47") && error.contains("original-producer-47"));
+            }
+            return;
+        }
+        if query.starts_with("matrix-") {
+            if query == "matrix-match" {
+                std::fs::write(
+                    "scenarios/harness_inventory.toml",
+                    "[[scenario]]\nid = \"sample\"\nclassification = \"shared\"\n",
+                )
+                .unwrap();
+            }
+            let outcome = super::run_harness_matrix_inventory();
+            if query == "matrix-error" {
+                let error = format!(
+                    "{:#}",
+                    outcome.expect_err("matrix failure must not become empty matches")
+                );
+                assert!(error.contains("47") && error.contains("original-producer-47"));
+            } else {
+                outcome.unwrap();
+            }
+            return;
+        }
+        let args = ["-n".to_owned(), "pattern".to_owned()];
+        if query == "lines" {
+            let lines = super::super::support::rg_lines(&args).unwrap();
+            assert_eq!(lines, ["path.rs:4:hit", "7:value", ""]);
+            assert_eq!(
+                lines.len(),
+                3,
+                "blank returned match retains count semantics"
+            );
+            return;
+        }
+        if query == "no-match" {
+            assert!(super::super::support::rg_lines(&args).unwrap().is_empty());
+            return;
+        }
+        if ["partial", "signal", "spawn"].contains(&query.as_str()) {
+            let error = super::super::support::rg_lines(&args)
+                .expect_err("native failure cannot certify no hits");
+            let rendered = format!("{error:#}");
+            if query == "partial" {
+                assert!(
+                    rendered.contains("47")
+                        && rendered.contains("original-rg-47")
+                        && rendered.contains("valid-looking-hit"),
+                    "{rendered}"
+                );
+            }
+            if query == "signal" {
+                assert!(
+                    rendered.contains("signal") || rendered.contains("SIGTERM"),
+                    "{rendered}"
+                );
+            }
+            if query == "spawn" {
+                assert!(rendered.contains("running rg"), "{rendered}");
+            }
+            return;
+        }
+        let error =
+            super::run_harness_command_plane_boundary().expect_err("rg error cannot certify clean");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("47") && rendered.contains("original-rg-47"),
+            "{rendered}"
+        );
+    }
+}
+
+// Conservative lexical context for the one exact consumer exemption. Quoted
+// text, template bodies and comments cannot manufacture that consumer line.
+fn javascript_prefix_ends_in_code(source: &str) -> bool {
+    let mut bytes = source.bytes().peekable();
+    let mut state = 0;
+    let mut previous = None;
+    let mut regex_class = false;
+    while let Some(byte) = bytes.next() {
+        match state {
+            0 => match byte {
+                b'\'' | b'"' | b'`' => state = byte,
+                b'/' if bytes.peek() == Some(&b'/') => {
+                    bytes.next();
+                    state = 1;
+                }
+                b'/' if bytes.peek() == Some(&b'*') => {
+                    bytes.next();
+                    state = 2;
+                }
+                b'/' if previous.is_some_and(|value| b"(=,[!:?{;".contains(&value)) => state = 3,
+                // Division and unknown regex lexical contexts are unsupported,
+                // rather than pretending their quotes have string semantics.
+                b'/' => return false,
+                _ if !byte.is_ascii_whitespace() => previous = Some(byte),
+                _ => {}
+            },
+            1 if byte == b'\n' => state = 0,
+            2 if byte == b'*' && bytes.peek() == Some(&b'/') => {
+                bytes.next();
+                state = 0;
+            }
+            3 if byte == b'\\' => {
+                if bytes.next().is_none() {
+                    return false;
+                }
+            }
+            3 if byte == b'[' => regex_class = true,
+            3 if byte == b']' => regex_class = false,
+            3 if byte == b'/' && !regex_class => {
+                state = 0;
+                previous = Some(b')');
+            }
+            3 if byte == b'\n' || byte == b'\r' => return false,
+            b'`' if byte == b'$' && bytes.peek() == Some(&b'{') => {
+                bytes.next();
+                let mut reference = String::new();
+                loop {
+                    match bytes.next() {
+                        Some(b'}') => break,
+                        Some(value) if value.is_ascii_alphanumeric() || b"_$.".contains(&value) => {
+                            reference.push(char::from(value))
+                        }
+                        _ => return false,
+                    }
+                }
+                if reference.split('.').any(|part| {
+                    part.is_empty()
+                        || !part.as_bytes()[0].is_ascii_alphabetic()
+                            && !b"_$".contains(&part.as_bytes()[0])
+                }) {
+                    return false;
+                }
+            }
+            b'\'' | b'"' | b'`' if byte == b'\\' => {
+                bytes.next();
+            }
+            b'\'' | b'"' if byte == b'\n' || byte == b'\r' => return false,
+            b'\'' | b'"' | b'`' if byte == state => {
+                state = 0;
+                previous = Some(b')');
+            }
+            _ => {}
+        }
+    }
+    state == 0
+}
+
 pub fn run_harness_command_plane_boundary() -> Result<()> {
     let repo_root = repo_root()?;
 
@@ -5868,24 +6243,20 @@ pub fn run_harness_command_plane_boundary() -> Result<()> {
 
     // Check Rust files for unexpected semantic command handling surfaces.
     let rust_hits: Vec<String> = {
-        let output = command_stdout(
-            "rg",
-            &[
-                "-l".into(),
-                r"fn submit_semantic_command\(|submit_semantic_command_via_ui\(".into(),
-                repo_root
-                    .join("crates/aura-harness")
-                    .to_string_lossy()
-                    .into_owned(),
-                repo_root
-                    .join("crates/aura-web")
-                    .to_string_lossy()
-                    .into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let output = rg_lines(&[
+            "-l".into(),
+            r"fn submit_semantic_command\(|submit_semantic_command_via_ui\(".into(),
+            repo_root
+                .join("crates/aura-harness")
+                .to_string_lossy()
+                .into_owned(),
+            repo_root
+                .join("crates/aura-web")
+                .to_string_lossy()
+                .into_owned(),
+        ])?;
         output
-            .lines()
+            .iter()
             .filter(|l| !l.is_empty())
             .map(|l| {
                 let p = std::path::Path::new(l);
@@ -5903,22 +6274,19 @@ pub fn run_harness_command_plane_boundary() -> Result<()> {
         }
     }
 
-    // Check TypeScript files for unexpected semantic command handling surfaces.
+    // Scan the entire driver, including production MJS launchers. A single
+    // declared smoke-test RPC consumer is not a command-handling owner.
     let ts_hits: Vec<String> = {
-        let output = command_stdout(
-            "rg",
-            &[
-                "-l".into(),
-                "submit_semantic_command".into(),
-                repo_root
-                    .join("crates/aura-harness/playwright-driver")
-                    .to_string_lossy()
-                    .into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let output = rg_lines(&[
+            "-l".into(),
+            "submit_semantic_command".into(),
+            repo_root
+                .join("crates/aura-harness/playwright-driver")
+                .to_string_lossy()
+                .into_owned(),
+        ])?;
         output
-            .lines()
+            .iter()
             .filter(|l| !l.is_empty())
             .map(|l| {
                 let p = std::path::Path::new(l);
@@ -5930,6 +6298,12 @@ pub fn run_harness_command_plane_boundary() -> Result<()> {
     };
     for file in &ts_hits {
         if !allowed_ts_files.contains(file.as_str()) {
+            let package =
+                read(repo_root.join("crates/aura-harness/playwright-driver/package.json"))?;
+            let source = read(repo_root.join(file))?;
+            if declared_smoke_command_consumer(file, &package, &source)? {
+                continue;
+            }
             bail!(
                 "harness-command-plane-boundary: unexpected semantic command handling surface in Playwright driver: {file}"
             );
@@ -6085,27 +6459,24 @@ pub fn run_harness_core_scenario_mechanics() -> Result<()> {
 pub fn run_harness_export_override_policy() -> Result<()> {
     let repo_root = repo_root()?;
 
-    let hits = command_stdout(
-        "rg",
-        &[
-            "--no-heading".into(),
-            "-n".into(),
-            "publish_.*override".into(),
-            repo_root
-                .join("crates/aura-terminal/src/tui")
-                .to_string_lossy()
-                .into_owned(),
-            repo_root
-                .join("crates/aura-ui/src")
-                .to_string_lossy()
-                .into_owned(),
-            repo_root
-                .join("crates/aura-web/src")
-                .to_string_lossy()
-                .into_owned(),
-        ],
-    )
-    .unwrap_or_default();
+    let hits = rg_lines(&[
+        "--no-heading".into(),
+        "-n".into(),
+        "publish_.*override".into(),
+        repo_root
+            .join("crates/aura-terminal/src/tui")
+            .to_string_lossy()
+            .into_owned(),
+        repo_root
+            .join("crates/aura-ui/src")
+            .to_string_lossy()
+            .into_owned(),
+        repo_root
+            .join("crates/aura-web/src")
+            .to_string_lossy()
+            .into_owned(),
+    ])?
+    .join("\n");
 
     let filtered: Vec<&str> = hits
         .lines()
@@ -6254,8 +6625,7 @@ pub fn run_harness_matrix_inventory() -> Result<()> {
                 lane.into(),
                 "--dry-run".into(),
             ],
-        )
-        .unwrap_or_default();
+        )?;
         let id_re = Regex::new(r"scenario=([A-Za-z0-9._-]+)")?;
         Ok(id_re
             .captures_iter(&out)
@@ -6309,22 +6679,19 @@ pub fn run_harness_mode_allowlist() -> Result<()> {
     }
 
     // Check frontend modules don't branch on AURA_HARNESS_MODE
-    let frontend_hits = command_stdout(
-        "rg",
-        &[
-            "-l".into(),
-            "AURA_HARNESS_MODE".into(),
-            repo_root
-                .join("crates/aura-terminal/src")
-                .to_string_lossy()
-                .into_owned(),
-            repo_root
-                .join("crates/aura-web/src")
-                .to_string_lossy()
-                .into_owned(),
-        ],
-    )
-    .unwrap_or_default();
+    let frontend_hits = rg_lines(&[
+        "-l".into(),
+        "AURA_HARNESS_MODE".into(),
+        repo_root
+            .join("crates/aura-terminal/src")
+            .to_string_lossy()
+            .into_owned(),
+        repo_root
+            .join("crates/aura-web/src")
+            .to_string_lossy()
+            .into_owned(),
+    ])?
+    .join("\n");
 
     let filtered: Vec<&str> = frontend_hits
         .lines()
@@ -6406,7 +6773,7 @@ pub fn run_harness_observation_determinism() -> Result<()> {
         }
     }
 
-    let rust_hits = command_stdout("rg", &rust_args).unwrap_or_default();
+    let rust_hits = rg_lines(&rust_args)?.join("\n");
     if !rust_hits.trim().is_empty() {
         eprintln!("{rust_hits}");
         bail!(
@@ -6416,16 +6783,13 @@ pub fn run_harness_observation_determinism() -> Result<()> {
 
     let driver_mjs = repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
     if driver_mjs.exists() {
-        let js_hits = command_stdout(
-            "rg",
-            &[
-                "--no-heading".into(),
-                "-n".into(),
-                r"Math\.random|randomUUID\(".into(),
-                driver_mjs.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let js_hits = rg_lines(&[
+            "--no-heading".into(),
+            "-n".into(),
+            r"Math\.random|randomUUID\(".into(),
+            driver_mjs.to_string_lossy().into_owned(),
+        ])?
+        .join("\n");
         if !js_hits.trim().is_empty() {
             eprintln!("{js_hits}");
             bail!(
@@ -6539,16 +6903,14 @@ pub fn run_harness_onboarding_contract() -> Result<()> {
         if !dir.exists() {
             continue;
         }
-        let hits = command_stdout(
-            "rg",
-            &[
-                "--no-heading".into(),
-                "-n".into(),
-                r"publish_onboarding_snapshot|stale_onboarding_publish|synthetic_onboarding_snapshot".into(),
-                dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let hits = rg_lines(&[
+            "--no-heading".into(),
+            "-n".into(),
+            r"publish_onboarding_snapshot|stale_onboarding_publish|synthetic_onboarding_snapshot"
+                .into(),
+            dir.to_string_lossy().into_owned(),
+        ])?
+        .join("\n");
         if !hits.trim().is_empty() {
             eprintln!("{hits}");
             bail!(
@@ -6640,15 +7002,12 @@ pub fn run_harness_raw_backend_quarantine() -> Result<()> {
     let repo_root = repo_root()?;
     let backend_dir = repo_root.join("crates/aura-harness/src/backend");
 
-    let raw_impls = command_stdout(
-        "rg",
-        &[
-            "-l".into(),
-            "impl RawUiBackend for".into(),
-            backend_dir.to_string_lossy().into_owned(),
-        ],
-    )
-    .unwrap_or_default();
+    let raw_impls = rg_lines(&[
+        "-l".into(),
+        "impl RawUiBackend for".into(),
+        backend_dir.to_string_lossy().into_owned(),
+    ])?
+    .join("\n");
 
     let raw_impl_files: Vec<String> = raw_impls
         .lines()
@@ -6684,18 +7043,15 @@ pub fn run_harness_raw_backend_quarantine() -> Result<()> {
     }
 
     // Check raw accessor usage is quarantined
-    let accessor_hits = command_stdout(
-        "rg",
-        &[
-            "-l".into(),
-            r"as_raw_ui_mut\(".into(),
-            repo_root
-                .join("crates/aura-harness/src")
-                .to_string_lossy()
-                .into_owned(),
-        ],
-    )
-    .unwrap_or_default();
+    let accessor_hits = rg_lines(&[
+        "-l".into(),
+        r"as_raw_ui_mut\(".into(),
+        repo_root
+            .join("crates/aura-harness/src")
+            .to_string_lossy()
+            .into_owned(),
+    ])?
+    .join("\n");
 
     for hit in accessor_hits.lines().filter(|l| !l.is_empty()) {
         let rel = std::path::Path::new(hit)
@@ -7018,17 +7374,14 @@ pub fn run_harness_scenario_config_boundary() -> Result<()> {
     }
 
     // Check that instance ids don't use frontend-specific names
-    let forbidden_ids = command_stdout(
-        "rg",
-        &[
-            "-n".into(),
-            r#"^\s*id\s*=\s*"(web|tui|browser|local|playwright|pty)""#.into(),
-            configs_dir.to_string_lossy().into_owned(),
-            "-g".into(),
-            "*.toml".into(),
-        ],
-    )
-    .unwrap_or_default();
+    let forbidden_ids = rg_lines(&[
+        "-n".into(),
+        r#"^\s*id\s*=\s*"(web|tui|browser|local|playwright|pty)""#.into(),
+        configs_dir.to_string_lossy().into_owned(),
+        "-g".into(),
+        "*.toml".into(),
+    ])?
+    .join("\n");
 
     if !forbidden_ids.trim().is_empty() {
         eprintln!("{forbidden_ids}");
@@ -7038,17 +7391,14 @@ pub fn run_harness_scenario_config_boundary() -> Result<()> {
     }
 
     // Check that mode bindings are declared
-    let mode_hits = command_stdout(
-        "rg",
-        &[
-            "-n".into(),
-            r#"^\s*mode\s*=\s*"(local|browser|ssh)""#.into(),
-            configs_dir.to_string_lossy().into_owned(),
-            "-g".into(),
-            "*.toml".into(),
-        ],
-    )
-    .unwrap_or_default();
+    let mode_hits = rg_lines(&[
+        "-n".into(),
+        r#"^\s*mode\s*=\s*"(local|browser|ssh)""#.into(),
+        configs_dir.to_string_lossy().into_owned(),
+        "-g".into(),
+        "*.toml".into(),
+    ])?
+    .join("\n");
 
     if mode_hits.trim().is_empty() {
         bail!(
@@ -7352,7 +7702,7 @@ pub fn run_ownership_capability_audit() -> Result<()> {
         ];
         args.extend(extra_args.iter().cloned());
 
-        let output = command_stdout("rg", &args).unwrap_or_default();
+        let output = rg_lines(&args)?.join("\n");
         let filtered: Vec<&str> = output
             .lines()
             .filter(|l| !l.contains("docs/809_capability_vocabulary_inventory.md:"))
@@ -7512,7 +7862,7 @@ pub fn run_protocol_device_id_legacy(args: &[String]) -> Result<()> {
         rg_args.extend(extra_args.iter().cloned());
         rg_args.push(pattern.into());
         rg_args.push(repo_root.join("crates").to_string_lossy().into_owned());
-        let output = command_stdout("rg", &rg_args).unwrap_or_default();
+        let output = rg_lines(&rg_args)?.join("\n");
         if !output.trim().is_empty() {
             eprintln!("✖ {description}");
             eprintln!("{output}");
@@ -7711,15 +8061,12 @@ pub fn run_runtime_bootstrap_guardrails() -> Result<()> {
         if !path.exists() {
             return Ok(false);
         }
-        let hits = command_stdout(
-            "rg",
-            &[
-                "-n".into(),
-                pattern.into(),
-                path.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let hits = rg_lines(&[
+            "-n".into(),
+            pattern.into(),
+            path.to_string_lossy().into_owned(),
+        ])?
+        .join("\n");
         if !hits.trim().is_empty() {
             eprintln!("✖ {description}");
             eprintln!("{hits}");
@@ -7856,15 +8203,12 @@ pub fn run_shared_intent_flow() -> Result<()> {
     }
 
     let backend_dir = repo_root.join("crates/aura-harness/src/backend");
-    let backend_hits = command_stdout(
-        "rg",
-        &[
-            "-n".into(),
-            "context_workflows::|invitation_workflows::".into(),
-            backend_dir.to_string_lossy().into_owned(),
-        ],
-    )
-    .unwrap_or_default();
+    let backend_hits = rg_lines(&[
+        "-n".into(),
+        "context_workflows::|invitation_workflows::".into(),
+        backend_dir.to_string_lossy().into_owned(),
+    ])?
+    .join("\n");
     if !backend_hits.trim().is_empty() {
         bail!(
             "harness-shared-intent-ui-flow: backend implementations must not call app-internal workflow shortcuts directly"
@@ -8317,15 +8661,12 @@ pub fn run_tui_semantic_snapshot() -> Result<()> {
         if !dir.exists() {
             continue;
         }
-        let hits = command_stdout(
-            "rg",
-            &[
-                "publish_contacts_list_export|publish_devices_list_export|publish_messages_export"
-                    .into(),
-                dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default();
+        let hits = rg_lines(&[
+            "publish_contacts_list_export|publish_devices_list_export|publish_messages_export"
+                .into(),
+            dir.to_string_lossy().into_owned(),
+        ])?
+        .join("\n");
         if !hits.trim().is_empty() {
             bail!(
                 "harness-tui-semantic-snapshot: parity-critical TUI exporter may not depend on contact/device/message publish overrides"
@@ -8929,17 +9270,12 @@ pub fn run_verification_coverage() -> Result<()> {
     );
 
     let quint_invariants = {
-        command_stdout(
-            "rg",
-            &[
-                "-rh".into(),
-                r"^\s*val [A-Za-z]*[Ii]nvariant".into(),
-                quint_dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default()
-        .lines()
-        .count() as u64
+        rg_lines(&[
+            "-rh".into(),
+            r"^\s*val [A-Za-z]*[Ii]nvariant".into(),
+            quint_dir.to_string_lossy().into_owned(),
+        ])?
+        .len() as u64
     };
     check_metric(
         "Quint Invariants",
@@ -8949,17 +9285,12 @@ pub fn run_verification_coverage() -> Result<()> {
     );
 
     let quint_temporal = {
-        command_stdout(
-            "rg",
-            &[
-                "-rh".into(),
-                r"^\s*temporal [a-zA-Z]".into(),
-                quint_dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default()
-        .lines()
-        .count() as u64
+        rg_lines(&[
+            "-rh".into(),
+            r"^\s*temporal [a-zA-Z]".into(),
+            quint_dir.to_string_lossy().into_owned(),
+        ])?
+        .len() as u64
     };
     check_metric(
         "Quint Temporal Properties",
@@ -8969,17 +9300,12 @@ pub fn run_verification_coverage() -> Result<()> {
     );
 
     let quint_types = {
-        command_stdout(
-            "rg",
-            &[
-                "-rh".into(),
-                r"^\s*type ".into(),
-                quint_dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default()
-        .lines()
-        .count() as u64
+        rg_lines(&[
+            "-rh".into(),
+            r"^\s*type ".into(),
+            quint_dir.to_string_lossy().into_owned(),
+        ])?
+        .len() as u64
     };
     check_metric(
         "Quint Type Definitions",
@@ -8997,17 +9323,12 @@ pub fn run_verification_coverage() -> Result<()> {
     );
 
     let lean_theorems = {
-        command_stdout(
-            "rg",
-            &[
-                "-rh".into(),
-                r"^(theorem|lemma) ".into(),
-                lean_dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .unwrap_or_default()
-        .lines()
-        .count() as u64
+        rg_lines(&[
+            "-rh".into(),
+            r"^(theorem|lemma) ".into(),
+            lean_dir.to_string_lossy().into_owned(),
+        ])?
+        .len() as u64
     };
     check_metric(
         "Lean Theorems",
@@ -9040,17 +9361,12 @@ pub fn run_verification_coverage() -> Result<()> {
         let testkit_tests_dir = repo_root.join("crates/aura-testkit/tests");
         let mut count = 0u64;
         for dir in [&testkit_src, &testkit_tests_dir] {
-            count += command_stdout(
-                "rg",
-                &[
-                    "-rh".into(),
-                    r"^#\[test\]".into(),
-                    dir.to_string_lossy().into_owned(),
-                ],
-            )
-            .unwrap_or_default()
-            .lines()
-            .count() as u64;
+            count += rg_lines(&[
+                "-rh".into(),
+                r"^#\[test\]".into(),
+                dir.to_string_lossy().into_owned(),
+            ])?
+            .len() as u64;
         }
         count
     };

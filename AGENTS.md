@@ -132,6 +132,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   evidence checks must reject actual success fallbacks without treating every
   `None` as one.
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
+- **Command-plane scan applicability**: scan the entire Playwright driver, including production MJS launchers. The exact npm-declared smoke fixture may contain its single direct RPC consumer; comments, strings, handlers, extra occurrences, unknown paths and test-like names grant no exemption. Repository rg queries preserve native no-match separately from spawn, signal and other failure; never default a failed query to clean. Failed command diagnostics retain partial stdout alongside stderr without inferring stream chronology.
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
 - **Optional scratch governance**: ownership checks must work in clean
   checkouts without ignored `work/` notes; absent scratch cannot exempt

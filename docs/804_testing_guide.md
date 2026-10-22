@@ -1,5 +1,19 @@
 # Testing Guide
 
+The command-plane policy scans the whole Playwright driver, including production
+MJS launchers. Its exact npm-declared smoke test may issue one checked direct RPC
+consumer call; this does not authorize handlers or exempt test directories.
+Comments, strings, unknown paths and additional occurrences cannot satisfy that
+consumer check.
+The fixture classifier supports a restricted lexical subset (known regex-start
+contexts and simple dotted-reference template substitutions); unsupported forms
+refuse. It is not a general JavaScript parser or live-authority proof.
+Repository rg-backed checks distinguish matches, valid no-match, and native
+query failures. Preserve each original failure and replay the same
+policy binary before editing. After security-sensitive toolkit changes, run the
+focused security-boundary policy before broader CI, and retain full toolkit tests
+and strict all-target Clippy evidence.
+
 Browser onboarding regressions must check guarded signal writes after async
 enrollment workflows, including identity persistence failures. Completion and
 error feedback use the browser retry helper; task spawning remains owned by
