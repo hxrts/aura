@@ -351,3 +351,12 @@ aura_receipt_validate_terminal_compile_commands() {
     .phases[-1].phase=="command" and .command_phase==.phases[-1]) end
   ' "$receipt" >/dev/null
 }
+
+# Source-packet data identities reuse this receipt owner's source capture.
+# Source this file by absolute path when invoking these helpers after chdir.
+aura_receipt_source_handoff_export() {
+  bash "$(dirname "${BASH_SOURCE[0]}")/source-handoff.sh" export "$@"
+}
+aura_receipt_source_handoff_verify() {
+  bash "$(dirname "${BASH_SOURCE[0]}")/source-handoff.sh" verify "$@"
+}

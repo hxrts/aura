@@ -1918,6 +1918,51 @@ commands, pending outcomes and multiple receipt documents fail validation.
 Callers must also verify source/configuration identity, the matching completion
 record, exact test discovery/execution and protected artifact identity. This
 helper provides no resource-settlement acknowledgment.
+
+Immutable source handoffs use `scripts/dev/source-handoff.sh` through the existing
+receipt source owner, with explicitly versioned `aura-source-handoff-blake3-v1`
+packet identities. Export with `export ROOT BASE_COMMIT TARGET_TREE INPUT_ROOT
+REQUEST_JSON OUTPUT_DIRECTORY`; verify with `verify ROOT INPUT_ROOT REQUEST_JSON
+PACKET_DIRECTORY EXPECTED_MANIFEST_BLAKE3`. Source the receipt helper by absolute
+path to use `aura_receipt_source_handoff_export` / `_verify` with those same
+arguments. Verification neither applies a patch nor edits the source or packet.
+The caller must retain the original expected manifest digest independently.
+Rewriting a packet and its checksums cannot establish the caller's approval.
+
+The request is one exact canonical `jq -Sc` JSON object with `schema: 1`, a
+`configuration` object containing the intended nonempty `argv` array, and
+`inventories`, `helpers`, and `evidence` arrays. Each selection is exactly
+`{"name":"unique-name","path":"relative/file"}` beneath `INPUT_ROOT`.
+Names are globally unique and start with an ASCII letter or digit, followed by
+letters, digits, dot, dash or underscore. Paths cannot be absolute, traverse
+parents, contain control characters/backslashes, or cross symlink components.
+Empty arrays are explicit; they do not prove that a required inventory or helper
+closure is complete. Configuration fields and original evidence bytes are data,
+not inferred compiler settings or test acceptance. Multiple documents and
+duplicate JSON keys refuse instead of canonicalizing ambiguous input away.
+
+Export binds the exact base commit/tree, current index target tree, raw full-tree
+mode/blob listings, binary Git delta and changed before/after native blobs,
+producer HEAD and the unchanged legacy SHA-256 source fingerprint. The target
+index must match its worktree, have no nonignored untracked inputs, and use no
+assume-unchanged or skip-worktree entries. Submodule changes are unsupported and
+refuse. External diff/textconv helpers are disabled. Outputs must be outside
+source, initially absent, and under the caller's exclusively owned destination
+parent. Input/source observations are rechecked before publication; this does
+not create an atomic snapshot of arbitrary concurrent writers. Stop those
+writers through their existing owners before handoff.
+
+A consumer prepares an independent checkout with the same producer HEAD and
+target index, applying the reviewed binary delta where needed. A committed
+producer already at its target tree does not require applying the base-to-target
+patch again. Verification binds that same target and selected input bytes.
+It uses the caller-held BLAKE3 manifest before canonical
+re-export comparison, rejects unbound/changed/ambiguous files and symlinks, and
+keeps private enumeration outside a read-only packet. Original signed receipts
+retain their original algorithms, statuses and scope. Independent semantic,
+ownership/error and model review remains required. Focused no-compiler contracts
+run with `bash scripts/dev/test-source-handoff.sh` and the existing
+`just ci-build-cache-policy` aggregate.
 For coordinator wakeups, create a one-shot private subscriber with
 `bash scripts/dev/receipt-events.sh --create`, then block on
 `bash scripts/dev/receipt-events.sh --next "$FIFO"` in a separate caller-owned

@@ -519,6 +519,7 @@ ci-build-cache-policy:
     bash scripts/dev/test-cargo-incremental-default.sh
     bash scripts/dev/test-build-budget.sh
     bash scripts/dev/test-build-receipt.sh
+    bash scripts/dev/test-source-handoff.sh
     bash scripts/dev/test-receipt-events.sh
     bash scripts/dev/test-task-plan.sh
     bash scripts/dev/test-check-staged-rust.sh
