@@ -37,6 +37,13 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Invariants
 
+- Semantic runtime-event dispatch preserves the canonical expectation's detail
+  predicate through the actual wait and capture. A capture extracts payload
+  from the selected matching record only; missing payload refuses without
+  borrowing another event's code, manifest or verifier. Operation waits apply
+  exact/prior-instance constraints to the retained submission instance when
+  available, after shared observation predicates have passed.
+
 - Complete browser enrollment uses an explicitly started loopback bootstrap
   broker. The harness accepts the broker URL and authorization token together,
   requires a loopback URL and a long hex token, and gives each browser instance

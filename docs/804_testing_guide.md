@@ -1409,9 +1409,12 @@ before opening the modal, then assert its `operation_state_is = succeeded` after
 approval. The absence assertion reads the actor's semantic snapshot; it fails
 if any prior operation of that ID is present. This prevents setup or another
 actor's success from satisfying enrollment-import completion.
-The harness checks the selected actor's observed operation ID, state, and
-optional `after_instance` before it consults a matching exact submission
-handle. For browser enrollment approval, assert `modal_confirm_button` is
+The harness checks shared observation predicates, then uses the selected actor's
+matching retained submission handle to check the exact instance and state,
+including `at_instance` and `after_instance` constraints on that instance. Without
+a matching handle it retains the generic observed-operation checks. A stale
+earlier record of the same operation ID cannot override the retained instance.
+For browser enrollment approval, assert `modal_confirm_button` is
 mounted and activate that control after filling the code, manifest, and
 independent verifier; a raw Enter key is not the approval action in this
 scenario.
@@ -1520,6 +1523,12 @@ These commands build the harness, validate the contract, replay recorded coverag
 The shared-flow policy scripts target the published Cargo package names for renamed Layer 6 crates and macros. When invoking raw Cargo commands behind these lanes, use `hxrts-aura-app` and `hxrts-aura-macros` package ids instead of the legacy `aura-app` and `aura-macros` selectors. File-system crate paths remain `crates/aura-app` and `crates/aura-macros`.
 
 When shared flows export data through runtime events, the event payload is part of the contract. Invitation and device-enrollment code capture should come from `RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or frontend-local heuristics. Shared chat waits should bind to semantic selection state so the harness targets the single shared channel instead of falling back to incidental render order.
+
+Semantic `runtime_event_occurred` steps express their detail constraint in
+`value`. Both the wait and any capture use the same event kind and detail
+predicate. Capture selects the latest matching record and requires its payload;
+it cannot borrow a code or manifest from another record. Enrollment code,
+manifest and verifier remain paired from that single selected record.
 
 AMP transition waits follow that runtime-event rule. Shared scenarios for normal transition, delayed or offline witnesses, conflicting `A2` certificates, subtractive membership, emergency quarantine, cryptoshred, rejected emergency attempts, cooldowns, duplicate-signing evidence, recovery replay, and authority-governance non-removal should wait on `RuntimeEventKind::AmpChannelTransitionUpdated`, parity snapshots, operation lifecycle, quiescence, and final reduced channel state.
 

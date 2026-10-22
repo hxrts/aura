@@ -722,24 +722,43 @@ mod private_namespace_tests {
     #[test]
     fn foreign_owned_namespace_is_refused_without_permission_change() {
         use std::os::unix::fs::MetadataExt;
-        let foreign = Path::new("/private/tmp");
-        let foreign = if foreign.exists() {
-            foreign
+        let original = tempfile::tempdir().expect("private fixture owner");
+        let private_foreign = original.path().join("foreign");
+        let foreign = if nix::unistd::getuid().is_root() {
+            std::fs::create_dir(&private_foreign).expect("private fixture child");
+            // Change only this fixture's native owner. Shared OS directories
+            // remain untouched even when the validation process is privileged.
+            nix::unistd::chown(
+                &private_foreign,
+                Some(nix::unistd::Uid::from_raw(65534)),
+                None,
+            )
+            .expect("establish actual foreign native owner");
+            private_foreign.as_path()
+        } else if Path::new("/private/tmp").exists() {
+            Path::new("/private/tmp")
         } else {
             Path::new("/tmp")
         };
         let before = std::fs::symlink_metadata(foreign).expect("actual shared OS directory");
+        assert!(before.is_dir());
+        assert!(!before.file_type().is_symlink());
         assert_ne!(
             before.uid(),
             nix::unistd::getuid().as_raw(),
             "fixture requires actual foreign-owned OS directory"
         );
-        assert!(prepare_private_directory(foreign).is_err());
+        let error = prepare_private_directory(foreign)
+            .expect_err("actual foreign native owner must be refused");
         assert_eq!(
-            std::fs::symlink_metadata(foreign)
-                .expect("unchanged foreign directory")
-                .mode(),
-            before.mode()
+            error.to_string(),
+            format!(
+                "harness directory is not an original owned native directory: {}",
+                foreign.display()
+            )
         );
+        let after = std::fs::symlink_metadata(foreign).expect("unchanged foreign directory");
+        assert_eq!(after.mode(), before.mode());
+        assert_eq!(after.uid(), before.uid());
     }
 }

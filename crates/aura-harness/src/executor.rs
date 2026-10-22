@@ -1024,8 +1024,9 @@ fn execute_semantic_step(
                     *modal_id,
                 ),
                 aura_app::scenario_contract::Expectation::RuntimeEventOccurred { kind, .. } => {
+                    let wait_step = semantic_expectation_wait_step(step, expectation, context)?;
                     let matched_snapshot = wait_for_runtime_event_snapshot(
-                        &base_step,
+                        &wait_step,
                         tool_api,
                         context,
                         &instance_id,
@@ -1037,19 +1038,29 @@ fn execute_semantic_step(
                         ..
                     } = expectation
                     {
+                        let selected_event = matched_snapshot
+                            .runtime_events
+                            .iter()
+                            .rev()
+                            .find(|event| {
+                                event.fact.kind() == *kind
+                                    && wait_step
+                                        .contains
+                                        .as_deref()
+                                        .is_none_or(|needle| event.fact.matches_needle(needle))
+                            })
+                            .ok_or_else(|| {
+                                anyhow!("step {} lost its matching runtime event", step.id)
+                            })?;
                         match kind {
                             RuntimeEventKind::InvitationCodeReady => {
-                                let code = matched_snapshot
-                                    .runtime_events
-                                    .iter()
-                                    .rev()
-                                    .find_map(|event| match &event.fact {
+                                let code = match &selected_event.fact {
                                         RuntimeFact::InvitationCodeReady {
                                             code: Some(code),
                                             ..
                                         } => Some(code.clone()),
                                         _ => None,
-                                    })
+                                    }
                                     .ok_or_else(|| {
                                         anyhow!(
                                             "step {} runtime event {:?} matched without an exported code on instance {}",
@@ -1061,10 +1072,10 @@ fn execute_semantic_step(
                                 context.vars.insert(var.clone(), code);
                             }
                             RuntimeEventKind::DeviceEnrollmentCodeReady => {
-                                let (code,transfer)=matched_snapshot.runtime_events.iter().rev().find_map(|event|match &event.fact {
+                                let (code,transfer)=match &selected_event.fact {
                                     RuntimeFact::DeviceEnrollmentCodeReady {code:Some(code),manifest_transfer:Some(transfer),..}=>Some((code.clone(),transfer.clone())),
                                     _=>None,
-                                }).ok_or_else(||anyhow!("step {} matched enrollment readiness without actual manifest/verifier transfer on instance {}",step.id,instance_id))?;
+                                }.ok_or_else(||anyhow!("step {} matched enrollment readiness without actual manifest/verifier transfer on instance {}",step.id,instance_id))?;
                                 context
                                     .vars
                                     .insert(format!("{var}_manifest"), transfer.manifest_code);
@@ -3386,21 +3397,22 @@ fn semantic_wait_matches_for_instance(
         return true;
     };
 
-    // The shared observation gate above excludes operation fields. A missing
-    // or unrelated submission handle must not satisfy this terminal wait.
-    if !semantic_wait_matches(step, snapshot) {
-        return false;
-    }
-
     let Some(handle) = context.last_operation_handle.get(instance_id) else {
-        return true;
+        return semantic_wait_matches(step, snapshot);
     };
     if handle.id() != operation_id {
-        return true;
+        return semantic_wait_matches(step, snapshot);
     }
 
-    snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
-        == Some(operation_state)
+    operation_handle_matches(snapshot, handle, operation_state)
+        && step
+            .operation_exact_instance
+            .as_ref()
+            .is_none_or(|exact| handle.instance_id().0 == *exact)
+        && step
+            .operation_after_instance
+            .as_ref()
+            .is_none_or(|previous| handle.instance_id().0 != *previous)
 }
 
 fn operation_handle_matches(
