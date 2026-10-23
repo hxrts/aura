@@ -133,6 +133,13 @@ steps still do not establish native normal/emergency finalization.
 An adjacent regression enforces a 16 KiB caller-future budget for membership
 rekeying, alongside execution on the default test stack.
 
+`just ci-test` excludes patchbay fixtures, including the
+`holepunch::holepunch_tier3_stress::` module whose individual fixture names do
+not contain `patchbay`. Those tests require actual network-namespace privileges
+and remain selected by `just ci-holepunch-nightly-stress`; they must fail on
+provisioning errors rather than silently substitute a mock backend. A passing
+workspace lane does not establish network-lab coverage.
+
 `just ci-test` first runs `just ci-amp-lifecycle-trace`, which regenerates the
 seed-424242, 24-step AMP harness trace and compares it with
 `verification/quint/traces/amp_channel.itf.json`. The workspace test lane runs

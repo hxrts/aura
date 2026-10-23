@@ -623,9 +623,9 @@ ci-bootstrap-discovery:
 ci-lan-deep:
     cargo test -p hxrts-aura-agent --test lan_integration -q -- --ignored
 
-# Test suite (excludes patchbay tests and contract_suite PTY/SSH tests which run in ci-harness-contract)
+# Test suite (patchbay tiers run in dedicated network lanes; PTY/SSH contracts run in ci-harness-contract)
 ci-test: ci-amp-lifecycle-trace
-    cargo test --workspace -- --skip patchbay --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
+    cargo test --workspace -- --skip patchbay --skip holepunch::holepunch_tier3_stress:: --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
     just ci-test-terminal-development
 
 # aura-terminal `development` feature (demo mode, demo peers, regression

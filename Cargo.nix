@@ -4884,10 +4884,10 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
       };
       "clipboard-win" = rec {
         crateName = "clipboard-win";
-        version = "5.4.1";
+        version = "5.4.3";
         edition = "2018";
         description = "Provides simple way to interact with Windows clipboard.";
-        sha256 = "1m44gqy11rq1ww7jls86ppif98v6kv2wkwk8p17is86zsdq3gq5x";
+        sha256 = "16isdlcwrj0jgjs5k5c0jvr15mqrs1knlyms2bdcrzk6hj3zfah5";
         libName = "clipboard_win";
         authors = [
           "Douman <douman@gmx.se>"

@@ -55,6 +55,24 @@ They cover missing and unrelated selections, absent members, changed confirmatio
 and exclusion of private lowering metadata from serialized compatibility fixtures.
 Focused control identity cannot establish control visibility.
 
+Runtime-event dispatch retains the canonical expectation's detail constraints:
+relay selection and network generation must match the same event. Invitation
+capture selects the matching invitation record, and enrollment readiness retains
+the matching code, manifest and verifier together. The harness regressions
+`semantic_runtime_event_dispatch_preserves_relay_and_generation_constraints`,
+`semantic_runtime_event_dispatch_captures_only_matching_invitation_record` and
+`semantic_runtime_event_dispatch_keeps_matching_enrollment_payload_together`
+exercise this dispatch boundary; they do not establish a live relay connection
+or cryptographic enrollment completion.
+
+Recorded-operation waits retain the original submitted handle and query its
+exact operation instance. Exact-instance and prior-instance constraints still
+apply when that handle exists; a foreign snapshot instance cannot satisfy the
+wait. `semantic_wait_recorded_handle_preserves_instance_constraints_and_fallbacks`
+covers these local matcher cases. The ownership policy checks the unconditional
+production matcher rather than accepting a conditional or test-only lookalike.
+These component and policy checks do not replace paired-client scenario execution.
+
 Typed snapshots currently establish screen, list and modal presence. Ordinary
 `ControlVisible` expectations fail explicitly until render-bound observations
 exist. This includes the `onboarding_root` expectations in semantic-observation
