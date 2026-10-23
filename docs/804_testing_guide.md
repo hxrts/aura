@@ -5,6 +5,17 @@ enrollment workflows, including identity persistence failures. Completion and
 error feedback use the browser retry helper; task spawning remains owned by
 the shared web task owner.
 
+For Playwright driver loader and fixture-owner iteration, run
+`node crates/aura-harness/playwright-driver/tests/launcher.mjs` from the repository
+root. This runs isolated real Node child/pipe and loopback HTTP controls without
+compiling TypeScript or starting a browser. Loader checks propagate required
+source/configuration metadata failures; a missing compiled artifact requests a
+rebuild. Fixture cleanup waits for the original direct child and listener before
+retiring its owned temporary data. These component controls do not replace the
+driver package's full `npm test`, actual browser smoke, or browser-descendant
+settlement evidence. Keep original operation failures and independent cleanup
+causes when testing partial acquisition or teardown refusal.
+
 For runtime tests that manually advance physical time, inject
 `aura_testkit::time::ManualPhysicalClock` before service assembly. Its sleeps wait
 for explicit clock advancement, so background cleanup loops cannot consume the

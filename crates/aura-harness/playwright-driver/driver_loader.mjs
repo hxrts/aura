@@ -3,21 +3,17 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 
-function statMtimeMs(targetPath) {
+function statMtimeMs(targetPath, { allowMissing = false } = {}) {
   try {
     return fs.statSync(targetPath).mtimeMs;
-  } catch {
-    return null;
+  } catch (error) {
+    if (allowMissing && error.code === 'ENOENT') return null;
+    throw error;
   }
 }
 
 function collectTypeScriptInputs(rootDir, entries = []) {
-  let children = [];
-  try {
-    children = fs.readdirSync(rootDir, { withFileTypes: true });
-  } catch {
-    return entries;
-  }
+  const children = fs.readdirSync(rootDir, { withFileTypes: true });
 
   for (const entry of children) {
     const entryPath = path.join(rootDir, entry.name);
@@ -45,9 +41,6 @@ export function newestInputMtimeMs({
   let newestMtimeMs = null;
   for (const inputPath of inputs) {
     const mtimeMs = statMtimeMs(inputPath);
-    if (mtimeMs == null) {
-      continue;
-    }
     newestMtimeMs =
       newestMtimeMs == null ? mtimeMs : Math.max(newestMtimeMs, mtimeMs);
   }
@@ -63,7 +56,7 @@ export function compiledDriverIsStale({
     path.join(driverRoot, 'package.json'),
   ],
 }) {
-  const compiledMtimeMs = statMtimeMs(compiledDriver);
+  const compiledMtimeMs = statMtimeMs(compiledDriver, { allowMissing: true });
   if (compiledMtimeMs == null) {
     return true;
   }
@@ -93,17 +86,28 @@ function defaultCompileDriver({
         stdio: 'inherit',
       },
     );
-    child.once('error', reject);
+    const failures = [];
+    let exit;
+    child.on('error', (error) => { failures.push(error); });
     child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(
-        new Error(
+      exit = { code, signal };
+      if (code !== 0 || signal !== null) {
+        failures.push(Object.assign(new Error(
           `TypeScript driver build failed code=${code ?? 'null'} signal=${signal ?? 'null'}`,
-        ),
-      );
+        ), { exitCode: code, signal }));
+      }
+    });
+    // Inherited stdio creates no owned pipes, but exit/error is not close ACK.
+    child.once('close', (code, signal) => {
+      if (!exit && failures.length === 0) {
+        failures.push(Object.assign(new Error('compiler closed without an execution outcome'),
+          { exitCode: code, signal }));
+      }
+      if (failures.length === 1) reject(failures[0]);
+      else if (failures.length > 1) {
+        reject(new AggregateError(failures, 'compiler failed during direct-child settlement',
+          { cause: failures[0] }));
+      } else resolve();
     });
   });
 }
@@ -144,7 +148,10 @@ export async function ensureCompiledDriverFresh({
     compilerPath,
   });
 
-  if (compiledDriverIsStale({ driverRoot, sourceRoot, compiledDriver })) {
+  if (compiledDriverIsStale({
+    driverRoot, sourceRoot, compiledDriver,
+    extraInputs: [tsconfigPath, path.join(driverRoot, 'package.json')],
+  })) {
     throw new Error(
       `Playwright driver rebuild completed but ${compiledDriver} is still stale`,
     );

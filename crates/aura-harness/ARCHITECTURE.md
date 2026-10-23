@@ -345,6 +345,16 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 
 Deterministic replay, semantic flow execution, and tool API correctness are the primary concerns. Replay now compares typed tool-response meaning rather than only `Ok`/`Error` shape. Tests are organized into `tests/phases/` for the phased harness evolution (phase 1 through 5), `tests/holepunch/` for NAT traversal tiers, and top-level contract tests.
 
+The Playwright Node fixture transaction retains the original direct child and
+RPC/stdio outcomes through native close, then acknowledges its HTTP listener
+close before removing its owned scratch directory. Original native errors remain
+distinct from independent cleanup failures; bounded stderr diagnostics do not
+claim complete retention. Loader and compiler controls exercise metadata refusal
+and actual direct-child settlement. The full `just browser-driver-smoke` command
+adds TypeScript compilation, driver selftest and Chromium boundary smoke; these
+fixture pages do not establish production Aura enrollment or settlement of
+arbitrary browser descendants.
+
 ### Commands
 
 ```
