@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import readline from 'node:readline';
-import { spawn } from 'node:child_process';
+import { withSmokeFixture } from './smoke_fixture.mjs';
 
 const fixtureHtml = `<!doctype html>
 <html>
@@ -182,77 +178,8 @@ const fixtureHtml = `<!doctype html>
   </body>
 </html>`;
 
-function createServer() {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(fixtureHtml);
-    });
-
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        reject(new Error('failed to bind server'));
-        return;
-      }
-      resolve({
-        server,
-        url: `http://127.0.0.1:${address.port}`
-      });
-    });
-  });
-}
-
-function spawnDriver() {
-  const driverPath = path.resolve('playwright_driver.mjs');
-  const child = spawn(process.execPath, [driverPath], {
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
-
-  const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
-  let requestId = 0;
-  const pending = new Map();
-
-  rl.on('line', (line) => {
-    const response = JSON.parse(line);
-    const resolver = pending.get(response.id);
-    if (resolver) {
-      pending.delete(response.id);
-      if (response.ok) {
-        resolver.resolve(response.result);
-      } else {
-        resolver.reject(new Error(String(response.error)));
-      }
-    }
-  });
-
-  const call = (method, params = {}) => {
-    requestId += 1;
-    const id = requestId;
-    const payload = JSON.stringify({ id, method, params });
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      child.stdin.write(`${payload}\n`);
-    });
-  };
-
-  const close = async () => {
-    try {
-      child.stdin.end();
-    } finally {
-      await new Promise((resolve) => child.once('exit', resolve));
-    }
-  };
-
-  return { child, call, close };
-}
-
 async function main() {
-  const { server, url } = await createServer();
-  const driver = spawnDriver();
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aura-playwright-smoke-'));
-
-  try {
+  await withSmokeFixture(fixtureHtml, async ({ url, driver, tempRoot }) => {
     await driver.call('start_page', {
       instance_id: 'smoke-a',
       app_url: url,
@@ -358,14 +285,11 @@ async function main() {
     const stop = await driver.call('stop', { instance_id: 'smoke-a' });
     assert.equal(stop.status, 'stopped');
 
-    console.log('playwright driver smoke test passed');
-  } finally {
-    server.close();
-    await driver.close();
-  }
+  });
+  console.log('playwright driver smoke test passed');
 }
 
-main().catch((error) => {
+await main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
