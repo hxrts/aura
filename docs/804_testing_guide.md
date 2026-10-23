@@ -14,6 +14,18 @@ policy binary before editing. After security-sensitive toolkit changes, run the
 focused security-boundary policy before broader CI, and retain full toolkit tests
 and strict all-target Clippy evidence.
 
+For selected-operation waits, preserve the canonical
+`operation_handle_matches` lookup through
+`UiSnapshot::operation_state_for_instance(handle.id(), handle.instance_id())`.
+The wait-contract policy checks this exact unconditional owner with parsed Rust,
+including its typed snapshot/handle inputs and comparison to the requested state.
+Its focused controls reject weaker id-only lookups, foreign ids/instances, raw
+operation-vector observations, and comment/string/unrelated helper lookalikes.
+Conditional owners and test attributes, including qualified test-macro paths,
+cannot satisfy that production owner requirement.
+Keep actual selected-instance wait tests: this narrow source check proves the
+mechanical owner shape, not asynchronous observation or runtime provenance.
+
 Browser onboarding regressions must check guarded signal writes after async
 enrollment workflows, including identity persistence failures. Completion and
 error feedback use the browser retry helper; task spawning remains owned by

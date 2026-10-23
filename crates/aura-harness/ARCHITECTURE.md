@@ -177,6 +177,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Primary-lane policy: default lane targets real Aura runtime and real TUI/web surfaces.
 - Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
 - Command-plane source policy scans the complete Playwright driver, including shipped MJS launchers. Its exact npm-declared smoke fixture is a checked single RPC consumer, not an additional command owner. Any other occurrence remains subject to the production owner inventory. Query failures retain their native cause; no-match alone may produce an empty inventory.
+- Selected-operation wait matching uses `UiSnapshot::operation_state_for_instance` with the original `UiOperationHandle` id and instance. The policy parses the canonical unconditional `operation_handle_matches` body rather than requiring the weaker generic-id accessor's textual presence. Conditional or recognized test-annotated owners cannot satisfy it. Its source-shape checks do not replace runtime regression evidence.
 - Shared scenarios can capture an observed operation instance before a later
   submission and require `operation_state_is.after_instance` to observe a
   different instance, so a setup result cannot satisfy the later operation.

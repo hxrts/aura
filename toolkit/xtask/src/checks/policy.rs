@@ -7659,15 +7659,7 @@ pub fn run_harness_wait_contract() -> Result<()> {
         );
     }
 
-    if !rg_exists(&[
-        "-F".into(),
-        "snapshot.operation_state(".into(),
-        executor_path,
-    ])? {
-        bail!(
-            "harness-wait-contract: typed wait contracts must read operation state through the shared snapshot surface"
-        );
-    }
+    require_instance_bound_operation_snapshot(&read(&executor)?)?;
 
     run_ok(
         "cargo",
@@ -7682,6 +7674,145 @@ pub fn run_harness_wait_contract() -> Result<()> {
 
     println!("harness wait contract: clean");
     Ok(())
+}
+
+fn require_instance_bound_operation_snapshot(source: &str) -> Result<()> {
+    let file = syn::parse_file(source).context("parse harness wait snapshot owner")?;
+    let owners: Vec<_> = file
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Fn(function) if function.sig.ident == "operation_handle_matches" => {
+                Some(function)
+            }
+            _ => None,
+        })
+        .collect();
+    if owners.len() != 1 || !instance_bound_operation_snapshot_owner(owners[0]) {
+        bail!("harness-wait-contract: operation_handle_matches must compare the shared snapshot state for the original handle id and instance");
+    }
+    Ok(())
+}
+
+fn instance_bound_operation_snapshot_owner(function: &syn::ItemFn) -> bool {
+    if function.attrs.iter().any(|attribute| {
+        attribute.path().is_ident("cfg")
+            || attribute.path().is_ident("cfg_attr")
+            || attribute
+                .path()
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "test")
+    }) || function.sig.inputs.len() != 3
+    {
+        return false;
+    }
+    let expected = [
+        ("snapshot", "UiSnapshot", true),
+        ("handle", "UiOperationHandle", true),
+        ("state", "OperationState", false),
+    ];
+    for (input, (name, ty, borrowed)) in function.sig.inputs.iter().zip(expected) {
+        let syn::FnArg::Typed(input) = input else {
+            return false;
+        };
+        if !matches!(input.pat.as_ref(), syn::Pat::Ident(pattern) if pattern.ident == name && pattern.by_ref.is_none() && pattern.mutability.is_none())
+        {
+            return false;
+        }
+        let actual = if borrowed {
+            let syn::Type::Reference(reference) = input.ty.as_ref() else {
+                return false;
+            };
+            if reference.mutability.is_some() {
+                return false;
+            }
+            reference.elem.as_ref()
+        } else {
+            input.ty.as_ref()
+        };
+        if !matches!(actual, syn::Type::Path(path) if path.qself.is_none() && path.path.is_ident(ty))
+        {
+            return false;
+        }
+    }
+    let [syn::Stmt::Expr(syn::Expr::Binary(compare), None)] = function.block.stmts.as_slice()
+    else {
+        return false;
+    };
+    if !matches!(compare.op, syn::BinOp::Eq(_)) {
+        return false;
+    }
+    let syn::Expr::MethodCall(lookup) = compare.left.as_ref() else {
+        return false;
+    };
+    let syn::Expr::Call(expected) = compare.right.as_ref() else {
+        return false;
+    };
+    lookup.method == "operation_state_for_instance"
+        && lookup.turbofish.is_none()
+        && wait_expression_is_name(&lookup.receiver, "snapshot")
+        && lookup.args.len() == 2
+        && wait_handle_accessor(&lookup.args[0], "id")
+        && wait_handle_accessor(&lookup.args[1], "instance_id")
+        && wait_expression_is_name(&expected.func, "Some")
+        && expected.args.len() == 1
+        && wait_expression_is_name(&expected.args[0], "state")
+}
+
+fn wait_expression_is_name(expression: &syn::Expr, name: &str) -> bool {
+    matches!(expression, syn::Expr::Path(path) if path.qself.is_none() && path.path.is_ident(name))
+}
+
+fn wait_handle_accessor(expression: &syn::Expr, accessor: &str) -> bool {
+    matches!(expression, syn::Expr::MethodCall(call) if call.method == accessor
+        && call.turbofish.is_none() && call.args.is_empty()
+        && wait_expression_is_name(&call.receiver, "handle"))
+}
+
+#[cfg(test)]
+mod instance_bound_wait_policy_tests {
+    use super::require_instance_bound_operation_snapshot;
+
+    const OWNER: &str = "fn operation_handle_matches(snapshot: &UiSnapshot, handle: &UiOperationHandle, state: OperationState) -> bool { snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) == Some(state) }";
+
+    #[test]
+    fn actual_executor_uses_original_instance_bound_shared_snapshot_owner() {
+        require_instance_bound_operation_snapshot(include_str!(
+            "../../../../crates/aura-harness/src/executor.rs"
+        ))
+        .expect("actual production owner must retain original operation instance");
+        require_instance_bound_operation_snapshot(OWNER).expect("canonical owner shape");
+    }
+
+    #[test]
+    fn operation_snapshot_owner_refuses_weaker_foreign_and_inert_evidence() {
+        for source in [
+            format!("#[test] {OWNER}"),
+            format!("#[tokio::test] {OWNER}"),
+            format!("#[async_std::test] {OWNER}"),
+            format!("#[::tokio::test] {OWNER}"),
+            format!("#[tokio::test(flavor = \"current_thread\")] {OWNER}"),
+            format!("#[cfg_attr(test, tokio::test)] {OWNER}"),
+            OWNER.replace("handle.instance_id()", "handle.id()"),
+            OWNER.replace("handle.instance_id()", "other.instance_id()"),
+            OWNER.replace("handle.id()", "other.id()"),
+            OWNER.replace("snapshot.operation_state_for_instance", "other.operation_state_for_instance"),
+            OWNER.replace("operation_state_for_instance(handle.id(), handle.instance_id())", "operation_state(handle.id())"),
+            OWNER.replace("snapshot.operation_state_for_instance(handle.id(), handle.instance_id())", "snapshot.operations.iter().find(|operation| operation.id == *handle.id()).map(|operation| operation.state)"),
+            OWNER.replace("Some(state)", "Some(OperationState::Succeeded)"),
+            OWNER.replace("handle: &UiOperationHandle", "handle: &OperationId"),
+            format!("#[cfg(test)] {OWNER}"),
+            format!("#[cfg(any())] {OWNER}"),
+            format!("{}\n{}", OWNER.replace("operation_handle_matches", "unrelated"), OWNER.replace("handle.instance_id()", "handle.id()")),
+            format!("// {OWNER}\nfn operation_handle_matches() -> bool {{ true }}"),
+            format!("const INERT: &str = {OWNER:?};\nfn operation_handle_matches() -> bool {{ true }}"),
+            format!("{OWNER}\n{OWNER}"),
+        ] {
+            assert!(require_instance_bound_operation_snapshot(&source).is_err(), "must refuse weaker or inert source: {source}");
+        }
+        assert!(require_instance_bound_operation_snapshot("fn {").is_err());
+    }
 }
 
 pub fn run_ownership_capability_audit() -> Result<()> {
