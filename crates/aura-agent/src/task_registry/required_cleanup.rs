@@ -5,6 +5,77 @@ enum OriginalRequiredDomainOwner {
     Native(Box<dyn RequiredTaskCustody>),
     Local(Box<dyn LocalRequiredTaskCustody>),
 }
+
+/// The same first refusal remains in every propagated failure observation.
+/// Only actual retirement of its original custody may publish the settled
+/// disposition. This diagnostic never authorizes disposal or removes a slot.
+#[derive(Debug)]
+pub(crate) struct OriginalRequiredCleanupDiagnostic {
+    execution: RequiredTaskExit,
+    refusal: Arc<aura_core::effects::task::RequiredTaskCleanupFailure>,
+    later: std::sync::OnceLock<Arc<OriginalRequiredCleanupCause>>,
+    settled: std::sync::OnceLock<aura_core::effects::task::RequiredTaskTerminalFailure>,
+}
+#[derive(Debug)]
+struct OriginalRequiredCleanupCause {
+    cause: Arc<aura_core::effects::task::RequiredTaskCleanupFailure>,
+    next: std::sync::OnceLock<Arc<OriginalRequiredCleanupCause>>,
+}
+impl OriginalRequiredCleanupDiagnostic {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn original_execution(&self) -> &RequiredTaskExit {
+        &self.execution
+    }
+
+    /// Actual producer-attempt causes in chronological order. Reobserving a
+    /// receipt or requesting a retry does not append an occurrence.
+    pub(crate) fn cleanup_failures(
+        &self,
+    ) -> impl Iterator<Item = &aura_core::effects::task::RequiredTaskCleanupFailure> {
+        std::iter::once(self.refusal.as_ref()).chain(
+            std::iter::successors(self.later.get().map(Arc::as_ref), |node| {
+                node.next.get().map(Arc::as_ref)
+            })
+            .map(|node| node.cause.as_ref()),
+        )
+    }
+    fn append_actual(&self, cause: Arc<aura_core::effects::task::RequiredTaskCleanupFailure>) {
+        let actual = Arc::new(OriginalRequiredCleanupCause {
+            cause,
+            next: std::sync::OnceLock::new(),
+        });
+        let mut tail = &self.later;
+        loop {
+            match tail.set(actual.clone()) {
+                Ok(()) => return,
+                Err(_) => {
+                    tail = &tail
+                        .get()
+                        .expect("actual cleanup occurrence was deposited")
+                        .next;
+                }
+            }
+        }
+    }
+}
+impl std::fmt::Display for OriginalRequiredCleanupDiagnostic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} ({} actual cleanup failures)",
+            self.refusal,
+            self.cleanup_failures().count()
+        )
+    }
+}
+impl std::error::Error for OriginalRequiredCleanupDiagnostic {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self.settled.get() {
+            Some(settled) => Some(settled),
+            None => Some(self.refusal.as_ref()),
+        }
+    }
+}
 impl TaskGroup {
     fn settled_original_domain_outcome(
         &self,
@@ -13,10 +84,54 @@ impl TaskGroup {
         original: TaskOutcome,
         settlement: RequiredTaskSettlement,
     ) -> Result<(String, TaskOutcome), AuraError> {
+        {
+            let _tree = self.shared.tree.state.lock();
+            let mut tasks = self.shared.tasks.lock();
+            let entry = tasks.get_mut(&task_id).ok_or_else(|| {
+                AuraError::invalid("original domain settlement registration is missing")
+            })?;
+            if !entry
+                .required_custody
+                .as_ref()
+                .is_some_and(|actual| Arc::ptr_eq(actual, custody))
+            {
+                return Err(AuraError::invalid(
+                    "original domain settlement custody differs",
+                ));
+            }
+            custody
+                .retiring
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                )
+                .map_err(|_| AuraError::invalid("original domain retirement already claimed"))?;
+            if let RequiredTaskSettlement::ResolvedWithDomainFailure(source) = &settlement {
+                entry.domain_terminal_failure.get_or_insert(source.clone());
+            }
+        }
+        let retired = match custody.original.try_lock() {
+            Ok(mut owner) => owner.take(),
+            Err(_) => {
+                custody
+                    .retiring
+                    .store(false, std::sync::atomic::Ordering::Release);
+                return Err(AuraError::invalid(
+                    "original domain owner is still borrowed",
+                ));
+            }
+        }
+        .ok_or_else(|| AuraError::invalid("original domain owner was already retired"))?;
+        // Run the real domain owner's destructor outside the registry and
+        // original-owner locks. Its operation/profile leases must be gone
+        // before a disposal observer can see the resource ACK.
+        drop(retired);
         let _tree = self.shared.tree.state.lock();
         let mut tasks = self.shared.tasks.lock();
         let entry = tasks.get_mut(&task_id).ok_or_else(|| {
-            AuraError::invalid("original domain settlement registration is missing")
+            AuraError::invalid("original domain settlement registration was lost")
         })?;
         if !entry
             .required_custody
@@ -24,62 +139,111 @@ impl TaskGroup {
             .is_some_and(|actual| Arc::ptr_eq(actual, custody))
         {
             return Err(AuraError::invalid(
-                "original domain settlement custody differs",
+                "original domain settlement custody changed during retirement",
             ));
         }
-        if let RequiredTaskSettlement::ResolvedWithDomainFailure(source) = settlement {
-            entry.domain_terminal_failure.get_or_insert(source);
-        }
         let name = entry.task_name.clone();
-        let Some(terminal) = entry.domain_terminal_failure.clone() else {
-            *custody.disposed_outcome.lock() = Some(original.clone());
-            custody
-                .acknowledged
-                .store(true, std::sync::atomic::Ordering::Release);
-            return Ok((name, original));
+        let outcome = match entry.domain_terminal_failure.clone() {
+            None => original,
+            Some(terminal) => {
+                let execution = match original {
+                    TaskOutcome::Completed => RequiredTaskExit::Completed,
+                    TaskOutcome::Failed(source) => RequiredTaskExit::Failed(source),
+                    TaskOutcome::Cancelled => RequiredTaskExit::Cancelled,
+                    TaskOutcome::Panicked => RequiredTaskExit::Panicked,
+                };
+                TaskOutcome::Failed(AuraError::Internal {
+                    message: "original domain terminal validation failed".into(),
+                    source: Some(Arc::new(
+                        aura_core::effects::task::RequiredTaskTerminalFailure::new(
+                            execution, terminal,
+                        ),
+                    )),
+                })
+            }
         };
-        let execution = match original {
-            TaskOutcome::Completed => RequiredTaskExit::Completed,
-            TaskOutcome::Failed(source) => RequiredTaskExit::Failed(source),
-            TaskOutcome::Cancelled => RequiredTaskExit::Cancelled,
-            TaskOutcome::Panicked => RequiredTaskExit::Panicked,
-        };
-        let outcome = TaskOutcome::Failed(AuraError::Internal {
-            message: "original domain terminal validation failed".into(),
-            source: Some(Arc::new(
-                aura_core::effects::task::RequiredTaskTerminalFailure::new(execution, terminal),
-            )),
-        });
         *custody.disposed_outcome.lock() = Some(outcome.clone());
-        // Original failure/name custody is committed under the SAME registry
-        // lock before resource ACK becomes visible. No await follows ACK.
+        if let Some(diagnostic) = custody.cleanup_diagnostic.get() {
+            diagnostic.settled.get_or_init(|| {
+                aura_core::effects::task::RequiredTaskTerminalFailure::new(
+                    diagnostic.execution.clone(),
+                    AuraError::Internal {
+                        message:
+                            "original required cleanup refusal retained after acknowledged retry"
+                                .into(),
+                        source: Some(diagnostic.refusal.clone()),
+                    },
+                )
+            });
+        }
+        // Deposit the refined observation before publishing the resource ACK.
         custody
             .acknowledged
             .store(true, std::sync::atomic::Ordering::Release);
         Ok((name, outcome))
     }
 }
+/// One coalescing retry request in the existing original required owner. No
+/// observer owns the cleanup future or creates another executor/registration.
+#[derive(Default)]
+struct OriginalRequiredCleanupRetry {
+    resident: bool,
+    running: bool,
+    requested: bool,
+    attempt: u64,
+    failure: Option<AuraError>,
+}
+struct OriginalRequiredCleanupResidence<'a> {
+    custody: &'a RetainedRequiredTaskCustody,
+}
+impl Drop for OriginalRequiredCleanupResidence<'_> {
+    fn drop(&mut self) {
+        self.custody.retry.with(|retry| retry.resident = false);
+        self.custody.retry_changed.notify_waiters();
+    }
+}
 struct RetainedRequiredTaskCustody {
+    resident_cleanup: bool,
+    retry: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell<
+        OriginalRequiredCleanupRetry,
+    >,
+    retry_changed: tokio::sync::Notify,
+    cleanup_diagnostic: std::sync::OnceLock<Arc<OriginalRequiredCleanupDiagnostic>>,
     disposed_outcome: parking_lot::Mutex<Option<TaskOutcome>>,
-    original: std::sync::Arc<tokio::sync::Mutex<OriginalRequiredDomainOwner>>,
+    original: std::sync::Arc<tokio::sync::Mutex<Option<OriginalRequiredDomainOwner>>>,
+    retiring: std::sync::atomic::AtomicBool,
     acknowledged: std::sync::atomic::AtomicBool,
 }
 impl RetainedRequiredTaskCustody {
     fn new(original: Box<dyn RequiredTaskCustody>) -> Self {
         Self {
-            original: std::sync::Arc::new(tokio::sync::Mutex::new(
+            resident_cleanup: false,
+            retry: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell::new(
+                OriginalRequiredCleanupRetry::default(),
+            ),
+            retry_changed: tokio::sync::Notify::new(),
+            cleanup_diagnostic: std::sync::OnceLock::new(),
+            original: std::sync::Arc::new(tokio::sync::Mutex::new(Some(
                 OriginalRequiredDomainOwner::Native(original),
-            )),
+            ))),
             disposed_outcome: parking_lot::Mutex::new(None),
+            retiring: std::sync::atomic::AtomicBool::new(false),
             acknowledged: std::sync::atomic::AtomicBool::new(false),
         }
     }
     fn new_local(original: Box<dyn LocalRequiredTaskCustody>) -> Self {
         Self {
-            original: Arc::new(tokio::sync::Mutex::new(OriginalRequiredDomainOwner::Local(
-                original,
+            resident_cleanup: false,
+            retry: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell::new(
+                OriginalRequiredCleanupRetry::default(),
+            ),
+            retry_changed: tokio::sync::Notify::new(),
+            cleanup_diagnostic: std::sync::OnceLock::new(),
+            original: Arc::new(tokio::sync::Mutex::new(Some(
+                OriginalRequiredDomainOwner::Local(original),
             ))),
             disposed_outcome: parking_lot::Mutex::new(None),
+            retiring: std::sync::atomic::AtomicBool::new(false),
             acknowledged: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -87,7 +251,10 @@ impl RetainedRequiredTaskCustody {
         let original = self.original.clone();
         Box::pin(async move {
             let mut obligation = original.lock_owned().await;
-            match &mut *obligation {
+            match obligation
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original required owner was retired"))?
+            {
                 OriginalRequiredDomainOwner::Native(owner) => owner.execute().await,
                 OriginalRequiredDomainOwner::Local(owner) => owner.execute().await,
             }
@@ -100,7 +267,10 @@ impl RetainedRequiredTaskCustody {
         let original = self.original.clone();
         Box::pin(async move {
             let mut obligation = original.lock_owned().await;
-            match &mut *obligation {
+            match obligation
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original required owner was retired"))?
+            {
                 OriginalRequiredDomainOwner::Native(owner) => owner.cleanup(&original_exit).await,
                 OriginalRequiredDomainOwner::Local(owner) => owner.cleanup(&original_exit).await,
             }
@@ -112,7 +282,10 @@ impl RetainedRequiredTaskCustody {
             // Owned guard and domain object remain separate allocations; the
             // ordinary Rust borrow lasts only as long as this execution future.
             let mut obligation = original.lock_owned().await;
-            match &mut *obligation {
+            match obligation
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original required owner was retired"))?
+            {
                 OriginalRequiredDomainOwner::Native(owner) => owner.execute().await,
                 OriginalRequiredDomainOwner::Local(_) => Err(aura_core::AuraError::invalid(
                     "local obligation requires its original local executor",
@@ -128,7 +301,10 @@ impl RetainedRequiredTaskCustody {
         let original = std::sync::Arc::clone(&self.original);
         Box::pin(async move {
             let mut obligation = original.lock_owned().await;
-            match &mut *obligation {
+            match obligation
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original required owner was retired"))?
+            {
                 OriginalRequiredDomainOwner::Native(owner) => owner.cleanup(&original_exit).await,
                 OriginalRequiredDomainOwner::Local(_) => Err(aura_core::AuraError::invalid(
                     "local obligation requires its original local executor",
@@ -208,11 +384,36 @@ impl std::fmt::Debug for RetainedRequiredTaskCustody {
     }
 }
 impl RetainedRequiredTaskCustody {
+    fn retain_actual_cleanup_failure(
+        &self,
+        execution: RequiredTaskExit,
+        cleanup: AuraError,
+    ) -> Arc<OriginalRequiredCleanupDiagnostic> {
+        let actual = Arc::new(aura_core::effects::task::RequiredTaskCleanupFailure::new(
+            match &execution {
+                RequiredTaskExit::Failed(source) => Some(source.clone()),
+                _ => None,
+            },
+            cleanup,
+        ));
+        let diagnostic = self.cleanup_diagnostic.get_or_init(|| {
+            Arc::new(OriginalRequiredCleanupDiagnostic {
+                execution,
+                refusal: actual.clone(),
+                later: std::sync::OnceLock::new(),
+                settled: std::sync::OnceLock::new(),
+            })
+        });
+        if !Arc::ptr_eq(&actual, &diagnostic.refusal) {
+            diagnostic.append_actual(actual);
+        }
+        diagnostic.clone()
+    }
     fn acknowledged(&self) -> bool {
         self.acknowledged.load(std::sync::atomic::Ordering::Acquire)
     }
 }
-async fn settle_retained_required_cleanup_with<F, C, CFut>(
+async fn settle_retained_required_cleanup_attempt<F, C, CFut>(
     completion: &mut TaskCompletionGuard<F>,
     custody: Option<&Arc<RetainedRequiredTaskCustody>>,
     original: TaskOutcome,
@@ -244,6 +445,7 @@ where
         TaskOutcome::Cancelled => RequiredTaskExit::Cancelled,
         TaskOutcome::Panicked => RequiredTaskExit::Panicked,
     };
+    let diagnostic_exit = exit.clone();
     let cleanup = RegisteredTaskFuture {
         identity,
         future: Some(Box::pin(cleanup(custody.clone(), exit))),
@@ -252,14 +454,22 @@ where
         Ok(Ok(settlement)) => {
             // Domain implementation returned only after consuming its ACTUAL
             // terminal receipts. This flag is supervision/resource state only.
-            match completion.group.settled_original_domain_outcome(
-                completion.task_id,
-                custody,
-                original,
-                settlement,
-            ) {
-                Ok((_name, outcome)) => outcome,
-                Err(source) => TaskOutcome::Failed(source),
+            match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                completion.group.settled_original_domain_outcome(
+                    completion.task_id,
+                    custody,
+                    original,
+                    settlement,
+                )
+            })) {
+                Ok(Ok((_name, outcome))) => outcome,
+                Ok(Err(source)) => TaskOutcome::Failed(source),
+                Err(_) => {
+                    completion
+                        .group
+                        .retain_original_cleanup_failure(completion.task_id, TaskOutcome::Panicked);
+                    TaskOutcome::Panicked
+                }
             }
         }
         Ok(Err(cleanup)) => {
@@ -267,24 +477,133 @@ where
                 completion.task_id,
                 TaskOutcome::Failed(cleanup.clone()),
             );
+            let diagnostic = custody.retain_actual_cleanup_failure(diagnostic_exit, cleanup);
             TaskOutcome::Failed(aura_core::AuraError::Internal {
-                message: "required original cleanup remains incomplete".into(),
-                source: Some(Arc::new(
-                    aura_core::effects::task::RequiredTaskCleanupFailure::new(
-                        match original {
-                            TaskOutcome::Failed(source) => Some(source),
-                            _ => None,
-                        },
-                        cleanup,
-                    ),
-                )),
+                message: "required original cleanup attempt failed".into(),
+                source: Some(diagnostic),
             })
+        }
+        Err(payload) if custody.resident_cleanup => {
+            let actual = AuraError::Internal {
+                message: "original required cleanup unwound".into(),
+                source: Some(Arc::new(aura_core::effects::task::RequiredTaskPanic::new(
+                    aura_core::effects::task::RequiredTaskPanicPhase::Cleanup,
+                    payload,
+                ))),
+            };
+            let diagnostic = custody.retain_actual_cleanup_failure(diagnostic_exit, actual);
+            let source = AuraError::Internal {
+                message: "actual original cleanup panic retained".into(),
+                source: Some(diagnostic),
+            };
+            completion.group.retain_original_cleanup_failure(
+                completion.task_id,
+                TaskOutcome::Failed(source.clone()),
+            );
+            TaskOutcome::Failed(source)
         }
         Err(_) => {
             completion
                 .group
                 .retain_original_cleanup_failure(completion.task_id, TaskOutcome::Panicked);
             TaskOutcome::Panicked
+        }
+    }
+}
+
+async fn settle_retained_required_cleanup_with<F, C, CFut>(
+    completion: &mut TaskCompletionGuard<F>,
+    custody: Option<&Arc<RetainedRequiredTaskCustody>>,
+    original: TaskOutcome,
+    mut cleanup: C,
+) -> TaskOutcome
+where
+    C: FnMut(Arc<RetainedRequiredTaskCustody>, RequiredTaskExit) -> CFut,
+    CFut: Future<Output = Result<RequiredTaskSettlement, AuraError>>,
+{
+    let Some(owner) = custody.filter(|owner| owner.resident_cleanup) else {
+        return settle_retained_required_cleanup_attempt(completion, custody, original, cleanup)
+            .await;
+    };
+    owner.retry.with(|retry| retry.resident = true);
+    let _residence = OriginalRequiredCleanupResidence { custody: owner };
+    loop {
+        owner.retry.with(|retry| {
+            retry.running = true;
+            retry.requested = false;
+        });
+        let outcome = settle_retained_required_cleanup_attempt(
+            completion,
+            custody,
+            original.clone(),
+            &mut cleanup,
+        )
+        .await;
+        let exhausted = owner.retry.with(|retry| {
+            retry.running = false;
+            let Some(attempt) = retry.attempt.checked_add(1) else {
+                retry.failure = Some(AuraError::internal(
+                    "original cleanup attempt generation exhausted",
+                ));
+                return true;
+            };
+            retry.attempt = attempt;
+            retry.failure = if owner.acknowledged() {
+                None
+            } else {
+                Some(match &outcome {
+                    TaskOutcome::Failed(source) => source.clone(),
+                    TaskOutcome::Panicked => AuraError::Internal {
+                        message: "original resident cleanup panicked".into(),
+                        source: Some(Arc::new(TaskSupervisionError::Panicked {
+                            group: completion.group.shared.name.clone(),
+                            task: completion.task_name.clone(),
+                        })),
+                    },
+                    _ => AuraError::internal("original resident cleanup remains unacknowledged"),
+                })
+            };
+            false
+        });
+        owner.retry_changed.notify_waiters();
+        completion.group.notify_ancestors();
+        if exhausted && !owner.acknowledged() {
+            // No custody lock crosses this pending/no-ACK disposition.
+            futures::future::pending::<()>().await;
+        }
+        if owner.acknowledged() {
+            return outcome;
+        }
+        // Publish the actual failure, but keep execution_disposed false: the
+        // same original supervisor still owns its retained cleanup lifecycle.
+        match &outcome {
+            TaskOutcome::Failed(source) => {
+                completion
+                    .group
+                    .propagate_failure(TaskSupervisionError::TaskFailed {
+                        group: completion.group.shared.name.clone(),
+                        task: completion.task_name.clone(),
+                        source: source.clone(),
+                    });
+            }
+            TaskOutcome::Panicked => {
+                completion
+                    .group
+                    .propagate_failure(TaskSupervisionError::Panicked {
+                        group: completion.group.shared.name.clone(),
+                        task: completion.task_name.clone(),
+                    });
+            }
+            _ => {}
+        }
+        loop {
+            let requested = owner.retry_changed.notified();
+            tokio::pin!(requested);
+            requested.as_mut().enable();
+            if owner.retry.with(|retry| retry.requested) {
+                break;
+            }
+            requested.await;
         }
     }
 }
@@ -312,8 +631,8 @@ async fn settle_retained_required_cleanup_local<F>(
 // NonClone handle minted only by accepted admission of the actual slot. It
 // retains the original task/tree and may reconcile that SAME obligation.
 pub(crate) struct OriginalRequiredTaskHandle {
+    requested_resident_attempt: Option<u64>,
     group: TaskGroup,
-    #[cfg(feature = "simulation")]
     task_name: String,
     task: OwnedTaskHandle<u64>,
     custody: Arc<RetainedRequiredTaskCustody>,
@@ -322,15 +641,173 @@ pub(crate) struct RejectedRequiredTaskCustody {
     custody: Arc<RetainedRequiredTaskCustody>,
     source: TaskSupervisionError,
 }
+
+/// Preserve the concrete move-only obligation until synchronous admission has
+/// either installed the original metadata slot or returned the exact box.
+/// The extra Arc is dropped on success; it is never an authority handle.
+#[cfg(any(test, not(target_arch = "wasm32")))]
+struct TypedAdmissionAdapter<T: RequiredTaskCustody + 'static> {
+    original: Arc<tokio::sync::Mutex<Option<Box<T>>>>,
+}
+#[cfg(target_arch = "wasm32")]
+struct TypedLocalAdmissionAdapter<T: LocalRequiredTaskCustody + 'static> {
+    original: Arc<tokio::sync::Mutex<Option<Box<T>>>>,
+}
+#[cfg(target_arch = "wasm32")]
+impl<T: LocalRequiredTaskCustody + 'static> LocalRequiredTaskCustody
+    for TypedLocalAdmissionAdapter<T>
+{
+    fn execute(&mut self) -> futures::future::LocalBoxFuture<'_, Result<(), AuraError>> {
+        let original = self.original.clone();
+        Box::pin(async move {
+            let mut owner = original.lock_owned().await;
+            owner
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original local required owner was withdrawn"))?
+                .execute()
+                .await
+        })
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        exit: &'a RequiredTaskExit,
+    ) -> futures::future::LocalBoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+        let original = self.original.clone();
+        Box::pin(async move {
+            let mut owner = original.lock_owned().await;
+            owner
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original local required owner was withdrawn"))?
+                .cleanup(exit)
+                .await
+        })
+    }
+}
+#[cfg(any(test, not(target_arch = "wasm32")))]
+impl<T: RequiredTaskCustody + 'static> RequiredTaskCustody for TypedAdmissionAdapter<T> {
+    fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), AuraError>> {
+        let original = self.original.clone();
+        Box::pin(async move {
+            let mut owner = original.lock_owned().await;
+            owner
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original required owner was withdrawn"))?
+                .execute()
+                .await
+        })
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        exit: &'a RequiredTaskExit,
+    ) -> futures::future::BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+        let original = self.original.clone();
+        Box::pin(async move {
+            let mut owner = original.lock_owned().await;
+            owner
+                .as_mut()
+                .ok_or_else(|| AuraError::invalid("original required owner was withdrawn"))?
+                .cleanup(exit)
+                .await
+        })
+    }
+}
 impl TaskGroup {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn spawn_original_local_required_custody_typed<
+        T: LocalRequiredTaskCustody + 'static,
+    >(
+        &self,
+        name: String,
+        obligation: Box<T>,
+        cancellation: Option<Arc<dyn CancellationToken>>,
+    ) -> Result<OriginalRequiredTaskHandle, aura_core::effects::task::RejectedRequiredTask<T>> {
+        let original = Arc::new(tokio::sync::Mutex::new(Some(obligation)));
+        let adapter = Box::new(TypedLocalAdmissionAdapter {
+            original: original.clone(),
+        });
+        match self.spawn_original_local_required_custody(name, adapter, cancellation) {
+            Ok(handle) => Ok(handle),
+            Err(rejected) => {
+                let rejected = rejected.into_local();
+                drop(rejected.obligation);
+                let slot = Arc::try_unwrap(original)
+                    .unwrap_or_else(|_| panic!("rejected local owner has no other reference"));
+                let obligation = slot
+                    .into_inner()
+                    .expect("rejected local owner remains unpolled");
+                Err(aura_core::effects::task::RejectedRequiredTask {
+                    obligation,
+                    source: rejected.source,
+                })
+            }
+        }
+    }
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    pub(crate) fn spawn_original_required_custody_typed<T: RequiredTaskCustody + 'static>(
+        &self,
+        name: String,
+        obligation: Box<T>,
+        cancellation: Option<Arc<dyn CancellationToken>>,
+    ) -> Result<OriginalRequiredTaskHandle, aura_core::effects::task::RejectedRequiredTask<T>> {
+        let original = Arc::new(tokio::sync::Mutex::new(Some(obligation)));
+        let adapter = Box::new(TypedAdmissionAdapter {
+            original: original.clone(),
+        });
+        match self.spawn_original_required_custody(name, adapter, cancellation) {
+            Ok(handle) => Ok(handle),
+            Err(rejected) => {
+                let rejected = rejected.into_native();
+                drop(rejected.obligation);
+                let slot = Arc::try_unwrap(original)
+                    .unwrap_or_else(|_| panic!("rejected required owner has no other reference"));
+                let obligation = slot
+                    .into_inner()
+                    .expect("rejected required owner remains unpolled");
+                Err(aura_core::effects::task::RejectedRequiredTask {
+                    obligation,
+                    source: rejected.source,
+                })
+            }
+        }
+    }
     pub(crate) fn spawn_original_local_required_custody(
         &self,
         name: String,
         obligation: Box<dyn LocalRequiredTaskCustody>,
         cancellation: Option<Arc<dyn CancellationToken>>,
     ) -> Result<OriginalRequiredTaskHandle, RejectedRequiredTaskCustody> {
-        let custody = Arc::new(RetainedRequiredTaskCustody::new_local(obligation));
-        #[cfg(feature = "simulation")]
+        self.spawn_original_local_required_custody_with_cleanup_policy(
+            name,
+            obligation,
+            cancellation,
+            false,
+        )
+    }
+    /// Select original-executor cleanup residence before actual admission.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn spawn_original_local_required_custody_with_resident_cleanup(
+        &self,
+        name: String,
+        obligation: Box<dyn LocalRequiredTaskCustody>,
+        cancellation: Option<Arc<dyn CancellationToken>>,
+    ) -> Result<OriginalRequiredTaskHandle, RejectedRequiredTaskCustody> {
+        self.spawn_original_local_required_custody_with_cleanup_policy(
+            name,
+            obligation,
+            cancellation,
+            true,
+        )
+    }
+    fn spawn_original_local_required_custody_with_cleanup_policy(
+        &self,
+        name: String,
+        obligation: Box<dyn LocalRequiredTaskCustody>,
+        cancellation: Option<Arc<dyn CancellationToken>>,
+        resident_cleanup: bool,
+    ) -> Result<OriginalRequiredTaskHandle, RejectedRequiredTaskCustody> {
+        let mut original_custody = RetainedRequiredTaskCustody::new_local(obligation);
+        original_custody.resident_cleanup = resident_cleanup;
+        let custody = Arc::new(original_custody);
         let original_task_name = name.clone();
         match self.spawn_checked_fallible_boxed_local_with_custody(
             name,
@@ -339,8 +816,8 @@ impl TaskGroup {
             Some(custody.clone()),
         ) {
             Ok(task) => Ok(OriginalRequiredTaskHandle {
+                requested_resident_attempt: None,
                 group: self.clone(),
-                #[cfg(feature = "simulation")]
                 task_name: original_task_name,
                 task,
                 custody,
@@ -354,8 +831,38 @@ impl TaskGroup {
         obligation: Box<dyn RequiredTaskCustody>,
         cancellation: Option<Arc<dyn CancellationToken>>,
     ) -> Result<OriginalRequiredTaskHandle, RejectedRequiredTaskCustody> {
-        let custody = Arc::new(RetainedRequiredTaskCustody::new(obligation));
-        #[cfg(feature = "simulation")]
+        self.spawn_original_required_custody_with_cleanup_policy(
+            name,
+            obligation,
+            cancellation,
+            false,
+        )
+    }
+    /// Select original-executor cleanup residence before actual admission.
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    pub(crate) fn spawn_original_required_custody_with_resident_cleanup(
+        &self,
+        name: String,
+        obligation: Box<dyn RequiredTaskCustody>,
+        cancellation: Option<Arc<dyn CancellationToken>>,
+    ) -> Result<OriginalRequiredTaskHandle, RejectedRequiredTaskCustody> {
+        self.spawn_original_required_custody_with_cleanup_policy(
+            name,
+            obligation,
+            cancellation,
+            true,
+        )
+    }
+    fn spawn_original_required_custody_with_cleanup_policy(
+        &self,
+        name: String,
+        obligation: Box<dyn RequiredTaskCustody>,
+        cancellation: Option<Arc<dyn CancellationToken>>,
+        resident_cleanup: bool,
+    ) -> Result<OriginalRequiredTaskHandle, RejectedRequiredTaskCustody> {
+        let mut original_custody = RetainedRequiredTaskCustody::new(obligation);
+        original_custody.resident_cleanup = resident_cleanup;
+        let custody = Arc::new(original_custody);
         let original_task_name = name.clone();
         match self.spawn_checked_fallible_boxed_with_custody(
             name,
@@ -364,8 +871,8 @@ impl TaskGroup {
             Some(custody.clone()),
         ) {
             Ok(task) => Ok(OriginalRequiredTaskHandle {
+                requested_resident_attempt: None,
                 group: self.clone(),
-                #[cfg(feature = "simulation")]
                 task_name: original_task_name,
                 task,
                 custody,
@@ -375,6 +882,89 @@ impl TaskGroup {
     }
 }
 impl OriginalRequiredTaskHandle {
+    /// Observe the actual disposed execution when required cleanup refused.
+    /// This is supervision evidence only; it cannot authorize a domain ACK.
+    pub(crate) fn original_exit_after_cleanup_refusal(
+        &self,
+    ) -> Result<aura_core::effects::task::RequiredTaskExit, AuraError> {
+        let _tree = self.group.shared.tree.state.lock();
+        let tasks = self.group.shared.tasks.lock();
+        let retained = tasks
+            .get(self.task.handle_id())
+            .ok_or_else(|| AuraError::invalid("original required task no longer retained"))?;
+        if !retained
+            .required_custody
+            .as_ref()
+            .is_some_and(|actual| Arc::ptr_eq(actual, &self.custody))
+            || !(retained.execution_disposed
+                || self.custody.retry.with(|retry| {
+                    retry.resident && retry.attempt > 0 && !retry.running && retry.failure.is_some()
+                }))
+            || retained.cleanup_failure.is_none()
+        {
+            return Err(AuraError::invalid(
+                "original required cleanup refusal is not retained",
+            ));
+        }
+        match retained.original_exit.as_ref().ok_or_else(|| {
+            AuraError::invalid("original required execution exit was not retained")
+        })? {
+            TaskOutcome::Completed => Ok(aura_core::effects::task::RequiredTaskExit::Completed),
+            TaskOutcome::Failed(source) => Ok(aura_core::effects::task::RequiredTaskExit::Failed(
+                source.clone(),
+            )),
+            TaskOutcome::Cancelled => Ok(aura_core::effects::task::RequiredTaskExit::Cancelled),
+            TaskOutcome::Panicked => Ok(aura_core::effects::task::RequiredTaskExit::Panicked),
+        }
+    }
+    /// Await the original slot's actual cleanup ACK or its retained concrete
+    /// cleanup failure. Execution disposal alone is not a resource settlement.
+    pub(crate) async fn await_original_cleanup_decision(&self) -> Result<(), AuraError> {
+        loop {
+            let changed = self.group.shared.notify.notified();
+            futures::pin_mut!(changed);
+            changed.as_mut().enable();
+            {
+                let _tree = self.group.shared.tree.state.lock();
+                let tasks = self.group.shared.tasks.lock();
+                if self.custody.acknowledged() {
+                    return Ok(());
+                }
+                let retained = tasks.get(self.task.handle_id()).ok_or_else(|| {
+                    AuraError::invalid("original required task no longer retained")
+                })?;
+                if !retained
+                    .required_custody
+                    .as_ref()
+                    .is_some_and(|actual| Arc::ptr_eq(actual, &self.custody))
+                {
+                    return Err(AuraError::invalid("original required task custody differs"));
+                }
+                if retained.execution_disposed {
+                    if let Some(TaskOutcome::Failed(source)) = retained.cleanup_failure.as_ref() {
+                        return Err(source.clone());
+                    }
+                    if matches!(
+                        retained.cleanup_failure.as_ref(),
+                        Some(TaskOutcome::Cancelled | TaskOutcome::Panicked)
+                    ) {
+                        return Err(AuraError::invalid(
+                            "original required cleanup was interrupted",
+                        ));
+                    }
+                }
+            }
+            if self.custody.resident_cleanup {
+                if let Some(source) = self.custody.retry.with(|retry| retry.failure.clone()) {
+                    return Err(source);
+                }
+            }
+            changed.await;
+        }
+    }
+    pub(crate) fn acknowledged(&self) -> bool {
+        self.custody.acknowledged()
+    }
     /// Observe the actual original attempt's disposal before retrying its same
     /// retained cleanup. The caller supplies its original bounded observation.
     pub(crate) async fn await_original_attempt_disposition(&self) -> Result<(), AuraError> {
@@ -402,7 +992,119 @@ impl OriginalRequiredTaskHandle {
                     return Ok(());
                 }
             }
+            if self.custody.resident_cleanup
+                && self
+                    .custody
+                    .retry
+                    .with(|retry| retry.attempt > 0 && !retry.running)
+            {
+                return Ok(());
+            }
             changed.await;
+        }
+    }
+
+    /// Queue mandatory cleanup on this exact original executor BEFORE clock
+    /// observation. One request target remains in the same handle across a
+    /// dropped observation; ids and new deadlines cannot recreate it.
+    pub(crate) fn request_resident_cleanup_retry(&mut self) -> Result<(), AuraError> {
+        if self.custody.acknowledged() {
+            return Ok(());
+        }
+        let prior_request = self.requested_resident_attempt;
+        let target = {
+            let _tree = self.group.shared.tree.state.lock();
+            let tasks = self.group.shared.tasks.lock();
+            let entry = tasks.get(self.task.handle_id()).ok_or_else(|| {
+                AuraError::invalid("original required cleanup registration is unavailable")
+            })?;
+            if !self.custody.resident_cleanup
+                || !entry
+                    .required_custody
+                    .as_ref()
+                    .is_some_and(|actual| Arc::ptr_eq(actual, &self.custody))
+                || entry.execution_disposed
+            {
+                return Err(AuraError::permission_denied(
+                    "original resident cleanup custody is unavailable",
+                ));
+            }
+            self.custody.retry.with(|retry| {
+                if let Some(prior) = prior_request {
+                    // Explicit new public requests may advance an actually
+                    // completed failed request. A merely abandoned observer
+                    // cannot replace a still-pending target.
+                    if retry.attempt < prior || retry.failure.is_none() {
+                        return Ok(prior);
+                    }
+                }
+                if !retry.resident && retry.attempt > 0 {
+                    return Err(AuraError::invalid(
+                        "original required cleanup executor is unavailable",
+                    ));
+                }
+                let target = retry.attempt.checked_add(1).ok_or_else(|| {
+                    AuraError::invalid("original cleanup attempt generation exhausted")
+                })?;
+                if !retry.running {
+                    retry.requested = true;
+                }
+                Ok(target)
+            })?
+        };
+        self.requested_resident_attempt = Some(target);
+        self.custody.retry_changed.notify_waiters();
+        Ok(())
+    }
+    async fn request_original_resident_cleanup(&mut self) -> Result<(), AuraError> {
+        if self.custody.acknowledged() {
+            self.requested_resident_attempt = None;
+            return Ok(());
+        }
+        // Reconciliation observes the request already issued by the caller.
+        // It must not resubmit after fast completion between those two polls.
+        if self.requested_resident_attempt.is_none() {
+            self.request_resident_cleanup_retry()?;
+        }
+        let target = self
+            .requested_resident_attempt
+            .ok_or_else(|| AuraError::invalid("actual original cleanup request is absent"))?;
+        loop {
+            let changed = self.custody.retry_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.custody.acknowledged() {
+                self.requested_resident_attempt = None;
+                return Ok(());
+            }
+            let registration_changed = self.group.shared.notify.notified();
+            tokio::pin!(registration_changed);
+            registration_changed.as_mut().enable();
+            let before_initial_attempt = {
+                let _tree = self.group.shared.tree.state.lock();
+                let tasks = self.group.shared.tasks.lock();
+                tasks.get(self.task.handle_id()).is_some_and(|entry| {
+                    !entry.execution_disposed
+                        && entry
+                            .required_custody
+                            .as_ref()
+                            .is_some_and(|actual| Arc::ptr_eq(actual, &self.custody))
+                })
+            };
+            if let Some(source) = self.custody.retry.with(|retry| {
+                if retry.attempt >= target {
+                    return Some(retry.failure.clone().unwrap_or_else(|| {
+                        AuraError::invalid("original cleanup lacks actual settlement")
+                    }));
+                }
+                (!(retry.resident || before_initial_attempt && retry.attempt == 0)).then(|| {
+                    AuraError::invalid("original required cleanup executor was interrupted")
+                })
+            }) {
+                self.requested_resident_attempt = None;
+                return Err(source);
+            }
+            tokio::select! { _ = changed => {}, _ = registration_changed => {} };
         }
     }
 
@@ -414,6 +1116,9 @@ impl OriginalRequiredTaskHandle {
         C: FnOnce(Arc<RetainedRequiredTaskCustody>, RequiredTaskExit) -> CFut,
         CFut: Future<Output = Result<RequiredTaskSettlement, aura_core::AuraError>>,
     {
+        if self.custody.resident_cleanup {
+            return self.request_original_resident_cleanup().await;
+        }
         let original = {
             let _tree = self.group.shared.tree.state.lock();
             let tasks = self.group.shared.tasks.lock();
@@ -480,12 +1185,27 @@ impl OriginalRequiredTaskHandle {
         };
         // No await follows actual cleanup ACK. Original execution disposition
         // remains independent: cancellation cannot become positive completion.
-        let (name, outcome) = self.group.settled_original_domain_outcome(
-            *self.task.handle_id(),
-            &self.custody,
-            original,
-            settlement,
-        )?;
+        let (name, outcome) = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+            self.group.settled_original_domain_outcome(
+                *self.task.handle_id(),
+                &self.custody,
+                original,
+                settlement,
+            )
+        })) {
+            Ok(result) => result?,
+            Err(_) => {
+                self.group
+                    .retain_original_cleanup_failure(*self.task.handle_id(), TaskOutcome::Panicked);
+                return Err(aura_core::AuraError::Internal {
+                    message: "original required owner retirement panicked".into(),
+                    source: Some(Arc::new(TaskSupervisionError::Panicked {
+                        group: self.group.shared.name.clone(),
+                        task: "original-required-retirement".into(),
+                    })),
+                });
+            }
+        };
         self.group
             .complete_task(*self.task.handle_id(), &name, outcome);
         Ok(())
@@ -499,6 +1219,157 @@ mod original_cleanup_disposition_tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("original native cleanup refusal")]
+    struct NativeCleanupRefusal;
+
+    struct RefusedThenRetiredOwner {
+        entered: Option<tokio::sync::oneshot::Sender<()>>,
+        attempts: Arc<AtomicUsize>,
+        dropped: Arc<AtomicUsize>,
+        cause: Arc<NativeCleanupRefusal>,
+    }
+    impl Drop for RefusedThenRetiredOwner {
+        fn drop(&mut self) {
+            self.dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    impl RequiredTaskCustody for RefusedThenRetiredOwner {
+        fn execute(&mut self) -> BoxFuture<'_, Result<(), AuraError>> {
+            Box::pin(async {
+                self.entered
+                    .take()
+                    .expect("original entry sender")
+                    .send(())
+                    .expect("original entry observer remains live");
+                futures::future::pending().await
+            })
+        }
+        fn cleanup<'a>(
+            &'a mut self,
+            exit: &'a RequiredTaskExit,
+        ) -> BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+            Box::pin(async move {
+                assert!(matches!(exit, RequiredTaskExit::Cancelled));
+                if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(AuraError::Internal {
+                        message: "original required cleanup refusal".into(),
+                        source: Some(self.cause.clone()),
+                    });
+                }
+                Ok(RequiredTaskSettlement::ResolvedWithDomainFailure(
+                    AuraError::invalid("original cancelled domain"),
+                ))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn acknowledged_retry_retains_first_cleanup_cause_and_original_cancelled_disposition() {
+        fn cause<'a, T: std::error::Error + 'static>(
+            mut error: &'a (dyn std::error::Error + 'static),
+        ) -> Option<&'a T> {
+            loop {
+                if let Some(actual) = error.downcast_ref::<T>() {
+                    return Some(actual);
+                }
+                error = error.source()?;
+            }
+        }
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("original-refused-cleanup");
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let native = Arc::new(NativeCleanupRefusal);
+        let mut original = group
+            .spawn_original_required_custody_typed(
+                "original".into(),
+                Box::new(RefusedThenRetiredOwner {
+                    entered: Some(entered),
+                    attempts: Arc::clone(&attempts),
+                    dropped: Arc::clone(&dropped),
+                    cause: Arc::clone(&native),
+                }),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("actual original admission"));
+        observed.await.expect("actual original entered execution");
+        aura_core::effects::task::RequiredTaskControl::request_cancel(&mut original);
+        original
+            .await_original_attempt_disposition()
+            .await
+            .expect("original refusal observed");
+        let first = group
+            .terminal_failure()
+            .expect("first native cleanup failure retained");
+        assert!(!original.acknowledged());
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+        assert!(
+            cause::<aura_core::effects::task::RequiredTaskTerminalFailure>(&first).is_none(),
+            "a failed attempt cannot report resource settlement"
+        );
+        assert!(std::ptr::eq(
+            cause::<NativeCleanupRefusal>(&first).unwrap(),
+            native.as_ref()
+        ));
+        let observed_disposal = original.disposal_observer();
+        let observed_refusal = match observed_disposal
+            .await_disposal_or_cleanup_failure_for_test()
+            .await
+        {
+            Err(source) => source,
+            Ok(_) => panic!("unacknowledged original cleanup cannot report disposal"),
+        };
+        assert!(std::ptr::eq(
+            cause::<NativeCleanupRefusal>(&observed_refusal).unwrap(),
+            native.as_ref()
+        ));
+        let sealed = group.seal_admission();
+        let mut disposal = Box::pin(sealed.await_disposal());
+        assert!(futures::poll!(disposal.as_mut()).is_pending());
+        drop(disposal);
+        aura_core::effects::task::RequiredTaskControl::reconcile(&mut original)
+            .await
+            .expect("same admitted owner acknowledges retry");
+        assert!(original.acknowledged());
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        observed_disposal
+            .await_disposal_or_cleanup_failure_for_test()
+            .await
+            .expect("actual resource ACK supersedes the retained attempt diagnostic")
+            .require_original(&original)
+            .unwrap();
+        sealed
+            .await_disposal()
+            .await
+            .require_original_group(&group)
+            .unwrap();
+        // Query the same previously held error, without replacing its first cause.
+        let terminal = cause::<aura_core::effects::task::RequiredTaskTerminalFailure>(&first)
+            .expect("actual ACK retains original disposition in existing observation");
+        assert!(matches!(terminal.execution(), RequiredTaskExit::Cancelled));
+        assert!(std::ptr::eq(
+            cause::<NativeCleanupRefusal>(&first).unwrap(),
+            native.as_ref()
+        ));
+        let shutdown = supervisor
+            .shutdown_with_timeout(std::time::Duration::from_secs(1))
+            .await
+            .expect_err("strict shutdown retains the original failed domain");
+        assert!(matches!(
+            cause::<aura_core::effects::task::RequiredTaskTerminalFailure>(&shutdown)
+                .unwrap()
+                .execution(),
+            RequiredTaskExit::Cancelled
+        ));
+        assert!(std::ptr::eq(
+            cause::<NativeCleanupRefusal>(&shutdown).unwrap(),
+            native.as_ref()
+        ));
+    }
 
     struct OriginalCleanupDropIdentity(OwnedRuntimeTaskIdentity);
     impl Drop for OriginalCleanupDropIdentity {
@@ -662,7 +1533,7 @@ impl RejectedRequiredTaskCustody {
             .expect("unadmitted owner has no registered custody clone");
         let owner = Arc::try_unwrap(custody.original)
             .unwrap_or_else(|_| panic!("unadmitted owner has no polled borrow"));
-        let OriginalRequiredDomainOwner::Native(obligation) = owner.into_inner() else {
+        let Some(OriginalRequiredDomainOwner::Native(obligation)) = owner.into_inner() else {
             unreachable!("native admission retains native owner");
         };
         aura_core::effects::task::RejectedRequiredTask {
@@ -680,7 +1551,7 @@ impl RejectedRequiredTaskCustody {
             .expect("unadmitted owner has no registered custody clone");
         let owner = Arc::try_unwrap(custody.original)
             .unwrap_or_else(|_| panic!("unadmitted owner has no polled borrow"));
-        let OriginalRequiredDomainOwner::Local(obligation) = owner.into_inner() else {
+        let Some(OriginalRequiredDomainOwner::Local(obligation)) = owner.into_inner() else {
             unreachable!("local admission retains local owner");
         };
         aura_core::effects::task::RejectedRequiredTask {
@@ -752,6 +1623,41 @@ mod registered_required_custody_tests {
     #[tokio::test]
     async fn actual_registered_outer_abort_retains_owner_through_failed_retry() {
         registered_cancellation(2).await;
+    }
+    #[tokio::test]
+    async fn unacknowledged_original_slot_retains_group_after_external_owner_drop() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("retained-original-slot");
+        let weak = Arc::downgrade(&group.shared);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut original = group
+            .spawn_original_required_custody(
+                "retained-obligation".into(),
+                Box::new(ActualRegisteredObligation {
+                    started: Some(started_tx),
+                    identity: None,
+                    attempts: Arc::new(AtomicUsize::new(0)),
+                    drops: drops.clone(),
+                }),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("original admission"));
+        started_rx.await.expect("original execution started");
+        original.request_cancel();
+        original
+            .await_original_attempt_disposition()
+            .await
+            .expect("failed cleanup retains the original slot");
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(original);
+        drop(group);
+        drop(supervisor);
+        let retained = weak
+            .upgrade()
+            .expect("unacknowledged slot retains its group");
+        assert_eq!(retained.tasks.lock().len(), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
     }
     async fn registered_cancellation(mode: u8) {
         let supervisor = TaskSupervisor::new();
@@ -830,6 +1736,8 @@ mod registered_required_custody_tests {
         acknowledged
             .require_original_group(&group)
             .expect("disposal acknowledges the original registered group");
+        drop(acknowledged);
+        drop(seal);
         assert!(original.custody.acknowledged());
         drop(original);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
@@ -837,6 +1745,13 @@ mod registered_required_custody_tests {
             &*group.shared.execution_outcome.lock(),
             TaskGroupExecutionOutcome::Interrupted(_)
         ));
+        let weak = Arc::downgrade(&group.shared);
+        drop(group);
+        drop(supervisor);
+        assert!(
+            weak.upgrade().is_none(),
+            "acknowledged slot breaks retention"
+        );
     }
 }
 
@@ -865,6 +1780,7 @@ mod rejected_required_custody_tests {
     async fn rejected_registration_returns_actual_owner_without_poll_or_drop() {
         let supervisor = TaskSupervisor::new();
         let group = supervisor.group("closed-admission");
+        let weak = Arc::downgrade(&group.shared);
         let _sealed = group.seal_admission();
         let drops = Arc::new(AtomicUsize::new(0));
         let rejected = match group.spawn_original_required_custody(
@@ -887,6 +1803,59 @@ mod rejected_required_custody_tests {
         ));
         drop(rejected.obligation);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
+        drop(_sealed);
+        drop(group);
+        drop(supervisor);
+        assert!(
+            weak.upgrade().is_none(),
+            "rejection installs no retained slot"
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_rejection_returns_exact_unpolled_original_box() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("typed-closed-admission");
+        let seal = group.seal_admission();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let owner = Box::new(UnadmittedOwner(drops.clone()));
+        let identity = (&*owner as *const UnadmittedOwner) as usize;
+        let rejected = group
+            .spawn_original_required_custody_typed("typed-original".into(), owner, None)
+            .err()
+            .expect("sealed original group refuses typed registration");
+        assert_eq!(
+            (&*rejected.obligation as *const UnadmittedOwner) as usize,
+            identity
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(group.shared.tasks.lock().is_empty());
+        drop(rejected);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        drop(seal);
+    }
+
+    #[tokio::test]
+    async fn ordinary_completed_task_does_not_retain_its_group() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("ordinary-release");
+        let weak = Arc::downgrade(&group.shared);
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let handle = group.spawn_named("ordinary", async move {
+            let _ = finished_tx.send(());
+        });
+        finished_rx.await.expect("ordinary task ran");
+        group
+            .wait_for_idle(std::time::Duration::from_secs(1))
+            .await
+            .expect("ordinary task finished");
+        drop(handle);
+        drop(group);
+        drop(supervisor);
+        assert!(
+            weak.upgrade().is_none(),
+            "ordinary completion leaves no cycle"
+        );
     }
 }
 
@@ -1036,6 +2005,11 @@ mod local_borrowed_required_custody_tests {
                     .require_original_group(&group)
                     .expect("local disposal acknowledges the original registered group");
                 assert!(original.custody.acknowledged());
+                assert_eq!(
+                    drops.load(Ordering::SeqCst),
+                    1,
+                    "local owner is retired before ACK while the handle is still held"
+                );
                 drop(original);
                 assert_eq!(drops.load(Ordering::SeqCst), 1);
                 assert!(matches!(
@@ -1183,14 +2157,56 @@ mod settled_domain_failure_tests {
 /// Observation of the exact issued task after execution and required cleanup
 /// disposal. This does not authorize any domain terminal decision.
 pub(crate) struct OriginalRequiredTaskDisposalObservation {
-    #[cfg(feature = "simulation")]
+    original_group: std::sync::Weak<TaskGroupShared>,
     group_name: String,
-    #[cfg(feature = "simulation")]
     task_name: String,
     custody: Arc<RetainedRequiredTaskCustody>,
     outcome: TaskOutcome,
 }
 impl OriginalRequiredTaskDisposalObservation {
+    /// Establish the exact original required task as the only accepted task in
+    /// this sealed, actually disposed subtree. This is resource evidence only;
+    /// it cannot authorize a signed terminal or change the retained task exit.
+    pub(crate) fn require_only_original_task(
+        &self,
+        disposal: &TaskGroupDisposalAcknowledgment,
+    ) -> Result<(), AuraError> {
+        let original = self.original_group.upgrade().ok_or_else(|| {
+            AuraError::permission_denied("original required task group is no longer retained")
+        })?;
+        let subtree = &disposal.group.shared;
+        let _tree = subtree.tree.state.lock();
+        if !Arc::ptr_eq(&original.tree, &subtree.tree)
+            || !original.lineage.starts_with(&subtree.lineage)
+            || !subtree.closing.load(Ordering::Acquire)
+            || subtree.accepted_subtree_tasks.load(Ordering::Relaxed) != 1
+            || !self.custody.acknowledged()
+        {
+            return Err(AuraError::permission_denied(
+                "disposal does not contain only the original acknowledged required task",
+            ));
+        }
+        if let Some(source) = disposal.failure() {
+            if !self.matches_supervision_failure(source) {
+                return Err(AuraError::permission_denied(
+                    "foreign failure in original task disposal",
+                ));
+            }
+        }
+        if let TaskGroupExecutionOutcome::Interrupted(source) = disposal.execution_outcome() {
+            let original_cancel = matches!(
+                (source, &self.outcome),
+                (TaskSupervisionError::Cancelled {group, task}, TaskOutcome::Cancelled)
+                    if group == &self.group_name && task == &self.task_name
+            );
+            if !original_cancel && !self.matches_supervision_failure(source) {
+                return Err(AuraError::permission_denied(
+                    "foreign interruption in original task disposal",
+                ));
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn require_original(
         &self,
         original: &OriginalRequiredTaskHandle,
@@ -1204,7 +2220,6 @@ impl OriginalRequiredTaskDisposalObservation {
         }
     }
     /// Observes only the exact acknowledged task and its original native failure.
-    #[cfg(feature = "simulation")]
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalRequiredTaskDisposalObservation", receiver_type = OriginalRequiredTaskDisposalObservation, family = "runtime_helper")]
     pub(crate) fn matches_supervision_failure(&self, failure: &TaskSupervisionError) -> bool {
         let TaskSupervisionError::TaskFailed {
@@ -1224,19 +2239,31 @@ impl OriginalRequiredTaskDisposalObservation {
         {
             return false;
         }
-        let TaskOutcome::Failed(actual) = &self.outcome else {
-            return false;
+        let terminal: Option<&(dyn std::error::Error + 'static)> = match &self.outcome {
+            TaskOutcome::Failed(actual) => Some(actual),
+            _ => None,
         };
-        let mut left: Option<&(dyn std::error::Error + 'static)> = Some(actual);
-        while let Some(actual) = left {
-            let mut right: Option<&(dyn std::error::Error + 'static)> = Some(source);
-            while let Some(candidate) = right {
-                if std::ptr::eq(actual, candidate) {
-                    return true;
+        // A resolved same-slot retry retains its original cleanup refusal even
+        // when execution completed. Only this custody-issued diagnostic can
+        // supply the independent first failure; neither names nor a new owner
+        // can substitute an unrelated source.
+        let cleanup = self
+            .custody
+            .cleanup_diagnostic
+            .get()
+            .map(|actual| actual.as_ref() as &(dyn std::error::Error + 'static));
+        for original in [terminal, cleanup].into_iter().flatten() {
+            let mut left: Option<&(dyn std::error::Error + 'static)> = Some(original);
+            while let Some(actual) = left {
+                let mut right: Option<&(dyn std::error::Error + 'static)> = Some(source);
+                while let Some(candidate) = right {
+                    if std::ptr::eq(actual, candidate) {
+                        return true;
+                    }
+                    right = candidate.source();
                 }
-                right = candidate.source();
+                left = actual.source();
             }
-            left = actual.source();
         }
         false
     }
@@ -1250,12 +2277,35 @@ impl OriginalRequiredTaskDisposalObservation {
     }
 }
 pub(crate) struct OriginalRequiredTaskDisposalObserver {
-    #[cfg(feature = "simulation")]
     task_name: String,
     group: TaskGroup,
     custody: Arc<RetainedRequiredTaskCustody>,
 }
 impl OriginalRequiredTaskDisposalObserver {
+    #[cfg(test)]
+    pub(crate) async fn await_disposal_or_cleanup_failure_for_test(
+        &self,
+    ) -> Result<OriginalRequiredTaskDisposalObservation, AuraError> {
+        tokio::select! {
+            biased;
+            actual = self.await_disposal() => Ok(actual),
+            source = async {
+                loop {
+                    let changed = self.group.shared.notify.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    if let Some(original) = self.custody.cleanup_diagnostic.get() {
+                        return AuraError::Internal {
+                            message: "original required cleanup refusal observed".into(),
+                            source: Some(original.clone()),
+                        };
+                    }
+                    changed.await;
+                }
+            } => Err(source),
+        }
+    }
+
     pub(crate) async fn await_disposal(&self) -> OriginalRequiredTaskDisposalObservation {
         loop {
             let changed = self.group.shared.notify.notified();
@@ -1264,9 +2314,8 @@ impl OriginalRequiredTaskDisposalObserver {
             if self.custody.acknowledged() {
                 if let Some(outcome) = self.custody.disposed_outcome.lock().clone() {
                     return OriginalRequiredTaskDisposalObservation {
-                        #[cfg(feature = "simulation")]
+                        original_group: Arc::downgrade(&self.group.shared),
                         group_name: self.group.shared.name.clone(),
-                        #[cfg(feature = "simulation")]
                         task_name: self.task_name.clone(),
                         custody: self.custody.clone(),
                         outcome,
@@ -1280,7 +2329,6 @@ impl OriginalRequiredTaskDisposalObserver {
 impl OriginalRequiredTaskHandle {
     pub(crate) fn disposal_observer(&self) -> OriginalRequiredTaskDisposalObserver {
         OriginalRequiredTaskDisposalObserver {
-            #[cfg(feature = "simulation")]
             task_name: self.task_name.clone(),
             group: self.group.clone(),
             custody: self.custody.clone(),
@@ -1313,6 +2361,255 @@ impl OriginalRequiredTaskHandle {
 #[cfg(test)]
 mod issued_required_task_observation_tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RetiredOwnedValue {
+        drops: Arc<AtomicUsize>,
+        cleanup_attempts: Arc<AtomicUsize>,
+    }
+    impl Drop for RetiredOwnedValue {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    impl RequiredTaskCustody for RetiredOwnedValue {
+        fn execute(&mut self) -> BoxFuture<'_, Result<(), AuraError>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn cleanup<'a>(
+            &'a mut self,
+            _: &'a RequiredTaskExit,
+        ) -> BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+            Box::pin(async move {
+                if self.cleanup_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Err(AuraError::invalid("original cleanup remains incomplete"))
+                } else {
+                    Ok(RequiredTaskSettlement::Resolved)
+                }
+            })
+        }
+    }
+    #[tokio::test]
+    async fn original_owner_retires_before_ack_even_with_handle_and_observer_held() {
+        use aura_core::effects::task::RequiredTaskControl;
+        let drops = Arc::new(AtomicUsize::new(0));
+        let cleanup_attempts = Arc::new(AtomicUsize::new(0));
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("original-owner-retirement");
+        let mut original = group
+            .spawn_original_required_custody(
+                "original".into(),
+                Box::new(RetiredOwnedValue {
+                    drops: Arc::clone(&drops),
+                    cleanup_attempts: Arc::clone(&cleanup_attempts),
+                }),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("actual required admission"));
+        let observer = original.disposal_observer();
+        original
+            .await_original_attempt_disposition()
+            .await
+            .expect("original failed cleanup attempt became observable");
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(!original.acknowledged());
+        assert!(observer.await_disposal().now_or_never().is_none());
+        original
+            .reconcile()
+            .await
+            .expect("same original cleanup retry ACK");
+        assert_eq!(cleanup_attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            drops.load(Ordering::SeqCst),
+            1,
+            "real owner retired before ACK"
+        );
+        let disposed = observer.await_disposal().await;
+        disposed
+            .require_original(&original)
+            .expect("same original slot");
+        assert!(matches!(disposed.outcome(), RequiredTaskExit::Completed));
+        let disposal = group.seal_admission().await_disposal().await;
+        disposed
+            .require_only_original_task(&disposal)
+            .expect("retry does not admit a second task");
+        let TaskSupervisionError::TaskFailed {
+            group,
+            task,
+            source,
+        } = disposal
+            .failure()
+            .expect("first original cleanup refusal stays retained")
+        else {
+            panic!("original cleanup refusal must remain source-bearing");
+        };
+        assert!(disposed.matches_supervision_failure(
+            disposal.failure().expect("same original cleanup refusal")
+        ));
+        for (group, task, source) in [
+            (format!("foreign-{group}"), task.clone(), source.clone()),
+            (group.clone(), format!("foreign-{task}"), source.clone()),
+            (
+                group.clone(),
+                task.clone(),
+                AuraError::Internal {
+                    message: "original cleanup remains incomplete".into(),
+                    source: Some(Arc::new(std::io::Error::other("foreign native refusal"))),
+                },
+            ),
+        ] {
+            assert!(
+                !disposed.matches_supervision_failure(&TaskSupervisionError::TaskFailed {
+                    group,
+                    task,
+                    source
+                }),
+                "same-slot retry cannot authorize foreign names or native sources"
+            );
+        }
+        assert!(
+            matches!(disposed.outcome(), RequiredTaskExit::Completed),
+            "observing retained cleanup refusal cannot rewrite original execution"
+        );
+
+        assert_eq!(
+            drops.load(Ordering::SeqCst),
+            1,
+            "held observer cannot retain operation resources"
+        );
+    }
+    #[tokio::test]
+    async fn exclusive_original_disposal_rejects_foreign_and_sibling_subtrees() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("exclusive-original");
+        let original = group
+            .spawn_original_required_custody(
+                "original".into(),
+                Box::new(RetiredOwnedValue {
+                    drops: Arc::new(AtomicUsize::new(0)),
+                    cleanup_attempts: Arc::new(AtomicUsize::new(1)),
+                }),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("actual required admission"));
+        let observed = original.disposal_observer().await_disposal().await;
+        let sibling = supervisor.group("sibling");
+        let sibling_disposal = sibling.seal_admission().await_disposal().await;
+        assert!(observed
+            .require_only_original_task(&sibling_disposal)
+            .is_err());
+        let foreign = TaskSupervisor::new();
+        let foreign_group = foreign.group("exclusive-original");
+        let foreign_disposal = foreign_group.seal_admission().await_disposal().await;
+        assert!(observed
+            .require_only_original_task(&foreign_disposal)
+            .is_err());
+        let disposal = group.seal_admission().await_disposal().await;
+        observed
+            .require_only_original_task(&disposal)
+            .expect("exact original subtree");
+        group.record_subsidiary_failure("unrelated", AuraError::invalid("independent failure"));
+        let contaminated = group.seal_admission().await_disposal().await;
+        assert!(
+            observed.require_only_original_task(&contaminated).is_err(),
+            "a foreign failure cannot be waived by sole-task custody"
+        );
+    }
+
+    #[tokio::test]
+    async fn exclusive_original_disposal_remembers_completed_dropped_descendant() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("exclusive-history");
+        let earlier = group.group("earlier");
+        let weak = Arc::downgrade(&earlier.shared);
+        let handle = earlier.spawn_named("completed", async {});
+        let earlier_disposal = earlier.seal_admission().await_disposal().await;
+        drop(earlier_disposal);
+        drop(handle);
+        drop(earlier);
+        assert!(
+            weak.upgrade().is_none(),
+            "completed group no longer enumerates"
+        );
+        let notice = group.group("original-notice");
+        let original = notice
+            .spawn_original_required_custody(
+                "original".into(),
+                Box::new(RetiredOwnedValue {
+                    drops: Arc::new(AtomicUsize::new(0)),
+                    cleanup_attempts: Arc::new(AtomicUsize::new(1)),
+                }),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("actual required admission"));
+        let observed = original.disposal_observer().await_disposal().await;
+        let notice_disposal = notice.seal_admission().await_disposal().await;
+        observed
+            .require_only_original_task(&notice_disposal)
+            .expect("notice subtree alone contains exact original");
+        let disposal = group.seal_admission().await_disposal().await;
+        assert!(
+            observed.require_only_original_task(&disposal).is_err(),
+            "dropping a completed descendant cannot erase accepted admission history"
+        );
+    }
+
+    struct PanickingRetiredOwner;
+    impl Drop for PanickingRetiredOwner {
+        fn drop(&mut self) {
+            panic!("injected original owner destructor failure");
+        }
+    }
+    impl RequiredTaskCustody for PanickingRetiredOwner {
+        fn execute(&mut self) -> BoxFuture<'_, Result<(), AuraError>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn cleanup<'a>(
+            &'a mut self,
+            _: &'a RequiredTaskExit,
+        ) -> BoxFuture<'a, Result<RequiredTaskSettlement, AuraError>> {
+            Box::pin(async {
+                Ok(RequiredTaskSettlement::ResolvedWithDomainFailure(
+                    AuraError::invalid("original domain failure before retirement"),
+                ))
+            })
+        }
+    }
+    #[tokio::test]
+    async fn destructor_panic_retains_original_domain_failure_without_resource_ack() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("original-owner-panic-retirement");
+        let original = group
+            .spawn_original_required_custody(
+                "original".into(),
+                Box::new(PanickingRetiredOwner),
+                None,
+            )
+            .unwrap_or_else(|_| panic!("actual required admission"));
+        original
+            .await_original_attempt_disposition()
+            .await
+            .expect("panicked original retirement remains inspectable");
+        let _tree = group.shared.tree.state.lock();
+        let tasks = group.shared.tasks.lock();
+        let entry = tasks
+            .get(original.task.handle_id())
+            .expect("unacknowledged original slot remains retained");
+        assert!(matches!(
+            entry.domain_terminal_failure.as_ref(),
+            Some(AuraError::Invalid { message, .. }) if message == "original domain failure before retirement"
+        ));
+        assert!(matches!(
+            entry.cleanup_failure.as_ref(),
+            Some(TaskOutcome::Panicked)
+        ));
+        assert!(matches!(
+            group.terminal_failure(),
+            Some(TaskSupervisionError::Panicked { task, .. }) if task == "original"
+        ));
+        assert!(!original.acknowledged());
+        assert!(original.custody.disposed_outcome.lock().is_none());
+    }
     struct ObservedCustody {
         execution: Option<tokio::sync::oneshot::Receiver<()>>,
         cleanup: Option<tokio::sync::oneshot::Receiver<()>>,

@@ -15,16 +15,59 @@ source "$script_dir/prebuilt-transfer.sh"
 }
 dioxus_config="$web_root/Dioxus.toml"
 config_backup=""
+config_backup_dir=""
+config_backup_ready=0
+config_mutated=0
 
 source "$script_dir/log-bootstrap.sh"
 aura_web_redirect_logs "$repo_root" "$repo_root/artifacts/aura-web/serve-static-${port}.log"
 
 restore_dioxus_config() {
-    if [[ -n "$config_backup" && -f "$config_backup" ]]; then
-        cp "$config_backup" "$dioxus_config"
-        rm -f "$config_backup"
-        config_backup=""
+    local stage="" status=0
+    if [[ "$config_mutated" == 1 ]]; then
+        # Only a completed backup can authorize replacing the live config.
+        [[ "$config_backup_ready" == 1 ]] || {
+            echo "[serve-web-static] incomplete backup cannot restore $dioxus_config" >&2
+            return 1
+        }
+        stage="$(mktemp "$web_root/.Dioxus.toml.restore.XXXXXXXX")" || return $?
+        if cp -p "$config_backup" "$stage"; then
+            if mv -f "$stage" "$dioxus_config"; then
+                config_mutated=0
+            else
+                status=$?
+            fi
+        else
+            status=$?
+        fi
+        if [[ "$status" != 0 ]]; then
+            rm -f "$stage" || echo "[serve-web-static] restore staging remains at $stage" >&2
+            echo "[serve-web-static] config restoration refused; original backup retained at $config_backup" >&2
+            return "$status"
+        fi
     fi
+    if [[ -n "$config_backup_dir" ]]; then
+        if rm -rf "$config_backup_dir"; then
+            config_backup_dir=""
+            config_backup=""
+            config_backup_ready=0
+        else
+            status=$?
+            echo "[serve-web-static] config restored; scratch cleanup refused at $config_backup_dir" >&2
+            return "$status"
+        fi
+    fi
+}
+
+finish_config_owner() {
+    local primary="$1" cleanup=0
+    trap - EXIT INT TERM
+    restore_dioxus_config || cleanup=$?
+    if [[ "$cleanup" != 0 ]]; then
+        echo "[serve-web-static] original status=$primary; config cleanup status=$cleanup" >&2
+        [[ "$primary" != 0 ]] || primary="$cleanup"
+    fi
+    exit "$primary"
 }
 
 cd "$web_root"
@@ -120,19 +163,31 @@ for profile in debug release; do
     fi
 done
 
-if [[ -f "$dioxus_config" ]]; then
-    config_backup="$(mktemp)"
-    cp "$dioxus_config" "$config_backup"
+if [[ -e "$dioxus_config" || -L "$dioxus_config" ]]; then
+    # This transaction owns one ordinary config path, not a link's referent.
+    # An invocation must have exclusive access until the original is restored.
+    [[ -f "$dioxus_config" && ! -L "$dioxus_config" ]] || {
+        echo "[serve-web-static] config backup requires a regular non-symlink file: $dioxus_config" >&2
+        exit 2
+    }
+    # Arm ownership before allocation, backup copying or the first live edit.
+    trap 'finish_config_owner "$?"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    config_backup_dir="$(mktemp -d "${TMPDIR:-/tmp}/aura-web-config.XXXXXXXX")"
+    config_backup="$config_backup_dir/original"
+    cp -p "$dioxus_config" "$config_backup"
+    config_backup_ready=1
+    config_mutated=1
     perl -0pi -e 's/^hot_reload = true$/hot_reload = false/m' "$dioxus_config"
     perl -0pi -e 's/^reload_html = true$/reload_html = false/m' "$dioxus_config"
-    trap restore_dioxus_config EXIT
 fi
 
 case "$build_profile" in
     release)
         public_dir="$repo_root/target/dx/aura-web/release/web/public"
         if [[ ! -f "$public_dir/index.html" ]]; then
-            NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness
+            NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness,production-build
         else
             echo "[serve-web-static] reusing prebuilt release web assets at $public_dir"
         fi
@@ -160,7 +215,7 @@ case "$build_profile" in
 esac
 
 restore_dioxus_config
-trap - EXIT
+trap - EXIT INT TERM
 fi
 
 if [[ ! -f "$public_dir/index.html" ]]; then

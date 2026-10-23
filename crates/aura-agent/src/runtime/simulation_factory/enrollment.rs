@@ -86,6 +86,21 @@ impl EnrollmentLifecycleFailure {
         &self.cleanup
     }
 }
+
+#[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+fn preserve_original_cleanup_failures(mut failures: Vec<AgentError>) -> AgentResult<()> {
+    if failures.is_empty() {
+        return Ok(());
+    }
+    let primary = failures.remove(0);
+    Err(source_error(EnrollmentLifecycleFailure {
+        primary,
+        cleanup: failures,
+        settled_execution_failure: None,
+        cancellation_refusal: None,
+        positive_disposal_acknowledged: false,
+    }))
+}
 async fn cleanup_agents(
     agents: &[Arc<AuraAgent>],
     clock: &Arc<dyn PhysicalTimeEffects>,
@@ -351,9 +366,7 @@ impl SimulatedEnrollment {
         let shutdown = cleanup_agents(&[issuer.clone(), recipient.clone()], &clock, startup).await;
         drop(issuer);
         drop(recipient);
-        if let Some(failure) = shutdown.into_iter().next() {
-            return Err(failure);
-        }
+        preserve_original_cleanup_failures(shutdown)?;
         let [issuer_proof, recipient_proof] = proofs;
         Ok([issuer_proof?, recipient_proof?])
     }
@@ -880,7 +893,7 @@ impl SimulatedEnrollment {
                 _ => {
                     return Err(AgentError::config(
                         "rejected lifecycle lost its typed task failure",
-                    ))
+                    ));
                 }
             }
             Ok::<_, AgentError>(())

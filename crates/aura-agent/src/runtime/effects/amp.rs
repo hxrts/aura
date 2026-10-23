@@ -36,7 +36,7 @@ impl AmpChannelEffects for AuraEffectSystem {
                 return Err(AmpChannelError::AlreadyExists {
                     context: params.context,
                     channel,
-                })
+                });
             }
             Err(error)
                 if aura_protocol::amp::ChannelStateUnavailable::find(&error).is_some_and(

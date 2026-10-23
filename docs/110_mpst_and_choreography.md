@@ -40,7 +40,19 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 Aura executes production choreographies through the Telltale protocol machine. The `tell!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build protocol-machine code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
 
-Aura targets the current public Telltale language/runtime surface directly. Generated code is sourced from `.tell` files, projected through the public session-type model, and admitted into the protocol machine without an Aura-local runner compatibility layer. For the upstream capability, finalization, semantic-handoff, and runtime-upgrade contract that this runtime model assumes, see Telltale `docs/38_capability_model.md`.
+Aura uses the pinned Telltale 17.0.1 session-type and runtime APIs. An executable
+construct must survive the actual projection and code-image lowering path.
+Capability metadata and upstream capability, finalization or handoff contracts
+alone do not establish that an Aura choreography executes those constructs.
+See the supported boundary in [Choreography Development Guide](803_choreography_guide.md).
+
+Session admission retains the machine-issued owned-session capability in both
+backend modes until actual VM disposal is acknowledged. Scheduler completion
+does not acknowledge disposal. Aura retains separate custody for physical tasks,
+runtime admission, selected clocks and host resources; machine ownership
+generations do not provide Rust move-only custody or asynchronous teardown.
+Transfer, scope attenuation and continuation support require their own backend
+and lowering evidence.
 
 Generated runners still expose role-specific execution helpers. Aura keeps those helpers for tests, focused migration utilities, and narrow tooling paths. They are not the production execution boundary.
 

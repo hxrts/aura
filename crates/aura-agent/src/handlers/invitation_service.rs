@@ -31,6 +31,392 @@ use aura_signature::sign_ed25519_transcript;
 use std::str::FromStr;
 use std::sync::Arc;
 
+type OriginalInviteeRoot = crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+    super::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+>;
+
+/// Original invitee failure keeps the execution cause first and the distinct
+/// required cleanup refusal second. A failed cleanup never authorizes a
+/// successful public result or a fresh admission.
+#[derive(Debug, thiserror::Error)]
+#[error("original invitee execution failed and required cleanup remains incomplete")]
+struct OriginalInviteeLifecycleFailure {
+    #[source]
+    primary: AgentError,
+    cleanup: aura_core::AuraError,
+}
+
+#[derive(Debug)]
+struct InterruptedInviteeDomainFailures {
+    primary: aura_core::AuraError,
+    notice: Arc<AgentError>,
+}
+
+impl InterruptedInviteeDomainFailures {
+    fn notice(&self) -> &AgentError {
+        self.notice.as_ref()
+    }
+}
+
+impl std::fmt::Display for InterruptedInviteeDomainFailures {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let category = if matches!(self.notice(), AgentError::Aura(_)) {
+            "effect"
+        } else {
+            "runtime"
+        };
+        write!(
+            formatter,
+            "original invitee execution and {category} notice domains failed"
+        )
+    }
+}
+
+impl std::error::Error for InterruptedInviteeDomainFailures {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.primary)
+    }
+}
+
+#[derive(Debug)]
+struct OriginalInviteeRequiredExit {
+    exit: aura_core::effects::task::RequiredTaskExit,
+}
+impl std::fmt::Display for OriginalInviteeRequiredExit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("original invitee required execution disposed without a public result")
+    }
+}
+impl std::error::Error for OriginalInviteeRequiredExit {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.exit {
+            aura_core::effects::task::RequiredTaskExit::Failed(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl OriginalInviteeLifecycleFailure {
+    #[cfg(test)]
+    fn primary(&self) -> &AgentError {
+        &self.primary
+    }
+    #[cfg(test)]
+    fn cleanup(&self) -> &aura_core::AuraError {
+        &self.cleanup
+    }
+}
+
+fn settle_original_invitee_result(
+    execution: Result<AgentResult<InvitationResult>, AgentError>,
+    cleanup: Result<(), aura_core::AuraError>,
+) -> AgentResult<InvitationResult> {
+    match (execution, cleanup) {
+        (Ok(Ok(value)), Ok(())) => Ok(value),
+        (Ok(Err(primary)), Ok(())) => Err(primary),
+        (Ok(Err(primary)), Err(cleanup)) => Err(AgentError::Aura(aura_core::AuraError::Internal {
+            message: "original invitee execution and required cleanup failed".into(),
+            source: Some(Arc::new(OriginalInviteeLifecycleFailure {
+                primary,
+                cleanup,
+            })),
+        })),
+        (Ok(Ok(_)), Err(cleanup)) => Err(AgentError::from(cleanup)),
+        (Err(observation), Ok(())) => Err(observation),
+        (Err(observation), Err(cleanup)) => Err(AgentError::Aura(aura_core::AuraError::Internal {
+            message: "original invitee result observation and required cleanup failed".into(),
+            source: Some(Arc::new(OriginalInviteeLifecycleFailure {
+                primary: observation,
+                cleanup,
+            })),
+        })),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn original_invitee_result_keeps_primary_and_independent_cleanup_failure() {
+    let source = settle_original_invitee_result(
+        Ok(Err(AgentError::Config(
+            "actual original execution refusal".into(),
+        ))),
+        Err(aura_core::AuraError::invalid(
+            "actual original cleanup refusal",
+        )),
+    )
+    .expect_err("cleanup failure cannot convert original refusal to success");
+    let AgentError::Aura(aura_core::AuraError::Internal {
+        source: Some(source),
+        ..
+    }) = source
+    else {
+        panic!("typed original invitee lifecycle failure");
+    };
+    let actual = source
+        .downcast_ref::<OriginalInviteeLifecycleFailure>()
+        .expect("original primary and cleanup owned separately");
+    assert!(
+        matches!(actual.primary(), AgentError::Config(message) if message == "actual original execution refusal")
+    );
+    assert!(
+        matches!(actual.cleanup(), aura_core::AuraError::Invalid { message, .. } if message == "actual original cleanup refusal")
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn interrupted_invitee_settlement_keeps_notice_domain_failure_separate_from_disposal() {
+    use std::error::Error;
+    let actual = InterruptedInviteeDomainFailures {
+        primary: aura_core::AuraError::invalid("original required exit"),
+        notice: Arc::new(AgentError::Config("original notice task failed".into())),
+    };
+    assert!(
+        matches!(actual.source().and_then(|source| source.downcast_ref::<aura_core::AuraError>()), Some(aura_core::AuraError::Invalid { message, .. }) if message == "original required exit")
+    );
+    assert!(
+        matches!(actual.notice(), AgentError::Config(message) if message == "original notice task failed")
+    );
+    assert!(!actual.to_string().contains("cleanup remains incomplete"));
+}
+
+/// The original admitted required slot owns the invitee root and its terminal
+/// proof through every awaited VM, protected-write, and frame-verification step.
+/// Dropping the public caller withdraws only its observation receiver.
+struct OriginalInviteeTaskCustody {
+    root: OriginalInviteeRoot,
+    // The required slot must not own a strong path back through
+    // InvitationHandler::invitation_cache to its manager-retained handle.
+    handler: std::sync::Weak<InvitationHandler>,
+    effects: Arc<AuraEffectSystem>,
+    _operation: crate::runtime::system::RuntimeOperationLease,
+    terminal: super::invitation::OriginalInviteeTerminalCustody,
+    reply: Option<tokio::sync::oneshot::Sender<AgentResult<InvitationResult>>>,
+    failure: Option<aura_core::AuraError>,
+    ack_failure_observed: bool,
+}
+
+impl OriginalInviteeTaskCustody {
+    async fn cleanup_original(
+        &mut self,
+        exit: &aura_core::effects::task::RequiredTaskExit,
+    ) -> Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError> {
+        use aura_core::effects::task::RequiredTaskExit;
+        if !self.ack_failure_observed {
+            let acknowledged = self.root.settle_original_transport().await?;
+            if let Some(acknowledged) = acknowledged {
+                let (source, precedes_execution) = acknowledged.into_parts();
+                self.failure = Some(match self.failure.take() {
+                    Some(execution) => {
+                        let (primary, cleanup) = if precedes_execution {
+                            (AgentError::Aura(source.as_ref().clone()), execution)
+                        } else {
+                            (AgentError::Aura(execution), source.as_ref().clone())
+                        };
+                        aura_core::AuraError::Internal {
+                            message: "original enrollment execution and ACK failed".into(),
+                            source: Some(Arc::new(OriginalInviteeLifecycleFailure {
+                                primary,
+                                cleanup,
+                            })),
+                        }
+                    }
+                    None => source.as_ref().clone(),
+                });
+            }
+            self.ack_failure_observed = true;
+        }
+        // Once supervision has interrupted an unfinished original operation,
+        // continuing its transport/VM receive can wait forever for a stopped
+        // broker. Dispose its retained owners under the original required slot.
+        if !matches!(exit, RequiredTaskExit::Completed)
+            && !self.terminal.completed()
+            && !self.terminal.has_signed_original_candidate()
+        {
+            // Retain a concrete execution failure before cleanup. Cancellation
+            // remains in the original registry exit; do not invent an unsigned
+            // domain error before discovering the child's retained signed proof.
+            if let RequiredTaskExit::Failed(source) = exit {
+                self.failure.get_or_insert_with(|| source.clone());
+            }
+            let disposal = self
+                .terminal
+                .dispose_cancelled_original()
+                .await
+                .map_err(|source| aura_core::AuraError::Internal {
+                    message: "dispose interrupted original invitee".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            match disposal {
+                super::invitation::OriginalInviteeInterruptionDisposition::Disposed => {
+                    self.failure
+                        .get_or_insert_with(|| aura_core::AuraError::Internal {
+                            message: "original invitee required execution was interrupted".into(),
+                            source: Some(Arc::new(OriginalInviteeRequiredExit { exit: exit.clone() })),
+                        });
+                    return self.settlement();
+                }
+                super::invitation::OriginalInviteeInterruptionDisposition::ReconcileSignedNotice => {}
+            }
+        }
+        if !self.terminal.completed() && self.terminal.has_retained_original_progress() {
+            let handler = self.handler.upgrade().ok_or_else(|| {
+                aura_core::AuraError::invalid("original invitee runtime handler was disposed")
+            })?;
+            let result = handler
+                .execute_device_enrollment_invitee_retained(
+                    self.effects.clone(),
+                    &mut self.root,
+                    &mut self.terminal,
+                )
+                .await;
+            if let Err(source) = result {
+                let cause = aura_core::AuraError::Internal {
+                    message: "reconcile original invitee terminal under retained root".into(),
+                    source: Some(Arc::new(source)),
+                };
+                if !self.terminal.completed() && !self.terminal.failed_response_disposed() {
+                    return Err(cause);
+                }
+                self.failure = Some(match self.failure.take() {
+                    Some(primary) => aura_core::AuraError::Internal {
+                        message: "original invitee execution and terminal reconciliation failed"
+                            .into(),
+                        source: Some(Arc::new(OriginalInviteeLifecycleFailure {
+                            primary: AgentError::from(primary),
+                            cleanup: cause,
+                        })),
+                    },
+                    None => cause,
+                });
+            }
+        }
+        self.settlement()
+    }
+    async fn execute_original(&mut self) -> Result<(), aura_core::AuraError> {
+        let handler = self.handler.upgrade().ok_or_else(|| {
+            aura_core::AuraError::invalid("original invitee runtime handler was disposed")
+        })?;
+        let result = async {
+            let accepted = handler
+                .accept_original_enrollment_invitation(self.effects.as_ref(), &self.root)
+                .await?;
+            handler
+                .execute_device_enrollment_invitee_retained(
+                    self.effects.clone(),
+                    &mut self.root,
+                    &mut self.terminal,
+                )
+                .await?;
+            Ok::<_, AgentError>(accepted)
+        }
+        .await;
+        match result {
+            Ok(accepted) => {
+                if let Some(reply) = self.reply.take() {
+                    let _ = reply.send(Ok(accepted));
+                }
+                Ok(())
+            }
+            Err(primary) => {
+                let cause = aura_core::AuraError::Internal {
+                    message: "original invitee enrollment execution failed".into(),
+                    source: Some(Arc::new(primary)),
+                };
+                let cause = match self.root.observe_original_execution_failure() {
+                    Ok(()) => cause,
+                    Err(cleanup) => aura_core::AuraError::Internal {
+                        message: "original execution failure observation refused".into(),
+                        source: Some(Arc::new(OriginalInviteeLifecycleFailure {
+                            primary: AgentError::Aura(cause),
+                            cleanup,
+                        })),
+                    },
+                };
+                self.failure = Some(cause.clone());
+                if let Some(reply) = self.reply.take() {
+                    let _ = reply.send(Err(AgentError::Aura(cause.clone())));
+                }
+                Err(cause)
+            }
+        }
+    }
+
+    fn settlement(
+        &self,
+    ) -> Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError> {
+        use aura_core::effects::task::RequiredTaskSettlement;
+        let failed_response_disposed = self.terminal.failed_response_disposed();
+        if !self.terminal.completed()
+            && !failed_response_disposed
+            && !self.terminal.cancelled_original_disposed()
+        {
+            return Err(self.failure.clone().unwrap_or_else(|| {
+                aura_core::AuraError::invalid("original invitee terminal remains incomplete")
+            }));
+        }
+        if (failed_response_disposed || self.terminal.cancelled_original_disposed())
+            && self.failure.is_none()
+        {
+            return Err(aura_core::AuraError::invalid(
+                "disposed failed response has no retained original cause",
+            ));
+        }
+        Ok(
+            match (
+                self.failure.as_ref(),
+                self.terminal.interrupted_notice_failure(),
+            ) {
+                (Some(primary), Some(notice)) => RequiredTaskSettlement::ResolvedWithDomainFailure(
+                    aura_core::AuraError::Internal {
+                        message: "original invitee execution and notice domains failed".into(),
+                        source: Some(Arc::new(InterruptedInviteeDomainFailures {
+                            primary: primary.clone(),
+                            notice: Arc::clone(notice),
+                        })),
+                    },
+                ),
+                (Some(source), None) => {
+                    RequiredTaskSettlement::ResolvedWithDomainFailure(source.clone())
+                }
+                (None, _) => RequiredTaskSettlement::Resolved,
+            },
+        )
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl aura_core::effects::task::RequiredTaskCustody for OriginalInviteeTaskCustody {
+    fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>> {
+        Box::pin(self.execute_original())
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        exit: &'a aura_core::effects::task::RequiredTaskExit,
+    ) -> futures::future::BoxFuture<
+        'a,
+        Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError>,
+    > {
+        Box::pin(self.cleanup_original(exit))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl aura_core::effects::task::LocalRequiredTaskCustody for OriginalInviteeTaskCustody {
+    fn execute(&mut self) -> futures::future::LocalBoxFuture<'_, Result<(), aura_core::AuraError>> {
+        Box::pin(self.execute_original())
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        exit: &'a aura_core::effects::task::RequiredTaskExit,
+    ) -> futures::future::LocalBoxFuture<
+        'a,
+        Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError>,
+    > {
+        Box::pin(self.cleanup_original(exit))
+    }
+}
+
 #[path = "invitation_service/cancellation_custody.rs"]
 mod cancellation_custody;
 #[cfg(test)]
@@ -38,6 +424,8 @@ pub(crate) use crate::runtime::services::issuer_task_custody::assert_original_si
 pub(crate) use crate::runtime::services::issuer_task_custody::{
     OriginalIssuerTaskCustody, OriginalIssuerTerminalState, PreparedOriginalIssuerHandoff,
 };
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use cancellation_custody::OriginalCancellationCleanupFailure;
 
 const DEFERRED_INVITATION_DELIVERY_ATTEMPTS: usize = 12;
 const DEFERRED_INVITATION_DELIVERY_BACKOFF_MS: u64 = 500;
@@ -45,7 +433,7 @@ const DEFERRED_INVITATION_DELIVERY_BACKOFF_MS: u64 = 500;
 #[cfg(test)]
 pub(crate) type OriginalIssuerBeforeVmGate = (
     tokio::sync::oneshot::Sender<()>,
-    tokio::sync::oneshot::Receiver<()>,
+    tokio::sync::oneshot::Receiver<Option<Arc<aura_testkit::time::ManualPhysicalClock>>>,
 );
 
 #[cfg(test)]
@@ -61,15 +449,27 @@ fn original_issuer_before_vm_gates(
 #[cfg(test)]
 pub(crate) struct OriginalIssuerBeforeVmGateGuard {
     authority: AuthorityId,
-    release: Option<tokio::sync::oneshot::Sender<()>>,
+    release:
+        Option<tokio::sync::oneshot::Sender<Option<Arc<aura_testkit::time::ManualPhysicalClock>>>>,
 }
 
 #[cfg(test)]
 impl OriginalIssuerBeforeVmGateGuard {
     pub(crate) fn release(mut self) {
         if let Some(release) = self.release.take() {
-            let _ = release.send(());
+            let _ = release.send(None);
         }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn release_with_original_clock_fault(
+        mut self,
+        clock: Arc<aura_testkit::time::ManualPhysicalClock>,
+    ) {
+        self.release
+            .take()
+            .expect("original VM gate remains held")
+            .send(Some(clock))
+            .unwrap_or_else(|_| panic!("original admitted issuer still waits at its gate"));
     }
 }
 
@@ -177,6 +577,56 @@ async fn verify_original_quorum_transcript<T: aura_signature::SecurityTranscript
 }
 
 impl InvitationServiceApi {
+    #[cfg(test)]
+    pub(crate) fn install_original_invitee_stage_gate_for_test(
+        &self,
+        invitation: InvitationId,
+        stage: crate::runtime::services::invitation_manager::OriginalInviteeStage,
+        fault_task: Option<
+            Arc<
+                crate::runtime::services::issuer_error_custody::SynchronousCustodyCell<
+                    Option<tokio::task::Id>,
+                >,
+            >,
+        >,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        self.handler
+            .install_original_invitee_stage_gate_for_test(invitation, stage, fault_task)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn await_original_invitee_cleanup_for_test(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.handler
+            .await_required_original_enrollment_cleanup(invitation)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn reconcile_original_invitee_cleanup_for_test(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.handler
+            .reconcile_original_required_enrollment_for_test(invitation)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn cancel_original_required_enrollment_for_test(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.handler
+            .cancel_original_required_enrollment_for_test(invitation)
+            .await
+    }
+
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "issued", capability_type = IssuedEnrollmentManifestBinding, family = "runtime_helper")]
     pub(crate) async fn retain_quorum_initial_request(
         &self,
@@ -611,8 +1061,9 @@ pub(crate) fn retain_rejected_native_issuer(
         message: "admit original issuer custody".into(),
         source: Some(Arc::new(RejectedIssuerTaskCustody {
             source: rejected.source,
-    #[allow(clippy::disallowed_types)] // Synchronous custody slot; no guard crosses an await.
-            retained: parking_lot::Mutex::new(rejected.obligation),
+            retained: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell::new(
+                rejected.obligation,
+            ),
         })),
     })
 }
@@ -626,8 +1077,9 @@ pub(crate) fn retain_rejected_local_issuer(
         message: "admit original local issuer custody".into(),
         source: Some(Arc::new(RejectedIssuerTaskCustody {
             source: rejected.source,
-    #[allow(clippy::disallowed_types)] // Synchronous custody slot; no guard crosses an await.
-            retained: parking_lot::Mutex::new(rejected.obligation),
+            retained: crate::runtime::services::issuer_error_custody::SynchronousCustodyCell::new(
+                rejected.obligation,
+            ),
         })),
     })
 }
@@ -642,8 +1094,43 @@ pub(crate) fn capture_original_issuer_terminal(
     destination: &OriginalIssuerTerminalDestination,
     state: &mut OriginalIssuerTerminalState,
 ) -> Result<(), aura_core::AuraError> {
+    // The progress source exists before either result publication or interrupted
+    // cleanup. Keep it separate from a later returned protocol error (for
+    // example a failed cancellation read or signed delivery failure).
+    if !state.progress_failure_captured {
+        if let Some((progress, earlier_finalizer)) =
+            destination.retained_original_progress_failure()
+        {
+            // Only the producer's snapshot proves a finalizer preceded this
+            // progress error. Owner observation may already contain a later
+            // negative-delivery failure; preserve it without promoting it.
+            let observed = state.execution_failure.take();
+            let original = match earlier_finalizer {
+                Some(primary) => aura_core::AuraError::Internal {
+                    message: "original issuer failure preceded protocol progress failure".into(),
+                    source: Some(Arc::new(EnrollmentInitiatorTaskFailure::new(
+                        AgentError::from(primary),
+                        Some(progress),
+                    ))),
+                },
+                None => progress,
+            };
+            state.execution_failure = Some(match observed {
+                Some(later) => aura_core::AuraError::Internal {
+                    message: "original issuer progress and later execution failed".into(),
+                    source: Some(Arc::new(EnrollmentInitiatorTaskFailure::new(
+                        AgentError::from(original),
+                        Some(later),
+                    ))),
+                },
+                None => original,
+            });
+            state.progress_failure_captured = true;
+        }
+    }
     let terminal = &mut state.terminal;
     let failure = &mut state.protocol_failure;
+
     if terminal.is_some() {
         return Ok(());
     }
@@ -665,7 +1152,7 @@ pub(crate) fn capture_original_issuer_terminal(
                     super::invitation::EnrollmentVmAdmissionError::TerminalObserverLost,
                 )),
             })?;
-    let received = result.lock().take();
+    let received = result.with(Option::take);
     match received {
         Some(Ok(super::invitation::IssuerEnrollmentTerminalOutcome::Committed(received))) => {
             *terminal = Some(received);
@@ -706,7 +1193,41 @@ pub(crate) fn capture_original_issuer_terminal(
 pub(crate) fn assert_original_terminal_capture_after_primary_failure_for_test(
     receipt: super::invitation::IssuerEnrollmentTerminalReceipt,
     effects: &AuraEffectSystem,
+    foreign_effects: &AuraEffectSystem,
+    native_refusal_observed: &std::sync::atomic::AtomicBool,
 ) -> super::invitation::IssuerEnrollmentTerminalReceipt {
+    // Exercise actual staging refusal with the unchanged signed receipt and a
+    // second real runtime. Both native refusal and move-owned obligation survive.
+    assert!(!std::ptr::eq(effects, foreign_effects));
+    let rejected_destination = OriginalIssuerTerminalDestination::default();
+    let rejected = rejected_destination
+        .stage_original_terminal(receipt, foreign_effects)
+        .expect_err("foreign physical provider cannot stage the original receipt");
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&rejected);
+    let mut native_owner_refusal = false;
+    while let Some(current) = cause {
+        native_owner_refusal |= matches!(
+            current.downcast_ref::<super::invitation::enrollment_trust::EnrollmentVerifierError>(),
+            Some(super::invitation::enrollment_trust::EnrollmentVerifierError::RuntimeOwner)
+        );
+        cause = current.source();
+    }
+    // The fixture asserts this after actual shutdown, so a missing cause does
+    // not interrupt delivery or discard the signed terminal during a red run.
+    native_refusal_observed.store(native_owner_refusal, std::sync::atomic::Ordering::Release);
+    let retained = std::error::Error::source(&rejected)
+        .and_then(|source| source.downcast_ref::<crate::runtime::services::issuer_error_custody::UndeliveredIssuerTerminal>())
+        .expect("same rejected signed terminal remains in original error custody");
+    let receipt = match retained.retained.with(Option::take) {
+        Some(Ok(super::invitation::IssuerEnrollmentTerminalOutcome::Committed(receipt))) => receipt,
+        _ => panic!("staging refusal must retain the exact original signed terminal"),
+    };
+    drop(rejected);
+    drop(rejected_destination);
+    receipt
+        .require_runtime_owner(effects)
+        .expect("rejected receipt keeps its actual original provider");
+
     #[derive(Debug, thiserror::Error)]
     #[error("original issuer primary validation failure")]
     struct OriginalPrimaryFailure;
@@ -789,7 +1310,7 @@ pub(crate) struct CancelledEnrollmentNoticeRecoveryCapability {
 /// Provides invitation operations through a clean public API.
 #[derive(Clone)]
 pub struct InvitationServiceApi {
-    handler: InvitationHandler,
+    handler: Arc<InvitationHandler>,
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
     tasks: Arc<TaskSupervisor>,
@@ -1039,7 +1560,7 @@ impl InvitationServiceApi {
             }
         }
         Ok(Self {
-            handler,
+            handler: Arc::new(handler),
             effects,
             ceremony_runner,
             tasks,
@@ -1172,7 +1693,7 @@ impl InvitationServiceApi {
         }
 
         let invitation = invitation.clone();
-        let handler = self.handler.clone();
+        let handler = self.handler.as_ref().clone();
         let ceremony_runner = self.ceremony_runner.clone();
         let effects = self.effects.clone();
         let (publication_sender, publication_receiver) = tokio::sync::oneshot::channel();
@@ -1195,7 +1716,6 @@ impl InvitationServiceApi {
             effects,
             ceremony_runner: Some(ceremony_runner),
             invitation,
-            terminal_receiver: None,
             terminal_destination,
             terminal_state: OriginalIssuerTerminalState::default(),
             acknowledged: None,
@@ -2166,11 +2686,12 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the acceptance
     pub async fn accept(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
-        let _operation = self.effects.admit_public_operation()?;
-        Box::pin(self.accept_owned(invitation_id)).await
+        let operation = self.effects.admit_public_operation()?;
+        Box::pin(self.accept_owned(invitation_id, operation)).await
     }
 
     /// Consume the canonical retained enrollment root exactly once.
+    #[cfg(test)]
     pub(crate) async fn take_original_enrollment_execution(
         &self,
         invitation: &InvitationId,
@@ -2198,36 +2719,99 @@ impl InvitationServiceApi {
     }
 
     /// Keep the shared caller future bounded while retaining lexical ownership.
-    async fn accept_owned(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+    async fn accept_owned(
+        &self,
+        invitation_id: &InvitationId,
+        operation: crate::runtime::system::RuntimeOperationLease,
+    ) -> AgentResult<InvitationResult> {
         // Observation selects the operation kind; only consuming its retained
         // original root can authorize the enrollment mutation that follows.
         let observed = self
             .handler
             .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await;
-        let enrollment_root = if observed.as_ref().is_some_and(|invitation| {
+        if observed.as_ref().is_some_and(|invitation| {
             matches!(
                 invitation.invitation_type,
                 InvitationType::DeviceEnrollment { .. }
             )
         }) {
-            Some(
-                self.take_original_enrollment_execution(invitation_id)
-                    .await?,
-            )
-        } else {
-            None
-        };
-        if let Some(root) = enrollment_root {
-            let result = self
-                .handler
-                .accept_original_enrollment_invitation(self.effects.as_ref(), &root)
-                .await?;
+            let (reply, result) = tokio::sync::oneshot::channel();
+            let group = self
+                .tasks
+                .group(format!("original_invitee_accept.{}", invitation_id));
+            // Admission and rejection rollback share the manager's original
+            // write guard. No await separates root removal from required-slot
+            // registration or restoring the exact rejected root.
             self.handler
-                .execute_device_enrollment_invitee(self.effects.clone(), root)
+                .admit_required_original_enrollment(invitation_id, move |root| {
+                    let owner = Box::new(OriginalInviteeTaskCustody {
+                        root,
+                        handler: Arc::downgrade(&self.handler),
+                        effects: self.effects.clone(),
+                        _operation: operation,
+                        terminal: super::invitation::OriginalInviteeTerminalCustody::new(),
+                        reply: Some(reply),
+                        failure: None,
+                        ack_failure_observed: false,
+                    });
+                    #[cfg(target_arch = "wasm32")]
+                    let admission = group.spawn_original_local_required_custody_typed(
+                        "accept".into(),
+                        owner,
+                        None,
+                    );
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let admission =
+                        group.spawn_original_required_custody_typed("accept".into(), owner, None);
+                    admission.map_err(|rejected| {
+                        let OriginalInviteeTaskCustody { root, .. } = *rejected.obligation;
+                        (root, AgentError::Aura(rejected.source))
+                    })
+                })
                 .await?;
-            return Ok(result);
+            let cleanup = self
+                .handler
+                .await_required_original_enrollment_cleanup(invitation_id)
+                .await;
+            let mut result = result;
+            let execution = if cleanup.is_ok() {
+                result.await.map_err(|source| {
+                    AgentError::Aura(aura_core::AuraError::Internal {
+                        message: "original invitee result observer was withdrawn".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })
+            } else {
+                match result.try_recv() {
+                    Ok(value) => Ok(value),
+                    Err(_) => {
+                        // Cleanup refusal is already settled in the original
+                        // registry. A canceled/aborted execute may still own
+                        // its sender, so awaiting it would hide that refusal.
+                        let primary = match self
+                            .handler
+                            .original_required_enrollment_exit_after_refusal(invitation_id)
+                            .await
+                        {
+                            Ok(aura_core::effects::task::RequiredTaskExit::Failed(source)) => {
+                                AgentError::Aura(source)
+                            }
+                            Ok(exit) => AgentError::Aura(aura_core::AuraError::Internal {
+                                message:
+                                    "original invitee required execution did not publish a result"
+                                        .into(),
+                                source: Some(Arc::new(OriginalInviteeRequiredExit { exit })),
+                            }),
+                            Err(source) => AgentError::Aura(source),
+                        };
+                        Err(primary)
+                    }
+                }
+            };
+            return settle_original_invitee_result(execution, cleanup);
         }
+        let _operation = operation;
         let result = self
             .handler
             .accept_invitation(self.effects.clone(), invitation_id)
@@ -3089,8 +3673,10 @@ mod tests {
                 )
             },
         );
-        assert!(bytes <= 16 * 1024,
-            "owned manifest export caller frame is {bytes} bytes; bounded lexical delegation is required");
+        assert!(
+            bytes <= 16 * 1024,
+            "owned manifest export caller frame is {bytes} bytes; bounded lexical delegation is required"
+        );
     }
 
     #[test]
@@ -4396,6 +4982,7 @@ mod required_enrollment_task_tests {
             }
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn canonical_cancellation_negative_ack_preserves_rollback_on_same_profile_reopen() {
         let diagnostics = tracing::Dispatch::new(
@@ -4459,7 +5046,7 @@ mod required_enrollment_task_tests {
                     let selected_clock = selected_clock.clone();
                     move || {
                         selected_clock
-                            .script_next_observation(5_500)
+                            .script_next_current_task_observation(5_500)
                             .expect("script exact next physical observation at checkpoint return");
                     }
                 })))
@@ -4550,8 +5137,12 @@ mod required_enrollment_task_tests {
                 issuer_terminal.outcome(),
                 aura_core::effects::task::RequiredTaskExit::Failed(_)
             ));
-            assert!(original.observes_retained_retirement_acknowledgment().expect("actual original owner fixture state"),
-                "early Negative is insufficient; actual original required cleanup ACK completes first");
+            assert!(
+                original
+                    .observes_retained_retirement_acknowledgment()
+                    .expect("actual original owner fixture state"),
+                "early Negative is insufficient; actual original required cleanup ACK completes first"
+            );
             for agent in [&issuer, &invitee] {
                 if let Err(source) = agent
                     .runtime()
@@ -4679,6 +5270,7 @@ mod required_enrollment_task_tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn canonical_cancellation_negative_checkpoint_write_failure_retains_original_custody_without_ack(
     ) {
@@ -4707,7 +5299,7 @@ mod required_enrollment_task_tests {
                 let clock = clock.clone();
                 move || {
                     clock
-                        .script_next_observation(5_500)
+                        .script_next_current_task_observation(5_500)
                         .expect("script selected provider's next original observation");
                 }
             })))
@@ -4807,8 +5399,10 @@ mod required_enrollment_task_tests {
                 .shutdown_with_timeout(std::time::Duration::from_secs(2))
                 .await;
             if let Err(source) = shutdown {
-                assert!(agent.runtime().tasks().terminal_failure().is_some(),
-                    "actual failed required cleanup remains observable during fixture teardown: {source}");
+                assert!(
+                    agent.runtime().tasks().terminal_failure().is_some(),
+                    "actual failed required cleanup remains observable during fixture teardown: {source}"
+                );
             }
         }
     }
@@ -4932,8 +5526,10 @@ mod required_enrollment_task_tests {
                 .shutdown_with_timeout(std::time::Duration::from_secs(2))
                 .await
             {
-                assert!(agent.runtime().tasks().terminal_failure().is_some(),
-                    "actual unresolved required cleanup remains observable during teardown: {source}");
+                assert!(
+                    agent.runtime().tasks().terminal_failure().is_some(),
+                    "actual unresolved required cleanup remains observable during teardown: {source}"
+                );
             }
         }
     }

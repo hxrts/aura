@@ -117,6 +117,63 @@ impl<C: ?Sized> std::fmt::Debug for RejectedRequiredTask<C> {
             .finish_non_exhaustive()
     }
 }
+/// Actual producer phase at which a required-task panic was caught.
+/// This diagnostic classifies an occurrence; it grants no disposal authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequiredTaskPanicPhase {
+    /// Required resource cleanup unwound before acknowledging settlement.
+    Cleanup,
+    /// Destruction of the original retained owner unwound.
+    Retirement,
+}
+
+/// Process-local custody of the exact caught panic payload and producer phase.
+/// Payload observation is nonblocking and nonconsuming. This value cannot
+/// serialize, reconstruct authority, or acknowledge asynchronous settlement.
+pub struct RequiredTaskPanic {
+    phase: RequiredTaskPanicPhase,
+    payload: futures::lock::Mutex<Box<dyn std::any::Any + Send>>,
+}
+impl RequiredTaskPanic {
+    /// Retain the actual payload returned by the indicated producer's unwind.
+    pub fn new(phase: RequiredTaskPanicPhase, payload: Box<dyn std::any::Any + Send>) -> Self {
+        Self {
+            phase,
+            payload: futures::lock::Mutex::new(payload),
+        }
+    }
+    /// Observe the original producer phase without accessing the payload.
+    pub fn phase(&self) -> RequiredTaskPanicPhase {
+        self.phase
+    }
+    /// Inspect without blocking or transferring the original payload.
+    /// A busy payload or different type returns `None`, never successful cleanup.
+    #[must_use = "inspect the returned payload observation"]
+    pub fn with_payload<T: 'static, R>(&self, inspect: impl FnOnce(&T) -> R) -> Option<R> {
+        let payload = self.payload.try_lock()?;
+        payload.downcast_ref::<T>().map(inspect)
+    }
+}
+impl std::fmt::Debug for RequiredTaskPanic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RequiredTaskPanic")
+            .field("phase", &self.phase)
+            .finish_non_exhaustive()
+    }
+}
+impl std::fmt::Display for RequiredTaskPanic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self.phase {
+            RequiredTaskPanicPhase::Cleanup => "original required task cleanup panicked",
+            RequiredTaskPanicPhase::Retirement => {
+                "original required task owner retirement panicked"
+            }
+        })
+    }
+}
+impl std::error::Error for RequiredTaskPanic {}
+
 /// Execution failure and failed required disposal retain their independent native causes.
 #[derive(Debug, thiserror::Error)]
 #[error("required task cleanup failed after execution")]

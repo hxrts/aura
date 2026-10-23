@@ -8,11 +8,96 @@ Native delegation and VM diagnostics box bulky concrete causes while retaining t
 
 Production runtime composition and effect system assembly for authority-based identity management. Owns structured concurrency, service lifecycle, session ownership, effect registry, builder infrastructure, and choreography adapters.
 
+The rendezvous manager's checkpoint handoff command and helper are native
+feature-enabled unit-test infrastructure;
+the retained simulator enrollment owner uses its own original broker custody.
+
 `AgentConfig` serializes `device_id` as the canonical 32-byte `DeviceId`
 encoding (64 hex characters). Its decoder rejects shorter and noncanonical
 encodings so a process restart retains the exact configured identity.
 
 The native runtime bridge processes original enrollment mailbox and other ceremony work through one owned pass. Its source-preserving maintenance result retains the agent error, broker network category, and native I/O cause through the app bridge. The legacy intent-error projection is presentation-only and must not replace this source-bearing call on required maintenance paths.
+
+Original pending and issuer-return mailbox transport adapters retain native
+broker failures in `TransportError::BackendFailure`. The VM response error must
+expose the actual network/provider source rather than only its diagnostic text.
+`runtime/services/enrollment_window/transport_custody.rs` extends the existing
+single admitted-window lease with bounded move-owned ACK borrows. The original
+fresh-birth acknowledgment checks provider, admission binding and physical device;
+one critical section reserves its real permit and custodian together. Pure
+binding data grants no lease. Error/disposition reports remain observations;
+the permit and ACK borrows remain move-owned resources.
+Maintenance captures that custodian before intake/ACK, and reports the actual
+error before releasing its borrow. Completion never re-resolves a newer owner.
+Required cleanup closes ACK ingress and observes every original borrow's actual
+disposition before resource settlement. Interrupted observation preserves the
+closed gate and outstanding borrows for retry. Actual borrow Drop retains a
+typed abandonment cause; it grants no broker delivery acknowledgment.
+The first reported ACK/VM failure keeps priority and the independent failure
+remains retained through task settlement, including after VM completion. Historical recovery
+without an attached original task still returns its source-bearing maintenance
+result; no new task owner is reconstructed from the retained admission.
+
+The existing task-group owner retains a saturating zero/one/many count of accepted
+subtree task registrations under its tree lock. Completed or dropped descendants
+cannot erase that history; rejected admission and cleanup retry add no task.
+An original required-task disposal observation keeps weak original group identity
+and can establish that a sealed disposed subtree contained only that acknowledged
+task, using tree identity and exact ancestry rather than diagnostic names. This
+resource observation alone grants no signed terminal decision and never changes
+the original execution outcome. Acknowledged same-slot retry may retain an original
+cleanup diagnostic alongside final completed execution. Source matching checks
+that exact custody-issued diagnostic as well as a failed terminal source graph;
+a foreign group, task or native allocation cannot supply this proof.
+The move-only `AcknowledgedOriginalNoticeDisposal` is issued only after actual
+signed-notice eligibility, original VM close and exact required-task disposal.
+It binds the signed frame digest to that original task. Admitted-root failure
+closure additionally requires that task to be the sole accepted task in its
+sealed original subtree, with no foreign failure or interruption. Only this
+negative signed-notice path can reconcile the original interrupted execution;
+positive completion and other terminal paths retain their existing checks.
+Fatal issuer progress errors enter the original destination before any awaited
+cancellation arbitration. The original required owner captures that same native
+source even before result publication or during interrupted cleanup. An already
+reported finalizer failure keeps priority; later finalizer failure stays separate.
+Signed cancellation, terminal delivery and acknowledged disposal still complete
+before domain failure is returned. Error custody stays with the live original
+owner rather than the post-disposal cancellation diagnostic.
+The original finite notice VM issues an opaque send-completion witness before
+validity postchecks and close. The same destination retains that witness with
+exact original terminal and signed-notice identity; signed bytes and generation
+retirement alone cannot construct it. Cleanup of a completed send closes the
+same retained VM and keeps native close failure separate from actual resource
+retirement. It does not restart delivery through a retired sender. Completion
+retains the original session claim and weak terminal/notice identity, without
+retaining a provider or live profile owner after disposal; it proves no peer
+adoption or positive confirmation.
+If required-task cancellation interrupts this protocol, cleanup resumes the
+same original negative tail from its protected cancellation decision. Retained
+terminal, signed notice, genuine retirement acknowledgment and pending VM cursor
+remain with that owner; positive request progress is never restarted. Protocol
+completion is recorded only after signed delivery and VM close, before negative
+resource settlement. A genuine late retirement acknowledgment advances that
+physical tail while its earlier native failure remains the domain outcome.
+The original destination accepts only the producer-issued receipt bound to the
+actual window and issued control; duplicate or foreign receipts remain refused.
+Physical cancellation observation reconciles the original issuer first, requires
+its actual same-control disposal and original storage receipt, and retains its
+failed outcome and independent causes in the cancellation custodian. A successful
+reconciliation Result alone cannot establish disposal. The ordinary issuer's
+signed `Cancelled` terminal remains distinct from failure of the cancellation
+operation; concrete native, VM and cleanup causes do not disappear with it.
+Original close failures remain task failures after signed failure persistence,
+and retry does not rerun already completed postchecks or replace the VM.
+
+Original unit-operation errors have move-owned custody while VM close awaits.
+Normal close returns the same `AgentError` variant for retry classification;
+withdrawal deposits the concrete error in the original runtime destination.
+This deposit acknowledges no cleanup. Final negative/resource settlement retains
+all interrupted operation and close causes after actual disposal. Progress error
+priority follows its producer's earlier-finalizer snapshot, rather than the order
+in which a later delivery failure happened to reach the observer.
+
 
 `SimulationSharedInbox` carries canonical frames and reserved return capacity
 across runtimes sharing one simulation inbox. A borrowed `InboundEnvelopeLease`
@@ -79,6 +164,86 @@ cannot acquire a later registration birth.
 
 ## Key Modules
 
+The choreography engine admits sessions through Telltale's owned loader in both
+cooperative and threaded modes and retains the original `OwnedSession` in its
+existing session metadata. Scheduler `AllDone` is not disposal acknowledgement.
+The handle is removed after actual targeted `close_and_reap_session` success or
+a cooperative engine-issued reap summary; failed close retains it for retry.
+The owner label is diagnostic: `session_ingress` still owns Aura's physical
+runtime/task claim. Telltale generation checks neither own arbitrary Rust futures
+nor perform asynchronous Drop cleanup. Threaded mutation/transfer parity and
+authority/continuation lowering require separate evidence; owned admission alone
+does not establish them.
+
+The original issuer executes its protocol inside its required task, preserving
+the same registered task binding for cleanup. Its VM slot resides in the retained
+runtime-owned terminal destination and is borrowed through the original issued
+control and execution child. Enrollment attempt teardown borrows the VM capability and
+releases the slot only after `close_retained` acknowledges completion; a refused
+or interrupted close retains the same capability for required cleanup. Retained
+VM custody alone does not establish signed terminal settlement, subtree disposal
+or durable checkpoint acknowledgment. A signed terminal is staged in that same
+destination before subsequent time observations or sends can suspend execution.
+Rejected staging retains both the original concrete validation cause and the
+move-owned signed terminal in its error custodian; display text cannot replace
+the native runtime-owner refusal. Duplicate publication likewise retains the
+unpublished obligation without replacing the original destination.
+A verified original rejection does not cancel that signed delivery when the
+finalizer reports its negative domain outcome. The same admitted protocol
+future continues under its original window; the original native finalizer
+failure remains retained independently of delivery and resource disposal.
+A failed rejection delivery retains its concrete cause alongside the original
+finalizer failure in the existing typed terminal-publication failure carrier.
+Published protocol failures are captured before finalizer-error precedence, so
+either publication order retains both native causes through repeated observation.
+Resource settlement retains its final failure graph only after actual descendant
+disposal, including late finalizer causes, and returns that same graph on retry.
+Original verified-rejection resource cleanup also applies when the signed terminal
+receipt is already retained. That receipt does not admit positive acknowledgment
+of the failed finalizer subtree; disposal retains the original native failure
+while requiring the same resource retirement and durable closure evidence.
+Unsigned interruption fences the disposed producer under the original decision
+gate only after acknowledged VM close and descendant disposal. It refuses any
+terminal or activation obligation, retires actual signing resources, and writes
+the resource closure checkpoint before releasing the original lease. This
+resource-only closure publishes no domain decision or signed acknowledgment and
+cannot retire an undecided generation. Later terminal publication by the disposed
+original is refused.
+If the required close clock fails after actual binding and fragment retirement,
+the effect retains a receipt bound to the original physical owner claim.
+Ordinary VM close continues returning that same native failure; a later clock
+read cannot turn it into success. Required issuer cleanup may use the retained
+retirement receipt and must retain both its original execution failure and this
+close-validation failure in the failed domain disposition. Missing bindings,
+missing fragments, matching ids and replacement owner claims cannot issue that
+receipt.
+Required-task admission can explicitly select resident cleanup before the
+original registration is published. Failed cleanup then stays on that same
+native or local supervisor; the existing nonclone control queues one retry
+request before observing the original deadline and retains its exact attempt
+across observer cancellation. An explicit retry may advance a completed failed
+request; async observation consumes its existing request even if it completed
+before the observer was polled. The observer never owns the cleanup future. Actual
+cleanup ACK and domain destruction still precede execution disposal and group
+ACK; failed or unavailable execution cannot manufacture either acknowledgment.
+Each returned cleanup cause remains in its original diagnostic chronology.
+Opted-in cleanup-body unwinds retain their actual payload in
+`RequiredTaskPanic(Cleanup)`; default cancellation and bare panic behavior,
+execution panics and owner-destructor panics remain separate unchanged paths.
+
+The first required-cleanup refusal remains in the original admitted custody
+and in propagated failure observations through retry. Its diagnostic retains
+the original execution disposition and native cleanup cause. Only after actual
+owner destruction and resource settlement may that same diagnostic expose the
+settled `RequiredTaskTerminalFailure`; the refined source is deposited before
+publishing the acknowledgment. A failed attempt cannot claim resource settlement,
+and acknowledged retry cannot erase the original cancellation or native refusal.
+Public cancellation retry advances the same retained registration before returning
+its failed operation outcome. Its source-bearing diagnostic retains actual
+issuer/cancellation disposal and independent retry or clock causes. Reobserving
+an already-issued disposal receipt returns that same diagnostic without a fresh
+clock read or another failure occurrence; no new task or success window is born.
+
 Required reactive publications, including startup replay, flush the ordered
 pending scheduler batch immediately after a fallible selected-clock observation.
 Their processing targets acknowledge only completed view application; the
@@ -99,8 +264,33 @@ The adapter cannot accept production runtimes or synthesize agreement evidence.
 The lifecycle regression enforces a 16 KiB caller-future budget for this adapter.
 
 The public invitation acceptance facade boxes its private delegated future
-before awaiting it. The caller retains lexical ownership and cancellation;
-acceptance does not create a task merely to control stack allocation.
+before awaiting it. Ordinary invitation acceptance retains caller-owned
+cancellation and does not create a task merely to control stack allocation.
+Device-enrollment acceptance synchronously transfers the original admitted
+root and public operation lease from the invitation manager into one required
+task slot under the manager lock. A rejected slot restores that exact root
+before unlocking. The required owner retains the signed terminal proof,
+original move-only acknowledgment, exact protected receipt readback and
+mailbox-frame verification through caller-observer cancellation. The manager
+retains the original non-clone reconciliation control until cleanup ACK; a
+caller holds only an observation. Required custody borrows the live handler
+without a permanent strong reference back to its manager, so the retained
+slot cannot form a manager/task cycle. Cleanup/reconciliation awaits release
+the manager state lock and final removal checks the same control identity.
+Only actual terminal settlement and task/group cleanup acknowledgment permit slot removal;
+an incomplete original root remains unresolved rather than becoming a fresh
+acceptance or a reconstructed acknowledgment.
+The legacy local-custody invitee adapters, raw-root service test accessor,
+direct slot-admission fixture helper and explicit cleanup-retry fixture helper
+are compiled only under `cfg(test)`. Production acceptance uses the retained
+required-task owner path; tests retain those helpers to exercise original-root
+transfer, admission refusal and acknowledged retry without exposing a second
+production execution path.
+Production typed required-task admission uses the native adapter on native
+targets and the local-future adapter on WASM. The native adapter also remains
+available to existing test fixtures on either target. Both return the original
+rejected box before polling or dropping it; platform selection does not change
+task or cleanup ownership.
 `invitation_acceptance_caller_future_is_bounded` enforces a 16 KiB caller
 future budget. The simulator's required AMP lifecycle replay runs on the
 default test stack and exercises this facade through real channel invitations.
@@ -382,6 +572,11 @@ All production async work uses structured concurrency with explicit task ownersh
 Enforcement locus:
 - `src/runtime/` service actors own their task groups.
 - `TaskGroup` enforces parent-child relationships.
+- An admitted required-custody task retains its original group through its
+  registered slot until actual cleanup acknowledgment removes that slot.
+  Losing all external handles after failed cleanup leaves custody unresolved
+  and the group retained; it does not reconstruct a reconciliation handle or
+  authorize a successful shutdown.
 
 Failure mode:
 - Detached tasks outlive their owner and mutate torn-down resources.
@@ -976,7 +1171,39 @@ cleanup cause, and retry uses the accepted noncloneable original control rather
 than a new task or a name lookup. Rejected admission returns the unpolled original
 boxed obligation and concrete native cause.
 
-Successful required cleanup deposits its actual settled task outcome in the original custody slot under the same registry lock before publishing the resource acknowledgment. Both ordinary completion and a resolved negative domain outcome retain their concrete execution and terminal causes. Repeated disposal observations read that immutable outcome; a failed or interrupted cleanup publishes no disposition acknowledgment.
+Successful required cleanup first retires the actual boxed domain owner, including its runtime operation and profile leases, outside the registry locks. The same original custody identity then deposits its settled task outcome under the registry lock before publishing the resource acknowledgment. A held task handle or disposal observer retains only the immutable outcome, not live domain resources. Both ordinary completion and a resolved negative domain outcome retain their concrete execution and terminal causes. Failed or interrupted cleanup retains the original owner for retry and publishes no disposition acknowledgment.
+The actual verified issuer cancellation captures its concrete enrollment-domain
+failure once before signing or delivery awaits. Negative settlement retains that
+same diagnostic allocation alongside independent execution and cleanup failures;
+its error graph retains no live cancellation capability or runtime owner. The
+capability remains with the original required cleanup owner until acknowledgment.
+An original invitee response that fails its selected postcheck may settle as a negative domain failure only after the same VM session and pending receive are gone and the original terminal-notice group has actually drained. The actual successful VM close moves its refused signed candidate and original postcheck cause into private ineligible custody; a failed close leaves the active candidate and same session retained for retry. The ineligible slot grants no terminal eligibility, acknowledgment or confirmation. An incomplete drain retains the original custody and refuses the resource acknowledgment.
+An original finalizer failure cannot withdraw the same pinned issuer protocol
+when its retained original protected cancellation receipt still requires signed
+notice and generation retirement. Verified rejection keeps its stronger native
+request custody check. Continuing the protocol grants no resource acknowledgment.
+After cancellation publication observes actual original retirement, a failed
+simulation requests cooperative issuer task cancellation before awaiting original
+disposal, so an unreachable broker's delivery retry cannot prevent shutdown from
+starting. The same disposal observation and original error validation still gate
+settlement; requesting cancellation alone proves no cleanup.
+The invitee terminal-notice VM belongs to its original required child task.
+Registry cancellation drops only borrowed execution; required cleanup closes
+that same VM under the child's registered binding and publishes disposition
+only after close acknowledgment. The parent retains the original task control
+for retry and observes disposal; it cannot close the child's VM under its own
+binding. Browser custody retains Send state and a local execution factory,
+never an in-flight non-Send future. Signed capture resumes the retained VM
+cursor and original budget without admitting a new receive, VM or owner.
+When supervision interrupts an invitee before a signed terminal candidate, required cleanup uses the original exit and retained owners to stop the notice listener, observe its actual group completion, close its notice and response VM sessions, then retire their blocked receives. It does not restart the stopped transport receive. The original exit and any independent notice domain failure remain typed after physical cleanup; failed close retains the same session and receive for original-slot retry and grants no resource acknowledgment. A retained signed candidate continues through its original eligibility checks and cannot become a terminal merely because cleanup was requested.
+Listener withdrawal after actual signed capture continues the same pinned receive
+future, selected window and VM. Its private observation cell only suppresses
+withdrawal; the retained typed proof, original postchecks, completion and close
+still govern eligibility. If interrupted cleanup discovers that eligible notice
+after its child drains, a typed routing disposition resumes canonical terminal
+reconciliation under the same root. The original registry exit remains unchanged;
+an unsigned interruption error is recorded only after actual unsigned disposal.
+Independent execution and reconciliation failures retain both concrete causes.
 
 The canonical enrollment entry and running issuer observation retain the same original required-task control in a shared mutex-backed slot. Cancellation of a reconciliation attempt cannot take and drop that control. After genuine cancelled-generation retirement, reconciliation borrows that exact control under the original negative-cleanup budget and selected effects; it does not hold the tracker state lock across await. Native reconciliation failure and final budget validation remain separate required evidence. An already disposed original control supplies only observed resource settlement, never positive domain authority. Active execution, contention or failed cleanup must retain refusal and original retry custody rather than start a replacement task, renew a window or fabricate an ACK. Resource settlement and independent
 domain terminal failure remain separate supervision outcomes.
@@ -1791,8 +2018,11 @@ The dedicated `simulator-checkpoint` feature may inject a fixture-scoped
 device-quorum and enrollment signing paths still retire actual FROST
 commitments before a share can sign. A quiescent native fixture obtains a
 one-use checkpoint selection proof from its runtime-held profile-owned
-filesystem provider and acknowledges original shutdown before capture. It
-cannot select from configuration defaults or a stale fallback key. No
+filesystem provider and acknowledges original shutdown before capture.
+Quiescent preparation retains the first shutdown error and every independent
+secondary error from both original agents. Checkpoint fixtures set their original
+profile and artifact directories to `0700` explicitly; ambient umask is not custody
+evidence. It cannot select from configuration defaults or a stale fallback key. No
 checkpoint API or nonce control is exposed by deployable terminal, browser, or
 RPC owners.
 
@@ -2250,3 +2480,52 @@ retains its actual cleanup/domain outcome; repeated or dropped observations do
 not authorize execution or terminal success. The existing required-task kernel
 and main observed-task API contracts remain unchanged. See `docs/104_runtime.md`,
 `docs/122_ownership_model.md` and `docs/804_testing_guide.md`.
+
+The original terminal-notice required-task custodian and its retained VM storage
+are owned by runtime/services/issuer_task_custody. Invitation protocol work borrows
+the same concrete runtime storage handle; it does not allocate a second cleanup
+owner. The runtime resumes the original cursor or closes that same VM after
+withdrawal, preserving independent execution and close causes. Pending receive
+retirement is coupled to successful original close in one VM operation. Handle
+clones and read-only eligibility observations grant no disposal acknowledgment.
+Signed-candidate construction and protocol verification remain private to the
+invitation owner.
+
+Synchronous ACK and retained-error custody uses the shared private
+`issuer_error_custody::SynchronousCustodyCell`. It exposes only a synchronous
+callback; its lock guard and borrowed state cannot escape into an awaited future.
+The actual original slot, semaphore, ACK counters and error chronology remain with
+the existing runtime owners. Two item-scoped lock expectations live solely at
+this runtime primitive's field and constructor, under the existing synchronous
+runtime lock policy. Callers do not acquire raw guards or gain new authority.
+Actual compiler borrow-escape rejection and component transfer/unwind tests are
+required alongside the original cancellation and ACK-settlement inventory.
+
+Prepared issuer completion results use the same private synchronous custody cell
+from task producer through the registry's one-shot consumer. Native failure
+observation precedes selected window/clock checks, and deposits precede completion
+and readiness publication. Test-only disposal observers move out of that cell
+before awaiting actual disposal; the original selected clock and acknowledgment
+owner are unchanged. Post-disposal assertions use the actual registered tracker
+handoff and original native failure identity, not a weak retired resource frame.
+
+Prepared-issuer cleanup fixtures observe original retained resources from a
+read-only callback in the actual cleanup producer, after successful settlement
+and before canonical required-task retirement. The callback deposits only its
+typed assertion result through a one-shot channel; it neither retains live
+resource ownership nor acknowledges disposal. Fixtures independently require the
+actual original disposal observation and weak resource absence afterward. A
+successful cleanup may legitimately destroy the resource cell before an external
+post-disposal observer can upgrade its weak reference.
+
+A live cancelled issuer sends its already-signed terminal notice through a
+borrowed negative-only window. Issuance requires the same original registered
+child, actual cancelled terminal, destination-retained signed notice allocation,
+and acknowledged original generation retirement. Its endpoint attenuates the
+original negative cleanup budget by the existing signed expiry; rollback history
+is retained and never cleared. Outer send, per-round validity and retry delay use
+that window. Positive enrollment operations and recovered notice capabilities
+retain their existing policies. The same notice VM cursor and original close
+continuation remain resident, and actual send completion is deposited before
+validation. A negative-only clock observation is not a positive terminal or
+resource acknowledgment; actual VM close and required subtree disposal still run.

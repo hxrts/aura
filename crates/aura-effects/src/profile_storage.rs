@@ -33,6 +33,7 @@ impl FilesystemProfileStorageHandler {
 /// let forged=OwnedProfileLease {};
 /// ```
 pub struct OwnedProfileLease {
+    #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
     pub(crate) secure_record_gate: Arc<tokio::sync::Mutex<()>>,
     pub(crate) lifetime_provider_identity:
         aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity,
@@ -189,6 +190,7 @@ impl FilesystemProfileStorageHandler {
                 .ok_or_else(|| ProfileStorageError::Invalid("profile path is not UTF-8".into()))?
                 .to_owned();
             Ok(OwnedProfileLease {
+                #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
                 secure_record_gate: Arc::new(tokio::sync::Mutex::new(())),
                 lifetime_provider_identity: aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity::new_trusted_provider_identity(),
                 lifetime_root_claimed: std::sync::atomic::AtomicBool::new(false),
@@ -241,6 +243,7 @@ impl OwnedProfileLease {
 /// Exclusive browser profile writer lease retaining its actual Web Locks owner.
 pub struct OwnedProfileLease {
     identity: String,
+    #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
     pub(crate) secure_record_gate: Arc<tokio::sync::Mutex<()>>,
     pub(crate) lifetime_provider_identity:
         aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity,
@@ -430,6 +433,7 @@ impl FilesystemProfileStorageHandler {
                 drop(callback);
                 Ok(OwnedProfileLease {
                     identity,
+                    #[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
                     secure_record_gate: Arc::new(tokio::sync::Mutex::new(())),
                     lifetime_provider_identity: aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity::new_trusted_provider_identity(),
                     lifetime_root_claimed: std::sync::atomic::AtomicBool::new(false),
@@ -452,7 +456,7 @@ impl FilesystemProfileStorageHandler {
 /// Create directory components relative to held directory descriptors. Existing
 /// symlinks are rejected before any descendants are created. The returned path
 /// anchors relative callers to their acquisition-time working directory.
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "development-keys")))]
 pub(crate) fn create_contained_directory(
     base: &std::path::Path,
     relative: &std::path::Path,

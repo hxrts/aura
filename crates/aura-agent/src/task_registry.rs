@@ -182,6 +182,11 @@ enum TaskOutcome {
 #[derive(Debug)]
 struct TaskMetadata {
     required_custody: Option<Arc<RetainedRequiredTaskCustody>>,
+    // An admitted required obligation owns its registration until actual
+    // cleanup ACK. This is an intentional self-retention of the original
+    // group through its existing task slot, not a second custody registry.
+    // Removing the acknowledged slot breaks the cycle.
+    _retained_group: Option<RetainedRequiredGroup>,
     original_exit: Option<TaskOutcome>,
     cleanup_failure: Option<TaskOutcome>,
     domain_terminal_failure: Option<AuraError>,
@@ -193,6 +198,17 @@ struct TaskMetadata {
 }
 
 const MAX_SUPERVISED_GROUPS: usize = 1024;
+
+// Debug output must not traverse the deliberate group -> slot -> group cycle.
+struct RetainedRequiredGroup {
+    _group: Arc<TaskGroupShared>,
+}
+
+impl std::fmt::Debug for RetainedRequiredGroup {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RetainedRequiredGroup")
+    }
+}
 const MAX_SUPERVISED_TASKS: usize = 4096;
 const MAX_GROUP_DEPTH: usize = 64;
 /// Bound on the retained supervised-task failure record of one runtime tree.
@@ -404,6 +420,9 @@ struct TaskGroupShared {
     closing: AtomicBool,
     name: String,
     next_task_id: AtomicU64,
+    // Saturating 0/1/many history survives completed and dropped descendants.
+    // Updated only for accepted new registrations under the existing tree lock.
+    accepted_subtree_tasks: AtomicU64,
     shutdown_tx: watch::Sender<bool>,
     inherited_cancellation: Option<Arc<dyn CancellationToken>>,
     diagnostics: Option<Arc<RuntimeDiagnosticSink>>,
@@ -896,6 +915,7 @@ impl TaskGroup {
             shared: Arc::new(TaskGroupShared {
                 name: name.into(),
                 next_task_id: AtomicU64::new(1),
+                accepted_subtree_tasks: AtomicU64::new(0),
                 shutdown_tx,
                 inherited_cancellation: None,
                 diagnostics,
@@ -984,6 +1004,7 @@ impl TaskGroup {
             shared: Arc::new(TaskGroupShared {
                 name: full_name,
                 next_task_id: AtomicU64::new(1),
+                accepted_subtree_tasks: AtomicU64::new(0),
                 shutdown_tx,
                 inherited_cancellation: Some(self.cancellation_token()),
                 diagnostics: self.shared.diagnostics.clone(),
@@ -1553,6 +1574,9 @@ impl TaskGroup {
         self.shared.tasks.lock().insert(
             task_id,
             TaskMetadata {
+                _retained_group: required_custody.as_ref().map(|_| RetainedRequiredGroup {
+                    _group: self.shared.clone(),
+                }),
                 required_custody,
                 original_exit: None,
                 cleanup_failure: None,
@@ -1565,6 +1589,14 @@ impl TaskGroup {
             },
         );
         tree.active_tasks += 1;
+        let mut ancestor = Some(&self.shared);
+        while let Some(group) = ancestor {
+            let previous = group.accepted_subtree_tasks.load(Ordering::Relaxed);
+            group
+                .accepted_subtree_tasks
+                .store(previous.saturating_add(1).min(2), Ordering::Relaxed);
+            ancestor = group.parent.as_ref();
+        }
         Ok(RegisteredTaskCapability {
             identity: OwnedRuntimeTaskIdentity {
                 tree: self.shared.tree.clone(),
@@ -3613,3 +3645,7 @@ mod sealed_group_disposal_tests {
             .expect("failed admission does not forge another scope");
     }
 }
+
+#[cfg(test)]
+#[path = "task_registry/resident_cleanup_tests.rs"]
+mod resident_cleanup_tests;

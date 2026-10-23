@@ -429,12 +429,19 @@ pub(super) fn terminal_failure(
 ) -> AgentError {
     failure(EnrollmentVmAdmissionError::TerminalFailed(reason))
 }
+pub(super) fn terminal_failure_cause(
+    reason: aura_app::runtime_bridge::CeremonyFailureReason,
+) -> aura_core::AuraError {
+    failure_cause(EnrollmentVmAdmissionError::TerminalFailed(reason))
+}
 pub(super) fn failure(error: EnrollmentVmAdmissionError) -> AgentError {
+    failure_cause(error).into()
+}
+fn failure_cause(error: EnrollmentVmAdmissionError) -> aura_core::AuraError {
     aura_core::AuraError::crypto_with_source(
         "enrollment VM admission failed",
         std::sync::Arc::new(error),
     )
-    .into()
 }
 #[derive(Clone, Copy)]
 enum StageKind {
@@ -536,7 +543,7 @@ enum EnrollmentControlDecision {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct EnrollmentControlFrame {
+pub(crate) struct EnrollmentControlFrame {
     version: u16,
     manifest_digest: [u8; 32],
     decision: EnrollmentControlDecision,
@@ -621,6 +628,16 @@ pub(crate) struct VerifiedEnrollmentFailureCapability {
     reason: aura_app::runtime_bridge::CeremonyFailureReason,
 }
 impl VerifiedEnrollmentFailureCapability {
+    pub(crate) fn terminal_frame_digest(&self) -> Result<[u8; 32], AgentError> {
+        let bytes =
+            aura_core::util::serialization::to_vec(self.frame.as_ref()).map_err(|source| {
+                AgentError::from(aura_core::AuraError::Serialization {
+                    message: "encode original verified negative terminal frame".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        Ok(aura_core::hash::hash(&bytes))
+    }
     pub(crate) fn manifest(
         &self,
     ) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
@@ -648,6 +665,16 @@ pub(super) enum VerifiedEnrollmentTerminal {
 }
 
 impl VerifiedEnrollmentConfirmation {
+    pub(crate) fn terminal_frame_digest(&self) -> Result<[u8; 32], AgentError> {
+        let bytes =
+            aura_core::util::serialization::to_vec(self.frame.as_ref()).map_err(|source| {
+                AgentError::from(aura_core::AuraError::Serialization {
+                    message: "encode original verified positive terminal frame".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        Ok(aura_core::hash::hash(&bytes))
+    }
     pub(crate) fn manifest(
         &self,
     ) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
@@ -3162,10 +3189,14 @@ mod committed_receipt_tests {
                     Some((session.clone(), device.clone()))
                 })
                 .collect();
-            assert_eq!(original_frames, vec![
-                (hex::encode(other_session), effects.device_id().to_string()),
-                (hex::encode(session), wrong_device.to_string()),
-            ], "drop and original expiry preserve foreign session and wrong-device frames in their original order");
+            assert_eq!(
+                original_frames,
+                vec![
+                    (hex::encode(other_session), effects.device_id().to_string()),
+                    (hex::encode(session), wrong_device.to_string()),
+                ],
+                "drop and original expiry preserve foreign session and wrong-device frames in their original order"
+            );
         });
     }
     #[test]
@@ -3529,11 +3560,14 @@ mod committed_receipt_tests {
                 .is_err());
             let captured = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let observed_capture = captured.clone();
+            let native_refusal_observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed_refusal = native_refusal_observed.clone();
             let selected_effects = issuer_effects.clone();
+            let foreign_effects = invitee_effects.clone();
             original.install_original_receipt_test_hook(Box::new(move |receipt| {
                 let original_bytes = aura_core::util::serialization::to_vec(receipt.frame()).unwrap();
                 let receipt = crate::handlers::invitation_service::assert_original_terminal_capture_after_primary_failure_for_test(
-                    receipt, selected_effects.as_ref(),
+                    receipt, selected_effects.as_ref(), foreign_effects.as_ref(), observed_refusal.as_ref(),
                 );
                 assert_eq!(aura_core::util::serialization::to_vec(receipt.frame()).unwrap(), original_bytes);
                 observed_capture.store(true, std::sync::atomic::Ordering::Release);
@@ -4501,7 +4535,10 @@ mod committed_receipt_tests {
                     None => break,
                 }
             }
-            assert!(actual_quorum, "native current-key effect must preserve concrete 2/2 quorum source, not Storage or solo authority");
+            assert!(
+                actual_quorum,
+                "native current-key effect must preserve concrete 2/2 quorum source, not Storage or solo authority"
+            );
             if foreign_subject {
                 reopened_invitee
                     .runtime()
@@ -4666,12 +4703,9 @@ mod committed_receipt_tests {
                         futures::poll!(generation.as_mut()).is_pending(),
                         "actual original generation lease retained at cancellation boundary"
                     );
-                    probe.request_cancel().unwrap();
-                    let disposed = disposal.await_disposal().await;
-                    probe.require_original_disposal_for_test(&disposed).unwrap();
-                    drop(generation.await);
-                    let wrap_original = probe
-                        .with_retained_resources_for_test(|resources| {
+                    let wrap_born = born.is_some();
+                    let mut cleanup_observed = probe
+                        .observe_cleanup_before_retirement_for_test(move |resources| {
                             assert!(resources.reservation.is_none());
                             assert!(resources.root.is_none());
                             assert!(resources.registered.is_none());
@@ -4679,7 +4713,7 @@ mod committed_receipt_tests {
                                 .allocation
                                 .as_ref()
                                 .expect("same original producer retained");
-                            let wrap = if born.is_some() {
+                            let wrap = if wrap_born {
                                 Some(producer.acknowledged_wrap_original_for_test())
                             } else {
                                 if write_started {
@@ -4693,6 +4727,14 @@ mod committed_receipt_tests {
                             wrap
                         })
                         .unwrap();
+                    probe.request_cancel().unwrap();
+                    let disposed = disposal.await_disposal().await;
+                    probe.require_original_disposal_for_test(&disposed).unwrap();
+                    drop(generation.await);
+                    let wrap_original = cleanup_observed.try_recv().expect(
+                        "actual original producer observed successful cleanup before retirement",
+                    ).unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+                    probe.require_original_resources_retired_for_test().unwrap();
                     if let (Some(reference), Some((ceremony, authority, epoch, decision))) =
                         (born.as_ref(), wrap_original)
                     {
@@ -4745,7 +4787,10 @@ mod committed_receipt_tests {
                             keys.sort();
                             after.push(keys);
                         }
-                        assert_eq!(before, after, "unwritten cleanup publishes no allocation/live/retirement/cleaned record");
+                        assert_eq!(
+                            before, after,
+                            "unwritten cleanup publishes no allocation/live/retirement/cleaned record"
+                        );
                     }
                     drop(retain_ack);
                     return;
@@ -4857,10 +4902,13 @@ mod committed_receipt_tests {
                     .expect("concrete coercion preserves the same original bridge allocation");
                 let different_bridge_same_agent =
                     crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone());
-                assert!(matches!(
-    sibling_approval.require_runtime_owner(&different_bridge_same_agent),
-    Err(aura_core::AuraError::PermissionDenied { .. }),
-), "a different bridge allocation over the same agent cannot consume original approval");
+                assert!(
+                    matches!(
+                        sibling_approval.require_runtime_owner(&different_bridge_same_agent),
+                        Err(aura_core::AuraError::PermissionDenied { .. }),
+                    ),
+                    "a different bridge allocation over the same agent cannot consume original approval"
+                );
                 drop(original_dynamic_owner);
                 if native_failure {
                     let sibling_approval = crate::runtime_bridge::enrollment_quorum::admit_original_runtime_approval_for_test(
@@ -4964,14 +5012,8 @@ mod committed_receipt_tests {
                     println!(
                         "original-registration-drop: committed actual live profile before readback"
                     );
-                    probe.request_cancel().unwrap();
-                    let disposal = disposed.await_disposal().await;
-                    println!(
-                        "original-registration-drop: original required task actually disposed"
-                    );
-                    probe.require_original_disposal_for_test(&disposal).unwrap();
-                    probe
-                        .with_retained_resources_for_test(|resources| {
+                    let mut cleanup_observed = probe
+                        .observe_cleanup_before_retirement_for_test(|resources| {
                             assert!(
                                 resources.registered_custody.is_none(),
                                 "no signed-control custodian fabricated before readback"
@@ -4992,6 +5034,19 @@ mod committed_receipt_tests {
                                 );
                         })
                         .unwrap();
+                    probe.request_cancel().unwrap();
+                    let disposal = disposed.await_disposal().await;
+                    println!(
+                        "original-registration-drop: original required task actually disposed"
+                    );
+                    probe.require_original_disposal_for_test(&disposal).unwrap();
+                    cleanup_observed
+                        .try_recv()
+                        .expect(
+                            "actual original held cleanup assertions ran before owner retirement",
+                        )
+                        .unwrap_or_else(|payload| std::panic::resume_unwind(payload));
+                    probe.require_original_resources_retired_for_test().unwrap();
                     drop(continue_readback);
                     return;
                 }
@@ -5424,7 +5479,19 @@ mod committed_receipt_tests {
                         let aura_core::effects::task::RequiredTaskExit::Failed(source) =
                             original_disposal.outcome()
                         else {
-                            panic!("cancelled original issuer must retain its actual domain failure: {:?}", original_disposal.outcome());
+                            panic!(
+                                "cancelled original issuer must retain its actual domain failure: {:?}",
+                                original_disposal.outcome()
+                            );
+                        };
+                        let original_terminal_source = match &source {
+                            aura_core::AuraError::Internal {
+                                source: Some(native),
+                                ..
+                            } => Arc::clone(native),
+                            other => panic!(
+                                "original issuer terminal failure has no retained native source: {other:?}"
+                            ),
                         };
                         eprintln!("actual original issuer failure before shutdown: {source:?}");
                         let issuer_settlement = issuer
@@ -5437,21 +5504,33 @@ mod committed_receipt_tests {
                             ..
                         }) = issuer_settlement
                         else {
-                            panic!("expected retained unresolved issuer terminal, got {issuer_settlement:?}");
+                            panic!(
+                                "expected retained unresolved issuer terminal, got {issuer_settlement:?}"
+                            );
                         };
                         eprintln!(
                             "actual unresolved issuer terminal after peer cleanup: {source:?}"
                         );
-                        second_probe
-                            .as_ref()
-                            .expect("same actual issuer probe")
-                            .with_retained_resources_for_test(|resources| {
-                                assert!(
-                                    resources.registered_custody.is_some(),
-                                    "same registered issuer custody remains retained"
-                                );
-                            })
-                            .unwrap();
+                        // The required-task owner has retired its resource frame.
+                        // Verify custody at the actual registered handoff owner,
+                        // without keeping the old prepared frame alive as a probe.
+                        original_issuer
+                            .require_original_issuer_disposal_for_test(&original_disposal)
+                            .expect(
+                                "same registered issuer custody remains retained after shutdown",
+                            );
+                        match &source {
+                            aura_core::AuraError::Internal {
+                                source: Some(retained),
+                                ..
+                            } => assert!(
+                                Arc::ptr_eq(&original_terminal_source, retained),
+                                "same concrete issuer terminal failure survives actual shutdown"
+                            ),
+                            other => panic!(
+                                "shutdown replaced the original issuer terminal failure: {other:?}"
+                            ),
+                        }
                         for (label, settlement) in [
                             (
                                 "peer",
@@ -5471,9 +5550,16 @@ mod committed_receipt_tests {
                             ),
                         ] {
                             match settlement {
-                                Ok(()) => {},
-                                Err(crate::task_registry::TaskSupervisionError::TaskFailed { source, .. }) => eprintln!("actual {label} retained domain failure after cleanup: {source:?}"),
-                                Err(source) => panic!("unexpected {label} resource shutdown failure: {source:?}"),
+                                Ok(()) => {}
+                                Err(crate::task_registry::TaskSupervisionError::TaskFailed {
+                                    source,
+                                    ..
+                                }) => eprintln!(
+                                    "actual {label} retained domain failure after cleanup: {source:?}"
+                                ),
+                                Err(source) => panic!(
+                                    "unexpected {label} resource shutdown failure: {source:?}"
+                                ),
                             }
                         }
                         return;
@@ -5530,6 +5616,8 @@ mod committed_receipt_tests {
                 .shutdown_gracefully(std::time::Duration::from_secs(5))
                 .await
                 .expect("actual issuer task completion after second issuance evidence");
+            assert!(native_refusal_observed.load(std::sync::atomic::Ordering::Acquire),
+                "actual staging validation retains its native owner refusal after acknowledged cleanup");
         });
     }
 }

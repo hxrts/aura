@@ -954,6 +954,10 @@ jq -e --arg old "$canonical_key" --arg source "$canonical_source" \
    .admission.incoming_reservation_kib==4194304' "$receipt" >/dev/null
 git -C "$project" update-ref refs/remotes/origin/main "$original_base"
 cp "$fakebin/just" "$test_root/just-original"
+# Preserve the real caller selector: a PR already supplies main, and clearing
+# it after the negative case would change the certified baseline identity.
+fixture_base_ref_was_set=${GITHUB_BASE_REF+x}
+fixture_base_ref_value=${GITHUB_BASE_REF-}
 for changed in recipe features profile target lock tool config policy-range guidance-range github-base guidance-files guidance-empty; do
   case "$changed" in
     recipe) printf 'ci-user-flow-policy:\n    @true # revised\n' > "$project/justfile" ;;
@@ -984,7 +988,12 @@ for changed in recipe features profile target lock tool config policy-range guid
     config) rm "$project/.cargo/config.toml"; rmdir "$project/.cargo" ;;
     policy-range) unset AURA_UX_POLICY_DIFF_RANGE ;;
     guidance-range) unset AURA_UX_GUIDANCE_DIFF_RANGE ;;
-    github-base) unset GITHUB_BASE_REF ;;
+    github-base)
+      if [[ -n "$fixture_base_ref_was_set" ]]; then
+        export GITHUB_BASE_REF="$fixture_base_ref_value"
+      else
+        unset GITHUB_BASE_REF
+      fi ;;
     guidance-files|guidance-empty) unset AURA_UX_GUIDANCE_CHANGED_FILES ;;
   esac
 done

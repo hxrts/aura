@@ -516,10 +516,28 @@ impl AuraAgent {
                 if is_new {
                     retained_keys.push(location.key.clone());
                 }
-                admitted_frames += usize::from(
-                    self.queue_retained_mailbox_frame_once(&location.key, record.envelope)?,
-                );
-                manager
+                // Capture the exact original window before intake and ACK.
+                // A completion or cancellation must never resolve a later owner.
+                let original_ack = effects
+                    .borrow_original_admitted_ack(&admitted)
+                    .map_err(AgentError::from)?;
+                let queued =
+                    match self.queue_retained_mailbox_frame_once(&location.key, record.envelope) {
+                        Ok(queued) => queued,
+                        Err(source) => {
+                            let source = AuraError::Internal {
+                                message: "original pending mailbox intake failed".into(),
+                                source: Some(Arc::new(source)),
+                            };
+                            let source = match original_ack {
+                                Some(original) => original.fail(source),
+                                None => source,
+                            };
+                            return Err(AgentError::from(source));
+                        }
+                    };
+                admitted_frames += usize::from(queued);
+                let acknowledged = manager
                     .acknowledge_original_pending_mailbox(
                         manifest.subject,
                         manifest.invitee_device,
@@ -528,7 +546,15 @@ impl AuraAgent {
                         &delivery.message_id,
                     )
                     .await
-                    .map_err(boundary)?;
+                    .map_err(|source| AuraError::Internal {
+                        message: "original pending mailbox ACK failed".into(),
+                        source: Some(Arc::new(source)),
+                    });
+                let acknowledged = match original_ack {
+                    Some(original) => original.finish(acknowledged),
+                    None => acknowledged,
+                };
+                acknowledged.map_err(AgentError::from)?;
             }
         }
         Ok(admitted_frames)

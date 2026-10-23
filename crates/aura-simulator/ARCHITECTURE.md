@@ -23,8 +23,19 @@ registration bytes before sealing. Reopen does not restore an issuer VM.
 The same original broker owner refuses checkpoint after a genuine signed
 receiver frame is queued, retrieval-selected, or ACKed. A simulator-only
 one-shot fault binds the served case to the exact original queued message ID.
+The signed-delivery refusal fixture retains the app-issued runtime admission
+through required task disposal. Its selected recipient profile must remain busy
+while that original caller pin lives. Only after actual cleanup, disposal of the
+completed cleanup future and release of that admission does it reacquire both
+original profile leases. Releasing an observer is not a task or VM disposal ACK.
 The lifecycle test's 30-second diagnostic watchdog is testkit-owned and does
 not advance the selected physical clock or decide protocol completion.
+The registered-window diagnostic checks the original broker's authenticated
+recipient-registration state before observing an issuer retry. Its simulator
+clock step requires the actual selected provider's live relative-sleep
+generation and target under the original task; a same-task unrelated timer or
+cancelled retry cannot substitute. Timer observation does not restore a VM or
+authorize checkpoint completion.
 The `simulator-checkpoint` feature reuses that signed native fixture from a
 quiescent pre-issuance selected-profile artifact. Each branch restores under
 fresh original owners, reissues through the normal signing effect, and creates
@@ -265,3 +276,33 @@ persistence, retry/reopen after refusal, or browser host storage behavior.
 - [Simulator](../../docs/119_simulator.md)
 - [Formal Verification Reference](../../docs/120_verification.md)
 - [Verification Coverage Report](../../docs/998_verification_coverage.md)
+
+The failed retained-reentry fixture checks both original physical leases for
+typed Busy immediately after synchronous admission and before its first await.
+A readiness refusal retains the original Config cause but is not evidence that
+cleanup is still pending: the required worker can retire before that observation
+is read. The same original session must acknowledge task/group disposal before
+both physical profiles are reopened. Observation handles retain no live lease.
+
+The signed broker registration checkpoint fixture captures its witness while
+the original prepared issuer registration is live, holding the selected Prepared
+write through authenticated HTTP registration readback. It then acknowledges
+that same issuer's disposal and selected-owner shutdown before sealing. Normal
+completed issuance cannot supply this pre-VM checkpoint witness.
+
+The signed queued refusal fixture retains the independent original recipient
+cancellation after resource settlement. It requires exact error-allocation
+identity with the same recipient's registry, rejects unresolved required-cleanup
+errors and extra failures, and still requires empty original task trees and both
+physical profile leases to reopen. A terminal error alone does not replace ACKs.
+
+The ACK-history fixture completes the normal signed app import and original
+issuer/recipient disposal while retaining the same broker. It consumes the
+fixture through into_original_checkpoint_parts, transferring the actual
+MoveOwned enrollment, original broker and ActorOwned supervisor without
+reconstruction; missing broker custody still returns the enrollment owner.
+Only then may the stopped broker refuse retained history as UnsupportedState,
+with no unsettled delivery obscuring that guard. Both original runtime failure
+inventories must be empty, and accepted profiles must authenticate on fresh
+reopen and acknowledged shutdown. ACK of the first frame alone cannot prove
+that later response sends or their original owners have quiesced.

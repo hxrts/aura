@@ -2,7 +2,7 @@
 # workflow.sh - Unified verification scripting
 #
 # Usage:
-#   ./scripts/verify/workflow.sh coverage [--md|--json]  # Generate verification coverage report
+#   ./scripts/verify/workflow.sh coverage [--md|--json]  # Report source inventory (execution evidence unknown)
 #   ./scripts/verify/workflow.sh quint-types [--verbose] # Check Quint-Rust type correspondence
 #   ./scripts/verify/workflow.sh kani                    # Run Kani bounded model checking suite
 #
@@ -41,11 +41,11 @@ cmd_coverage() {
     count_quint_temporal() { grep -rh "^[[:space:]]*temporal " "$QUINT_DIR" --include="*.qnt" 2>/dev/null | wc -l | tr -d ' '; }
     count_quint_types() { grep -rhE "type[[:space:]]+[A-Z][a-zA-Z0-9_]*[[:space:]]*=" "$QUINT_DIR" --include="*.qnt" 2>/dev/null | wc -l | tr -d ' '; }
     count_rust_invariant_checks() { grep -rh "debug_assert.*Invariant\|check_.*invariant\|InvariantCheck" "$RUST_SRC" --include="*.rs" 2>/dev/null | wc -l | tr -d ' '; }
-    count_lean_theorems() { [ -d "$LEAN_DIR" ] && grep -rh "^theorem\|^lemma" "$LEAN_DIR" --include="*.lean" 2>/dev/null | wc -l | tr -d ' ' || echo "0"; }
+    count_lean_theorems() { if [ -d "$LEAN_DIR" ]; then grep -rh "^theorem\|^lemma" "$LEAN_DIR" --include="*.lean" 2>/dev/null | wc -l | tr -d ' '; else echo "0"; fi; }
     count_itf_traces() { find "$PROJECT_ROOT/verification/quint/traces" -name "*.itf.json" -type f 2>/dev/null | wc -l | tr -d ' '; }
     count_differential_tests() { grep -rh "#\[test\]" "$RUST_SRC/aura-testkit/tests" --include="*.rs" 2>/dev/null | wc -l | tr -d ' '; }
 
-    count_verified_specs() {
+    count_configured_spec_mentions() {
         grep -rl "quint verify\|--invariant=" "$PROJECT_ROOT/justfile" "$PROJECT_ROOT/.github/workflows/" 2>/dev/null | \
             xargs grep -h "verification/quint" 2>/dev/null | \
             grep -oE "verification/quint/[^[:space:]\"']*.qnt" | sort -u | wc -l | tr -d ' '
@@ -66,15 +66,12 @@ cmd_coverage() {
     }
 
     categorize_specs() {
-        local verified_pattern="protocol_consensus|protocol_journal|protocol_frost|protocol_anti_entropy|protocol_recovery|protocol_sessions|authorization|transport|invitation|epochs"
         find "$QUINT_DIR" -name "*.qnt" -type f | while read -r spec; do
             local rel="${spec#$QUINT_DIR/}"
             local name=$(basename "$spec" .qnt)
             local inv_count
             inv_count=$(grep -c "val Invariant" "$spec" 2>/dev/null) || inv_count=0
-            if echo "$name" | grep -qE "$verified_pattern"; then
-                echo "VERIFIED:$rel:$inv_count"
-            elif [ "$inv_count" -gt 0 ]; then
+            if [ "$inv_count" -gt 0 ]; then
                 echo "HAS_INVARIANTS:$rel:$inv_count"
             else
                 echo "NO_INVARIANTS:$rel:$inv_count"
@@ -89,7 +86,7 @@ cmd_coverage() {
         local quint_types=$(count_quint_types)
         local rust_checks=$(count_rust_invariant_checks)
         local lean_theorems=$(count_lean_theorems)
-        local verified_specs=$(count_verified_specs)
+        local configured_spec_mentions=$(count_configured_spec_mentions)
         local itf_traces=$(count_itf_traces)
         local diff_tests=$(count_differential_tests)
 
@@ -108,7 +105,7 @@ Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 | Quint Type Definitions | $quint_types |
 | Rust Invariant Checks | $rust_checks |
 | Lean Theorems | $lean_theorems |
-| Verified Specs (CI) | $verified_specs |
+| CI/justfile source spec mentions (not run evidence) | $configured_spec_mentions |
 | ITF Traces | $itf_traces |
 | Differential Tests | $diff_tests |
 
@@ -120,20 +117,20 @@ Formal protocol specifications in \`verification/quint/\`:
 
 EOF
 
-        local verified=0 has_inv=0 no_inv=0
+        local has_inv=0 no_inv=0
         while IFS=: read -r status path inv_count; do
             case "$status" in
-                VERIFIED) ((verified++)) ;;
                 HAS_INVARIANTS) ((has_inv++)) ;;
                 NO_INVARIANTS) ((no_inv++)) ;;
             esac
         done < <(categorize_specs)
 
+        echo "Model-check and Lean execution status: unknown (no receipts consumed)."
+        echo ""
         echo "| Status | Count |"
         echo "|--------|-------|"
-        echo "| Model-checked (CI verified) | $verified |"
-        echo "| Has invariants (not in CI) | $has_inv |"
-        echo "| No invariants (helpers/harness) | $no_inv |"
+        echo "| Matching invariant declarations | $has_inv |"
+        echo "| No matching invariant declarations | $no_inv |"
         echo ""
         echo "### Layer 2: Rust Integration"
         echo ""
@@ -162,7 +159,7 @@ EOF
             echo "No Lean verification modules found."
         fi
         echo ""
-        echo "## Verified Invariants"
+        echo "## Invariant declarations (execution unknown)"
         echo ""
         echo "| Invariant | Specification |"
         echo "|-----------|---------------|"
@@ -184,6 +181,8 @@ EOF
     generate_json_report() {
         cat << EOF
 {
+  "schema_version": 2,
+  "evidence": {"status": "unknown", "receipts_consumed": false},
   "generated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "metrics": {
     "quint_specs": $(count_quint_specs),
@@ -192,7 +191,7 @@ EOF
     "quint_types": $(count_quint_types),
     "rust_invariant_checks": $(count_rust_invariant_checks),
     "lean_theorems": $(count_lean_theorems),
-    "verified_specs": $(count_verified_specs),
+    "ci_source_spec_mentions": $(count_configured_spec_mentions),
     "itf_traces": $(count_itf_traces),
     "differential_tests": $(count_differential_tests)
   }
@@ -210,12 +209,13 @@ EOF
 # Subcommand: quint-types
 # ============================================================================
 
-cmd_quint_types() {
+cmd_quint_types() (
     local VERBOSE="${1:-}"
     local QUINT_DIR="$PROJECT_ROOT/verification/quint"
     local RUST_SRC="$PROJECT_ROOT/crates"
-    local TEMP_DIR=$(mktemp -d)
-    trap "rm -rf $TEMP_DIR" EXIT
+    local TEMP_DIR
+    TEMP_DIR="$(mktemp -d)" || return
+    trap 'rm -rf -- "$TEMP_DIR"' EXIT
 
     log_info "Quint-Rust Type Drift Detection"
     log_info "==============================="
@@ -315,7 +315,7 @@ cmd_quint_types() {
 
     echo
     log_info "✓ Type drift check complete"
-}
+)
 
 # ============================================================================
 # Subcommand: kani

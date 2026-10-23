@@ -104,6 +104,11 @@ mod context_sync;
 mod device_enrollment;
 #[cfg(test)]
 pub(crate) use device_enrollment::EnrollmentVmTeardownFailure;
+pub(crate) use device_enrollment::{
+    enrollment_stage_error, AcknowledgedOriginalNoticeDisposal,
+    OriginalInviteeInterruptionDisposition, OriginalInviteeTerminalCustody, RetainedNoticeResult,
+    RetainedOriginalCleanupFailure,
+};
 pub(crate) mod enrollment_manifest_admission;
 pub(crate) mod enrollment_parent_archive;
 
@@ -234,7 +239,8 @@ impl AuthorizedInvitationCancellationCapability {
 mod enrollment_terminal_notice;
 pub(crate) use enrollment_terminal_notice::{
     launch_recovered_enrollment_notice, AcknowledgedCancelledNotice,
-    IssuerEnrollmentTerminalOutcome, OriginalIssuerCancellationTerminal, RetainedCancelledNotice,
+    IssuerEnrollmentTerminalOutcome, OriginalCancelledNoticeSendCompletion,
+    OriginalIssuerCancellationTerminal, RetainedCancelledNotice, RetainedOriginalNoticeVm,
     SignedCancelledNotice,
 };
 #[cfg(test)]
@@ -242,6 +248,7 @@ pub(crate) use enrollment_terminal_notice::{RecoveredNoticeCrashGate, RecoveredN
 pub(crate) mod enrollment_trust;
 mod enrollment_vm_admission;
 pub(super) use enrollment_vm_admission::retain_quorum_initial_request;
+pub(crate) use enrollment_vm_admission::EnrollmentControlFrame;
 mod required_channel_read;
 pub(crate) use enrollment_trust::VerifiedEnrollmentResponse;
 pub(crate) use enrollment_vm_admission::{
@@ -665,6 +672,46 @@ impl Clone for InvitationHandler {
 }
 
 impl InvitationHandler {
+    #[cfg(test)]
+    pub(crate) fn install_original_invitee_stage_gate_for_test(
+        &self,
+        invitation: InvitationId,
+        stage: crate::runtime::services::invitation_manager::OriginalInviteeStage,
+        fault_task: Option<
+            Arc<
+                crate::runtime::services::issuer_error_custody::SynchronousCustodyCell<
+                    Option<tokio::task::Id>,
+                >,
+            >,
+        >,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        self.invitation_cache
+            .install_original_invitee_stage_gate_for_test(invitation, stage, fault_task)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn cancel_original_required_enrollment_for_test(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.invitation_cache
+            .cancel_original_required_enrollment_for_test(invitation)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn reconcile_original_required_enrollment_for_test(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.invitation_cache
+            .reconcile_required_enrollment_cleanup(invitation)
+            .await
+    }
+
     const IMPORTED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/imported";
     const CREATED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/created";
 
@@ -2353,6 +2400,56 @@ impl InvitationHandler {
             .await
     }
 
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_required_invitee_task_custody",
+        receiver_type = InvitationHandler,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn admit_required_original_enrollment<E, F>(
+        &self,
+        invitation: &InvitationId,
+        admit: F,
+    ) -> Result<(), E>
+    where
+        E: From<aura_core::AuraError>,
+        F: FnOnce(
+            crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+                enrollment_manifest_admission::AdmittedEnrollmentManifest,
+            >,
+        ) -> Result<
+            crate::task_registry::OriginalRequiredTaskHandle,
+            (
+                crate::runtime::services::enrollment_window::EnrollmentExecutionRoot<
+                    enrollment_manifest_admission::AdmittedEnrollmentManifest,
+                >,
+                E,
+            ),
+        >,
+    {
+        self.invitation_cache
+            .admit_required_enrollment(invitation, admit)
+            .await
+    }
+
+    pub(crate) async fn await_required_original_enrollment_cleanup(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        self.invitation_cache
+            .await_required_enrollment_cleanup(invitation)
+            .await
+    }
+
+    pub(crate) async fn original_required_enrollment_exit_after_refusal(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<aura_core::effects::task::RequiredTaskExit, aura_core::AuraError> {
+        self.invitation_cache
+            .original_required_enrollment_exit_after_refusal(invitation)
+            .await
+    }
+
     /// Import an invitation from a shareable code into the local cache.
     ///
     /// This is a best-effort, local-only operation used for out-of-band invite
@@ -2783,11 +2880,11 @@ impl InvitationHandler {
             )
         });
         if enrollment_response {
-            let root = self
+            let mut root = self
                 .take_original_enrollment_execution(invitation_id)
                 .await?;
             device_enrollment::InvitationDeviceEnrollmentHandler::new(self)
-                .execute_device_enrollment_invitee_decline(effects.clone(), root)
+                .execute_device_enrollment_invitee_decline(effects.clone(), &mut root)
                 .await?;
         }
         self.validate_cached_invitation_for_action(
@@ -4214,8 +4311,10 @@ fn unpolled_invitation_command_dispatch_caller_frame_is_bounded() {
             )
         },
     );
-    assert!(bytes <= 16 * 1024,
-        "invitation command dispatch caller frame is {bytes} bytes; bounded lexical delegation is required");
+    assert!(
+        bytes <= 16 * 1024,
+        "invitation command dispatch caller frame is {bytes} bytes; bounded lexical delegation is required"
+    );
 }
 
 impl InvitationHandler {

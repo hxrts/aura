@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
+bash "$repo_root/scripts/check/simulator-checkpoint-reachability.sh"
 source "$repo_root/scripts/web/prebuilt-provenance.sh"
 source "$repo_root/scripts/web/prebuilt-transfer.sh"
 start_commit="$(aura_web_clean_commit "$repo_root" || true)"

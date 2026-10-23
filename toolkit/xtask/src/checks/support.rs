@@ -132,19 +132,13 @@ pub fn command_error(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     anyhow!(
-        "{program} {} failed with status {}{}\n{}",
+        "{program} {} failed with status {}\nstdout (stream order not inferred):\n{stdout}\nstderr (stream order not inferred):\n{stderr}",
         args.join(" "),
         output
             .status
             .code()
             .map(|code| code.to_string())
-            .unwrap_or_else(|| "signal".to_string()),
-        if stderr.trim().is_empty() { "" } else { ":" },
-        if stderr.trim().is_empty() {
-            stdout.trim().to_string()
-        } else {
-            stderr.trim().to_string()
-        }
+            .unwrap_or_else(|| output.status.to_string()),
     )
 }
 

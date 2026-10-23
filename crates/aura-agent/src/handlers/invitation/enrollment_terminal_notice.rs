@@ -19,6 +19,48 @@ fn notice_session_id(invitation: &InvitationId, digest: &[u8; 32]) -> Uuid {
     )
 }
 
+/// Actual finite-VM send completion, not a peer adoption or cleanup receipt.
+/// Only the original sender below constructs this move-owned witness.
+pub(crate) struct OriginalCancelledNoticeSendCompletion {
+    owner: crate::runtime::RuntimeSessionOwner,
+    invitation: InvitationId,
+    manifest_digest: [u8; 32],
+    notice_digest: [u8; 32],
+}
+impl OriginalCancelledNoticeSendCompletion {
+    pub(crate) fn require_original_binding(
+        &self,
+        terminal: &OriginalIssuerCancellationTerminal,
+        notice: &SignedCancelledNotice,
+    ) -> AgentResult<()> {
+        let issued = terminal.issued();
+        if self.invitation != issued.manifest().invitation
+            || self.manifest_digest != issued.digest()
+            || self.notice_digest != aura_core::hash::hash(&notice.bytes)
+            || self.owner.session_id.as_uuid()
+                != notice_session_id(&issued.manifest().invitation, &issued.digest())
+        {
+            return Err(AgentError::invalid(
+                "notice send completion has another original binding",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn require_live_original(
+        &self,
+        effects: &Arc<AuraEffectSystem>,
+        terminal: &OriginalIssuerCancellationTerminal,
+        notice: &SignedCancelledNotice,
+    ) -> AgentResult<()> {
+        self.require_original_binding(terminal, notice)?;
+        terminal.require_original_effects(effects)?;
+        terminal.issued().require_runtime_owner(effects.as_ref())?;
+        effects
+            .assert_owned_choreography_session(&self.owner)
+            .map_err(stage)
+    }
+}
+
 fn stage(error: impl std::error::Error + Send + Sync + 'static) -> AgentError {
     AgentError::from(aura_core::AuraError::Internal {
         message: "owned enrollment terminal notification".into(),
@@ -51,6 +93,11 @@ fn pending_terminal_receive(status: AuraVmHostWaitStatus, step: &StepResult) -> 
 /// Each variant retains its protocol-specific owner; recovery has no active
 /// request/response admission authority.
 enum IssuedNoticeWindowCapability<'a> {
+    OriginalCancelled(
+        &'a crate::runtime::services::enrollment_window::OriginalCancelledNoticeWindowCapability<
+            'a,
+        >,
+    ),
     Active(&'a EnrollmentExecutionChild),
     Cancelled(
         &'a crate::runtime::services::enrollment_window::CancelledEnrollmentNoticeWindowCapability,
@@ -63,6 +110,9 @@ impl IssuedNoticeWindowCapability<'_> {
         effects: &AuraEffectSystem,
     ) -> AgentResult<()> {
         match self {
+            Self::OriginalCancelled(window) => window
+                .require_owner(issued, effects)
+                .map_err(AgentError::from),
             Self::Active(window) => window
                 .require_issued_notice_owner(issued)
                 .map_err(AgentError::from),
@@ -76,6 +126,7 @@ impl IssuedNoticeWindowCapability<'_> {
         effects: &AuraEffectSystem,
     ) -> Result<u64, aura_core::TimeoutBudgetError> {
         match self {
+            Self::OriginalCancelled(window) => window.remaining_ms(effects).await,
             Self::Active(window) => window.remaining_ms(effects).await,
             Self::Cancelled(window) => window.remaining_ms(effects).await,
         }
@@ -86,6 +137,7 @@ impl IssuedNoticeWindowCapability<'_> {
         source: TimeoutRunError<AgentError>,
     ) -> AgentError {
         match self {
+            Self::OriginalCancelled(window) => window.map_run_error(stage, source),
             Self::Active(window) => window.map_run_error(stage, source),
             Self::Cancelled(window) => window.map_run_error(stage, source),
         }
@@ -205,8 +257,14 @@ pub(crate) struct OriginalIssuerCancellationTerminal {
     pub(super) cancellation:
         crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
     pub(super) issued: Arc<RetainedEnrollmentVmControl>,
+    // Captured once with the actual verified decision. Diagnostic retention
+    // must not keep this capability's runtime owner alive after cleanup ACK.
+    pub(super) failure: aura_core::AuraError,
 }
 impl OriginalIssuerCancellationTerminal {
+    pub(crate) fn original_domain_failure(&self) -> aura_core::AuraError {
+        self.failure.clone()
+    }
     pub(crate) fn issued(&self) -> &RetainedEnrollmentVmControl {
         &self.issued
     }
@@ -261,24 +319,46 @@ pub(super) async fn sign_cancelled_notice(
 )]
 pub(super) async fn send_cancelled_notice(
     effects: Arc<AuraEffectSystem>,
-    issued: &RetainedEnrollmentVmControl,
-    notice: &SignedCancelledNotice,
+    terminal: &Arc<OriginalIssuerCancellationTerminal>,
+    notice: &Arc<SignedCancelledNotice>,
     window: &EnrollmentExecutionChild,
     slot: &mut Option<OwnedVmSession>,
+    destination: &crate::handlers::invitation_service::OriginalIssuerTerminalDestination,
 ) -> AgentResult<()> {
+    let issued = terminal.issued();
     let validity = window
-        .issued_notice_validity_child(effects.as_ref(), issued)
-        .await
+        .original_cancelled_notice_window(effects.as_ref(), terminal, notice, destination)
         .map_err(AgentError::from)?;
+    #[cfg(test)]
+    {
+        let foreign = Arc::new(SignedCancelledNotice {
+            bytes: notice.bytes.clone(),
+        });
+        assert!(
+            window
+                .original_cancelled_notice_window(effects.as_ref(), terminal, &foreign, destination)
+                .is_err(),
+            "equal signed bytes cannot replace the actual retained notice owner"
+        );
+        validity
+            .require_owner(issued, effects.as_ref())
+            .expect("same actual live negative owner");
+        validity.assert_original_deadline_for_test();
+    }
     validity
         .execute(effects.as_ref(), || {
-            Box::pin(send_signed_cancelled_notice(
-                effects.clone(),
-                issued,
-                IssuedNoticeWindowCapability::Active(&validity),
-                notice.bytes.clone(),
-                slot,
-            ))
+            Box::pin(async {
+                let completed = send_signed_cancelled_notice(
+                    effects.clone(),
+                    issued,
+                    IssuedNoticeWindowCapability::OriginalCancelled(&validity),
+                    notice.bytes.clone(),
+                    slot,
+                )
+                .await?;
+                // Retain before either validity postcheck or VM close awaits.
+                destination.retain_original_cancelled_send(&effects, terminal, notice, completed)
+            })
         })
         .await
         .map_err(|source| validity.map_run_error("signed enrollment notice validity", source))
@@ -338,13 +418,15 @@ async fn sign_cancelled_notice_bytes(
     capability = "IssuedNoticeWindowCapability",
     family = "runtime_helper"
 )]
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 async fn send_signed_cancelled_notice(
     effects: Arc<AuraEffectSystem>,
     issued: &RetainedEnrollmentVmControl,
     window: IssuedNoticeWindowCapability<'_>,
     bytes: Vec<u8>,
     slot: &mut Option<OwnedVmSession>,
-) -> AgentResult<()> {
+) -> AgentResult<OriginalCancelledNoticeSendCompletion> {
+    let notice_digest = aura_core::hash::hash(&bytes);
     window.require_owner(issued, effects.as_ref())?;
     issued
         .require_runtime_owner(effects.as_ref())
@@ -356,6 +438,9 @@ async fn send_signed_cancelled_notice(
                 NoticeIngressCapability::Issued(
                     issued,
                     match &window {
+                        IssuedNoticeWindowCapability::OriginalCancelled(owner) => {
+                            IssuedNoticeWindowCapability::OriginalCancelled(owner)
+                        }
                         IssuedNoticeWindowCapability::Active(owner) => {
                             IssuedNoticeWindowCapability::Active(owner)
                         }
@@ -406,19 +491,22 @@ async fn send_signed_cancelled_notice(
                 "finite terminal sender unexpectedly received",
             ));
         }
-        if super::vm_loop::handle_invitation_vm_wait_status(
+        super::vm_loop::handle_invitation_vm_wait_status(
             round.host_wait_status,
             false,
             "terminal notice send timed out",
             "terminal notice send cancelled",
-        )?
-        .is_some()
-            || super::vm_loop::handle_invitation_vm_step(
-                round.step,
-                "terminal notice sender became stuck",
-            )?
-        {
-            return Ok(());
+        )?;
+        if super::vm_loop::handle_invitation_vm_step(
+            round.step,
+            "terminal notice sender became stuck",
+        )? {
+            return Ok(OriginalCancelledNoticeSendCompletion {
+                owner: session.owner().clone(),
+                invitation: issued.manifest().invitation.clone(),
+                manifest_digest: issued.digest(),
+                notice_digest,
+            });
         }
     }
 }
@@ -447,27 +535,233 @@ async fn send_recovered_cancelled_notice(
         slot,
     )
     .await
+    .map(|_| ())
 }
 
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "admitted_original_window_terminal_notice",
-    capability_type = EnrollmentExecutionChild,
-    family = "runtime_helper"
-)]
-pub(super) async fn receive_cancelled_notice(
+/// The original required invitee task retains the actual notice VM cursor.
+/// A signed candidate is not a terminal: the same selected-time check,
+/// blocked receive, and finite VM completion must still run before settlement.
+#[derive(Default)]
+pub(crate) struct RetainedOriginalNoticeVm {
+    pub(super) session: Option<OwnedVmSession>,
+    pub(super) candidate: Option<VerifiedEnrollmentFailureCapability>,
+    blocked: Option<crate::runtime::vm_host_bridge::BlockedVmReceive>,
+    injected: bool,
+    completed: bool,
+    pub(super) eligible: bool,
+    injection_failure: Option<Arc<AgentError>>,
+    // Observation suppresses withdrawal only. The actual candidate, original
+    // postchecks, VM completion and close still authorize terminal settlement.
+    candidate_observed: Arc<std::sync::OnceLock<()>>,
+}
+
+impl RetainedOriginalNoticeVm {
+    pub(crate) fn is_eligible(&self) -> bool {
+        self.eligible
+    }
+
+    /// The runtime custodian may retire a pending receive only after this same
+    /// original VM has actually acknowledged close. Refusal retains its cursor.
+    pub(crate) async fn close_for_required_cleanup(
+        &mut self,
+    ) -> Result<(), crate::runtime::session_ingress::SessionIngressError> {
+        self.close_retained().await?;
+        self.retire_cancelled_receive_after_close();
+        Ok(())
+    }
+    pub(super) fn candidate_observation(&self) -> Arc<std::sync::OnceLock<()>> {
+        Arc::clone(&self.candidate_observed)
+    }
+    pub(super) fn retire_cancelled_receive_after_close(&mut self) {
+        debug_assert!(self.session.is_none());
+        self.blocked.take();
+    }
+
+    pub(super) async fn close_retained(
+        &mut self,
+    ) -> Result<(), crate::runtime::session_ingress::SessionIngressError> {
+        if let Some(session) = self.session.as_mut() {
+            session.close_retained().await?;
+            self.session.take();
+        }
+        Ok(())
+    }
+}
+
+pub(super) async fn receive_cancelled_notice_retained(
     effects: Arc<AuraEffectSystem>,
     admitted: &AdmittedEnrollmentManifest,
     window: &EnrollmentExecutionChild,
-    slot: &mut Option<OwnedVmSession>,
-) -> AgentResult<VerifiedEnrollmentFailureCapability> {
-    receive_cancelled_notice_with_window(
-        effects,
-        admitted,
-        AdmittedNoticeWindowCapability::Active(window),
-        slot,
-    )
-    .await
+    vm: &mut RetainedOriginalNoticeVm,
+    #[cfg(test)] gate: &crate::runtime::services::invitation_manager::InvitationManager,
+) -> AgentResult<()> {
+    if let Some(source) = vm.injection_failure.as_ref() {
+        return Err(AgentError::Aura(aura_core::AuraError::Internal {
+            message: "original notice blocked receive injection failed".into(),
+            source: Some(Arc::clone(source) as Arc<dyn std::error::Error + Send + Sync>),
+        }));
+    }
+    let ingress = AdmittedNoticeWindowCapability::Active(window);
+    ingress
+        .require_owner(admitted, &effects)
+        .map_err(AgentError::from)?;
+    if vm.session.is_none() {
+        vm.session = Some(
+            open_notice_session(
+                effects.clone(),
+                NoticeIngressCapability::Admitted(admitted, ingress),
+            )
+            .await?,
+        );
+    }
+    let peer = ChoreographicRole::new(
+        admitted.manifest().initiator_device,
+        admitted.manifest().subject,
+        RoleIndex::new(0).expect("fixed initiator role"),
+    );
+    let peers = BTreeMap::from([("Initiator".into(), peer)]);
+    loop {
+        if vm.completed {
+            return Ok(());
+        }
+        if vm.candidate.is_some() {
+            if !vm.injected {
+                ingress
+                    .remaining_ms(effects.as_ref())
+                    .await
+                    .map_err(|source| {
+                        ingress.map_run_error(
+                            "verified terminal notice",
+                            TimeoutRunError::Timeout(source),
+                        )
+                    })?;
+                let blocked = vm.blocked.take().ok_or_else(|| {
+                    AgentError::internal("original signed notice lost its blocked receive")
+                })?;
+                if let Err(source) = vm
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| AgentError::internal("original notice VM was not retained"))?
+                    .inject_blocked_receive(blocked)
+                {
+                    let source = Arc::new(stage(source));
+                    vm.injection_failure = Some(Arc::clone(&source));
+                    return Err(AgentError::Aura(aura_core::AuraError::Internal {
+                        message: "original notice blocked receive injection failed".into(),
+                        source: Some(source),
+                    }));
+                }
+                vm.injected = true;
+            }
+            let round = vm
+                .session
+                .as_mut()
+                .ok_or_else(|| AgentError::internal("original notice VM was not retained"))?
+                .advance_round("Invitee", &peers)
+                .await
+                .map_err(stage)?;
+            if round.blocked_receive.is_some() {
+                return Err(AgentError::invalid(
+                    "terminal listener received after finite notice",
+                ));
+            }
+            if super::vm_loop::handle_invitation_vm_wait_status(
+                round.host_wait_status,
+                false,
+                "terminal listener completion timed out",
+                "terminal listener completion cancelled",
+            )?
+            .is_some()
+                || super::vm_loop::handle_invitation_vm_step(
+                    round.step,
+                    "terminal listener became stuck",
+                )?
+            {
+                vm.completed = true;
+                return Ok(());
+            }
+            continue;
+        }
+        ingress
+            .remaining_ms(effects.as_ref())
+            .await
+            .map_err(|source| {
+                ingress.map_run_error("terminal notice receive", TimeoutRunError::Timeout(source))
+            })?;
+        let round = vm
+            .session
+            .as_mut()
+            .ok_or_else(|| AgentError::internal("original notice VM was not retained"))?
+            .advance_round_until_receive(
+                "Invitee",
+                &peers,
+                InvitationHandler::is_transport_no_message,
+            )
+            .await
+            .map_err(stage)?;
+        if let Some(blocked) = round.blocked_receive {
+            if blocked.payload.len() > DeviceEnrollmentTerminalNotice::MAX_WIRE_BYTES {
+                continue;
+            }
+            let Ok(notice) = from_slice::<DeviceEnrollmentTerminalNotice>(&blocked.payload) else {
+                continue;
+            };
+            if notice.invitation_id != admitted.manifest().invitation
+                || notice.ceremony_id != admitted.manifest().ceremony
+            {
+                continue;
+            }
+            let frame = match EnrollmentControlFrame::decode(&notice.signed_control) {
+                Ok(frame) => frame,
+                Err(error)
+                    if discard_unverified_notice(&error)
+                        || matches!(
+                            error,
+                            AgentError::Aura(aura_core::AuraError::Serialization { .. })
+                        ) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let verified = match frame
+                .verify_terminal_notice(effects.as_ref(), admitted)
+                .await
+            {
+                Ok(verified) => verified,
+                Err(error) if discard_unverified_notice(&error) => continue,
+                Err(error) => return Err(error),
+            };
+            // This is the earliest genuine signed-candidate boundary. Both
+            // nonclone receive and proof enter the original required owner
+            // before the next selected-time observation can be cancelled.
+            vm.blocked = Some(blocked);
+            vm.candidate = Some(verified);
+            let _ = vm.candidate_observed.set(());
+            #[cfg(test)]
+            gate.await_original_invitee_stage_gate_for_test(
+                &admitted.canonical_invitation().invitation_id,
+                crate::runtime::services::invitation_manager::OriginalInviteeStage::SignedNoticeCandidate,
+            )
+            .await;
+            continue;
+        }
+        super::vm_loop::handle_invitation_vm_wait_status(
+            round.host_wait_status,
+            false,
+            "terminal listener timed out",
+            "terminal listener cancelled",
+        )?;
+        if pending_terminal_receive(round.host_wait_status, &round.step) {
+            continue;
+        }
+        if super::vm_loop::handle_invitation_vm_step(round.step, "terminal listener became stuck")?
+        {
+            return Err(AgentError::invalid(
+                "terminal listener completed without verified notice",
+            ));
+        }
+    }
 }
 async fn receive_cancelled_notice_with_window(
     effects: Arc<AuraEffectSystem>,
@@ -527,7 +821,7 @@ async fn receive_cancelled_notice_with_window(
                             AgentError::Aura(aura_core::AuraError::Serialization { .. })
                         ) =>
                 {
-                    continue
+                    continue;
                 }
                 Err(error) => return Err(error),
             };
@@ -877,7 +1171,7 @@ impl RetainedCancelledNotice {
             None => {
                 return Err(AgentError::invalid(
                     "original cancellation disposal interrupted",
-                ))
+                ));
             }
         }
         let retained = &mut self.checkpoint;

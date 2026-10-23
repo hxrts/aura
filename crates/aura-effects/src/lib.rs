@@ -80,6 +80,11 @@ compile_error!(
 
 use cfg_if::cfg_if;
 
+// Cargo features are additive: a development provider must never be unified
+// into a canonical production graph, regardless of optimization profile.
+#[cfg(all(feature = "production-build", any(test, feature = "development-keys")))]
+compile_error!("production builds must not include the development hot-key provider");
+
 pub mod biometric;
 pub mod console;
 pub mod context;
@@ -164,7 +169,9 @@ pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use route_crypto::RealRouteCryptoHandler;
 pub use runtime_capability::RuntimeCapabilityHandler;
-pub use secure::{FilesystemFallbackSecureStorageHandler, ProductionSecureStorageHandler};
+#[cfg(any(test, feature = "development-keys", target_arch = "wasm32"))]
+pub use secure::FilesystemFallbackSecureStorageHandler;
+pub use secure::ProductionSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
 #[allow(deprecated)]

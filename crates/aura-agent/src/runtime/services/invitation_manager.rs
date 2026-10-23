@@ -36,20 +36,37 @@ enum CachedInvitationEntry {
         // Keeps actual required custody alive even when no external observer exists.
         _task: crate::task_registry::OriginalRequiredTaskHandle,
     },
+    RequiredEnrollment {
+        invitation: Invitation,
+        admitted: std::sync::Arc<AdmittedEnrollmentManifest>,
+        task: std::sync::Arc<tokio::sync::Mutex<crate::task_registry::OriginalRequiredTaskHandle>>,
+    },
 }
 
 impl CachedInvitationEntry {
+    fn reapable_after_original_ack(&self) -> bool {
+        match self {
+            Self::Observed(_) => true,
+            Self::RequiredEnrollment { task, .. } if std::sync::Arc::strong_count(task) == 1 => {
+                task.try_lock()
+                    .is_ok_and(|original| original.acknowledged())
+            }
+            _ => false,
+        }
+    }
     fn invitation(&self) -> &Invitation {
         match self {
             Self::Observed(invitation)
             | Self::AdmittedEnrollment { invitation, .. }
-            | Self::RecoveredNegative { invitation, .. } => invitation,
+            | Self::RecoveredNegative { invitation, .. }
+            | Self::RequiredEnrollment { invitation, .. } => invitation,
         }
     }
     fn commit_update(&mut self, updated: Invitation) -> Result<(), aura_core::AuraError> {
         let original = match self {
             Self::AdmittedEnrollment { root, .. } => Some(root.origin().canonical_invitation()),
             Self::RecoveredNegative { admitted, .. } => Some(admitted.canonical_invitation()),
+            Self::RequiredEnrollment { admitted, .. } => Some(admitted.canonical_invitation()),
             Self::Observed(_) => None,
         };
         if let Some(original) = original {
@@ -82,7 +99,8 @@ impl CachedInvitationEntry {
         match self {
             Self::Observed(invitation)
             | Self::AdmittedEnrollment { invitation, .. }
-            | Self::RecoveredNegative { invitation, .. } => {
+            | Self::RecoveredNegative { invitation, .. }
+            | Self::RequiredEnrollment { invitation, .. } => {
                 *invitation = updated;
             }
         }
@@ -146,6 +164,33 @@ impl Default for InvitationState {
 }
 
 /// Manages cached invitations for the invitation handler.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OriginalInviteeStage {
+    VerifiedRequestBeforeResponse,
+    VerifiedRequestBeforeResponseWithCloseFault,
+    SignedResponseCandidate,
+    EligibleResponseBeforeClose,
+    SignedNoticeCandidate,
+    EligibleNoticeBeforeClose,
+    EligibleNoticeBeforeCloseWithCloseFault,
+}
+
+#[cfg(test)]
+struct OriginalInviteeStageGate {
+    invitation: InvitationId,
+    stage: OriginalInviteeStage,
+    entered: tokio::sync::oneshot::Sender<()>,
+    release: tokio::sync::oneshot::Receiver<()>,
+    fault_task: Option<
+        std::sync::Arc<
+            crate::runtime::services::issuer_error_custody::SynchronousCustodyCell<
+                Option<tokio::task::Id>,
+            >,
+        >,
+    >,
+}
+
 #[aura_macros::actor_owned(
     owner = "invitation_manager",
     domain = "invitation_cache",
@@ -155,6 +200,10 @@ impl Default for InvitationState {
     category = "actor_owned"
 )]
 pub struct InvitationManager {
+    #[cfg(test)]
+    #[allow(clippy::disallowed_types)]
+    // The named fixture gate is removed under this lock before awaiting.
+    original_invitee_stage_gate: parking_lot::Mutex<Option<OriginalInviteeStageGate>>,
     #[cfg(test)]
     #[allow(clippy::disallowed_types)]
     // Test gate transfer is synchronous and released before any await.
@@ -179,6 +228,9 @@ impl InvitationManager {
     /// Create a new invitation manager with an explicit cache bound.
     pub fn with_capacity(max_invitations: usize) -> Self {
         Self {
+            #[cfg(test)]
+            #[allow(clippy::disallowed_types)]
+            original_invitee_stage_gate: parking_lot::Mutex::new(None),
             #[cfg(test)]
             #[allow(clippy::disallowed_types)] // Synchronous test gate slot declared above.
             recovered_notice_crash_gate: parking_lot::Mutex::new(None),
@@ -207,10 +259,10 @@ impl InvitationManager {
                 .invitation_lru
                 .iter()
                 .find(|(_, id)| {
-                    matches!(
-                        state.invitations.get(*id),
-                        Some(CachedInvitationEntry::Observed(_))
-                    )
+                    state
+                        .invitations
+                        .get(*id)
+                        .is_some_and(CachedInvitationEntry::reapable_after_original_ack)
                 })
                 .map(|(tick, invitation_id)| (*tick, invitation_id.clone()))
             else {
@@ -351,6 +403,7 @@ impl InvitationManager {
                     state.invitations.get(&id),
                     Some(
                         CachedInvitationEntry::AdmittedEnrollment { .. }
+                            | CachedInvitationEntry::RequiredEnrollment { .. }
                             | CachedInvitationEntry::RecoveredNegative { .. }
                     )
                 ) {
@@ -372,6 +425,99 @@ impl InvitationManager {
             |_| Ok(()),
         )
         .await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_original_invitee_stage_gate_for_test(
+        &self,
+        invitation: InvitationId,
+        stage: OriginalInviteeStage,
+        fault_task: Option<
+            std::sync::Arc<
+                crate::runtime::services::issuer_error_custody::SynchronousCustodyCell<
+                    Option<tokio::task::Id>,
+                >,
+            >,
+        >,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let mut slot = self.original_invitee_stage_gate.lock();
+        assert!(
+            slot.is_none(),
+            "one original invitee stage gate per fixture"
+        );
+        *slot = Some(OriginalInviteeStageGate {
+            invitation,
+            stage,
+            entered,
+            release: released,
+            fault_task,
+        });
+        (observed, release)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn original_invitee_stage_matches_for_test(
+        &self,
+        invitation: &InvitationId,
+        stage: OriginalInviteeStage,
+    ) -> bool {
+        self.original_invitee_stage_gate
+            .lock()
+            .as_ref()
+            .is_some_and(|gate| gate.invitation == *invitation && gate.stage == stage)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn await_original_invitee_stage_gate_for_test(
+        &self,
+        invitation: &InvitationId,
+        stage: OriginalInviteeStage,
+    ) -> bool {
+        let gate = {
+            let mut slot = self.original_invitee_stage_gate.lock();
+            if slot
+                .as_ref()
+                .is_some_and(|gate| gate.invitation == *invitation && gate.stage == stage)
+            {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if let Some(gate) = gate {
+            let _ = gate.entered.send(());
+            let _ = gate.release.await;
+            if let Some(target) = gate.fault_task {
+                target.with(|target| *target = Some(tokio::task::id()));
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn cancel_original_required_enrollment_for_test(
+        &self,
+        invitation: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        use aura_core::effects::task::RequiredTaskControl;
+        let task = {
+            let state = self.state.read().await;
+            let Some(CachedInvitationEntry::RequiredEnrollment { task, .. }) =
+                state.invitations.get(invitation)
+            else {
+                return Err(owner_refused(InvitationExecutionOwnerError::Missing));
+            };
+            task.clone()
+        };
+        task.lock().await.request_cancel();
+        Ok(())
     }
 
     #[cfg(test)]
@@ -410,6 +556,7 @@ impl InvitationManager {
             state.invitations.get(&id),
             Some(
                 CachedInvitationEntry::AdmittedEnrollment { .. }
+                    | CachedInvitationEntry::RequiredEnrollment { .. }
                     | CachedInvitationEntry::RecoveredNegative { .. }
             )
         ) {
@@ -472,7 +619,11 @@ impl InvitationManager {
                     .get_mut(invitation_id)
                     .ok_or_else(|| owner_refused(InvitationExecutionOwnerError::Missing))?;
                 let observation = entry.invitation().clone();
-                if matches!(entry, CachedInvitationEntry::RecoveredNegative { .. }) {
+                if matches!(
+                    entry,
+                    CachedInvitationEntry::RecoveredNegative { .. }
+                        | CachedInvitationEntry::RequiredEnrollment { .. }
+                ) {
                     return Err(owner_refused(
                         InvitationExecutionOwnerError::AlreadyRetained,
                     ));
@@ -485,11 +636,243 @@ impl InvitationManager {
                     CachedInvitationEntry::RecoveredNegative { .. } => {
                         unreachable!("checked before transfer")
                     }
+                    CachedInvitationEntry::RequiredEnrollment { .. } => {
+                        unreachable!("checked before transfer")
+                    }
                 }
             },
             |_| Ok(()),
         )
         .await
+    }
+
+    /// Transfer the exact root into the caller's original required slot while
+    /// holding the invitation owner lock. A rejected synchronous admission
+    /// restores that same root before any cancellation point or observer sees
+    /// an unowned `Observed` entry.
+    #[cfg(test)]
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_required_invitee_task_custody",
+        receiver_type = InvitationManager,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn admit_admitted_enrollment<T, E, F>(
+        &self,
+        invitation_id: &InvitationId,
+        admit: F,
+    ) -> Result<T, E>
+    where
+        E: From<aura_core::AuraError>,
+        F: FnOnce(
+            EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+        ) -> Result<T, (EnrollmentExecutionRoot<AdmittedEnrollmentManifest>, E)>,
+    {
+        let mut state = self.state.write().await;
+        let entry = state
+            .invitations
+            .get_mut(invitation_id)
+            .ok_or_else(|| E::from(owner_refused(InvitationExecutionOwnerError::Missing)))?;
+        if matches!(
+            entry,
+            CachedInvitationEntry::RecoveredNegative { .. }
+                | CachedInvitationEntry::RequiredEnrollment { .. }
+        ) {
+            return Err(E::from(owner_refused(
+                InvitationExecutionOwnerError::AlreadyRetained,
+            )));
+        }
+        let observation = entry.invitation().clone();
+        match std::mem::replace(entry, CachedInvitationEntry::Observed(observation)) {
+            CachedInvitationEntry::AdmittedEnrollment { invitation, root } => match admit(*root) {
+                Ok(admitted) => Ok(admitted),
+                Err((root, source)) => {
+                    *entry = CachedInvitationEntry::AdmittedEnrollment {
+                        invitation,
+                        root: Box::new(root),
+                    };
+                    Err(source)
+                }
+            },
+            CachedInvitationEntry::Observed(_) => Err(E::from(owner_refused(
+                InvitationExecutionOwnerError::Missing,
+            ))),
+            CachedInvitationEntry::RecoveredNegative { .. } => {
+                unreachable!("recovered negative was refused before transfer")
+            }
+            CachedInvitationEntry::RequiredEnrollment { .. } => {
+                unreachable!("required enrollment was refused before transfer")
+            }
+        }
+    }
+
+    /// Admit the original required slot and deposit its only reconciliation
+    /// control in this manager before releasing the original root lock.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_required_invitee_task_custody",
+        receiver_type = InvitationManager,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn admit_required_enrollment<E, F>(
+        &self,
+        invitation_id: &InvitationId,
+        admit: F,
+    ) -> Result<(), E>
+    where
+        E: From<aura_core::AuraError>,
+        F: FnOnce(
+            EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+        ) -> Result<
+            crate::task_registry::OriginalRequiredTaskHandle,
+            (EnrollmentExecutionRoot<AdmittedEnrollmentManifest>, E),
+        >,
+    {
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let entry = state.invitations.get_mut(invitation_id).ok_or_else(|| {
+                    E::from(owner_refused(InvitationExecutionOwnerError::Missing))
+                })?;
+                if !matches!(entry, CachedInvitationEntry::AdmittedEnrollment { .. }) {
+                    return Err(E::from(owner_refused(
+                        InvitationExecutionOwnerError::AlreadyRetained,
+                    )));
+                }
+                let observation = entry.invitation().clone();
+                let CachedInvitationEntry::AdmittedEnrollment { invitation, root } =
+                    std::mem::replace(entry, CachedInvitationEntry::Observed(observation))
+                else {
+                    unreachable!("checked before transfer")
+                };
+                let admitted = root.origin_observation();
+                match admit(*root) {
+                    Ok(task) => {
+                        *entry = CachedInvitationEntry::RequiredEnrollment {
+                            invitation,
+                            admitted,
+                            task: std::sync::Arc::new(tokio::sync::Mutex::new(task)),
+                        };
+                        Ok(())
+                    }
+                    Err((root, source)) => {
+                        *entry = CachedInvitationEntry::AdmittedEnrollment {
+                            invitation,
+                            root: Box::new(root),
+                        };
+                        Err(source)
+                    }
+                }
+            },
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    pub(crate) async fn await_required_enrollment_cleanup(
+        &self,
+        invitation_id: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        let task = {
+            let state = self.state.read().await;
+            let Some(CachedInvitationEntry::RequiredEnrollment { task, .. }) =
+                state.invitations.get(invitation_id)
+            else {
+                return Err(owner_refused(InvitationExecutionOwnerError::Missing));
+            };
+            task.clone()
+        };
+        task.lock().await.await_original_cleanup_decision().await?;
+        // The retained control is removed only after the original required
+        // slot acknowledges cleanup. A canceled waiter never reaches this
+        // transition and leaves the manager-held control retryable.
+        self.release_acknowledged_required_enrollment(invitation_id, &task)
+            .await
+    }
+
+    async fn release_acknowledged_required_enrollment(
+        &self,
+        invitation_id: &InvitationId,
+        expected: &std::sync::Arc<
+            tokio::sync::Mutex<crate::task_registry::OriginalRequiredTaskHandle>,
+        >,
+    ) -> Result<(), aura_core::AuraError> {
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let entry = state
+                    .invitations
+                    .get_mut(invitation_id)
+                    .ok_or_else(|| owner_refused(InvitationExecutionOwnerError::Missing))?;
+                let CachedInvitationEntry::RequiredEnrollment {
+                    invitation, task, ..
+                } = entry
+                else {
+                    return Err(owner_refused(InvitationExecutionOwnerError::Missing));
+                };
+                if !std::sync::Arc::ptr_eq(task, expected) {
+                    return Err(owner_refused(InvitationExecutionOwnerError::ForeignBinding));
+                }
+                if !task
+                    .try_lock()
+                    .map_err(|_| owner_refused(InvitationExecutionOwnerError::AlreadyRetained))?
+                    .acknowledged()
+                {
+                    return Err(owner_refused(
+                        InvitationExecutionOwnerError::AlreadyRetained,
+                    ));
+                }
+                *entry = CachedInvitationEntry::Observed(invitation.clone());
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Retry cleanup through the same original admitted task slot. A failed
+    /// cleanup leaves the control and required custody in their original owners.
+    #[cfg(test)]
+    pub(crate) async fn reconcile_required_enrollment_cleanup(
+        &self,
+        invitation_id: &InvitationId,
+    ) -> Result<(), aura_core::AuraError> {
+        use aura_core::effects::task::RequiredTaskControl;
+        let task = {
+            let state = self.state.read().await;
+            let Some(CachedInvitationEntry::RequiredEnrollment { task, .. }) =
+                state.invitations.get(invitation_id)
+            else {
+                return Err(owner_refused(InvitationExecutionOwnerError::Missing));
+            };
+            task.clone()
+        };
+        {
+            let mut original = task.lock().await;
+            #[cfg(target_arch = "wasm32")]
+            original.reconcile_local().await?;
+            #[cfg(not(target_arch = "wasm32"))]
+            original.reconcile().await?;
+        }
+        self.release_acknowledged_required_enrollment(invitation_id, &task)
+            .await
+    }
+
+    pub(crate) async fn original_required_enrollment_exit_after_refusal(
+        &self,
+        invitation_id: &InvitationId,
+    ) -> Result<aura_core::effects::task::RequiredTaskExit, aura_core::AuraError> {
+        let task = {
+            let state = self.state.read().await;
+            let Some(CachedInvitationEntry::RequiredEnrollment { task, .. }) =
+                state.invitations.get(invitation_id)
+            else {
+                return Err(owner_refused(InvitationExecutionOwnerError::Missing));
+            };
+            task.clone()
+        };
+        let exit = task.lock().await.original_exit_after_cleanup_refusal();
+        exit
     }
 
     pub async fn contact_index_seeded(&self) -> bool {
@@ -568,6 +951,7 @@ mod tests {
     use super::*;
     use crate::core::default_context_id_for_authority;
     use aura_core::types::identifiers::AuthorityId;
+    use std::sync::Arc;
 
     fn invitation(seed: u8) -> Invitation {
         let sender_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -608,6 +992,534 @@ mod tests {
             .get_invitation(&InvitationId::new("invitation-3"))
             .await
             .is_some());
+    }
+
+    #[test]
+    fn rejected_original_slot_admission_restores_same_root_before_error_drop() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let (_issuer, invitee, admitted_invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "manager-rejected-original-slot",
+                ),
+            )
+            .await;
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&admitted_invitation.invitation_id)
+                .await
+                .unwrap();
+            let original = root.origin_observation();
+            let manager = InvitationManager::with_capacity(2);
+            manager.cache_admitted_enrollment(root).await.unwrap();
+            let refused = manager
+                .admit_admitted_enrollment(&admitted_invitation.invitation_id, |root| {
+                    Err::<(), _>((
+                        root,
+                        aura_core::AuraError::invalid("original task admission refused"),
+                    ))
+                })
+                .await
+                .expect_err("original admission refusal must restore custody");
+            drop(refused);
+            let retained = manager
+                .take_admitted_enrollment(&admitted_invitation.invitation_id)
+                .await
+                .expect("same original root remains retryable after refusal error drop");
+            assert!(Arc::ptr_eq(&original, &retained.origin_observation()));
+        });
+    }
+
+    #[test]
+    fn rejected_required_registration_rolls_back_original_invitee_root() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            use aura_core::effects::task::{
+                RequiredTaskCustody, RequiredTaskExit, RequiredTaskSettlement,
+            };
+            struct UnpolledRoot(EnrollmentExecutionRoot<AdmittedEnrollmentManifest>);
+            impl RequiredTaskCustody for UnpolledRoot {
+                fn execute(
+                    &mut self,
+                ) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>>
+                {
+                    panic!("rejected original invitee task must never execute")
+                }
+                fn cleanup<'a>(
+                    &'a mut self,
+                    _: &'a RequiredTaskExit,
+                ) -> futures::future::BoxFuture<
+                    'a,
+                    Result<RequiredTaskSettlement, aura_core::AuraError>,
+                > {
+                    panic!("rejected original invitee task has no cleanup registration")
+                }
+            }
+            let (_issuer, invitee, invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "manager-actual-rejected-original-slot",
+                ),
+            )
+            .await;
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let original = root.origin_observation();
+            let manager = InvitationManager::with_capacity(2);
+            manager.cache_admitted_enrollment(root).await.unwrap();
+            let supervisor = crate::runtime::TaskSupervisor::new();
+            let group = supervisor.group("rejected-original-invitee-registration");
+            let seal = group.seal_admission();
+            let refused = manager
+                .admit_admitted_enrollment(&invitation.invitation_id, |root| {
+                    let rejected = group
+                        .spawn_original_required_custody_typed(
+                            "invitee".into(),
+                            Box::new(UnpolledRoot(root)),
+                            None,
+                        )
+                        .err()
+                        .expect("sealed group refuses actual registration");
+                    let UnpolledRoot(root) = *rejected.obligation;
+                    Err::<(), _>((root, rejected.source))
+                })
+                .await
+                .expect_err("original required slot admission was refused");
+            drop(refused);
+            let retained = manager
+                .take_admitted_enrollment(&invitation.invitation_id)
+                .await
+                .expect("dropping refusal preserves exact original manager root");
+            assert!(Arc::ptr_eq(&original, &retained.origin_observation()));
+            drop(seal);
+        });
+    }
+
+    #[test]
+    fn dropped_original_result_waiter_retains_same_reconciliation_control() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            use aura_core::effects::task::{
+                RequiredTaskCustody, RequiredTaskExit, RequiredTaskSettlement,
+            };
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            struct OriginalInviteeProbe {
+                _root: EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+                cleanup_attempts: Arc<AtomicUsize>,
+                cleanup_started: Option<tokio::sync::oneshot::Sender<()>>,
+                cleanup_release: Option<tokio::sync::oneshot::Receiver<()>>,
+                retry_started: Option<tokio::sync::oneshot::Sender<()>>,
+                retry_release: Option<tokio::sync::oneshot::Receiver<()>>,
+            }
+            impl RequiredTaskCustody for OriginalInviteeProbe {
+                fn execute(
+                    &mut self,
+                ) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>>
+                {
+                    Box::pin(async { Ok(()) })
+                }
+                fn cleanup<'a>(
+                    &'a mut self,
+                    _: &'a RequiredTaskExit,
+                ) -> futures::future::BoxFuture<
+                    'a,
+                    Result<RequiredTaskSettlement, aura_core::AuraError>,
+                > {
+                    Box::pin(async move {
+                        let attempt = self.cleanup_attempts.fetch_add(1, Ordering::SeqCst);
+                        if attempt == 0 {
+                            if let Some(started) = self.cleanup_started.take() {
+                                let _ = started.send(());
+                            }
+                            if let Some(release) = self.cleanup_release.take() {
+                                release
+                                    .await
+                                    .map_err(|source| aura_core::AuraError::Internal {
+                                        message: "original cleanup release sender was lost".into(),
+                                        source: Some(Arc::new(source)),
+                                    })?;
+                            }
+                            return Err(aura_core::AuraError::invalid(
+                                "first original invitee cleanup failed",
+                            ));
+                        }
+                        if attempt == 1 {
+                            if let Some(started) = self.retry_started.take() {
+                                let _ = started.send(());
+                            }
+                            if let Some(release) = self.retry_release.take() {
+                                let _ = release.await;
+                            }
+                        }
+                        Ok(RequiredTaskSettlement::Resolved)
+                    })
+                }
+            }
+
+            let (_issuer, invitee, invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "manager-original-invitee-reconcile-after-waiter-drop",
+                ),
+            )
+            .await;
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let manager = InvitationManager::with_capacity(2);
+            manager.cache_admitted_enrollment(root).await.unwrap();
+            let supervisor = crate::runtime::TaskSupervisor::new();
+            let group = supervisor.group("original-invitee-manager-reconcile");
+            let attempts = Arc::new(AtomicUsize::new(0));
+            let (cleanup_started, started) = tokio::sync::oneshot::channel();
+            let (release_cleanup, cleanup_release) = tokio::sync::oneshot::channel();
+            let (retry_started, retry_entered) = tokio::sync::oneshot::channel();
+            let (_release_retry, retry_release) = tokio::sync::oneshot::channel();
+            manager
+                .admit_required_enrollment(&invitation.invitation_id, |root| {
+                    group
+                        .spawn_original_required_custody_typed(
+                            "invitee".into(),
+                            Box::new(OriginalInviteeProbe {
+                                _root: root,
+                                cleanup_attempts: attempts.clone(),
+                                cleanup_started: Some(cleanup_started),
+                                cleanup_release: Some(cleanup_release),
+                                retry_started: Some(retry_started),
+                                retry_release: Some(retry_release),
+                            }),
+                            None,
+                        )
+                        .map_err(|rejected| {
+                            let OriginalInviteeProbe { _root, .. } = *rejected.obligation;
+                            (_root, rejected.source)
+                        })
+                })
+                .await
+                .expect("original required slot admitted under manager lock");
+            drop(group);
+            started
+                .await
+                .expect("actual original cleanup entered its first attempt");
+            let mut waiter =
+                Box::pin(manager.await_required_enrollment_cleanup(&invitation.invitation_id));
+            assert!(
+                futures::poll!(waiter.as_mut()).is_pending(),
+                "waiter observes actual pending cleanup"
+            );
+            drop(waiter);
+            release_cleanup
+                .send(())
+                .expect("original cleanup still owns release receiver");
+            let first = manager
+                .await_required_enrollment_cleanup(&invitation.invitation_id)
+                .await
+                .expect_err("actual first cleanup failure remains typed");
+            assert!(matches!(
+                first,
+                aura_core::AuraError::Invalid { message, .. }
+                    if message == "first original invitee cleanup failed"
+            ));
+            assert!(matches!(
+                manager
+                    .state
+                    .read()
+                    .await
+                    .invitations
+                    .get(&invitation.invitation_id),
+                Some(CachedInvitationEntry::RequiredEnrollment { .. })
+            ));
+            let mut interrupted =
+                Box::pin(manager.reconcile_required_enrollment_cleanup(&invitation.invitation_id));
+            assert!(futures::poll!(interrupted.as_mut()).is_pending());
+            retry_entered
+                .await
+                .expect("same original cleanup entered retry");
+            drop(interrupted);
+            assert!(matches!(
+                manager
+                    .state
+                    .read()
+                    .await
+                    .invitations
+                    .get(&invitation.invitation_id),
+                Some(CachedInvitationEntry::RequiredEnrollment { .. })
+            ));
+            manager
+                .reconcile_required_enrollment_cleanup(&invitation.invitation_id)
+                .await
+                .expect("same manager-held original control settles after canceled retry waiter");
+            assert_eq!(attempts.load(Ordering::SeqCst), 3);
+            assert!(matches!(
+                manager
+                    .state
+                    .read()
+                    .await
+                    .invitations
+                    .get(&invitation.invitation_id),
+                Some(CachedInvitationEntry::Observed(_))
+            ));
+        });
+    }
+
+    #[test]
+    fn acknowledged_required_slot_without_caller_observer_releases_bounded_cache_capacity() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            use aura_core::effects::task::{
+                RequiredTaskCustody, RequiredTaskExit, RequiredTaskSettlement,
+            };
+            struct SettledOriginalRoot(EnrollmentExecutionRoot<AdmittedEnrollmentManifest>);
+            impl RequiredTaskCustody for SettledOriginalRoot {
+                fn execute(
+                    &mut self,
+                ) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>>
+                {
+                    Box::pin(async { Ok(()) })
+                }
+                fn cleanup<'a>(
+                    &'a mut self,
+                    _: &'a RequiredTaskExit,
+                ) -> futures::future::BoxFuture<
+                    'a,
+                    Result<RequiredTaskSettlement, aura_core::AuraError>,
+                > {
+                    Box::pin(async { Ok(RequiredTaskSettlement::Resolved) })
+                }
+            }
+            let (_issuer, invitee, admitted_invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "manager-canceled-success-reaps-only-after-original-ack",
+                ),
+            )
+            .await;
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&admitted_invitation.invitation_id)
+                .await
+                .unwrap();
+            let manager = InvitationManager::with_capacity(1);
+            manager.cache_admitted_enrollment(root).await.unwrap();
+            let supervisor = crate::runtime::TaskSupervisor::new();
+            let group = supervisor.group("manager-canceled-success");
+            manager
+                .admit_required_enrollment(&admitted_invitation.invitation_id, |root| {
+                    group
+                        .spawn_original_required_custody_typed(
+                            "invitee".into(),
+                            Box::new(SettledOriginalRoot(root)),
+                            None,
+                        )
+                        .map_err(|rejected| {
+                            let SettledOriginalRoot(root) = *rejected.obligation;
+                            (root, rejected.source)
+                        })
+                })
+                .await
+                .expect("exact original slot admitted");
+            let waiter =
+                manager.await_required_enrollment_cleanup(&admitted_invitation.invitation_id);
+            drop(waiter);
+            let original = {
+                let state = manager.state.read().await;
+                let Some(CachedInvitationEntry::RequiredEnrollment { task, .. }) =
+                    state.invitations.get(&admitted_invitation.invitation_id)
+                else {
+                    panic!("original control retained")
+                };
+                task.clone()
+            };
+            original
+                .lock()
+                .await
+                .await_original_cleanup_decision()
+                .await
+                .expect("actual cleanup ACK");
+            drop(original);
+            manager.cache_invitation(invitation(91)).await;
+            assert!(
+                manager
+                    .get_invitation(&admitted_invitation.invitation_id)
+                    .await
+                    .is_none(),
+                "ACKed original slot with no waiter is eligible for bounded eviction"
+            );
+            assert!(manager
+                .get_invitation(&InvitationId::new("invitation-91"))
+                .await
+                .is_some());
+        });
+    }
+
+    #[test]
+    fn cancelled_original_execution_without_result_retains_exit_and_cleanup_refusal() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            use aura_core::effects::task::{
+                RequiredTaskControl, RequiredTaskCustody, RequiredTaskExit, RequiredTaskSettlement,
+            };
+            struct PendingOriginalRoot {
+                _root: EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+                started: Option<tokio::sync::oneshot::Sender<()>>,
+                _unpublished_reply: tokio::sync::oneshot::Sender<()>,
+            }
+            impl RequiredTaskCustody for PendingOriginalRoot {
+                fn execute(
+                    &mut self,
+                ) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>>
+                {
+                    Box::pin(async move {
+                        if let Some(started) = self.started.take() {
+                            let _ = started.send(());
+                        }
+                        futures::future::pending::<()>().await;
+                        unreachable!("cancelled original execution cannot publish result")
+                    })
+                }
+                fn cleanup<'a>(
+                    &'a mut self,
+                    _: &'a RequiredTaskExit,
+                ) -> futures::future::BoxFuture<
+                    'a,
+                    Result<RequiredTaskSettlement, aura_core::AuraError>,
+                > {
+                    Box::pin(async {
+                        Err(aura_core::AuraError::invalid(
+                            "original cancelled cleanup refused",
+                        ))
+                    })
+                }
+            }
+            let (_issuer, invitee, invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "manager-cancel-before-original-public-reply",
+                ),
+            )
+            .await;
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let manager = InvitationManager::with_capacity(1);
+            manager.cache_admitted_enrollment(root).await.unwrap();
+            let supervisor = crate::runtime::TaskSupervisor::new();
+            let group = supervisor.group("original-invitee-cancel-before-reply");
+            let (started_tx, started) = tokio::sync::oneshot::channel();
+            let (reply_tx, mut reply) = tokio::sync::oneshot::channel();
+            manager
+                .admit_required_enrollment(&invitation.invitation_id, |root| {
+                    group
+                        .spawn_original_required_custody_typed(
+                            "invitee".into(),
+                            Box::new(PendingOriginalRoot {
+                                _root: root,
+                                started: Some(started_tx),
+                                _unpublished_reply: reply_tx,
+                            }),
+                            None,
+                        )
+                        .map_err(|rejected| {
+                            let PendingOriginalRoot { _root, .. } = *rejected.obligation;
+                            (_root, rejected.source)
+                        })
+                })
+                .await
+                .expect("real original task slot admitted");
+            started
+                .await
+                .expect("actual execution entered before cancellation");
+            let task = {
+                let state = manager.state.read().await;
+                let Some(CachedInvitationEntry::RequiredEnrollment { task, .. }) =
+                    state.invitations.get(&invitation.invitation_id)
+                else {
+                    panic!("original handle remains manager-owned")
+                };
+                task.clone()
+            };
+            task.lock().await.request_cancel();
+            drop(task);
+            let cleanup = manager
+                .await_required_enrollment_cleanup(&invitation.invitation_id)
+                .await
+                .expect_err("actual cancelled cleanup refusal remains retained");
+            assert!(
+                matches!(cleanup, aura_core::AuraError::Invalid { message, .. } if message == "original cancelled cleanup refused")
+            );
+            assert!(
+                matches!(
+                    reply.try_recv(),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+                ),
+                "original owner still retains unpublished reply; awaiting it would hang"
+            );
+            assert!(matches!(
+                manager
+                    .original_required_enrollment_exit_after_refusal(&invitation.invitation_id)
+                    .await
+                    .unwrap(),
+                RequiredTaskExit::Cancelled
+            ));
+            assert!(
+                matches!(
+                    manager
+                        .state
+                        .read()
+                        .await
+                        .invitations
+                        .get(&invitation.invitation_id),
+                    Some(CachedInvitationEntry::RequiredEnrollment { .. })
+                ),
+                "failed cleanup cannot release original root or control"
+            );
+        });
+    }
+
+    #[test]
+    fn canceled_original_slot_waiter_cannot_take_root_before_manager_lock() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let (_issuer, invitee, invitation, _, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "manager-canceled-original-slot",
+                ),
+            )
+            .await;
+            let root = invitee
+                .invitations()
+                .unwrap()
+                .take_original_enrollment_execution(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let original = root.origin_observation();
+            let manager = InvitationManager::with_capacity(2);
+            manager.cache_admitted_enrollment(root).await.unwrap();
+            let held = manager.state.write().await;
+            let mut pending = Box::pin(manager.admit_admitted_enrollment(
+                &invitation.invitation_id,
+                |root| {
+                    Ok::<
+                        _,
+                        (
+                            EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+                            aura_core::AuraError,
+                        ),
+                    >(root)
+                },
+            ));
+            assert!(futures::poll!(pending.as_mut()).is_pending());
+            drop(pending);
+            drop(held);
+            let retained = manager
+                .take_admitted_enrollment(&invitation.invitation_id)
+                .await
+                .expect("canceled waiter never removed original root");
+            assert!(Arc::ptr_eq(&original, &retained.origin_observation()));
+        });
     }
 
     #[test]

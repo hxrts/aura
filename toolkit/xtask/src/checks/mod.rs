@@ -104,6 +104,7 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "secret-persistence-boundary" => policy::run_secret_persistence_boundary(),
         "secret-field-wrappers" => policy::run_secret_field_wrappers(),
         "security-exception-metadata" => policy::run_security_exception_metadata(),
+        "production-key-provider" => required_secret_lifetime::run_production_key_provider(),
         "secret-lifetime-regressions" => required_secret_lifetime::run(),
         "runtime-boundary-allowlist" => policy::run_runtime_boundary_allowlist(args),
         "runtime-error-boundary" => policy::run_runtime_error_boundary(),

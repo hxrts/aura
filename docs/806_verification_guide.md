@@ -30,6 +30,37 @@ Validate evaluator upgrades with `cargo check -p aura-quint --all-targets` and
 `cargo test -p aura-quint`. Retain an immutable resolved git revision; no local
 path override or fork is required for this accepted upstream dependency.
 
+## Verification wrapper evidence
+
+`just ci-quint-typecheck` first runs fake-command wrapper contracts, then runs
+`just quint check`. The latter recursively enumerates both declared roots,
+`verification/quint/` and `crates/aura-simulator/tests/quint_specs/`, prints each
+selected path, and fails if any typecheck fails. No subsystem is exempted;
+unsupported specifications remain explicit failures requiring disposition.
+
+`just quint models` retains its narrower selection: top-level Quint source
+files are typechecked, followed by the three named bounded consensus invariant
+checks. It does not certify nested specifications or unselected invariants.
+Trace generation stages output privately and replaces it only after successful
+generation/normalization; setup and trace checks retire their own temporary
+artifacts on success and failure.
+
+`quint-observation.sh` reuses the trace helper with its original main, seed,
+and 16-step limit. It validates the complete expected phase sequence and stages
+the scenario before publishing either output. Trace and scenario publication
+are individually atomic replacements, not an atomic pair: if the second rename
+fails, the command fails and reports that the trace was already published.
+Consumers must require successful completion before using the pair.
+
+`just verification-coverage --json` emits schema version 2. This is a source
+inventory, with `evidence.status` equal to `unknown` and `receipts_consumed`
+false. The former `metrics.verified_specs` field is intentionally removed;
+`metrics.ci_source_spec_mentions` counts configured source mentions, not executed
+proofs. The existing `quint_specs` metric covers `verification/quint/` only.
+Markdown reports likewise distinguish declarations from execution evidence.
+Actual model, Lean, host lifecycle, and cryptographic verification require their
+own source-bound receipts; source names and counts cannot substitute for them.
+
 ## Writing Quint Specifications
 
 ### Getting Started

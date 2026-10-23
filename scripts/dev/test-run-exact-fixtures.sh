@@ -68,6 +68,36 @@ jq -e '([.phases[] | select(.phase=="execution" and .failed_count==1)] | length)
   ([.phases[] | select(.phase=="discovery" and .inventory_result=="matched")] | length)==2 and
   ([.phases[].phase]==["compile","discovery","discovery","execution"])' \
   "$AURA_BUILD_RECEIPT" >/dev/null
+# Decisive-first is explicit: compile once, discover/execute the checkpoint,
+# then retain complete adjacent discovery/execution and refusal obligations.
+aura_receipt_init "$project" ownership-exact bash exact-decisive
+before=$(wc -l < "$COMPILE_COUNTER" | tr -d ' ')
+run_exact --decisive-name suite::one > "$fixture/output"
+[[ $(wc -l < "$COMPILE_COUNTER" | tr -d ' ') == $((before + 1)) ]]
+jq -e '.metadata.decisive_name=="suite::one" and
+  [.phases[].phase]==["compile","discovery","execution","discovery","execution"] and
+  [.phases[]|select(.phase=="execution")|.expected_tests[0]]==["suite::one","suite::two"]' "$AURA_BUILD_RECEIPT" >/dev/null
+aura_receipt_init "$project" ownership-exact bash exact-decisive-failure
+if FAIL_NAME=suite::one run_exact --decisive-name suite::one > "$fixture/output" 2>&1; then exit 1; fi
+jq -e '[.phases[].phase]==["compile","discovery","execution"] and .phases[-1].failed_count==1' "$AURA_BUILD_RECEIPT" >/dev/null
+aura_receipt_init "$project" ownership-exact bash exact-decisive-missing-adjacent
+if MISSING_NAME=suite::two run_exact --decisive-name suite::one > "$fixture/output" 2>&1; then exit 1; fi
+jq -e '[.phases[].phase]==["compile","discovery","execution","discovery"] and
+  .phases[-1].inventory_result=="mismatch" and
+  ([.phases[]|select(.phase=="execution")]|length)==1' "$AURA_BUILD_RECEIPT" >/dev/null
+aura_receipt_init "$project" ownership-exact bash exact-decisive-missing-checkpoint
+if MISSING_NAME=suite::one run_exact --decisive-name suite::one > "$fixture/output" 2>&1; then exit 1; fi
+jq -e '[.phases[].phase]==["compile","discovery"] and .phases[-1].inventory_result=="mismatch"' "$AURA_BUILD_RECEIPT" >/dev/null
+cp "$project/Cargo.toml" "$fixture/decisive-original-Cargo.toml"
+aura_receipt_init "$project" ownership-exact bash exact-decisive-source-change
+if MUTATE_NAME=suite::one run_exact --decisive-name suite::one > "$fixture/output" 2>&1; then exit 1; fi
+jq -e '[.phases[].phase]==["compile","discovery"]' "$AURA_BUILD_RECEIPT" >/dev/null
+cp "$fixture/decisive-original-Cargo.toml" "$project/Cargo.toml"
+for invalid in suite::two suite::absent; do
+  before=$(wc -l < "$COMPILE_COUNTER" | tr -d ' ')
+  if run_exact --decisive-name "$invalid" > "$fixture/output" 2>&1; then exit 1; fi
+  [[ $(wc -l < "$COMPILE_COUNTER" | tr -d ' ') == "$before" ]]
+done
 cp "$project/Cargo.toml" "$fixture/original-Cargo.toml"
 aura_receipt_init "$project" ownership-exact bash exact-fixtures
 if MUTATE_NAME=suite::one run_exact > "$fixture/output" 2>&1; then exit 1; fi

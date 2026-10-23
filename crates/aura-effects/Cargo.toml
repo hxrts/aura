@@ -18,15 +18,19 @@ workspace = true
 
 [features]
 default = []
-simulation = ["aura-core/simulation"]
+# Explicit unattended development/test key provider; excluded from production.
+development-keys = []
+# Canonical shipping builds select this marker; incompatible dev features fail compilation.
+production-build = []
+simulation = ["aura-core/simulation", "development-keys"]
 # Test-only protected profile replay. Never enable in deployable targets.
 simulator-checkpoint = ["simulation"]
 telltale-runtime-capability = ["dep:telltale-machine"]
 transparent_onion = ["aura-core/transparent_onion"]
-test-support = []
+test-support = ["development-keys"]
 # Route platform keyring entries to a file-backed test store. Enable only
 # through dev-dependencies: test binaries must never open the real keychain.
-test-keyring = []
+test-keyring = ["development-keys"]
 # Opt-in isolated-account diagnostic binary; absent from deployable feature graphs.
 os-keychain-diagnostic = []
 
@@ -34,6 +38,11 @@ os-keychain-diagnostic = []
 name = "aura-os-keychain-diagnostic"
 path = "src/bin/os_keychain_diagnostic.rs"
 required-features = ["os-keychain-diagnostic"]
+
+[[test]]
+name = "secure_immutable_publication"
+path = "tests/secure_immutable_publication.rs"
+required-features = ["development-keys"]
 
 [dependencies]
 aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }

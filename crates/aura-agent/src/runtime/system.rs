@@ -59,6 +59,16 @@ use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Simulator-only classification of the original selected reactive owner.
+/// An observation does not authorize clock progress or restore a task.
+#[cfg(feature = "simulator-checkpoint")]
+pub enum SelectedSchedulerBatchObservation {
+    ForeignSelectedProvider,
+    PipelineUnavailable,
+    NoPendingBatch,
+    Pending(crate::reactive::SchedulerBatchDeadlineWitness),
+}
 const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_LAN_FRAME_BYTES: usize = 128 * 1024;
@@ -1256,6 +1266,45 @@ impl RuntimeSystem {
     /// Check whether the service-owned reactive pipeline is running.
     pub async fn reactive_pipeline_running(&self) -> bool {
         self.reactive_pipeline_service.is_running().await
+    }
+
+    /// Simulator-only observation from this runtime's original scheduler,
+    /// refused for an equal-valued but foreign selected physical provider.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub async fn selected_scheduler_batch_deadline_witness(
+        &self,
+        selected: &Arc<dyn PhysicalTimeEffects>,
+    ) -> SelectedSchedulerBatchObservation {
+        if !self
+            .effect_system
+            .time_effects()
+            .selected_provider_is(selected)
+        {
+            return SelectedSchedulerBatchObservation::ForeignSelectedProvider;
+        }
+        if !self.reactive_pipeline_service.is_running().await {
+            return SelectedSchedulerBatchObservation::PipelineUnavailable;
+        }
+        match self
+            .reactive_pipeline_service
+            .current_batch_deadline_witness()
+            .await
+        {
+            Some(witness) => SelectedSchedulerBatchObservation::Pending(witness),
+            None => SelectedSchedulerBatchObservation::NoPendingBatch,
+        }
+    }
+
+    /// Read the actual original issuer transport retry owner. Broker
+    /// registration and selected timer custody must be checked separately.
+    #[cfg(all(feature = "simulator-checkpoint", not(target_arch = "wasm32")))]
+    pub fn original_pending_mailbox_retry_witness(
+        &self,
+        selected: &Arc<dyn PhysicalTimeEffects>,
+        selector: (AuthorityId, DeviceId, [u8; 32]),
+    ) -> crate::runtime::effects::OriginalPendingMailboxRetryObservation {
+        self.effect_system
+            .observe_original_pending_mailbox_retry(selected, selector)
     }
 
     /// Exercise failure of this runtime's actual publication owner without

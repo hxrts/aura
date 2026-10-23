@@ -143,7 +143,7 @@ aura_web_selected_tools_match() {
     done < "$inventory"
 }
 
-aura_web_build_args=(build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness)
+aura_web_build_args=(build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness,production-build)
 aura_web_build_command="dx ${aura_web_build_args[*]}"
 
 aura_web_write_prebuilt_provenance() {
