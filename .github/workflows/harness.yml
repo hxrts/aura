@@ -3,6 +3,11 @@ run-name: ci/deep-harness/${{ github.event_name }}
 
 on:
   workflow_dispatch:
+    inputs:
+      bootstrap_checkpoint:
+        description: Run only the exact bootstrap mailbox checkpoint inventory
+        type: boolean
+        default: false
   push:
     branches: [main, develop]
     paths-ignore:
@@ -16,7 +21,43 @@ env:
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
+  bootstrap-checkpoint:
+    name: Bootstrap Mailbox Exact Fixtures
+    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap_checkpoint == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-nix
+      - name: Compile, discover, execute and replay the first failure
+        run: |
+          nix develop .#ci --command bash scripts/dev/run-exact-fixtures.sh \
+            --lane bootstrap-checkpoint \
+            --package aura-simulator --test bootstrap_delivery_checkpoint \
+            --replay-first-failure --expected-count 4 \
+            --decisive-name bootstrap_checkpoint_canonical_contact_and_enrollment_dispatch \
+            --name bootstrap_checkpoint_canonical_contact_and_enrollment_dispatch \
+            --name bootstrap_checkpoint_cancellation_preserves_other_device_delivery \
+            --name bootstrap_checkpoint_two_device_credentials_refresh_and_one_use \
+            --name bootstrap_checkpoint_wrong_purpose_foreign_recipient_and_verification_refuse
+        env:
+          CARGO_BUILD_JOBS: 4
+          CARGO_PROFILE_DEV_DEBUG: 0
+          CARGO_PROFILE_TEST_DEBUG: 0
+          CARGO_INCREMENTAL: 0
+      - name: Retain original receipts and compiled fixture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-checkpoint-${{ github.run_id }}
+          path: |
+            artifacts/disk-budget/receipts
+            target/debug/deps/bootstrap_delivery_checkpoint-*
+          if-no-files-found: error
+
   build:
+    if: inputs.bootstrap_checkpoint != true
     name: Harness Build
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +72,7 @@ jobs:
           replay-command: nix develop --command just ci-harness-build
 
   contract:
+    if: inputs.bootstrap_checkpoint != true
     name: Harness Contract
     runs-on: ubuntu-latest
     steps:
@@ -45,6 +87,7 @@ jobs:
           replay-command: nix develop --command just ci-harness-contract
 
   ui-state-evented:
+    if: inputs.bootstrap_checkpoint != true
     name: Harness UI Evented
     runs-on: ubuntu-latest
     steps:
@@ -59,6 +102,7 @@ jobs:
           replay-command: nix develop .#ci --command just ci-harness-ui-state-evented
 
   matrix-inventory:
+    if: inputs.bootstrap_checkpoint != true
     name: Harness Matrix Inventory
     runs-on: ubuntu-latest
     steps:
@@ -73,6 +117,7 @@ jobs:
           replay-command: nix develop --command just ci-harness-matrix-inventory
 
   shared-intent:
+    if: inputs.bootstrap_checkpoint != true
     name: Harness Shared Intent
     runs-on: ubuntu-latest
     steps:
@@ -88,7 +133,7 @@ jobs:
 
   replay:
     name: Harness Replay
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && inputs.bootstrap_checkpoint != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +147,7 @@ jobs:
           replay-command: nix develop --command just ci-harness-replay
 
   browser:
+    if: inputs.bootstrap_checkpoint != true
     name: Harness Browser
     runs-on: ubuntu-latest
     steps:
@@ -126,7 +172,7 @@ jobs:
 
   matrix-tui:
     name: Harness Matrix TUI
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && inputs.bootstrap_checkpoint != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +187,7 @@ jobs:
 
   matrix-web:
     name: Harness Matrix Web
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && inputs.bootstrap_checkpoint != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -421,6 +421,7 @@
             # Development tools
             git
             jq
+            b3sum # Protected exact-fixture artifact identities
             ripgrep
             rustup
 
@@ -569,6 +570,7 @@
             # Development tools
             git
             jq
+            b3sum # Protected exact-fixture artifact identities
             ripgrep
             rustup
 
@@ -638,6 +640,7 @@
             git
             ripgrep
             jq
+            b3sum # Protected exact-fixture artifact identities
 
             # Build tools
             pkg-config

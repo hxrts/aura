@@ -3687,3 +3687,24 @@ per-round reads and retry delay. At the actual test issuance boundary, equal
 signed bytes in a foreign notice allocation are refused and original allocation
 start/signed-expiry-attenuated deadline are checked. These are additional
 assertions inside existing fixtures, not new discovered tests or execution proof.
+
+### Hosted bootstrap mailbox fixture feedback
+
+The existing deep-harness workflow has a manual `bootstrap_checkpoint` mode for
+an isolated native simulator checkpoint. Dispatch the candidate revision with
+`gh workflow run harness.yml --ref <candidate> -f bootstrap_checkpoint=true`.
+This mode runs only the four exact `bootstrap_delivery_checkpoint` fixtures;
+the default manual, push and scheduled harness campaigns remain unchanged.
+
+The maintained exact-fixture runner compiles that test target, discovers its
+exact names and count, and executes the decisive case immediately. With
+`--replay-first-failure`, a failure is replayed once against the same held binary
+only after its source/configuration/helper/inventory and binary identities still
+match. The original failure remains the workflow result even if replay differs.
+Receipts and the compiled executable are uploaded for source-bound review.
+
+Use this lane when existing local admission is unavailable; it is component
+feedback on real in-process runtimes, not full workspace acceptance, a real
+network-lab result, or a replacement for required production/ownership gates.
+Missing or ignored fixtures cannot satisfy its inventory. Keep baseline and
+corrected candidate evidence separate, including any workflow-only source delta.
