@@ -98,7 +98,7 @@ ciborium = "0.2.2"
 
 # Async runtime
 # Pin futures to 0.3.31 — 0.3.32 has ambiguous Self::Error on Rust 1.93
-tokio = { version = "1.49", default-features = false, features = [
+tokio = { version = "1.53.3", default-features = false, features = [
     "io-util", "macros", "rt", "sync", "time",
 ] }
 futures = "=0.3.31"

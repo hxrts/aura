@@ -28670,12 +28670,12 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "tokio" = rec {
         crateName = "tokio";
-        version = "1.53.2";
+        version = "1.53.3";
         edition = "2021";
         description = "An event-driven, non-blocking I/O platform for writing asynchronous I/O
 backed applications.
 ";
-        sha256 = "0i202ksji8q2asvii0adzgi8m0z93z3j7apn62qfh8d6qzy92pz9";
+        sha256 = "0kny1nnbpy11dllv6ncxy3n804wh0ddn3msq78rxl744f7x3acyf";
         authors = [
           "Tokio Contributors <team@tokio.rs>"
         ];
