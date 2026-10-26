@@ -2308,7 +2308,8 @@ mod original_shortcut_delivery_tests {
                 crate::runtime::services::bootstrap_broker::BootstrapBrokerLanBindPolicy::LoopbackOnly,
             )
             .await
-            .expect("authenticated loopback broker binds");
+            .expect("authenticated loopback broker binds")
+            .with_mailbox_time_provider(std::sync::Arc::new(clock.clone()));
             broker_service.start(&issuer.runtime().tasks().group("shortcut-external-broker"));
             tokio::task::yield_now().await;
             let broker_config =

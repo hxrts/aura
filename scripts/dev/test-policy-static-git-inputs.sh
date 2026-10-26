@@ -6,6 +6,10 @@ source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
 source "$repo_root/scripts/dev/build-receipt.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/aura-static-git.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
+# This fixture owns its Git user configuration; ambient filters remain refused
+# by production helpers and must not contaminate the isolated happy path.
+mkdir -p "$fixture/home" "$fixture/xdg"
+export HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/xdg"
 project="$fixture/project"
 mkdir -p "$project"
 project="$(cd "$project" && pwd -P)"
@@ -80,6 +84,14 @@ if policy_static_git_identity "$project" > "$fixture/output"; then
   echo 'external diff driver was accepted' >&2; exit 1
 fi
 git -C "$project" config --unset diff.fixture.command
+git config --global filter.fixture.clean /bin/true
+[[ "$(git config --global --get filter.fixture.clean)" == /bin/true ]]
+global_filter_status=0
+policy_static_git_identity "$project" > "$fixture/output" || global_filter_status=$?
+[[ "$global_filter_status" == 2 && ! -s "$fixture/output" ]] || {
+  echo 'global external Git filter did not produce its original refusal' >&2; exit 1;
+}
+git config --global --unset filter.fixture.clean
 git -C "$project" config include.path "$fixture/other-config"
 if policy_static_git_identity "$project" > "$fixture/output"; then
   echo 'external Git config include was accepted' >&2; exit 1
