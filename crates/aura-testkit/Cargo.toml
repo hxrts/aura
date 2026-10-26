@@ -93,3 +93,7 @@ harness = false
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 aura-build-support = { path = "../../toolkit/test-support" }
+
+[[example]]
+name = "generate_tree_scalability_fixture"
+path = "examples/generate_tree_scalability_fixture.rs"
