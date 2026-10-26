@@ -2149,3 +2149,245 @@ fn diagnostic_capture_paths_do_not_peek_legacy_screen_field_names() {
         "executor diagnostics must not peek ambiguous normalized_screen fields"
     );
 }
+
+#[cfg(unix)]
+fn runtime_event_dispatch_fixture(
+    facts: Vec<RuntimeFact>,
+    expected: &str,
+    kind: RuntimeEventKind,
+    capture: bool,
+) -> (Result<()>, ScenarioContext) {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    let temp = tempfile::tempdir().expect("runtime event fixture root");
+    let config: RunConfig = serde_json::from_value(json!({
+        "schema_version": 1,
+        "run": {"name": "runtime-event-dispatch", "artifact_dir": temp.path().join("artifacts")},
+        "instances": [{"id":"alice", "mode":"local", "data_dir":temp.path().join("profile"),
+            "bind_address":"127.0.0.1:41001", "command":"cat", "args":[]}]
+    }))
+    .expect("fixture config");
+    let coordinator = HarnessCoordinator::from_run_config(&config).expect("coordinator");
+    let socket = coordinator
+        .instance_transient_dir("alice")
+        .expect("transient root")
+        .join("tui/u1.sock");
+    let mut api = ToolApi::new(coordinator);
+    api.start_all().expect("start original backend");
+    let result: Result<(Result<()>, ScenarioContext)> = (|| {
+        let mut snapshot = UiSnapshot::loading(ScreenId::Contacts);
+        snapshot.runtime_events = facts
+            .into_iter()
+            .enumerate()
+            .map(|(index, fact)| RuntimeEventSnapshot {
+                id: RuntimeEventId::synthetic(format!("runtime-event-fixture-{index}")),
+                fact,
+            })
+            .collect();
+        let mut stream = UnixStream::connect(socket)?;
+        stream.write_all(&serde_json::to_vec(&snapshot)?)?;
+        stream.shutdown(std::net::Shutdown::Write)?;
+        drop(stream);
+        // The actual backend acknowledges receipt of the selected snapshot.
+        let received = api
+            .wait_for_ui_snapshot_event("alice", Duration::from_secs(1), None)?
+            .ok_or_else(|| anyhow!("snapshot not acknowledged"))?;
+        if received.snapshot != snapshot {
+            bail!("original backend acknowledged a different snapshot");
+        }
+        let step = SemanticStep {
+            id: "runtime-event-detail".into(),
+            actor: Some(aura_app::scenario_contract::ActorId("alice".into())),
+            timeout_ms: None,
+            action: SemanticAction::Expect(Expectation::RuntimeEventOccurred {
+                kind,
+                detail_contains: Some(expected.into()),
+                capture_name: capture.then(|| "captured".into()),
+            }),
+        };
+        let mut context = ScenarioContext::default();
+        let outcome = execute_semantic_step(
+            &step,
+            ExecutionLane::SharedSemantic,
+            &mut api,
+            0,
+            &mut DeterministicRng::new(1),
+            &mut DeterministicRng::new(2),
+            &mut context,
+        );
+        Ok((outcome, context))
+    })();
+    let cleanup = api.stop_all();
+    cleanup.expect("actual backend cleanup");
+    result.expect("fixture setup")
+}
+
+#[cfg(unix)]
+#[test]
+fn semantic_runtime_event_dispatch_preserves_relay_and_generation_constraints() {
+    let fact = |path: &str, network_generation| RuntimeFact::PeerPathSelected {
+        peer_authority_id: "peer".into(),
+        path: path.into(),
+        protocol: "tcp".into(),
+        candidate_generation: 0,
+        network_generation,
+    };
+    for (observed, needle, succeeds) in [
+        (fact("direct", 0), "relay", false),
+        (fact("relay", 0), "network_generation:1", false),
+        (fact("relay", 0), "relay", true),
+        (fact("direct", 1), "network_generation:1", true),
+    ] {
+        let (result, _) = runtime_event_dispatch_fixture(
+            vec![observed],
+            needle,
+            RuntimeEventKind::PeerPathSelected,
+            false,
+        );
+        assert_eq!(result.is_ok(), succeeds, "detail={needle}: {result:?}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn semantic_runtime_event_dispatch_captures_only_matching_invitation_record() {
+    let invitation = |receiver: &str, code: Option<&str>| RuntimeFact::InvitationCodeReady {
+        receiver_authority_id: Some(receiver.into()),
+        source_operation: OperationId::invitation_create(),
+        code: code.map(str::to_string),
+    };
+    for code in [Some("original-code"), None] {
+        let (result, context) = runtime_event_dispatch_fixture(
+            vec![
+                invitation("selected-recipient", code),
+                invitation("foreign-recipient", Some("foreign-code")),
+            ],
+            "selected-recipient",
+            RuntimeEventKind::InvitationCodeReady,
+            true,
+        );
+        assert_eq!(result.is_ok(), code.is_some());
+        assert_eq!(context.vars.get("captured").map(String::as_str), code);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn semantic_runtime_event_dispatch_keeps_matching_enrollment_payload_together() {
+    let enrollment =
+        |name: &str, code: Option<&str>, complete: bool| RuntimeFact::DeviceEnrollmentCodeReady {
+            device_name: Some(name.into()),
+            code_len: code.map(|code| code.len() as u64),
+            code: code.map(str::to_string),
+            manifest_transfer: complete.then(|| {
+                aura_app::ui_contract::EnrollmentManifestTransferInput {
+                    manifest_code: format!("{name}-manifest"),
+                    initiator_verifier_code: format!("{name}-verifier"),
+                }
+            }),
+        };
+    for (code, complete) in [
+        (Some("original-code"), true),
+        (None, true),
+        (Some("original-code"), false),
+    ] {
+        let (result, context) = runtime_event_dispatch_fixture(
+            vec![
+                enrollment("selected-device", code, complete),
+                enrollment("foreign-device", Some("foreign-code"), true),
+            ],
+            "selected-device",
+            RuntimeEventKind::DeviceEnrollmentCodeReady,
+            true,
+        );
+        assert_eq!(result.is_ok(), code.is_some() && complete);
+        if result.is_ok() {
+            assert_eq!(
+                context.vars.get("captured").map(String::as_str),
+                Some("original-code")
+            );
+            assert_eq!(
+                context.vars.get("captured_manifest").map(String::as_str),
+                Some("selected-device-manifest")
+            );
+            assert_eq!(
+                context
+                    .vars
+                    .get("captured_initiator_verifier")
+                    .map(String::as_str),
+                Some("selected-device-verifier")
+            );
+        } else {
+            assert!(
+                context.vars.is_empty(),
+                "foreign payload cannot complete a partial selected record"
+            );
+        }
+    }
+}
+
+#[test]
+fn semantic_wait_recorded_handle_preserves_instance_constraints_and_fallbacks() {
+    let step = CompatibilityStep {
+        operation_id: Some(OperationId::invitation_accept_contact()),
+        operation_state: Some(OperationState::Succeeded),
+        ..Default::default()
+    };
+    let mut snapshot = UiSnapshot::loading(ScreenId::Contacts);
+    snapshot.operations.push(OperationSnapshot {
+        id: OperationId::invitation_accept_contact(),
+        instance_id: OperationInstanceId("selected".into()),
+        state: OperationState::Succeeded,
+        failure: None,
+    });
+    let mut context = ScenarioContext::default();
+    assert!(semantic_wait_matches_for_instance(
+        &step, &snapshot, &context, "alice"
+    ));
+    context.last_operation_handle.insert(
+        "alice".into(),
+        test_ui_operation_handle(
+            OperationId::invitation_create(),
+            OperationInstanceId("unrelated".into()),
+        ),
+    );
+    assert!(semantic_wait_matches_for_instance(
+        &step, &snapshot, &context, "alice"
+    ));
+    context.last_operation_handle.insert(
+        "alice".into(),
+        test_ui_operation_handle(
+            OperationId::invitation_accept_contact(),
+            OperationInstanceId("selected".into()),
+        ),
+    );
+    for (exact, previous, matches) in [
+        (Some("selected"), None, true),
+        (Some("foreign"), None, false),
+        (None, Some("selected"), false),
+        (None, Some("prior"), true),
+    ] {
+        let constrained = CompatibilityStep {
+            operation_exact_instance: exact.map(str::to_string),
+            operation_after_instance: previous.map(str::to_string),
+            ..step.clone()
+        };
+        assert_eq!(
+            semantic_wait_matches_for_instance(&constrained, &snapshot, &context, "alice"),
+            matches
+        );
+    }
+    snapshot.operations[0].state = OperationState::Failed;
+    assert!(!semantic_wait_matches_for_instance(
+        &step, &snapshot, &context, "alice"
+    ));
+    snapshot.operations[0].state = OperationState::Succeeded;
+    snapshot.operations[0].instance_id = OperationInstanceId("foreign".into());
+    assert!(!semantic_wait_matches_for_instance(
+        &step, &snapshot, &context, "alice"
+    ));
+    snapshot.operations.clear();
+    assert!(!semantic_wait_matches_for_instance(
+        &step, &snapshot, &context, "alice"
+    ));
+}

@@ -17,8 +17,8 @@ use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::{
     identifiers::{new_authority_id, new_context_id},
-    EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
-    FilesystemStorageHandler, RealCryptoHandler,
+    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler,
+    ProductionSecureStorageHandler, RealCryptoHandler,
 };
 
 use super::{AccountLoadResult, ACCOUNT_FILENAME, JOURNAL_FILENAME};
@@ -103,9 +103,11 @@ impl ProfileStore {
     /// The nonproduction (demo/simulation) store at `base_path`.
     #[must_use]
     pub fn nonproduction(base_path: &Path) -> Self {
-        let secure = Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
-            base_path.to_path_buf(),
-        ));
+        let secure = Arc::new(
+            ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+                base_path.to_path_buf(),
+            ),
+        );
         let storage = EncryptedStorage::new(
             FilesystemStorageHandler::from_path(base_path.to_path_buf()),
             Arc::new(RealCryptoHandler::new()),

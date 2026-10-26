@@ -32,8 +32,17 @@ Shared testing infrastructure providing test fixtures, effect system harnesses, 
   Its sleeps remain pending until an explicit physical observation reaches the
   original target; background services cannot advance the test clock by sleeping.
   Deliberate rollback remains visible to production timeout validation.
-  Native selected-task read faults target the owning Tokio workflow task, so
-  background readers cannot consume its one-shot provider failure.
+  Native selected-task read faults and scripted observations target the owning Tokio workflow task, so
+  background readers cannot consume its one-shot provider result. A scripted read
+  does not change driven time or original timer endpoints; arm it inside the
+  actual producer callback rather than its observer.
+  A relative-sleep registration callback fires only after the selected manual
+  provider admits the actual timer. Conditional simulator advancement checks
+  its ephemeral provider identity, generation, target and task under the
+  provider's time-change gate; timer cancellation takes that same gate, so its
+  active-to-inactive transition and a conditional step have one order. A
+  cancelled, replaced, duplicate or same-task unrelated timer cannot satisfy
+  the observation. It does not acknowledge broker registration or VM work.
 - Mock effects behave consistently with production ones.
 - `MockSimulationHandler` checkpoints restore only the selected simulation-time
   value; a missing checkpoint is an error. They do not rewind runtime state.

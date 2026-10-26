@@ -635,6 +635,27 @@ with a fault at every transaction boundary. The required assertions are:
 | Wrong allocation scope or record bytes, stale namespace identity, unexpected credential | Typed refusal without selecting another provider or deleting evidence |
 | First writer and concurrent contender under one namespace | Exactly one acknowledged transition; contender observes the authentic winner or typed conflict |
 
+Autonomous development and integration tests use explicitly selected hot keys
+through the existing `ThresholdSigningEffects` and `SecureStorageEffects`
+boundaries. For durable runtime fixtures, reuse the nonproduction profile-owned
+filesystem provider and its original lifetime channel; keep real signing,
+approved verifier custody, nonce rules, selected clocks and acknowledged
+cleanup/reopen. A custom crypto or ordinary storage handler alone does not
+replace that protected profile owner. Select `development-keys` explicitly
+when constructing the native software-key provider. `simulation`, `test-support`
+and `test-keyring` imply that feature. Canonical shipping commands select
+`production-build`, which rejects development keys at compile time; without
+the development feature the native provider implementation and its public type
+are excluded. Browser WebCrypto/IndexedDB remains available in production.
+Production selection must fail closed
+rather than silently switch to development keys.
+
+Keep macOS credential-service integration in a separate opt-in one-off lane
+that may require user input. It must not introduce a credential-service prompt
+into the autonomous integration loop. This separation preserves the actual
+OS-provider evidence requirements below; hot-key and test-keyring results do
+not establish platform durability or authorize the platform lifetime root.
+
 Use the test keyring for deterministic transaction faults, then run a separate
 native credential-provider lane on the actual OS service. Test-keyring success
 does not establish macOS Keychain or another OS provider's durability semantics.
@@ -660,8 +681,10 @@ the positive lane. This is an opt-in diagnostic, not a production lifetime
 root or a durability proof. Its real OS-service positive has not run on the
 developer account; do not run it against a developer login Keychain.
 Only after both the selected-provider fixture and security/ownership gates pass
-should L6 transfer the platform lifetime root and the signed production native
-enrollment fixture resume. Browser storage has its own provider and evidence.
+should L6 transfer the platform lifetime root and the platform-backed signed
+production native enrollment fixture resume. This gate is specific to that
+provider; explicitly selected unattended development/test providers continue
+independently. Browser storage has its own provider and evidence.
 
 ### Supplying custom runtime handlers
 
@@ -698,3 +721,11 @@ providers use cancellable timers; the manual provider waits for actual test
 clock progress. Test delayed registration, blocked observation, hung reads,
 checkpoint delay, native timer faults and same-poll late completion with
 `just _policy-check check absolute-time-observation`.
+
+For required enrollment notice work, retain task storage and cleanup in the
+existing `runtime::services::issuer_task_custody` owner. Protocol callback factories
+borrow its original storage handle across execution attempts. Keep signed-frame
+verification in the protocol owner, and require the same VM's acknowledged close
+before retiring its pending receive. Cloning a storage handle or observing
+eligibility does not settle the task. The registered required-task disposal
+observation remains mandatory.

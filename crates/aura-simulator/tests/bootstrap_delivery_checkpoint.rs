@@ -29,6 +29,7 @@ struct Checkpoint {
 
 impl Checkpoint {
     async fn new() -> Self {
+        let clock = Arc::new(ManualPhysicalClock::new(5_000));
         let broker = LocalBootstrapBrokerService::bind(
             "127.0.0.1:0",
             Duration::from_secs(120),
@@ -36,13 +37,13 @@ impl Checkpoint {
             BootstrapBrokerLanBindPolicy::LoopbackOnly,
         )
         .await
-        .expect("actual loopback broker");
+        .expect("actual loopback broker")
+        .with_mailbox_time_provider(clock.clone());
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_checkpoint"));
         let roots: Vec<_> = (0..3)
             .map(|_| tempfile::tempdir().expect("isolated actual profile"))
             .collect();
-        let clock = Arc::new(ManualPhysicalClock::new(5_000));
         let broker_config = BootstrapBrokerConfig::default()
             .enabled(true)
             .with_base_url(broker.public_url())

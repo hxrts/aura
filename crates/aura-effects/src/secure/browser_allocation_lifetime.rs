@@ -372,7 +372,7 @@ impl Allocation {
                     Decision::Negative {
                         bytes: decision.to_vec(),
                     }
-                })
+                });
             }
         }
         self.root.publish(original.as_deref(), &inventory).await

@@ -403,6 +403,10 @@ mod tests {
         assert!(source.contains("shared_web_task_owner().spawn_local(async move"));
         assert!(!source.contains("import_error.set(Some(error))"));
         assert!(!source.contains("importing_code.set(false)"));
+        assert!(
+            source.contains("\"clear importing_code after device enrollment admission refusal\"")
+        );
+        assert!(source.contains("\"publish device enrollment admission refusal\""));
         assert!(source.contains("\"clear creating_account after account creation\""));
         assert!(source.contains("\"publish account creation error\""));
         assert!(!source.contains("let _ = importing_code.try_write().map"));
@@ -898,10 +902,51 @@ mod tests {
         let source = std::fs::read_to_string(&app_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
 
+        let admission = source
+            .find("aura_ui::semantic_lifecycle::begin_exact_enrollment_import(")
+            .unwrap_or_else(|| panic!("missing required app enrollment admission"));
+        let observation = source[admission..]
+            .find(".run_workflow(controller.clone(), \"import_device_enrollment\", observer)")
+            .map(|offset| admission + offset)
+            .unwrap_or_else(|| panic!("missing original transfer observation"));
         assert!(
-            source.contains("import_device_enrollment_with_terminal_status("),
-            "device enrollment import should hand off to the shared app semantic owner"
+            source[admission..observation].contains("controller.enrollment_import_host_policy()")
         );
+        assert!(source[admission..observation]
+            .contains("shared_web_task_owner().spawn_local(async move"));
+        assert!(admission < observation);
+
+        let lifecycle_path = repo_root.join("crates/aura-ui/src/semantic_lifecycle.rs");
+        let lifecycle = std::fs::read_to_string(&lifecycle_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", lifecycle_path.display()));
+        let begin = lifecycle
+            .find("pub fn begin_exact_enrollment_import(")
+            .unwrap_or_else(|| panic!("missing original admission helper"));
+        let admitted = lifecycle[begin..]
+            .find("import_device_enrollment_with_terminal_status(")
+            .map(|offset| begin + offset)
+            .unwrap_or_else(|| panic!("missing required app import admission"));
+        let handoff = lifecycle[admitted..]
+            .find("owner.handoff_enrollment_import(&mut observer)")
+            .map(|offset| admitted + offset)
+            .unwrap_or_else(|| panic!("missing original instance handoff"));
+        assert!(lifecycle[admitted..handoff].contains("owner.workflow_instance_id()"));
+        assert!(admitted < handoff);
+
+        let workflows_path = repo_root.join("crates/aura-web/src/workflows.rs");
+        let workflows = std::fs::read_to_string(&workflows_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", workflows_path.display()));
+        let host_start = workflows
+            .find("pub(crate) fn enrollment_import_host_policy(")
+            .unwrap_or_else(|| panic!("missing browser persistence acknowledgment policy"));
+        let workflows = &workflows[host_start..];
+        assert!(workflows.contains("EnrollmentImportHostPolicy::Prepare("));
+
+        assert!(workflows.contains("PreparedEnrollmentHostCommit::new("));
+        assert!(workflows.contains("crate::bootstrap_storage::persist_account_config("));
+        assert!(workflows.contains("persist_selected_runtime_identity("));
+        assert!(workflows.contains("clear_pending_device_enrollment_code("));
+
         assert!(
             source.contains("workflows::stage_account_creation(controller.app_core(), &nickname)"),
             "onboarding account creation should route through the shared aura-web workflow helper"

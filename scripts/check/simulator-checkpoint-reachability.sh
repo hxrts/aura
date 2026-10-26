@@ -12,14 +12,14 @@ check_graph() {
   local name="$1"
   shift
   cargo tree --locked -e normal,build,features "$@" > "$graph"
-  if rg -q 'feature "(simulator-checkpoint|test-keyring|os-keychain-diagnostic)"|aura-simulator v' "$graph"; then
-    printf 'simulator checkpoint reachable from deployable %s feature graph\n' "$name" >&2
-    rg -n 'feature "(simulator-checkpoint|test-keyring|os-keychain-diagnostic)"|aura-simulator v' "$graph" >&2
+  if rg -q 'feature "(development-keys|simulator-checkpoint|test-keyring|os-keychain-diagnostic)"|aura-simulator v' "$graph"; then
+    printf 'development-only key/checkpoint provider reachable from deployable %s feature graph\n' "$name" >&2
+    rg -n 'feature "(development-keys|simulator-checkpoint|test-keyring|os-keychain-diagnostic)"|aura-simulator v' "$graph" >&2
     return 1
   fi
-  printf 'simulator checkpoint absent from %s feature graph\n' "$name"
+  printf 'development-only key/checkpoint provider absent from %s feature graph\n' "$name"
 }
 
-check_graph terminal-and-rpc -p aura-terminal --no-default-features --features terminal
-check_graph app-host -p hxrts-aura-app --features host
-check_graph web-release --target wasm32-unknown-unknown -p aura-web --features web,harness
+check_graph terminal-and-rpc -p aura-terminal --no-default-features --features terminal,production-build
+check_graph app-host -p hxrts-aura-app --features host,production-build
+check_graph web-release --target wasm32-unknown-unknown -p aura-web --features web,harness,production-build

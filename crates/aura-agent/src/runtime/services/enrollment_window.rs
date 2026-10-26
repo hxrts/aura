@@ -1,4 +1,5 @@
 //! Sealed durable clock owner for enrollment execution.
+mod cancelled_notice;
 use super::ceremony_tracker::RegisteredEnrollmentWindowCapability;
 use crate::handlers::invitation::enrollment_manifest_admission::{
     AdmittedEnrollmentManifest, NewEnrollmentAdmissionCapability,
@@ -9,10 +10,16 @@ use aura_core::effects::{
 };
 use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError};
+pub(crate) use cancelled_notice::OriginalCancelledNoticeWindowCapability;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, OwnedSemaphorePermit};
 
 mod signing_checkpoint;
+mod transport_custody;
+pub(crate) use transport_custody::{
+    OriginalAdmittedAckBorrow, OriginalAdmittedAckFailure, OriginalAdmittedTransportCustody,
+    OriginalAdmittedTransportGate,
+};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod launch_contract_tests;
@@ -30,6 +37,11 @@ mod signing_contract_guards {
         impl<T: ?Sized> AmbiguousIfClone<()> for T {}
         impl<T: Clone> AmbiguousIfClone<CloneImplemented> for T {}
         let _ = <HeldIssuerCompletionObserver as AmbiguousIfClone<_>>::marker;
+        let _ = <super::OriginalAdmittedAckBorrow as AmbiguousIfClone<_>>::marker;
+        let _ =
+            <crate::handlers::invitation::AcknowledgedOriginalNoticeDisposal as AmbiguousIfClone<
+                _,
+            >>::marker;
         let _ = <crate::runtime::effects::OwnedSecretBirthCapability<'static, 'static> as AmbiguousIfClone<_>>::marker;
         let _ = <super::OriginalIssuerLaunchWindow as AmbiguousIfClone<_>>::marker;
         let _ = <super::OriginalIssuerLaunchObservation as AmbiguousIfClone<_>>::marker;
@@ -51,6 +63,8 @@ mod signing_contract_guards {
         impl<T: ?Sized> AmbiguousIfDeserialize<()> for T {}
         impl<T: serde::de::DeserializeOwned> AmbiguousIfDeserialize<DeserializeImplemented> for T {}
         let _ = <HeldIssuerCompletionObserver as AmbiguousIfDeserialize<_>>::marker;
+        let _ = <super::OriginalAdmittedAckBorrow as AmbiguousIfDeserialize<_>>::marker;
+        let _ = <crate::handlers::invitation::AcknowledgedOriginalNoticeDisposal as AmbiguousIfDeserialize<_>>::marker;
         let _ = <crate::runtime::effects::OwnedSecretBirthCapability<'static, 'static> as AmbiguousIfDeserialize<_>>::marker;
         let _ = <super::OriginalIssuerLaunchWindow as AmbiguousIfDeserialize<_>>::marker;
         let _ = <super::OriginalIssuerLaunchObservation as AmbiguousIfDeserialize<_>>::marker;
@@ -94,35 +108,6 @@ impl HeldIssuerCompletionObserver {
         .await
         .map_err(|source| {
             map_enrollment_run_error("observe original required retirement", &self.active, source)
-        })
-    }
-    /// Observe original negative settlement through its retained cleanup resource window.
-    pub(super) async fn observe_original_negative_retirement(
-        &self,
-        effects: &AuraEffectSystem,
-        original: &Arc<RegisteredEnrollmentWindowCapability>,
-        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-        destination: &crate::handlers::invitation_service::OriginalIssuerTerminalDestination,
-    ) -> crate::core::AgentResult<()> {
-        self.original.require_effects(effects)?;
-        original.require_issued_notice_control(issued)?;
-        aura_core::execute_with_timeout_budget(
-            effects,
-            original.negative_cleanup_budget(),
-            || async {
-                destination
-                    .await_original_retirement(original, issued)
-                    .await
-                    .map_err(crate::core::AgentError::from)
-            },
-        )
-        .await
-        .map_err(|source| {
-            map_enrollment_run_error(
-                "observe original required retirement",
-                original.negative_cleanup_budget(),
-                source,
-            )
         })
     }
     pub(crate) async fn observe_registered_admission(
@@ -872,6 +857,10 @@ enum EnrollmentExecutionLease {
     Exclusive {
         _original: Arc<OwnedSemaphorePermit>,
     },
+    Admitted {
+        _original: Arc<OwnedSemaphorePermit>,
+        transport: Arc<OriginalAdmittedTransportCustody>,
+    },
 }
 impl EnrollmentExecutionLease {
     fn borrow_execution(
@@ -879,13 +868,13 @@ impl EnrollmentExecutionLease {
     ) -> Result<Option<super::ceremony_tracker::OriginalRegisteredExecutionBorrow>, AuraError> {
         match self {
             Self::Registered(original) => original.borrow_execution().map(Some),
-            Self::Exclusive { .. } => Ok(None),
+            Self::Exclusive { .. } | Self::Admitted { .. } => Ok(None),
         }
     }
     fn require_active(&self) -> Result<(), AuraError> {
         match self {
             Self::Registered(original) => original.require_active(),
-            Self::Exclusive { .. } => Ok(()),
+            Self::Exclusive { .. } | Self::Admitted { .. } => Ok(()),
         }
     }
 }
@@ -906,6 +895,31 @@ pub(crate) struct EnrollmentExecutionRoot<Origin> {
     children: crate::task_registry::TaskGroup,
     origin: Arc<Origin>,
     signing_terminal: RetainedSigningTerminalCustody,
+}
+
+impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "original_enrollment_transport_root",
+        receiver_type = EnrollmentExecutionRoot<AdmittedEnrollmentManifest>, family = "runtime_helper")]
+    pub(crate) fn observe_original_execution_failure(&self) -> Result<(), AuraError> {
+        let EnrollmentExecutionLease::Admitted { transport, .. } = &self.child._lease else {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        };
+        transport.observe_execution_failure();
+        Ok(())
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "original_enrollment_transport_root",
+        receiver_type = EnrollmentExecutionRoot<AdmittedEnrollmentManifest>, family = "runtime_helper")]
+    pub(crate) async fn settle_original_transport(
+        &self,
+    ) -> Result<Option<OriginalAdmittedAckFailure>, AuraError> {
+        let EnrollmentExecutionLease::Admitted { transport, .. } = &self.child._lease else {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        };
+        Ok(transport.settle().await)
+    }
 }
 
 impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
@@ -942,6 +956,7 @@ impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
             retirement_destination,
         )
     }
+
     pub(crate) fn original_issuer_observer(
         &self,
         effects: &AuraEffectSystem,
@@ -969,6 +984,7 @@ impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
     pub(crate) async fn acknowledge_issuer_terminal(
         &self,
         effects: &AuraEffectSystem,
+        destination: &super::issuer_terminal_destination::OriginalIssuerTerminalDestination,
         terminal: &mut Option<crate::handlers::invitation::IssuerEnrollmentTerminalReceipt>,
         acknowledged: &mut Option<AcknowledgedIssuerEnrollmentWindow>,
     ) -> Result<(), AuraError> {
@@ -985,6 +1001,7 @@ impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
         retained_terminal.require_runtime_owner(effects)?;
         self.origin
             .require_issued_notice_control(retained_terminal.retained())?;
+        destination.require_original_protocol_completion(retained_terminal.retained())?;
         let sealed = self.children.seal_admission();
         let result = aura_core::time::timeout::execute_with_timeout_budget(
             effects,
@@ -999,10 +1016,8 @@ impl EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability> {
                     });
                 }
                 match disposal.execution_outcome() {
-                    crate::task_registry::TaskGroupExecutionOutcome::Completed => {}
-                    crate::task_registry::TaskGroupExecutionOutcome::NotExecuted => {
-                        return Err(DurableEnrollmentExecutionError::NoCompletedChild.refusal());
-                    }
+                    crate::task_registry::TaskGroupExecutionOutcome::Completed
+                    | crate::task_registry::TaskGroupExecutionOutcome::NotExecuted => {}
                     crate::task_registry::TaskGroupExecutionOutcome::Interrupted(source) => {
                         return Err(AuraError::Internal {
                             message: "original issuer child execution was interrupted".into(),
@@ -1221,7 +1236,7 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
         family = "runtime_helper"
     )]
     pub(crate) async fn acknowledge_confirmation(
-        self,
+        &mut self,
         effects: &AuraEffectSystem,
         proof: &crate::handlers::invitation::VerifiedEnrollmentConfirmation,
     ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
@@ -1229,7 +1244,14 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
         if proof.manifest_digest() != self.origin().manifest_digest() {
             return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
         }
-        self.close_acknowledged(effects, true).await
+        let digest = proof
+            .terminal_frame_digest()
+            .map_err(|source| AuraError::Internal {
+                message: "bind original committed terminal proof".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        self.close_acknowledged(effects, true, AdmittedTerminalKind::Committed, digest, None)
+            .await
     }
 
     #[aura_macros::capability_boundary(
@@ -1239,7 +1261,7 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
         family = "runtime_helper"
     )]
     pub(crate) async fn acknowledge_failure(
-        self,
+        &mut self,
         effects: &AuraEffectSystem,
         proof: &crate::handlers::invitation::VerifiedEnrollmentFailureCapability,
     ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
@@ -1247,15 +1269,60 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
         if proof.manifest_digest() != self.origin().manifest_digest() {
             return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
         }
-        self.close_acknowledged(effects, false).await
+        let digest = proof
+            .terminal_frame_digest()
+            .map_err(|source| AuraError::Internal {
+                message: "bind original negative terminal proof".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        self.close_acknowledged(effects, false, AdmittedTerminalKind::Failed, digest, None)
+            .await
+    }
+
+    #[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "original_enrollment_terminal_root",
+    receiver_type = EnrollmentExecutionRoot<AdmittedEnrollmentManifest>,
+    family = "runtime_helper"
+)]
+    pub(crate) async fn acknowledge_original_notice_failure(
+        &mut self,
+        effects: &AuraEffectSystem,
+        proof: &crate::handlers::invitation::VerifiedEnrollmentFailureCapability,
+        disposal: &crate::handlers::invitation::AcknowledgedOriginalNoticeDisposal,
+    ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
+        self.require_original_domain_invitation(proof.canonical_invitation())?;
+        if proof.manifest_digest() != self.origin().manifest_digest() {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        let digest = proof
+            .terminal_frame_digest()
+            .map_err(|source| AuraError::Internal {
+                message: "bind original reconciled notice failure".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        self.close_acknowledged(
+            effects,
+            false,
+            AdmittedTerminalKind::Failed,
+            digest,
+            Some(disposal),
+        )
+        .await
     }
 
     async fn close_acknowledged(
-        self,
+        &mut self,
         effects: &AuraEffectSystem,
         positive: bool,
+        kind: AdmittedTerminalKind,
+        digest: [u8; 32],
+        notice: Option<&crate::handlers::invitation::AcknowledgedOriginalNoticeDisposal>,
     ) -> Result<AcknowledgedEnrollmentWindow, AuraError> {
         self.child.require_execution_effects(effects)?;
+        // Native failures remain retained for original task settlement. Their
+        // borrows must dispose before a durable Closed receipt can be issued.
+        let _transport_disposition = self.settle_original_transport().await?;
         let sealed = self.children.seal_admission();
         let result = aura_core::time::timeout::execute_with_timeout_budget(
             effects,
@@ -1269,37 +1336,82 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
                             .into(),
                         source: Some(Arc::new(source)),
                     })?;
-                if let Some(source) = disposal.failure() {
-                    return Err(AuraError::Internal {
-                        message: "original enrollment child disposal failed".into(),
-                        source: Some(Arc::new(source.clone())),
-                    });
-                }
-                match disposal.execution_outcome() {
-                    crate::task_registry::TaskGroupExecutionOutcome::Interrupted(source) => {
+                // Only an eligible, actually closed original notice VM with
+                // exact required-task ACK can reconcile its own interruption.
+                // The registry retains the original exit and native failure.
+                let reconciled_notice = if let Some(notice) = notice {
+                    if positive || kind != AdmittedTerminalKind::Failed {
+                        return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+                    }
+                    notice.require_original(&digest, &disposal)?;
+                    true
+                } else {
+                    false
+                };
+                if !reconciled_notice {
+                    if let Some(source) = disposal.failure() {
                         return Err(AuraError::Internal {
-                            message: "original enrollment child execution was interrupted".into(),
+                            message: "original enrollment child disposal failed".into(),
                             source: Some(Arc::new(source.clone())),
                         });
                     }
-                    crate::task_registry::TaskGroupExecutionOutcome::NotExecuted => {
-                        if positive {
-                            return Err(DurableEnrollmentExecutionError::NoCompletedChild.refusal());
+                    match disposal.execution_outcome() {
+                        crate::task_registry::TaskGroupExecutionOutcome::Interrupted(source) => {
+                            return Err(AuraError::Internal {
+                                message: "original enrollment child execution was interrupted"
+                                    .into(),
+                                source: Some(Arc::new(source.clone())),
+                            });
                         }
+                        crate::task_registry::TaskGroupExecutionOutcome::NotExecuted => {
+                            if positive {
+                                return Err(
+                                    DurableEnrollmentExecutionError::NoCompletedChild.refusal()
+                                );
+                            }
+                        }
+                        crate::task_registry::TaskGroupExecutionOutcome::Completed => {}
                     }
-                    crate::task_registry::TaskGroupExecutionOutcome::Completed => {}
                 }
                 let WindowCheckpoint::Admitted {
-                    binding, writes, ..
+                    binding,
+                    writes,
+                    terminal,
+                    ..
                 } = self.child.checkpoint.as_ref()
                 else {
                     return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
                 };
+                let binding = binding.as_ref();
                 let _write = writes.lock().await;
-                self.child
-                    .require_pending_checkpoint(effects)
-                    .await
-                    .map_err(AuraError::from)?;
+                {
+                    let mut claim = terminal.lock().await;
+                    match claim.as_ref() {
+                        Some(current)
+                            if current.kind != kind
+                                || current.digest != digest
+                                || current.issued =>
+                        {
+                            return Err(DurableEnrollmentExecutionError::AlreadyBorn.refusal());
+                        }
+                        Some(_) => {}
+                        None => {
+                            *claim = Some(AdmittedTerminalClaim {
+                                kind,
+                                digest,
+                                issued: false,
+                            });
+                        }
+                    }
+                }
+                let anchor =
+                    EnrollmentExecutionChild::read_admitted_anchor(effects, binding).await?;
+                if anchor.execution != DurableEnrollmentExecutionState::Pending
+                    || anchor.budget.started_at_ms() != self.child.original.started_at_ms()
+                    || anchor.budget.deadline_at_ms() != self.child.original.deadline_at_ms()
+                {
+                    return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+                }
                 let retained = EnrollmentExecutionChild::read_bound_admitted_checkpoint(
                     effects,
                     binding,
@@ -1307,18 +1419,50 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
                 )
                 .await
                 .map_err(AuraError::from)?;
-                if retained.execution != DurableEnrollmentExecutionState::Pending {
-                    return Err(DurableEnrollmentExecutionError::AlreadyBorn.refusal());
-                }
                 let now = effects.physical_time().await.map_err(AuraError::from)?;
                 self.child
                     .active
                     .remaining_at(&now)
                     .map_err(AuraError::from)?;
+                if let DurableEnrollmentExecutionState::ClosedV3 {
+                    acknowledged_at_ms,
+                    kind: retained_kind,
+                    digest: retained_digest,
+                } = retained.execution
+                {
+                    if acknowledged_at_ms < binding.admitted_at_ms
+                        || acknowledged_at_ms >= self.child.original.deadline_at_ms()
+                        || now.ts_ms < acknowledged_at_ms
+                        || retained_kind != kind
+                        || retained_digest != digest
+                    {
+                        return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+                    }
+                    let frozen_budget = serde_json::to_vec(&retained.budget).map_err(|source| {
+                        AuraError::Internal {
+                            message: "encode recovered original enrollment budget".into(),
+                            source: Some(Arc::new(source)),
+                        }
+                    })?;
+                    return Ok(AcknowledgedEnrollmentWindow {
+                        binding: binding.clone(),
+                        frozen_budget,
+                        acknowledged_at_ms,
+                    });
+                }
+                if retained.execution != DurableEnrollmentExecutionState::Pending {
+                    // Legacy Closed has no authenticated original timestamp;
+                    // it cannot recreate a move-only terminal acknowledgment.
+                    return Err(DurableEnrollmentExecutionError::AlreadyBorn.refusal());
+                }
                 let record = StoredAdmittedWindow {
                     binding: binding.clone(),
                     budget: self.child.original.clone(),
-                    execution: DurableEnrollmentExecutionState::Closed,
+                    execution: DurableEnrollmentExecutionState::ClosedV3 {
+                        acknowledged_at_ms: now.ts_ms,
+                        kind,
+                        digest,
+                    },
                 };
                 let bytes = serde_json::to_vec(&record).map_err(|source| AuraError::Internal {
                     message: "encode original enrollment terminal checkpoint".into(),
@@ -1353,7 +1497,26 @@ impl EnrollmentExecutionRoot<AdmittedEnrollmentManifest> {
         )
         .await;
         match result {
-            Ok(acknowledged) => Ok(acknowledged),
+            Ok(acknowledged) => {
+                let WindowCheckpoint::Admitted { terminal, .. } = self.child.checkpoint.as_ref()
+                else {
+                    return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+                };
+                // No await may intervene between marking the original claim
+                // issued and returning its single move-owned acknowledgment.
+                let mut claim = terminal.try_lock().map_err(|source| AuraError::Internal {
+                    message: "original terminal handoff is already owned".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+                let current = claim
+                    .as_mut()
+                    .ok_or_else(|| DurableEnrollmentExecutionError::ForeignAdmission.refusal())?;
+                if current.kind != kind || current.digest != digest || current.issued {
+                    return Err(DurableEnrollmentExecutionError::AlreadyBorn.refusal());
+                }
+                current.issued = true;
+                Ok(acknowledged)
+            }
             Err(TimeoutRunError::Operation(source)) => Err(source),
             Err(TimeoutRunError::Timeout(source)) => Err(AuraError::from(source)),
         }
@@ -1370,6 +1533,23 @@ pub(crate) struct AcknowledgedAdmittedEnrollmentBirth<'provider> {
 }
 
 impl AcknowledgedAdmittedEnrollmentBirth<'_> {
+    pub(crate) fn require_original(
+        &self,
+        effects: &AuraEffectSystem,
+        admitted: &AdmittedEnrollmentManifest,
+    ) -> Result<(), AuraError> {
+        if !std::ptr::eq(self.effects, effects) {
+            return Err(DurableEnrollmentExecutionError::ForeignProvider.refusal());
+        }
+        if self.binding != EnrollmentExecutionChild::admitted_binding(admitted) {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        if self.binding.device != effects.device_id() {
+            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+        }
+        Ok(())
+    }
+
     /// Consume the actual fresh provider acknowledgment while attaching its
     /// original runtime and independently admitted physical invitation owner.
     pub(crate) fn into_root(
@@ -1378,13 +1558,8 @@ impl AcknowledgedAdmittedEnrollmentBirth<'_> {
         admitted: AdmittedEnrollmentManifest,
         original_tasks: &crate::task_registry::TaskGroup,
     ) -> Result<EnrollmentExecutionRoot<AdmittedEnrollmentManifest>, AuraError> {
-        if !std::ptr::eq(self.effects, effects.as_ref()) {
-            return Err(DurableEnrollmentExecutionError::ForeignProvider.refusal());
-        }
-        if self.binding != EnrollmentExecutionChild::admitted_binding(&admitted) {
-            return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
-        }
-        let lease = effects.acquire_admitted_enrollment_window_owner(&admitted)?;
+        let (lease, transport) =
+            effects.acquire_original_admitted_window_owner(&self, &admitted)?;
         lease.require_effects(effects.as_ref())?;
         let lease = lease.into_permit();
         Ok(EnrollmentExecutionRoot {
@@ -1393,11 +1568,13 @@ impl AcknowledgedAdmittedEnrollmentBirth<'_> {
                 original: self.budget,
                 checkpoint: Arc::new(WindowCheckpoint::Admitted {
                     effects,
-                    binding: self.binding,
+                    binding: Box::new(self.binding),
                     writes: Mutex::new(()),
+                    terminal: Mutex::new(None),
                 }),
-                _lease: EnrollmentExecutionLease::Exclusive {
+                _lease: EnrollmentExecutionLease::Admitted {
                     _original: Arc::new(lease),
+                    transport,
                 },
             },
             signing_terminal: RetainedSigningTerminalCustody::fresh(),
@@ -1446,9 +1623,20 @@ enum WindowCheckpoint {
     },
     Admitted {
         effects: Arc<AuraEffectSystem>,
-        binding: AdmittedWindowBinding,
+        binding: Box<AdmittedWindowBinding>,
         writes: Mutex<()>,
+        terminal: Mutex<Option<AdmittedTerminalClaim>>,
     },
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum AdmittedTerminalKind {
+    Committed,
+    Failed,
+}
+struct AdmittedTerminalClaim {
+    kind: AdmittedTerminalKind,
+    digest: [u8; 32],
+    issued: bool,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -1475,6 +1663,13 @@ pub(super) enum DurableEnrollmentExecutionState {
     Allocated,
     Pending,
     Closed,
+    /// V3 positive terminal: timestamp is authenticated in the same selected
+    /// provider write as Closed, so interrupted readback can recover it.
+    ClosedV3 {
+        acknowledged_at_ms: u64,
+        kind: AdmittedTerminalKind,
+        digest: [u8; 32],
+    },
     Refused,
 }
 
@@ -1531,6 +1726,9 @@ impl EnrollmentExecutionChild {
         };
         capability.require_original_cancellation(terminal)?;
         destination.require_original_cancelled_terminal(terminal)?;
+        if destination.original_cancelled_retirement_acknowledged(capability, terminal)? {
+            return Ok(());
+        }
         let _work = self._lease.borrow_execution()?;
         let actual = aura_core::time::timeout::execute_negative_cleanup_with_timeout_budget(
             effects.as_ref(),
@@ -1553,7 +1751,18 @@ impl EnrollmentExecutionChild {
         .await;
         let completed = match actual.operation {
             Some(Err(source)) => return Err(source),
-            Some(Ok(())) => true,
+            Some(Ok(publication)) => {
+                if !destination.original_cancelled_retirement_acknowledged(capability, terminal)? {
+                    return Err(crate::core::AgentError::invalid(
+                        "accepted original retirement publication lacks its actual acknowledgment",
+                    ));
+                }
+                // The actual destination retains this first cause independently
+                // for the failed domain outcome. Physical retirement progress
+                // must still allow its signed-terminal and VM cleanup to run.
+                let _retained_domain_failure = publication.into_retained_failure();
+                true
+            }
             None => false,
         };
         actual
@@ -1720,6 +1929,16 @@ impl EnrollmentExecutionChild {
                 },
             ));
         }
+        if let DurableEnrollmentExecutionState::ClosedV3 {
+            acknowledged_at_ms, ..
+        } = record.execution
+        {
+            if acknowledged_at_ms < binding.admitted_at_ms
+                || acknowledged_at_ms >= binding.expires_at_ms
+            {
+                return Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal());
+            }
+        }
         Ok(())
     }
     async fn decode_admitted_record(
@@ -1885,10 +2104,10 @@ impl EnrollmentExecutionChild {
             budget: record.budget,
         })
     }
-    pub(crate) async fn require_retained_admitted_window(
+    async fn require_retained_admitted_window(
         effects: &AuraEffectSystem,
         witness: &AdmittedEnrollmentManifest,
-    ) -> Result<(), AuraError> {
+    ) -> Result<StoredAdmittedWindow, AuraError> {
         let binding = Self::admitted_binding(witness);
         let anchor = Self::read_admitted_anchor(effects, &binding).await?;
         let checkpoint = Self::decode_admitted_record(
@@ -1897,7 +2116,11 @@ impl EnrollmentExecutionChild {
         )
         .await?;
         if anchor.execution != DurableEnrollmentExecutionState::Pending
-            || checkpoint.execution != DurableEnrollmentExecutionState::Closed
+            || !matches!(
+                checkpoint.execution,
+                DurableEnrollmentExecutionState::Closed
+                    | DurableEnrollmentExecutionState::ClosedV3 { .. }
+            )
             || checkpoint.binding != binding
         {
             return Err(DurableEnrollmentExecutionError::MissingTerminalCheckpoint.refusal());
@@ -1906,7 +2129,35 @@ impl EnrollmentExecutionChild {
             .budget
             .validate_checkpoint_continuation_from(&anchor.budget)
             .map_err(AuraError::from)?;
-        Ok(())
+        Ok(checkpoint)
+    }
+    fn require_retained_terminal_purpose(
+        checkpoint: &StoredAdmittedWindow,
+        expected: AdmittedTerminalKind,
+        frame: &crate::handlers::invitation::EnrollmentControlFrame,
+        acknowledged_at_ms: u64,
+    ) -> Result<(), AuraError> {
+        match checkpoint.execution {
+            DurableEnrollmentExecutionState::Closed => Ok(()),
+            DurableEnrollmentExecutionState::ClosedV3 {
+                acknowledged_at_ms: stored_at,
+                kind,
+                digest,
+            } if kind == expected && stored_at == acknowledged_at_ms => {
+                let bytes = aura_core::util::serialization::to_vec(frame).map_err(|source| {
+                    AuraError::Serialization {
+                        message: "encode retained terminal frame binding".into(),
+                        source: Some(Arc::new(source)),
+                    }
+                })?;
+                if digest == aura_core::hash::hash(&bytes) {
+                    Ok(())
+                } else {
+                    Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal())
+                }
+            }
+            _ => Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal()),
+        }
     }
     /// Validate original clock evidence of a separately authenticated retained
     /// receipt. Later live expiry cannot rewrite immutable completed evidence.
@@ -1915,7 +2166,13 @@ impl EnrollmentExecutionChild {
         retained: &crate::handlers::invitation::enrollment_manifest_admission::RetainedConfirmationAdmission,
     ) -> Result<(), AuraError> {
         let admitted = retained.admitted();
-        Self::require_retained_admitted_window(effects, admitted).await?;
+        let checkpoint = Self::require_retained_admitted_window(effects, admitted).await?;
+        Self::require_retained_terminal_purpose(
+            &checkpoint,
+            AdmittedTerminalKind::Committed,
+            retained.frame(),
+            retained.acknowledged_at_ms(),
+        )?;
         if retained.budget_bytes().len() > 16_384 {
             return Err(AuraError::invalid("oversized retained confirmation clock"));
         }
@@ -1956,7 +2213,13 @@ impl EnrollmentExecutionChild {
         retained: &crate::handlers::invitation::enrollment_manifest_admission::RetainedFailureAdmissionCapability,
     ) -> Result<(), AuraError> {
         let admitted = retained.admitted();
-        Self::require_retained_admitted_window(effects, admitted).await?;
+        let checkpoint = Self::require_retained_admitted_window(effects, admitted).await?;
+        Self::require_retained_terminal_purpose(
+            &checkpoint,
+            AdmittedTerminalKind::Failed,
+            retained.frame(),
+            retained.acknowledged_at_ms(),
+        )?;
         if retained.budget_bytes().len() > 16_384 {
             return Err(AuraError::invalid("oversized retained failure clock"));
         }
@@ -2023,10 +2286,11 @@ impl EnrollmentExecutionChild {
         Ok(record)
     }
 
-    async fn observe_pending_birth(
+    async fn derive_pending_birth<T>(
         &self,
         effects: &AuraEffectSystem,
-    ) -> Result<PhysicalTime, TimeoutBudgetError> {
+        derive: impl FnOnce(&PhysicalTime, Duration) -> Result<T, TimeoutBudgetError>,
+    ) -> Result<T, TimeoutBudgetError> {
         let _original_execution = self
             ._lease
             .borrow_execution()
@@ -2038,17 +2302,21 @@ impl EnrollmentExecutionChild {
             &self.active,
             || async {
                 self.require_pending_checkpoint(effects).await?;
+                // The post-success observation in execute_with_timeout_budget
+                // may advance this same clock before it returns. Derive the
+                // result while the original observation lease still owns now.
+                let _observation = self.active.acquire_observation().await;
                 let now = effects
                     .physical_time()
                     .await
                     .map_err(TimeoutBudgetError::time_source_failure)?;
-                self.active.remaining_at(&now)?;
-                Ok(now)
+                let remaining = self.active.remaining_at(&now)?;
+                derive(&now, remaining)
             },
         )
         .await;
         match result {
-            Ok(now) => Ok(now),
+            Ok(derived) => Ok(derived),
             Err(TimeoutRunError::Operation(source) | TimeoutRunError::Timeout(source)) => {
                 Err(source)
             }
@@ -2276,55 +2544,27 @@ impl EnrollmentExecutionChild {
         &self,
         effects: &AuraEffectSystem,
     ) -> Result<u64, TimeoutBudgetError> {
-        let now = self.observe_pending_birth(effects).await?;
-        u64::try_from(self.active.remaining_at(&now)?.as_millis())
-            .map_err(|source| TimeoutBudgetError::invalid_policy(source.to_string()))
+        self.derive_pending_birth(effects, |_, remaining| {
+            u64::try_from(remaining.as_millis())
+                .map_err(|source| TimeoutBudgetError::invalid_policy(source.to_string()))
+        })
+        .await
     }
     pub(crate) async fn child(
         &self,
         effects: &AuraEffectSystem,
         requested: Duration,
     ) -> Result<Self, TimeoutBudgetError> {
-        let now = self.observe_pending_birth(effects).await?;
+        let active = self
+            .derive_pending_birth(effects, |now, _| self.active.child_budget(now, requested))
+            .await?;
         Ok(Self {
-            active: self.active.child_budget(&now, requested)?,
+            active,
             original: self.original.clone(),
             checkpoint: Arc::clone(&self.checkpoint),
             _lease: self._lease.clone(),
         })
     }
-    /// Attenuate the existing owner to signed manifest validity using one owned
-    /// physical observation. No second read can shift the derived endpoint later.
-    #[aura_macros::capability_boundary(
-        category = "capability_gated",
-        capability = "issued_notice_validity_window",
-        capability_type = EnrollmentExecutionChild,
-        family = "runtime_helper"
-    )]
-    pub(crate) async fn issued_notice_validity_child(
-        &self,
-        effects: &AuraEffectSystem,
-        issued: &crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl,
-    ) -> Result<EnrollmentExecutionChild, AuraError> {
-        self.require_issued_notice_owner(issued)?;
-        let now = self
-            .observe_pending_birth(effects)
-            .await
-            .map_err(AuraError::from)?;
-        self.active.remaining_at(&now).map_err(AuraError::from)?;
-        let remaining = signed_notice_validity_remaining(&now, issued.manifest().expires_at_ms)?;
-        let active = self
-            .active
-            .child_budget(&now, remaining)
-            .map_err(AuraError::from)?;
-        Ok(Self {
-            active,
-            original: self.original.clone(),
-            checkpoint: self.checkpoint.clone(),
-            _lease: self._lease.clone(),
-        })
-    }
-
     pub(crate) async fn retry_delay(
         &self,
         effects: &AuraEffectSystem,
@@ -2552,6 +2792,258 @@ mod notice_validity_tests {
 #[cfg(test)]
 mod admitted_clock_split_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn original_pending_birth_derivatives_keep_monotone_postcheck() {
+        #[derive(Debug)]
+        enum CleanupFailure {
+            OwnerStillShared,
+            IncompleteShutdown,
+            IncompleteCancellation,
+            IncompleteDisposal,
+            Cancellation(crate::core::AgentError),
+            OriginalDisposal(AuraError),
+            MissingFinalizer,
+            Shutdown(crate::core::AgentError),
+        }
+        impl std::fmt::Display for CleanupFailure {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    Self::OwnerStillShared => write!(f, "agent owner remains shared"),
+                    Self::IncompleteShutdown => write!(f, "owned shutdown did not finish in bound"),
+                    Self::IncompleteCancellation => {
+                        write!(f, "original issuer cancellation did not finish in bound")
+                    }
+                    Self::IncompleteDisposal => {
+                        write!(f, "original issuer disposal did not finish in bound")
+                    }
+                    Self::Cancellation(source) => {
+                        write!(f, "typed original cancellation failure: {source}")
+                    }
+                    Self::OriginalDisposal(source) => {
+                        write!(f, "typed original disposal failure: {source}")
+                    }
+                    Self::MissingFinalizer => write!(f, "original finalizer cause absent"),
+                    Self::Shutdown(source) => write!(f, "typed shutdown failure: {source}"),
+                }
+            }
+        }
+
+        Box::pin(async {
+        let clock = Arc::new(
+            crate::handlers::invitation::tests::ReadAdvancingPhysicalClock::new(5_000),
+        );
+        let ((issuer, invitee, invitation, _start, _acceptance, _response), original) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                "pending-birth-postcheck-order",
+                Some(clock.clone()),
+                None,
+            )
+            .await;
+        eprintln!("pending-birth diagnostic: signed fixture complete");
+        let effects = invitee.runtime().effects();
+        let root = invitee
+            .invitations()
+            .unwrap()
+            .take_original_enrollment_execution(&invitation.invitation_id)
+            .await
+            .unwrap();
+        eprintln!("pending-birth diagnostic: original root acquired");
+        let original_deadline = root.child().original.deadline_at_ms();
+
+        clock.arm();
+        eprintln!("pending-birth diagnostic: first derivative");
+        let primary = async {
+            let remaining = root.child().remaining_ms(effects.as_ref()).await?;
+            eprintln!("pending-birth diagnostic: remaining derived");
+            let child = root
+                .child()
+                .child(effects.as_ref(), Duration::from_millis(25))
+                .await?;
+            eprintln!("pending-birth diagnostic: child derived");
+            let child_deadline = child.active.deadline_at_ms();
+            let child_timeout = child.active.timeout_ms();
+            drop(child);
+            let (first, second) = tokio::join!(
+                root.child().remaining_ms(effects.as_ref()),
+                root.child().remaining_ms(effects.as_ref())
+            );
+            first?;
+            second?;
+            Ok::<_, TimeoutBudgetError>((remaining, child_deadline, child_timeout))
+        }
+        .await;
+        eprintln!("pending-birth diagnostic: primary returned");
+        eprintln!("pending-birth diagnostic: primary={primary:?}");
+        clock.disarm();
+        let reversal = if primary.is_ok() {
+            let previous = clock.now_ms();
+            clock.set_time(previous - 1);
+            let result = root.child().remaining_ms(effects.as_ref()).await;
+            Some((previous, result))
+        } else {
+            None
+        };
+        drop(root);
+        if let Some((previous, _)) = &reversal {
+            // Test-controlled time can move forward for independent shutdown,
+            // but the original child's latched refusal remains immutable.
+            clock.set_time(*previous);
+        }
+        let original_disposal = original
+            .original_disposal_for_test()
+            .map_err(CleanupFailure::OriginalDisposal);
+        let issuer_cancellation = match issuer.invitations() {
+            Ok(service) => match tokio::time::timeout(
+                Duration::from_secs(5),
+                service.cancel(&invitation.invitation_id),
+            )
+            .await
+            {
+                Ok(result) => result.map(|_| ()).map_err(CleanupFailure::Cancellation),
+                Err(_) => Err(CleanupFailure::IncompleteCancellation),
+            },
+            Err(source) => Err(CleanupFailure::Cancellation(source)),
+        };
+        eprintln!("pending-birth diagnostic: issuer_cancellation={issuer_cancellation:?}");
+        let issuer_disposal = match original_disposal {
+            Ok(observation) => match tokio::time::timeout(
+                Duration::from_secs(5),
+                observation.await_disposal(),
+            )
+            .await
+            {
+                Ok(disposed) => Ok(disposed.outcome().clone()),
+                Err(_) => Err(CleanupFailure::IncompleteDisposal),
+            },
+            Err(source) => Err(source),
+        };
+        eprintln!("pending-birth diagnostic: issuer_disposal={issuer_disposal:?}");
+        let issuer_finalizer = original
+            .original_finalizer_failure_for_test()
+            .map_err(CleanupFailure::OriginalDisposal)
+            .and_then(|source| source.ok_or(CleanupFailure::MissingFinalizer));
+        eprintln!("pending-birth diagnostic: issuer_finalizer={issuer_finalizer:?}");
+        drop(original);
+        let issuer_context = aura_core::context::EffectContext::new(
+            issuer.authority_id(),
+            aura_core::ContextId::new_from_entropy([153; 32]),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let invitee_context = aura_core::context::EffectContext::new(
+            invitee.authority_id(),
+            aura_core::ContextId::new_from_entropy([156; 32]),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let issuer_shutdown = match Arc::try_unwrap(issuer) {
+            Ok(issuer) => match tokio::time::timeout(
+                Duration::from_secs(5),
+                issuer.shutdown(&issuer_context),
+            )
+            .await
+            {
+                Ok(result) => result.map_err(CleanupFailure::Shutdown),
+                Err(_) => Err(CleanupFailure::IncompleteShutdown),
+            },
+            Err(_) => Err(CleanupFailure::OwnerStillShared),
+        };
+        eprintln!("pending-birth diagnostic: issuer_cleanup={issuer_shutdown:?}");
+        let invitee_shutdown = match Arc::try_unwrap(invitee) {
+            Ok(invitee) => match tokio::time::timeout(
+                Duration::from_secs(5),
+                invitee.shutdown(&invitee_context),
+            )
+            .await
+            {
+                Ok(result) => result.map_err(CleanupFailure::Shutdown),
+                Err(_) => Err(CleanupFailure::IncompleteShutdown),
+            },
+            Err(_) => Err(CleanupFailure::OwnerStillShared),
+        };
+        eprintln!("pending-birth diagnostic: invitee_cleanup={invitee_shutdown:?}");
+
+        let (remaining, child_deadline, child_timeout) = primary.unwrap_or_else(|source| {
+            panic!(
+                "pending-birth derivative failed: {source}; issuer cleanup={issuer_shutdown:?}; invitee cleanup={invitee_shutdown:?}"
+            )
+        });
+        assert!(remaining > 0);
+        assert!(child_deadline <= original_deadline);
+        assert!(child_timeout <= 25);
+        let (previous, rollback) = reversal.expect("positive derivatives reach reversal check");
+        assert!(matches!(
+            rollback,
+            Err(TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms,
+                observed_at_ms,
+            }) if previous_observed_at_ms == previous && observed_at_ms == previous - 1
+        ));
+        issuer_cancellation.expect("original issuer cancellation before shutdown");
+        let disposed = issuer_disposal.expect("original issuer disposal before shutdown");
+        let aura_core::effects::task::RequiredTaskExit::Failed(ref native) = disposed else {
+            panic!("original cancelled issuer must retain failed disposition: {disposed:?}");
+        };
+        let finalizer = issuer_finalizer.expect("original finalizer cause before shutdown");
+        if let Err(CleanupFailure::Shutdown(ref source)) = issuer_shutdown {
+            fn cause<'a, T: std::error::Error + 'static>(
+                mut source: &'a (dyn std::error::Error + 'static),
+            ) -> Option<&'a T> {
+                loop {
+                    if let Some(actual) = source.downcast_ref::<T>() {
+                        return Some(actual);
+                    }
+                    source = source.source()?;
+                }
+            }
+            let terminal = cause::<aura_core::effects::task::RequiredTaskTerminalFailure>(native)
+                .expect("actual original disposition retains typed terminal failure");
+            type Admission = crate::handlers::invitation::EnrollmentVmAdmissionError;
+            let cancelled_before_vm = matches!(
+                terminal.execution(),
+                aura_core::effects::task::RequiredTaskExit::Cancelled
+            );
+            let cancelled_after_vm = cause::<Admission>(&finalizer).is_some_and(|actual| {
+                matches!(
+                    actual,
+                    Admission::TerminalFailed(
+                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+                    )
+                )
+            });
+            assert!(
+                cancelled_before_vm || cancelled_after_vm,
+                "same original issuer retains a cancelled typed cause"
+            );
+            assert!(matches!(
+                cause::<crate::runtime::system::RuntimeShutdownError>(source),
+                Some(crate::runtime::system::RuntimeShutdownError::TaskTree(
+                    crate::task_registry::TaskSupervisionError::TaskFailed { .. }
+                ))
+            ));
+            let exact_terminal =
+                cause::<aura_core::effects::task::RequiredTaskTerminalFailure>(source)
+                    .is_some_and(|actual| std::ptr::eq(actual, terminal));
+            let finalizer_source = std::error::Error::source(&finalizer).unwrap_or(&finalizer);
+            let mut current: Option<&(dyn std::error::Error + 'static)> = Some(source);
+            let mut exact_finalizer = false;
+            while let Some(actual) = current {
+                if std::ptr::eq(actual, finalizer_source) {
+                    exact_finalizer = true;
+                    break;
+                }
+                current = actual.source();
+            }
+            assert!(
+                exact_terminal || exact_finalizer,
+                "shutdown must retain the exact original finalizer or terminal allocation"
+            );
+        } else {
+            issuer_shutdown.expect("owned issuer shutdown or exact retained negative cause");
+        }
+        invitee_shutdown.expect("invitee cleanup after original rollback refusal");
+        })
+        .await;
+    }
 
     #[cfg(unix)]
     #[tokio::test]
@@ -3106,12 +3598,12 @@ impl OriginalIssuerLaunchWindow {
         let receipt = match &actual.checkpoint {
             aura_core::time::timeout::CheckpointAttempt::Returned(receipt) => receipt.clone(),
             aura_core::time::timeout::CheckpointAttempt::Failed { source } => {
-                return Err(AuraError::from(source.clone()))
+                return Err(AuraError::from(source.clone()));
             }
             _ => {
                 return Err(AuraError::invalid(
                     "original allocation checkpoint did not return its receipt",
-                ))
+                ));
             }
         };
         actual.validation.clone().map_err(AuraError::from)?;
@@ -3674,9 +4166,9 @@ impl OriginalIssuerNegativeCleanupOwner {
         let children = &self.root.children;
         let conditional_signing = &self.conditional_signing;
         let original_child = &self.root.child;
+        let issued = self.terminal.issued();
         #[cfg(test)]
         let mut refusal_observer = None;
-        #[cfg(test)]
         let destination = &self.destination;
         let work = execute_negative_cleanup_with_timeout_budget(
             effects,
@@ -3694,6 +4186,17 @@ impl OriginalIssuerNegativeCleanupOwner {
 
                 if disposal.is_none() {
                     *disposal = Some(Arc::new(sealed.await_disposal().await));
+                }
+                disposal
+                    .as_ref()
+                    .ok_or_else(|| AuraError::invalid("original negative disposal missing"))?
+                    .require_original_group(children)?;
+                if let Err(source) = destination
+                    .dispose_original_vm(effects.as_ref(), issued, original_child)
+                    .await
+                {
+                    work_failure.get_or_insert_with(|| source.clone());
+                    return Err(source);
                 }
                 if let Some(signing) = conditional_signing {
                     if let Err(source) = signing
@@ -3732,7 +4235,7 @@ impl OriginalIssuerNegativeCleanupOwner {
             None => {
                 return Err(AuraError::invalid(
                     "original negative disposal was not acknowledged",
-                ))
+                ));
             }
         }
         let checkpoint = &mut self.checkpoint;
@@ -3767,7 +4270,7 @@ impl OriginalIssuerNegativeCleanupOwner {
         match observation.checkpoint {
             CheckpointAttempt::Returned(receipt) => {
                 receipt.require_original(original)?;
-                #[cfg(feature = "simulation")]
+                #[cfg(any(test, feature = "simulation"))]
                 self.destination
                     .retain_simulated_original_subtree_disposal(
                         Arc::clone(self.disposal.as_ref().ok_or_else(|| {
@@ -3819,28 +4322,26 @@ impl OriginalIssuerNegativeCleanupOwner {
 }
 impl AcknowledgedIssuerNegativeTerminal {
     pub(crate) fn domain_failure(&self) -> AuraError {
-        self.owner
+        let original = self.owner.terminal.original_domain_failure();
+        let cleanup = self
+            .owner
             .retirement_failure
             .clone()
             .or_else(|| self.owner.work_failure.clone())
             .or_else(|| self.owner.checkpoint_failure.clone().map(AuraError::from))
-            .or_else(|| self.owner.validation_failure.clone().map(AuraError::from))
-            .unwrap_or_else(|| AuraError::Internal {
-                message: "original issuer enrollment was cancelled".into(),
-                source: Some(Arc::new(OriginalIssuerCancellationFailure {
-                    terminal: Arc::clone(&self.owner.terminal),
-                })),
-            })
-    }
-}
-#[derive(thiserror::Error)]
-#[error("original verified issuer cancellation")]
-struct OriginalIssuerCancellationFailure {
-    terminal: Arc<crate::handlers::invitation::OriginalIssuerCancellationTerminal>,
-}
-impl std::fmt::Debug for OriginalIssuerCancellationFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("OriginalIssuerCancellationFailure")
+            .or_else(|| self.owner.validation_failure.clone().map(AuraError::from));
+        match cleanup {
+            Some(primary) => AuraError::Internal {
+                message: "original cancellation and cleanup domains failed".into(),
+                source: Some(Arc::new(
+                    crate::handlers::invitation_service::EnrollmentInitiatorTaskFailure::new(
+                        crate::AgentError::from(primary),
+                        Some(original),
+                    ),
+                )),
+            },
+            None => original,
+        }
     }
 }
 
@@ -3973,7 +4474,7 @@ impl
                         .map(AuraError::from)
                         .unwrap_or_else(|| {
                             DurableEnrollmentExecutionError::MissingTerminalCheckpoint.refusal()
-                        }))
+                        }));
                 }
             }
             observed.validation.map_err(AuraError::from)?;
@@ -4953,7 +5454,7 @@ impl OriginalSigningTaskCustody {
                 _ => {
                     return Err(AuraError::permission_denied(
                         "original conditional actor and dispatcher terminal dispositions differ",
-                    ))
+                    ));
                 }
             }
             // The joined futures have ended. Consume the same original material
@@ -5498,6 +5999,7 @@ impl EnrollmentExecutionChild {
 pub(crate) enum OriginalIssuerResourceDecision {
     Committed,
     VerifiedRejected,
+    Interrupted,
 }
 impl OriginalIssuerResourceDecision {
     pub(super) fn require_original(
@@ -5506,6 +6008,12 @@ impl OriginalIssuerResourceDecision {
         child: &EnrollmentExecutionChild,
     ) -> Result<(), AuraError> {
         match self {
+            Self::Interrupted => match child.checkpoint.as_ref() {
+                WindowCheckpoint::Registered { capability } => {
+                    capability.require_original_interrupted_resources(issued)
+                }
+                _ => Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal()),
+            },
             Self::Committed => child
                 .original_positive_decision(issued)?
                 .require_original_control(issued),
@@ -5526,6 +6034,10 @@ impl OriginalIssuerResourceDecision {
     ) -> Result<std::sync::Weak<RegisteredEnrollmentWindowCapability>, AuraError> {
         self.require_original(issued, child)?;
         match self {
+            Self::Interrupted => match child.checkpoint.as_ref() {
+                WindowCheckpoint::Registered { capability } => Ok(Arc::downgrade(capability)),
+                _ => Err(DurableEnrollmentExecutionError::ForeignAdmission.refusal()),
+            },
             Self::Committed => child
                 .original_positive_decision(issued)?
                 .original_owner_for_control(issued),
@@ -5556,7 +6068,9 @@ pub(crate) struct OriginalIssuerResourceCleanupOwner {
         Arc<tokio::sync::Mutex<super::threshold_signing::OriginalIssuerTranscriptSigningCustody>>,
     >,
     primary: AuraError,
-    decision: OriginalIssuerResourceDecision,
+    decision: Option<OriginalIssuerResourceDecision>,
+    destination: Arc<super::issuer_terminal_destination::OriginalIssuerTerminalDestination>,
+    interruption_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
     generation: Option<super::ceremony_tracker::OriginalEnrollmentRetirementAcknowledgment>,
     refused_generation: Option<super::ceremony_tracker::RejectedOriginalEnrollmentRetirement>,
     sealed: Option<crate::task_registry::SealedTaskGroup>,
@@ -5565,7 +6079,7 @@ pub(crate) struct OriginalIssuerResourceCleanupOwner {
     closure: Option<super::ceremony_tracker::OriginalIssuerResourceClosure>,
     first_failure: Option<AuraError>,
     work_completed: bool,
-    settled: bool,
+    settled_failure: Option<AuraError>,
 }
 impl OriginalIssuerResourceCleanupOwner {
     #[aura_macros::capability_boundary(
@@ -5585,6 +6099,7 @@ impl OriginalIssuerResourceCleanupOwner {
             >,
         >,
         primary: AuraError,
+        destination: Arc<super::issuer_terminal_destination::OriginalIssuerTerminalDestination>,
     ) -> Result<
         Self,
         Box<(
@@ -5601,7 +6116,9 @@ impl OriginalIssuerResourceCleanupOwner {
             issued,
             signing,
             primary,
-            decision,
+            decision: Some(decision),
+            destination,
+            interruption_guard: None,
             generation: None,
             refused_generation: None,
             sealed: None,
@@ -5610,8 +6127,41 @@ impl OriginalIssuerResourceCleanupOwner {
             closure: None,
             first_failure: None,
             work_completed: false,
-            settled: false,
+            settled_failure: None,
         })
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "original_interrupted_issuer_root", capability_type = EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>, family = "runtime_helper")]
+    pub(crate) fn from_interrupted_original(
+        root: EnrollmentExecutionRoot<RegisteredEnrollmentWindowCapability>,
+        issued: Arc<crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl>,
+        signing: Option<
+            Arc<
+                tokio::sync::Mutex<
+                    super::threshold_signing::OriginalIssuerTranscriptSigningCustody,
+                >,
+            >,
+        >,
+        primary: AuraError,
+        destination: Arc<super::issuer_terminal_destination::OriginalIssuerTerminalDestination>,
+    ) -> Self {
+        Self {
+            root,
+            issued,
+            signing,
+            primary,
+            destination,
+            decision: None,
+            interruption_guard: None,
+            generation: None,
+            refused_generation: None,
+            sealed: None,
+            disposal: None,
+            retirement: None,
+            closure: None,
+            first_failure: None,
+            work_completed: false,
+            settled_failure: None,
+        }
     }
     #[aura_macros::capability_boundary(category = "capability_gated", capability = "OriginalIssuerResourceCleanupOwner", receiver_type = OriginalIssuerResourceCleanupOwner, family = "runtime_helper")]
     pub(crate) async fn settle(
@@ -5623,12 +6173,10 @@ impl OriginalIssuerResourceCleanupOwner {
             execute_negative_cleanup_with_timeout_budget, CheckpointAttempt,
         };
         self.root.origin.require_effects(effects.as_ref())?;
-        self.decision
-            .require_original(&self.issued, &self.root.child)?;
-        if self.settled {
+        if let Some(failure) = self.settled_failure.as_ref() {
             return Ok(
                 aura_core::effects::task::RequiredTaskSettlement::ResolvedWithDomainFailure(
-                    self.primary.clone(),
+                    failure.clone(),
                 ),
             );
         }
@@ -5641,6 +6189,77 @@ impl OriginalIssuerResourceCleanupOwner {
             self.sealed = Some(self.root.children.seal_admission());
         }
         let budget = self.root.origin.negative_cleanup_budget();
+        // The VM was opened by this required task. Cleanup borrows its retained
+        // slot under that same registered binding, after disposing its children.
+        let root = &self.root;
+        let disposal = &mut self.disposal;
+        let sealed = &self.sealed;
+        let destination = &self.destination;
+        let issued = &self.issued;
+        let decision = &mut self.decision;
+        let interruption_guard = &mut self.interruption_guard;
+        #[cfg(test)]
+        eprintln!("original issuer resources: await descendants and original VM");
+        let prepared = execute_negative_cleanup_with_timeout_budget(
+            effects,
+            budget,
+            &self.primary,
+            || async {
+                if disposal.is_none() {
+                    *disposal = Some(
+                        sealed
+                            .as_ref()
+                            .ok_or_else(|| AuraError::invalid("original subtree seal missing"))?
+                            .await_disposal()
+                            .await,
+                    );
+                }
+                let disposal = disposal
+                    .as_ref()
+                    .ok_or_else(|| AuraError::invalid("original subtree disposal missing"))?;
+                disposal.require_original_group(&root.children)?;
+                destination
+                    .dispose_original_vm(effects.as_ref(), issued, &root.child)
+                    .await?;
+                #[cfg(test)]
+                eprintln!("original issuer resources: descendants and original VM disposed");
+                if decision.is_none() {
+                    *interruption_guard = Some(
+                        root.origin
+                            .fence_original_interrupted_resources(
+                                issued,
+                                destination,
+                                disposal,
+                                &root.children,
+                            )
+                            .await?,
+                    );
+                    *decision = Some(OriginalIssuerResourceDecision::Interrupted);
+                }
+                decision
+                    .ok_or_else(|| AuraError::invalid("original resource decision missing"))?
+                    .require_original(issued, &root.child)
+            },
+        )
+        .await;
+        match prepared.operation {
+            Some(Ok(())) => {}
+            Some(Err(source)) => return Err(source),
+            None => {
+                return Err(AuraError::invalid(
+                    "original VM and subtree preparation incomplete",
+                ))
+            }
+        }
+        prepared.validation.map_err(AuraError::from)?;
+        if self.decision.is_none() {
+            return Err(AuraError::invalid(
+                "original resource preparation incomplete",
+            ));
+        }
+        let decision = self
+            .decision
+            .ok_or_else(|| AuraError::invalid("original resource decision missing"))?;
         let child = &self.root.child;
         let issued = &self.issued;
         let children = &self.root.children;
@@ -5650,7 +6269,6 @@ impl OriginalIssuerResourceCleanupOwner {
             let retirement = &mut self.retirement;
             let generation = &mut self.generation;
             let refused_generation = &mut self.refused_generation;
-            let decision = self.decision;
             let original = &self.root.origin;
             let failure = &mut self.first_failure;
             let sealed = self
@@ -5699,9 +6317,15 @@ impl OriginalIssuerResourceCleanupOwner {
                             if let Some(rejected) = refused_generation.as_ref() {
                                 return Err(rejected.source.clone());
                             }
+                            #[cfg(test)]
+                            eprintln!("original issuer resources: begin rejected generation retirement");
                             let writes = original.retire_original_rejected_generation(issued).await?;
                             match original.acknowledge_original_retirement(writes, issued) {
-                                Ok(actual) => *generation = Some(actual),
+                                Ok(actual) => {
+                                    *generation = Some(actual);
+                                    #[cfg(test)]
+                                    eprintln!("original issuer resources: rejected generation retired");
+                                },
                                 Err(rejected) => {
                                     let source = rejected.source.clone();
                                     *refused_generation = Some(rejected);
@@ -5737,7 +6361,6 @@ impl OriginalIssuerResourceCleanupOwner {
             drop(original_work);
             self.work_completed = true;
         }
-        let decision = self.decision;
         let generation = self.generation.as_ref();
         let closure = &mut self.closure;
         let original = &self.root.origin;
@@ -5750,6 +6373,8 @@ impl OriginalIssuerResourceCleanupOwner {
             .as_ref()
             .ok_or_else(|| AuraError::invalid("committed subtree disposal missing"))?;
         let checkpoint_failure = &mut self.first_failure;
+        #[cfg(test)]
+        eprintln!("original issuer resources: begin resource closure");
         let observation = acknowledge_negative_cleanup_with_timeout_budget(
             effects,
             budget,
@@ -5792,15 +6417,18 @@ impl OriginalIssuerResourceCleanupOwner {
             _ => {
                 return Err(AuraError::invalid(
                     "committed resource checkpoint unresolved",
-                ))
+                ));
             }
         }
-        self.settled = true;
-        Ok(
-            aura_core::effects::task::RequiredTaskSettlement::ResolvedWithDomainFailure(
-                self.primary.clone(),
-            ),
-        )
+        // All original descendants are disposed before retaining the final
+        // failure graph, including a finalizer that failed after observation.
+        let failure = self.destination.with_retained_finalizer_failure(
+            self.destination
+                .with_retained_vm_failures(self.primary.clone()),
+        );
+        self.settled_failure = Some(failure.clone());
+        self.interruption_guard = None;
+        Ok(aura_core::effects::task::RequiredTaskSettlement::ResolvedWithDomainFailure(failure))
     }
 }
 

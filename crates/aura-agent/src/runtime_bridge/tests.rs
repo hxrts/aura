@@ -1828,6 +1828,7 @@ fn enrollment_crash_boundary_worker() {
                 | "before-tree"
                 | "after-tree"
                 | "retirement-fault"
+                | "retirement-shutdown-fault"
                 | "cancelled-notice"
                 | "cancelled-notice-foreign"
                 | "prepared-negative-before-close"
@@ -1865,6 +1866,7 @@ fn enrollment_crash_boundary_worker() {
             .await
             .unwrap();
         let mut _notice_release = None;
+        let mut _retirement_refusal = None;
         let detail = if matches!(
             phase.as_str(),
             "cancelled-notice" | "cancelled-notice-foreign"
@@ -1911,7 +1913,10 @@ fn enrollment_crash_boundary_worker() {
                 invitation: invitation.invitation_id.clone(),
                 pending_epoch: start.pending_epoch.value(),
             }
-        } else if phase == "retirement-fault" {
+        } else if matches!(
+            phase.as_str(),
+            "retirement-fault" | "retirement-shutdown-fault"
+        ) {
             let effects = issuer.runtime().effects();
             let participant =
                 aura_core::threshold::ParticipantIdentity::device(invitee.context().device_id());
@@ -1924,7 +1929,13 @@ fn enrollment_crash_boundary_worker() {
                 .secure_retrieve(&share, &[SecureStorageCapability::Read])
                 .await
                 .expect("actual original allocation envelope");
-            effects.fail_next_enrollment_retirement_for_test(start.pending_epoch.value());
+            // Refuse real config deletion through protocol and cleanup retries,
+            // until the actual process crash below.
+            _retirement_refusal = Some(
+                effects.refuse_enrollment_retirement_until_released_for_test(
+                    start.pending_epoch.value(),
+                ),
+            );
             let failure = AgentRuntimeBridge::new(issuer.clone())
                 .cancel_key_rotation_ceremony(&start.ceremony_id)
                 .await
@@ -1965,6 +1976,34 @@ fn enrollment_crash_boundary_worker() {
                     .unwrap(),
                 "interrupted final config deletion remains for cold recovery"
             );
+            if phase == "retirement-shutdown-fault" {
+                if let Err(error) = issuer
+                    .runtime()
+                    .tasks()
+                    .shutdown_with_timeout(std::time::Duration::from_secs(2))
+                    .await
+                {
+                    assert!(
+                        !format!("{error:?}").contains("contradictory"),
+                        "cleanup failure must not publish a second terminal: {error:?}"
+                    );
+                }
+                let failures = issuer.supervised_task_failures();
+                assert!(
+                    failures
+                        .iter()
+                        .any(|failure| std::error::Error::source(failure).is_some()),
+                    "failed generation cleanup is recorded with its cause: {failures:?}"
+                );
+                let profile = crate::runtime::effects::enrollment_generation_profile_location(
+                    &issuer.authority_id(),
+                    start.pending_epoch.value(),
+                );
+                assert!(
+                    effects.secure_exists(&profile).await.unwrap(),
+                    "interrupted cleanup retains activation fence through actual shutdown"
+                );
+            }
             EnrollmentCrashDetail::Retirement {
                 invitee_authority: invitee.authority_id(),
                 invitee_context: invitee.context().default_context_id(),
@@ -2593,79 +2632,57 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
     run_async_test_on_large_stack(async move {
-        let (issuer, invitee, _invitation, start, _accept, _witness) =
-            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
-                "retirement-reissue",
-            )
-            .await;
-        let authority = issuer.authority_id();
-        let config = issuer.runtime().effects().config().clone();
-        let context = EffectContext::new(
-            authority,
-            issuer.context().default_context_id(),
-            ExecutionMode::Testing,
-        );
-        // Cancel releases the generation before it returns, so the
-        // deletion fault must be armed first. The cancellation itself is
-        // committed; the failed cleanup is a recorded supervised failure
-        // that a restart retries.
-        issuer
-            .runtime()
-            .effects()
-            .fail_next_enrollment_retirement_for_test(start.pending_epoch.value());
-        let bridge = AgentRuntimeBridge::new(issuer.clone());
-        bridge
-            .cancel_key_rotation_ceremony(&start.ceremony_id)
-            .await
-            .expect("committed cancellation succeeds although cleanup failed");
-        let failures = issuer.supervised_task_failures();
-        assert!(
-            failures
-                .iter()
-                .any(|failure| std::error::Error::source(failure).is_some()),
-            "failed generation cleanup is recorded with its cause: {failures:?}"
-        );
-        // Shutdown reports the recorded cleanup failure; it must not carry a
-        // second, contradictory terminal publication.
-        if let Err(error) = issuer
-            .runtime()
-            .tasks()
-            .shutdown_with_timeout(std::time::Duration::from_secs(2))
-            .await
-        {
-            assert!(
-                !format!("{error:?}").contains("contradictory"),
-                "cleanup failure must not publish a second terminal: {error:?}"
-            );
-        }
-        let original = issuer
-            .runtime()
-            .ceremony_runner()
-            .terminal_outcome(&start.ceremony_id)
-            .await
-            .unwrap();
-        assert!(matches!(
-            original,
-            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(_))
+        // The original owner refuses cleanup and retains its physical profile.
+        // Only an actual worker process death can release that crash boundary.
+        let boundary = actual_enrollment_crash_boundary("retirement-shutdown-fault");
+        let EnrollmentCrashDetail::Retirement {
+            invitee_authority,
+            invitee_context,
+            invitee_config,
+            pending_epoch,
+            ..
+        } = boundary.detail
+        else {
+            panic!("actual failed retirement crash boundary");
+        };
+        let authority = boundary.authority;
+        let ceremony = boundary.ceremony;
+        let config = boundary.config;
+        let context = EffectContext::new(authority, boundary.context, ExecutionMode::Testing);
+        let original = Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+            aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
         ));
         let profile = crate::runtime::effects::enrollment_generation_profile_location(
             &authority,
-            start.pending_epoch.value(),
+            pending_epoch,
         );
-        assert!(
-            issuer
-                .runtime()
-                .effects()
-                .secure_exists(&profile)
+        let invitee = Arc::new(
+            AgentBuilder::new()
+                .with_authority(invitee_authority)
+                .with_config(invitee_config)
+                .build_testing_async(&EffectContext::new(
+                    invitee_authority,
+                    invitee_context,
+                    ExecutionMode::Testing,
+                ))
                 .await
-                .unwrap(),
-            "interrupted cleanup retains activation fence"
+                .expect("reopen actual receiver after worker death"),
         );
-        drop(bridge);
-        drop(issuer);
+        AgentRuntimeBridge::new(invitee.clone())
+            .bootstrap_signing_keys(
+                crate::runtime::services::RuntimeServiceContext::test_original(
+                    invitee.runtime().tasks(),
+                    invitee.runtime().effects(),
+                )
+                .await
+                .startup_window(),
+            )
+            .await
+            .expect("recover original receiver signer before export");
         let restarted = Arc::new(
             AgentBuilder::new()
                 .with_authority(authority)
@@ -2673,6 +2690,15 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
                 .build_testing_async(&context)
                 .await
                 .expect("reopen failed generation"),
+        );
+        assert!(
+            restarted
+                .runtime()
+                .effects()
+                .secure_exists(&profile)
+                .await
+                .unwrap(),
+            "actual process crash preserved the original unfinished generation fence"
         );
         let bridge = AgentRuntimeBridge::new(restarted.clone());
         bridge
@@ -2686,11 +2712,26 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
             )
             .await
             .expect("retry original failed cleanup under owned bootstrap");
+        let retained_window = restarted
+            .runtime()
+            .ceremony_tracker()
+            .get(&ceremony)
+            .await
+            .expect("actual original recovered clock owner");
+        assert_eq!(
+            retained_window.timeout_budget.started_at_ms(),
+            boundary.original_started
+        );
+        assert_eq!(
+            retained_window.timeout_budget.deadline_at_ms(),
+            boundary.original_deadline
+        );
+
         assert_eq!(
             restarted
                 .runtime()
                 .ceremony_runner()
-                .terminal_outcome(&start.ceremony_id)
+                .terminal_outcome(&ceremony)
                 .await
                 .unwrap(),
             original
@@ -2722,13 +2763,16 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
             .initiate_device_enrollment_ceremony("reissued".to_string(), setup)
             .await
             .expect("fresh owned generation after strict retirement");
-        assert_ne!(replacement.ceremony_id, start.ceremony_id);
-        assert_eq!(replacement.pending_epoch, start.pending_epoch);
+        assert_ne!(replacement.ceremony_id, ceremony);
+        assert_eq!(
+            replacement.pending_epoch,
+            aura_core::Epoch::new(pending_epoch)
+        );
         assert_eq!(
             restarted
                 .runtime()
                 .ceremony_runner()
-                .terminal_outcome(&start.ceremony_id)
+                .terminal_outcome(&ceremony)
                 .await
                 .unwrap(),
             original
@@ -2739,9 +2783,9 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
 #[test]
 fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_restart() {
     run_async_test_on_large_stack(async move {
-        let (issuer, invitee, _invitation, first, _accept, _witness) =
-            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
-                "orphan-retirement",
+        let ((issuer, invitee, _invitation, first, _accept, _witness), original_issuer) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_original_continuation(
+                "orphan-retirement", None, None,
             )
             .await;
         AgentRuntimeBridge::new(issuer.clone())
@@ -2763,12 +2807,54 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
                 .unwrap(),
             "cancel releases the cancelled generation before returning"
         );
-        issuer
+        let shutdown = issuer
             .runtime()
             .tasks()
             .shutdown_with_timeout(std::time::Duration::from_secs(2))
             .await
-            .unwrap();
+            .expect_err("settled cancelled issuer preserves its failed signed domain outcome");
+        let disposed = original_issuer
+            .original_disposal_for_test()
+            .expect("actual original issuer disposal observer")
+            .await_disposal_or_cleanup_failure_for_test()
+            .await
+            .expect("original issuer resources really acknowledged before orphan allocation");
+        original_issuer
+            .require_original_issuer_disposal_for_test(&disposed)
+            .expect("same original issuer owns disposal");
+        assert!(
+            disposed.matches_supervision_failure(&shutdown),
+            "shutdown retains this actual original issuer failure"
+        );
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&shutdown);
+        let mut terminal = None;
+        let mut cancelled = false;
+        while let Some(actual) = source {
+            if let Some(actual_terminal) =
+                actual.downcast_ref::<aura_core::effects::task::RequiredTaskTerminalFailure>()
+            {
+                terminal = Some(actual_terminal);
+            }
+            if let Some(actual_admission) =
+                actual.downcast_ref::<crate::handlers::invitation::EnrollmentVmAdmissionError>()
+            {
+                cancelled |= matches!(
+                    actual_admission,
+                    crate::handlers::invitation::EnrollmentVmAdmissionError::TerminalFailed(
+                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+                    )
+                );
+            }
+            source = actual.source();
+        }
+        assert!(matches!(
+            terminal.expect("actual settled domain failure").execution(),
+            aura_core::effects::task::RequiredTaskExit::Completed
+        ));
+        assert!(
+            cancelled,
+            "original signed Cancelled failure remains typed after real resource ACK"
+        );
         let authority = issuer.authority_id();
         let config = issuer.runtime().effects().config().clone();
         let context = EffectContext::new(
@@ -2841,6 +2927,9 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
         drop(effects);
         drop(service);
         drop(app);
+        drop(original_issuer);
+        drop(disposed);
+        drop(shutdown);
         drop(issuer);
         let restarted = Arc::new(
             AgentBuilder::new()

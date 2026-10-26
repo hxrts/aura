@@ -354,8 +354,8 @@
           vendor-deps = warmVendor;
           deps-debug = warmDebug;
           # Main CLI application (terminal interface)
-          default = cargoNix.workspaceMembers.aura-terminal.build;
-          aura-terminal = cargoNix.workspaceMembers.aura-terminal.build;
+          default = cargoNix.workspaceMembers.aura-terminal.build.override { features = [ "default" "production-build" ]; };
+          aura-terminal = cargoNix.workspaceMembers.aura-terminal.build.override { features = [ "default" "production-build" ]; };
 
           # Terminal with development features (demo mode, simulator integration)
           aura-terminal-dev = cargoNix.workspaceMembers.aura-terminal.build.override {
@@ -421,6 +421,7 @@
             # Development tools
             git
             jq
+            b3sum # Protected exact-fixture artifact identities
             ripgrep
             rustup
 
@@ -569,6 +570,7 @@
             # Development tools
             git
             jq
+            b3sum # Protected exact-fixture artifact identities
             ripgrep
             rustup
 
@@ -638,6 +640,7 @@
             git
             ripgrep
             jq
+            b3sum # Protected exact-fixture artifact identities
 
             # Build tools
             pkg-config

@@ -52,6 +52,8 @@ pub use reductions::{
     ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction, InvitationReduction,
     RecoveryReduction,
 };
+#[cfg(feature = "simulator-checkpoint")]
+pub use scheduler::SchedulerBatchDeadlineWitness;
 pub use scheduler::{
     topological_sort_dag, AnyView, FactIngress, FactProcessingError,
     FactProcessingTargetCapability, FactSource, IssuedFactPublication, ReactiveScheduler,

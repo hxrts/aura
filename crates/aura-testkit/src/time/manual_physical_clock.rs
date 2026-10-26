@@ -1,4 +1,8 @@
 //! Manual physical time whose sleeps wait for actual test-controlled progress.
+use aura_core::effects::time::{
+    PhysicalSleepRegistration, PhysicalSleepRegistrationObservation,
+    PhysicalSleepRegistrationObserver,
+};
 use aura_core::types::window::{PhysicalMillis, WindowPosition};
 use aura_core::{
     effects::{PhysicalTimeEffects, TimeError},
@@ -6,9 +10,19 @@ use aura_core::{
 };
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+
+// The selected clock's synchronous mutation methods cannot await. This guard
+// is held only while changing one atomic reading under timer registration.
+#[allow(clippy::disallowed_types)]
+type ClockMutationLock = std::sync::Mutex<()>;
+// The test-only sender is read synchronously in timer Drop; no await occurs.
+#[cfg(test)]
+#[allow(clippy::disallowed_types)]
+type ClockCancellationProbe = std::sync::Mutex<Option<std::sync::mpsc::Sender<bool>>>;
+static NEXT_PROVIDER_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Shared provider for actual runtimes and their timeout owners.
 #[derive(Clone, Debug)]
@@ -17,35 +31,71 @@ pub struct ManualPhysicalClock {
 }
 #[derive(Debug)]
 struct State {
+    provider_id: u64,
     now: AtomicU64,
+    next_relative_registration: AtomicU64,
+    time_change: ClockMutationLock,
     changed: tokio::sync::Notify,
-    deadlines: tokio::sync::Mutex<BTreeMap<u64, Arc<AtomicUsize>>>,
+    deadlines: tokio::sync::Mutex<BTreeMap<u64, Vec<Arc<RegisteredTimer>>>>,
     deadlines_changed: tokio::sync::Notify,
     observation_override: tokio::sync::Mutex<Option<Result<PhysicalTime, TimeError>>>,
     #[cfg(not(target_arch = "wasm32"))]
-    task_observation_failure: tokio::sync::Mutex<Option<(tokio::task::Id, TimeError)>>,
+    task_observation_override:
+        tokio::sync::Mutex<Option<(tokio::task::Id, Result<PhysicalTime, TimeError>)>>,
     sleep_failure: tokio::sync::Mutex<Option<TimeError>>,
     sleep_admission: tokio::sync::Mutex<SleepAdmission>,
+    #[cfg(test)]
+    drop_attempt: ClockCancellationProbe,
 }
 
 type SleepAdmission = Option<(
     Option<u64>,
     tokio::sync::oneshot::Sender<WindowPosition<PhysicalMillis>>,
 )>;
+#[derive(Debug)]
+struct RegisteredTimer {
+    active: AtomicBool,
+    task: Option<tokio::task::Id>,
+    generation: u64,
+}
+
+/// Read-only reason an observed scheduler timer cannot drive this exact clock.
+/// The result observes one instant; only `try_advance_sole_registered_deadline`
+/// makes a synchronized time decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegisteredDeadlineRefusal {
+    Eligible,
+    NotFuture,
+    NoLiveTimer,
+    EarlierTimer,
+    ForeignTask,
+    DuplicateTimer,
+    ObservationBusy,
+}
 impl ManualPhysicalClock {
     /// Construct the original physical observation.
     pub fn new(now: u64) -> Self {
+        let provider_id = NEXT_PROVIDER_ID
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                old.checked_add(1)
+            })
+            .expect("manual physical provider identity exhausted");
         Self {
             state: Arc::new(State {
+                provider_id,
                 now: AtomicU64::new(now),
+                next_relative_registration: AtomicU64::new(0),
+                time_change: ClockMutationLock::new(()),
                 changed: tokio::sync::Notify::new(),
                 deadlines: tokio::sync::Mutex::new(BTreeMap::new()),
                 deadlines_changed: tokio::sync::Notify::new(),
                 observation_override: tokio::sync::Mutex::new(None),
                 #[cfg(not(target_arch = "wasm32"))]
-                task_observation_failure: tokio::sync::Mutex::new(None),
+                task_observation_override: tokio::sync::Mutex::new(None),
                 sleep_failure: tokio::sync::Mutex::new(None),
                 sleep_admission: tokio::sync::Mutex::new(None),
+                #[cfg(test)]
+                drop_attempt: ClockCancellationProbe::new(None),
             }),
         }
     }
@@ -63,13 +113,42 @@ impl ManualPhysicalClock {
         let task = tokio::task::try_id().ok_or_else(|| TimeError::OperationFailed {
             reason: "selected physical fault requires a Tokio task".into(),
         })?;
-        let mut slot = self.state.task_observation_failure.lock().await;
+        let mut slot = self.state.task_observation_override.lock().await;
         if slot.is_some() {
             return Err(TimeError::OperationFailed {
                 reason: "selected physical fault already installed".into(),
             });
         }
-        *slot = Some((task, cause));
+        *slot = Some((task, Err(cause)));
+        Ok(())
+    }
+    /// Script the next read of the actual Tokio task installing this fault.
+    /// Foreign tasks sharing this provider cannot consume the observation.
+    /// This changes neither driven time nor any original timer endpoint.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn script_next_current_task_observation(&self, at_ms: u64) -> Result<(), TimeError> {
+        let task = tokio::task::try_id().ok_or_else(|| TimeError::OperationFailed {
+            reason: "selected physical observation requires a Tokio task".into(),
+        })?;
+        let mut slot = self
+            .state
+            .task_observation_override
+            .try_lock()
+            .map_err(|_| TimeError::OperationFailed {
+                reason: "selected physical observation is borrowed".into(),
+            })?;
+        if slot.is_some() {
+            return Err(TimeError::OperationFailed {
+                reason: "selected physical observation already installed".into(),
+            });
+        }
+        *slot = Some((
+            task,
+            Ok(PhysicalTime {
+                ts_ms: at_ms,
+                uncertainty: None,
+            }),
+        ));
         Ok(())
     }
     /// Script one actual physical read without changing independently driven
@@ -137,7 +216,10 @@ impl ManualPhysicalClock {
     pub async fn next_registered_deadline(&self) -> Option<WindowPosition<PhysicalMillis>> {
         let now = self.now_ms();
         let mut deadlines = self.state.deadlines.lock().await;
-        deadlines.retain(|_, count| count.load(Ordering::Acquire) != 0);
+        deadlines.retain(|_, timers| {
+            timers.retain(|timer| timer.active.load(Ordering::Acquire));
+            !timers.is_empty()
+        });
         deadlines
             .keys()
             .copied()
@@ -158,21 +240,74 @@ impl ManualPhysicalClock {
         }
     }
     async fn register_deadline(&self, deadline: u64) -> RegisteredManualDeadline {
-        let count = {
+        let timer = Arc::new(RegisteredTimer {
+            active: AtomicBool::new(true),
+            task: tokio::task::try_id(),
+            generation: 0,
+        });
+        {
             let mut deadlines = self.state.deadlines.lock().await;
-            deadlines.retain(|_, count| count.load(Ordering::Acquire) != 0);
-            let count = deadlines.entry(deadline).or_default();
-            count.fetch_add(1, Ordering::AcqRel);
-            count.clone()
-        };
+            deadlines.retain(|_, timers| {
+                timers.retain(|registered| registered.active.load(Ordering::Acquire));
+                !timers.is_empty()
+            });
+            deadlines.entry(deadline).or_default().push(timer.clone());
+        }
         self.state.deadlines_changed.notify_waiters();
         RegisteredManualDeadline {
             state: Arc::clone(&self.state),
-            count,
+            timer,
         }
+    }
+    async fn register_relative_deadline(
+        &self,
+        duration: u64,
+    ) -> Result<(u64, RegisteredManualDeadline), TimeError> {
+        let mut deadlines = self.state.deadlines.lock().await;
+        // No await follows acquisition: observation, relative endpoint and
+        // registration are atomic with the conditional selected-time step.
+        let _time_change = self.state.time_change.lock().expect("manual clock owner");
+        let target = self
+            .state
+            .now
+            .load(Ordering::SeqCst)
+            .checked_add(duration)
+            .ok_or_else(|| TimeError::OperationFailed {
+                reason: "manual sleep deadline overflow".into(),
+            })?;
+        deadlines.retain(|_, timers| {
+            timers.retain(|timer| timer.active.load(Ordering::Acquire));
+            !timers.is_empty()
+        });
+        let generation = self
+            .state
+            .next_relative_registration
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+                old.checked_add(1)
+            })
+            .map_err(|_| TimeError::OperationFailed {
+                reason: "selected sleep registration generation exhausted".into(),
+            })?
+            + 1;
+        let timer = Arc::new(RegisteredTimer {
+            active: AtomicBool::new(true),
+            task: tokio::task::try_id(),
+            generation,
+        });
+        deadlines.entry(target).or_default().push(timer.clone());
+        drop(deadlines);
+        self.state.deadlines_changed.notify_waiters();
+        Ok((
+            target,
+            RegisteredManualDeadline {
+                state: Arc::clone(&self.state),
+                timer,
+            },
+        ))
     }
     /// Move time forward by `by_ms`, waking sleeps whose deadline it reaches.
     pub fn advance(&self, by_ms: u64) {
+        let _time_change = self.state.time_change.lock().expect("manual clock owner");
         self.state
             .now
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
@@ -184,58 +319,217 @@ impl ManualPhysicalClock {
     }
     /// Publish an actual physical observation, including deliberate rollback.
     pub fn set_time(&self, now: u64) {
+        let _time_change = self.state.time_change.lock().expect("manual clock owner");
         self.state.now.store(now, Ordering::SeqCst);
         self.state.changed.notify_waiters();
         self.state.deadlines_changed.notify_waiters();
+    }
+
+    /// Advance only a single already-polled selected timer. The caller must
+    /// additionally hold the originating task's current observation guard;
+    /// an equal deadline by itself never identifies the timer's owner.
+    pub fn try_advance_sole_registered_deadline(
+        &self,
+        deadline: u64,
+        task: tokio::task::Id,
+    ) -> bool {
+        let Ok(_time_change) = self.state.time_change.try_lock() else {
+            return false;
+        };
+        let Ok(deadlines) = self.state.deadlines.try_lock() else {
+            return false;
+        };
+        let now = self.state.now.load(Ordering::SeqCst);
+        if deadline <= now {
+            return false;
+        }
+        let mut live = deadlines.iter().flat_map(|(at, timers)| {
+            timers
+                .iter()
+                .filter(|timer| timer.active.load(Ordering::Acquire))
+                .map(move |timer| (*at, timer))
+        });
+        let Some((first_deadline, first_timer)) = live.next() else {
+            return false;
+        };
+        if first_deadline != deadline || first_timer.task.as_ref() != Some(&task) {
+            return false;
+        }
+        if live.next().is_some_and(|(at, _)| at == deadline) {
+            return false;
+        }
+        self.state.now.store(deadline, Ordering::SeqCst);
+        drop(deadlines);
+        self.state.changed.notify_waiters();
+        self.state.deadlines_changed.notify_waiters();
+        true
+    }
+
+    /// Advance one selected endpoint only when the complete earliest timer
+    /// set belongs to these distinct, still-live original task witnesses.
+    /// Caller-owned scheduler generation guards must remain held throughout
+    /// this synchronous step. Any earlier or same-valued foreign timer refuses.
+    pub fn try_advance_exact_registered_deadline_set(
+        &self,
+        deadline: u64,
+        tasks: &[tokio::task::Id],
+    ) -> bool {
+        if tasks.is_empty()
+            || tasks
+                .iter()
+                .enumerate()
+                .any(|(index, task)| tasks[..index].contains(task))
+        {
+            return false;
+        }
+        let Ok(_time_change) = self.state.time_change.try_lock() else {
+            return false;
+        };
+        let Ok(deadlines) = self.state.deadlines.try_lock() else {
+            return false;
+        };
+        if deadline <= self.state.now.load(Ordering::SeqCst) {
+            return false;
+        }
+        let mut found = Vec::new();
+        for (at, timers) in deadlines.iter() {
+            for timer in timers
+                .iter()
+                .filter(|timer| timer.active.load(Ordering::Acquire))
+            {
+                if *at < deadline {
+                    return false;
+                }
+                if *at > deadline {
+                    break;
+                }
+                let Some(task) = timer.task.as_ref() else {
+                    return false;
+                };
+                if !tasks.contains(task) || found.contains(task) {
+                    return false;
+                }
+                found.push(*task);
+            }
+            if *at > deadline {
+                break;
+            }
+        }
+        if found.len() != tasks.len() {
+            return false;
+        }
+        self.state.now.store(deadline, Ordering::SeqCst);
+        drop(deadlines);
+        self.state.changed.notify_waiters();
+        self.state.deadlines_changed.notify_waiters();
+        true
+    }
+
+    /// Diagnose the selected timer without granting authority to advance it.
+    /// A later step must recheck under the original synchronized mutation gate.
+    pub fn inspect_registered_deadline(
+        &self,
+        deadline: u64,
+        task: tokio::task::Id,
+    ) -> RegisteredDeadlineRefusal {
+        let Ok(deadlines) = self.state.deadlines.try_lock() else {
+            return RegisteredDeadlineRefusal::ObservationBusy;
+        };
+        let now = self.state.now.load(Ordering::SeqCst);
+        if deadline <= now {
+            return RegisteredDeadlineRefusal::NotFuture;
+        }
+        let mut live = deadlines.iter().flat_map(|(at, timers)| {
+            timers
+                .iter()
+                .filter(|timer| timer.active.load(Ordering::Acquire))
+                .map(move |timer| (*at, timer))
+        });
+        let Some((first_deadline, first_timer)) = live.next() else {
+            return RegisteredDeadlineRefusal::NoLiveTimer;
+        };
+        if first_deadline < deadline {
+            return RegisteredDeadlineRefusal::EarlierTimer;
+        }
+        if first_deadline != deadline {
+            return RegisteredDeadlineRefusal::NoLiveTimer;
+        }
+        if first_timer.task.as_ref() != Some(&task) {
+            return RegisteredDeadlineRefusal::ForeignTask;
+        }
+        if live.next().is_some_and(|(at, _)| at == deadline) {
+            return RegisteredDeadlineRefusal::DuplicateTimer;
+        }
+        RegisteredDeadlineRefusal::Eligible
     }
 }
 /// Lexical custody removes a cancelled/completed wait from the observed schedule.
 struct RegisteredManualDeadline {
     state: Arc<State>,
-    count: Arc<AtomicUsize>,
+    timer: Arc<RegisteredTimer>,
 }
 impl Drop for RegisteredManualDeadline {
     fn drop(&mut self) {
-        self.count.fetch_sub(1, Ordering::AcqRel);
+        #[cfg(test)]
+        let attempt = self
+            .state
+            .drop_attempt
+            .lock()
+            .expect("manual cancellation probe")
+            .take();
+        // Cancellation and every conditional selected-time step linearize on
+        // the same short gate. No await or deadline-map lock is taken here.
+        let _time_change = match self.state.time_change.try_lock() {
+            Ok(guard) => {
+                #[cfg(test)]
+                if let Some(attempt) = attempt {
+                    let _ = attempt.send(false);
+                }
+                guard
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                #[cfg(test)]
+                if let Some(attempt) = attempt {
+                    let _ = attempt.send(true);
+                }
+                self.state.time_change.lock().expect("manual clock owner")
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => panic!("manual clock owner poisoned"),
+        };
+        self.timer.active.store(false, Ordering::Release);
         self.state.deadlines_changed.notify_waiters();
     }
 }
-#[async_trait::async_trait]
-impl PhysicalTimeEffects for ManualPhysicalClock {
-    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(task) = tokio::task::try_id() {
-            let mut selected = self.state.task_observation_failure.lock().await;
-            if selected.as_ref().is_some_and(|(owner, _)| *owner == task) {
-                return Err(selected.take().expect("matched selected fault").1);
-            }
+
+impl ManualPhysicalClock {
+    async fn sleep_registered(
+        &self,
+        duration: u64,
+        observer: Option<PhysicalSleepRegistrationObserver>,
+    ) -> Result<(), TimeError> {
+        let (target, registration) = self.register_relative_deadline(duration).await?;
+        if let Some(observer) = observer {
+            observer(PhysicalSleepRegistrationObservation::Registered(
+                PhysicalSleepRegistration {
+                    provider_id: self.state.provider_id,
+                    generation: registration.timer.generation,
+                    deadline: WindowPosition::new(target),
+                },
+            ));
         }
-        if let Some(observation) = self.state.observation_override.lock().await.take() {
-            return observation;
-        }
-        Ok(PhysicalTime {
-            ts_ms: self.state.now.load(Ordering::SeqCst),
-            uncertainty: None,
-        })
-    }
-    async fn sleep_ms(&self, duration: u64) -> Result<(), TimeError> {
-        let target = self
-            .state
-            .now
-            .load(Ordering::SeqCst)
-            .checked_add(duration)
-            .ok_or_else(|| TimeError::OperationFailed {
-                reason: "manual sleep deadline overflow".into(),
-            })?;
-        let _registration = self.register_deadline(target).await;
-        let mut observer = self.state.sleep_admission.lock().await;
-        if observer.as_ref().is_some_and(|(selected_duration, _)| {
-            selected_duration.is_none_or(|selected| selected == duration)
-        }) {
-            let (_, sender) = observer.take().expect("matching admitted sleep observer");
+        let mut selected_observer = self.state.sleep_admission.lock().await;
+        if selected_observer
+            .as_ref()
+            .is_some_and(|(selected_duration, _)| {
+                selected_duration.is_none_or(|selected| selected == duration)
+            })
+        {
+            let (_, sender) = selected_observer
+                .take()
+                .expect("matching admitted sleep observer");
             let _ = sender.send(WindowPosition::new(target));
         }
-        drop(observer);
+        drop(selected_observer);
         loop {
             let changed = self.state.changed.notified();
             tokio::pin!(changed);
@@ -248,6 +542,81 @@ impl PhysicalTimeEffects for ManualPhysicalClock {
             }
             changed.await;
         }
+    }
+
+    /// Advance only the exact still-live timer registration issued by this
+    /// selected provider. A same-task foreign timer, replacement, or duplicate
+    /// cannot satisfy a stale registration observation.
+    pub fn try_advance_registered_timer(
+        &self,
+        registration: PhysicalSleepRegistration,
+        task: tokio::task::Id,
+    ) -> bool {
+        let Ok(_time_change) = self.state.time_change.try_lock() else {
+            return false;
+        };
+        let Ok(deadlines) = self.state.deadlines.try_lock() else {
+            return false;
+        };
+        let deadline = registration.deadline.value();
+        if registration.provider_id != self.state.provider_id
+            || deadline <= self.state.now.load(Ordering::SeqCst)
+        {
+            return false;
+        }
+        let mut live = deadlines.iter().flat_map(|(at, timers)| {
+            timers
+                .iter()
+                .filter(|timer| timer.active.load(Ordering::Acquire))
+                .map(move |timer| (*at, timer))
+        });
+        let Some((first_at, first)) = live.next() else {
+            return false;
+        };
+        if first_at != deadline
+            || first.generation != registration.generation
+            || first.task != Some(task)
+        {
+            return false;
+        }
+        if live.next().is_some_and(|(at, _)| at == deadline) {
+            return false;
+        }
+        self.state.now.store(deadline, Ordering::SeqCst);
+        drop(deadlines);
+        self.state.changed.notify_waiters();
+        self.state.deadlines_changed.notify_waiters();
+        true
+    }
+}
+#[async_trait::async_trait]
+impl PhysicalTimeEffects for ManualPhysicalClock {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(task) = tokio::task::try_id() {
+            let mut selected = self.state.task_observation_override.lock().await;
+            if selected.as_ref().is_some_and(|(owner, _)| *owner == task) {
+                return selected.take().expect("matched selected fault").1;
+            }
+        }
+        if let Some(observation) = self.state.observation_override.lock().await.take() {
+            return observation;
+        }
+        Ok(PhysicalTime {
+            ts_ms: self.state.now.load(Ordering::SeqCst),
+            uncertainty: None,
+        })
+    }
+    async fn sleep_ms(&self, duration: u64) -> Result<(), TimeError> {
+        self.sleep_registered(duration, None).await
+    }
+
+    async fn sleep_ms_with_registration_observer(
+        &self,
+        duration: u64,
+        observer: PhysicalSleepRegistrationObserver,
+    ) -> Result<(), TimeError> {
+        self.sleep_registered(duration, Some(observer)).await
     }
 
     async fn wait_until_physical_deadline(
@@ -285,6 +654,237 @@ impl PhysicalTimeEffects for ManualPhysicalClock {
 mod tests {
     use super::*;
     use futures::FutureExt;
+
+    struct UnobservedTime(ManualPhysicalClock);
+
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for UnobservedTime {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            self.0.physical_time().await
+        }
+
+        async fn sleep_ms(&self, duration: u64) -> Result<(), TimeError> {
+            self.0.sleep_ms(duration).await
+        }
+    }
+
+    #[tokio::test]
+    async fn unsupported_registration_observation_preserves_ordinary_sleep() {
+        let clock = ManualPhysicalClock::new(5_000);
+        let provider = UnobservedTime(clock.clone());
+        let (sender, observed) = tokio::sync::oneshot::channel();
+        let mut wait = Box::pin(provider.sleep_ms_with_registration_observer(
+            5,
+            Box::new(move |observation| {
+                let _ = sender.send(observation);
+            }),
+        ));
+        assert!(wait.as_mut().now_or_never().is_none());
+        assert_eq!(
+            observed.await.expect("one explicit observation"),
+            PhysicalSleepRegistrationObservation::Unsupported
+        );
+        assert_eq!(
+            clock.next_registered_deadline().await,
+            Some(WindowPosition::new(5_005))
+        );
+        clock.advance(5);
+        wait.await.expect("ordinary selected sleep completes");
+        let (sender, observed) = tokio::sync::oneshot::channel();
+        let mut cancelled = Box::pin(provider.sleep_ms_with_registration_observer(
+            5,
+            Box::new(move |observation| {
+                let _ = sender.send(observation);
+            }),
+        ));
+        assert!(cancelled.as_mut().now_or_never().is_none());
+        assert_eq!(
+            observed.await.expect("one cancellation observation"),
+            PhysicalSleepRegistrationObservation::Unsupported
+        );
+        drop(cancelled);
+        assert_eq!(clock.next_registered_deadline().await, None);
+    }
+
+    #[tokio::test]
+    async fn provider_issued_registration_refuses_same_task_foreign_and_replaced_timer() {
+        tokio::spawn(async {
+            let clock = ManualPhysicalClock::new(5_000);
+            let task = tokio::task::try_id().expect("selected owner task");
+            let (sender, observed) = tokio::sync::oneshot::channel();
+            let mut actual = Box::pin(clock.sleep_ms_with_registration_observer(
+                100,
+                Box::new(move |observation| {
+                    let _ = sender.send(observation);
+                }),
+            ));
+            assert!(actual.as_mut().now_or_never().is_none());
+            let registration = match observed.await.expect("provider observation") {
+                PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider"),
+            };
+            let foreign_clock = ManualPhysicalClock::new(5_000);
+            let (sender, foreign_observed) = tokio::sync::oneshot::channel();
+            let mut foreign = Box::pin(foreign_clock.sleep_ms_with_registration_observer(
+                100,
+                Box::new(move |observation| {
+                    let _ = sender.send(observation);
+                }),
+            ));
+            assert!(foreign.as_mut().now_or_never().is_none());
+            let foreign_registration = match foreign_observed.await.expect("foreign observation") {
+                PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider"),
+            };
+            assert_ne!(registration.provider_id, foreign_registration.provider_id);
+            assert_eq!(registration.generation, foreign_registration.generation);
+            assert_eq!(registration.deadline, foreign_registration.deadline);
+            assert!(!clock.try_advance_registered_timer(foreign_registration, task));
+            drop(foreign);
+            let mut same_task_foreign = Box::pin(clock.sleep_ms(100));
+            assert!(same_task_foreign.as_mut().now_or_never().is_none());
+            assert!(!clock.try_advance_registered_timer(registration, task));
+            drop(same_task_foreign);
+            assert_eq!(clock.now_ms(), 5_000);
+            drop(actual);
+
+            let (sender, observed) = tokio::sync::oneshot::channel();
+            let mut replaced = Box::pin(clock.sleep_ms_with_registration_observer(
+                100,
+                Box::new(move |observation| {
+                    let _ = sender.send(observation);
+                }),
+            ));
+            assert!(replaced.as_mut().now_or_never().is_none());
+            let replacement = match observed.await.expect("replacement observation") {
+                PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider"),
+            };
+            assert_ne!(registration.generation, replacement.generation);
+            assert!(!clock.try_advance_registered_timer(registration, task));
+            assert!(clock.try_advance_registered_timer(replacement, task));
+            replaced.await.expect("replacement selected wait");
+            assert!(!clock.try_advance_registered_timer(replacement, task));
+        })
+        .await
+        .expect("selected owner completes");
+    }
+
+    #[tokio::test]
+    async fn cancellation_and_registered_advance_preserve_both_gate_orders() {
+        tokio::spawn(async {
+            let clock = ManualPhysicalClock::new(5_000);
+            let task = tokio::task::try_id().expect("selected owner task");
+            let (sender, observed) = tokio::sync::oneshot::channel();
+            let mut cancelled = Box::pin(clock.sleep_ms_with_registration_observer(
+                5,
+                Box::new(move |observation| {
+                    let _ = sender.send(observation);
+                }),
+            ));
+            assert!(cancelled.as_mut().now_or_never().is_none());
+            let cancelled_token = match observed.await.expect("actual provider observation") {
+                PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider"),
+            };
+            drop(cancelled);
+            assert!(!clock.try_advance_registered_timer(cancelled_token, task));
+            assert_eq!(clock.now_ms(), 5_000);
+
+            let (sender, observed) = tokio::sync::oneshot::channel();
+            let mut claimed = Box::pin(clock.sleep_ms_with_registration_observer(
+                5,
+                Box::new(move |observation| {
+                    let _ = sender.send(observation);
+                }),
+            ));
+            assert!(claimed.as_mut().now_or_never().is_none());
+            let claimed_token = match observed.await.expect("replacement provider observation") {
+                PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider"),
+            };
+            assert!(clock.try_advance_registered_timer(claimed_token, task));
+            claimed.await.expect("claimed selected wait");
+            assert_eq!(clock.now_ms(), 5_005);
+            assert!(!clock.try_advance_registered_timer(claimed_token, task));
+        })
+        .await
+        .expect("selected owner completes");
+    }
+
+    #[tokio::test]
+    async fn cancellation_cannot_cross_a_claimed_selected_time_gate() {
+        tokio::spawn(async {
+            let clock = ManualPhysicalClock::new(5_000);
+            let task = tokio::task::try_id().expect("selected owner task");
+            let (sender, observed) = tokio::sync::oneshot::channel();
+            let mut wait = Box::pin(clock.sleep_ms_with_registration_observer(
+                5,
+                Box::new(move |observation| {
+                    let _ = sender.send(observation);
+                }),
+            ));
+            assert!(wait.as_mut().now_or_never().is_none());
+            let registration = match observed.await.expect("actual timer admission") {
+                PhysicalSleepRegistrationObservation::Registered(registration) => registration,
+                PhysicalSleepRegistrationObservation::Unsupported => panic!("manual provider"),
+            };
+            let (attempt_tx, attempt_rx) = std::sync::mpsc::channel();
+            *clock
+                .state
+                .drop_attempt
+                .lock()
+                .expect("manual cancellation probe") = Some(attempt_tx);
+            std::thread::scope(|scope| {
+                let gate = clock.state.time_change.lock().expect("selected time gate");
+                let (completion_tx, completion_rx) = std::sync::mpsc::channel();
+                scope.spawn(move || {
+                    drop(wait);
+                    let _ = completion_tx.send(());
+                });
+                let observed_contention = attempt_rx
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .expect("real cancellation reached the selected gate");
+                let deadlines = clock
+                    .state
+                    .deadlines
+                    .try_lock()
+                    .expect("timer map available");
+                let active_before_release = deadlines
+                    .get(&registration.deadline.value())
+                    .is_some_and(|timers| {
+                        timers.iter().any(|timer| {
+                            timer.generation == registration.generation
+                                && timer.active.load(Ordering::Acquire)
+                        })
+                    });
+                drop(deadlines);
+                let completed_under_gate = completion_rx.try_recv();
+                drop(gate);
+                if completed_under_gate.is_err() {
+                    completion_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .expect("cancellation commits after gate release");
+                }
+                assert!(
+                    observed_contention,
+                    "cancellation did not contend on selected-time gate"
+                );
+                assert!(
+                    active_before_release,
+                    "cancellation crossed held selected-time gate"
+                );
+                assert!(matches!(
+                    completed_under_gate,
+                    Err(std::sync::mpsc::TryRecvError::Empty)
+                ));
+            });
+            assert!(!clock.try_advance_registered_timer(registration, task));
+            assert_eq!(clock.now_ms(), 5_000);
+        })
+        .await
+        .expect("selected owner completes");
+    }
     #[tokio::test]
     async fn relative_admission_and_timer_inventory_preserve_original_endpoints() {
         let clock = ManualPhysicalClock::new(7_000);
@@ -363,6 +963,127 @@ mod tests {
         assert_eq!(second.await.expect("actual original endpoint").ts_ms, 5_100);
         assert_eq!(clock.next_registered_deadline().await, None);
         assert!(clock.state.deadlines.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sole_registered_advance_refuses_earlier_duplicate_and_cancelled_timers() {
+        tokio::spawn(async {
+            let task = tokio::task::try_id().expect("owned timer task");
+            let clock = ManualPhysicalClock::new(5_000);
+            let mut batch = Box::pin(clock.sleep_ms(5));
+            let mut earlier = Box::pin(clock.sleep_ms(3));
+            let mut duplicate = Box::pin(clock.sleep_ms(5));
+            assert!(batch.as_mut().now_or_never().is_none());
+            let foreign = tokio::spawn(async { tokio::task::try_id().expect("foreign task") })
+                .await
+                .expect("foreign task join");
+            assert_eq!(
+                clock.inspect_registered_deadline(5_005, foreign),
+                RegisteredDeadlineRefusal::ForeignTask
+            );
+            assert!(!clock.try_advance_sole_registered_deadline(5_005, foreign));
+            assert!(earlier.as_mut().now_or_never().is_none());
+            assert_eq!(
+                clock.inspect_registered_deadline(5_005, task),
+                RegisteredDeadlineRefusal::EarlierTimer
+            );
+            assert!(!clock.try_advance_sole_registered_deadline(5_005, task));
+            drop(earlier);
+            assert!(duplicate.as_mut().now_or_never().is_none());
+            assert_eq!(
+                clock.inspect_registered_deadline(5_005, task),
+                RegisteredDeadlineRefusal::DuplicateTimer
+            );
+            assert!(!clock.try_advance_sole_registered_deadline(5_005, task));
+            drop(duplicate);
+            assert_eq!(
+                clock.inspect_registered_deadline(5_005, task),
+                RegisteredDeadlineRefusal::Eligible
+            );
+            assert!(clock.try_advance_sole_registered_deadline(5_005, task));
+            assert_eq!(clock.now_ms(), 5_005);
+            batch.await.expect("original selected timer");
+            assert!(!clock.try_advance_sole_registered_deadline(5_005, task));
+        })
+        .await
+        .expect("original task completion");
+    }
+
+    #[tokio::test]
+    async fn exact_two_owner_advance_refuses_extra_earlier_and_foreign_timers() {
+        async fn pending_timer(
+            clock: Arc<ManualPhysicalClock>,
+            duration: u64,
+        ) -> (
+            tokio::task::JoinHandle<Result<(), TimeError>>,
+            tokio::task::Id,
+        ) {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            let handle = tokio::spawn(async move {
+                let owner = tokio::task::try_id().expect("actual timer task");
+                let mut wait = Box::pin(clock.sleep_ms(duration));
+                assert!(wait.as_mut().now_or_never().is_none());
+                sender.send(owner).expect("selected timer owner observed");
+                wait.await
+            });
+            let owner = receiver.await.expect("original timer admitted");
+            (handle, owner)
+        }
+
+        let clock = Arc::new(ManualPhysicalClock::new(5_000));
+        let (first, issuer) = pending_timer(clock.clone(), 5).await;
+        let (second, recipient) = pending_timer(clock.clone(), 5).await;
+        assert!(!clock.try_advance_sole_registered_deadline(5_005, issuer));
+        assert!(!clock.try_advance_exact_registered_deadline_set(5_005, &[issuer, issuer]));
+        let (foreign, foreign_task) = pending_timer(clock.clone(), 5).await;
+        assert!(!clock.try_advance_exact_registered_deadline_set(5_005, &[issuer, recipient]));
+        foreign.abort();
+        assert!(foreign
+            .await
+            .expect_err("foreign timer cancelled")
+            .is_cancelled());
+        assert!(!clock.try_advance_exact_registered_deadline_set(5_005, &[issuer, foreign_task]));
+        let mut earlier = Box::pin(clock.sleep_ms(3));
+        assert!(earlier.as_mut().now_or_never().is_none());
+        assert!(!clock.try_advance_exact_registered_deadline_set(5_005, &[issuer, recipient]));
+        drop(earlier);
+        assert!(clock.try_advance_exact_registered_deadline_set(5_005, &[issuer, recipient]));
+        first
+            .await
+            .expect("issuer task retained")
+            .expect("issuer original sleep");
+        second
+            .await
+            .expect("recipient task retained")
+            .expect("recipient original sleep");
+        assert!(!clock.try_advance_exact_registered_deadline_set(5_005, &[issuer, recipient]));
+    }
+
+    #[tokio::test]
+    async fn pending_relative_registration_uses_selected_now_without_shifting_absolute_deadline() {
+        let clock = ManualPhysicalClock::new(5_000);
+        let mut absolute = Box::pin(clock.wait_until_physical_deadline(WindowPosition::new(5_200)));
+        assert!(absolute.as_mut().now_or_never().is_none());
+        let registration_gate = clock.state.deadlines.lock().await;
+        let mut relative = Box::pin(clock.sleep_ms(5));
+        assert!(relative.as_mut().now_or_never().is_none());
+        clock.set_time(5_010);
+        drop(registration_gate);
+        assert!(relative.as_mut().now_or_never().is_none());
+        assert_eq!(
+            clock.next_registered_deadline().await,
+            Some(WindowPosition::new(5_015)),
+            "relative target is selected atomically with actual registration"
+        );
+        clock.set_time(5_015);
+        relative.await.expect("original relative wait");
+        assert_eq!(
+            clock.next_registered_deadline().await,
+            Some(WindowPosition::new(5_200)),
+            "preexisting absolute endpoint was not moved"
+        );
+        clock.set_time(5_200);
+        assert_eq!(absolute.await.expect("original absolute wait").ts_ms, 5_200);
     }
 
     #[tokio::test]
@@ -481,6 +1202,7 @@ mod tests {
             100
         );
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn selected_task_observation_fault_survives_other_runtime_readers() {
         let clock = ManualPhysicalClock::new(100);
@@ -521,6 +1243,40 @@ mod tests {
         );
         resume.send(()).expect("selected task still owns fault");
         selected.await.expect("selected owner settled");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn selected_task_scripted_observation_survives_foreign_reads_without_moving_time() {
+        let clock = ManualPhysicalClock::new(6_000);
+        let owner_clock = clock.clone();
+        let (armed, observed) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let owner = tokio::spawn(async move {
+            owner_clock
+                .script_next_current_task_observation(5_500)
+                .expect("actual owning task installs selected observation");
+            armed.send(()).expect("armed observation");
+            let _release = released.await;
+            let scripted = owner_clock.physical_time().await;
+            let subsequent = owner_clock.physical_time().await;
+            (scripted, subsequent)
+        });
+        observed.await.expect("original owning task armed");
+        let foreign_clock = clock.clone();
+        let foreign = tokio::spawn(async move { foreign_clock.physical_time().await }).await;
+        let driven = clock.now_ms();
+        let _release = release.send(());
+        let (scripted, subsequent) = owner.await.expect("same original task completes");
+        assert_eq!(
+            foreign
+                .expect("actual foreign task joins")
+                .expect("foreign reader unaffected")
+                .ts_ms,
+            6_000
+        );
+        assert_eq!(driven, 6_000);
+        assert_eq!(scripted.expect("owner selected observation").ts_ms, 5_500);
+        assert_eq!(subsequent.expect("owner one-shot consumed").ts_ms, 6_000);
     }
     #[tokio::test]
     async fn sleep_requires_explicit_observation_and_keeps_rollback_visible() {

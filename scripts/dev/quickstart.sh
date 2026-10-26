@@ -19,7 +19,8 @@ case "$action" in
     rm -rf .aura-test
 
     echo "1. Initializing 2-of-3 threshold account..."
-    init_log="$(mktemp)"
+    init_log="$(mktemp "${TMPDIR:-/tmp}/aura-quickstart.XXXXXXXX")"
+    trap 'rm -f -- "$init_log"' EXIT
     cargo run --bin aura -- init -n 3 -t 2 -o .aura-test | tee "$init_log"
     echo "OK Account initialized"
 
@@ -32,7 +33,6 @@ case "$action" in
       echo "ERROR: Config entry missing"
       exit 1
     }
-    rm -f "$init_log"
 
     echo "3. Checking account status..."
     status_out="$(cargo run --bin aura -- status -c .aura-test/configs/device_1.toml)"

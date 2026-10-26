@@ -39,6 +39,8 @@ path = "tests/native_enrollment_host.rs"
 required-features = ["development"]
 
 [features]
+# Canonical shipping builds reject development key providers throughout the graph.
+production-build = ["aura-agent/production-build", "aura-effects/production-build"]
 default = ["terminal"]
 terminal = []
 testing = ["terminal", "aura-app/app-internals", "aura-agent/simulation"]

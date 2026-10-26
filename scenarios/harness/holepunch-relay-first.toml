@@ -232,7 +232,7 @@ id = "alice-peer-path-selected"
 action = "runtime_event_occurred"
 actor = "alice"
 runtime_event_kind = "peer_path_selected"
-contains = "relay"
+value = "relay"
 timeout_ms = 30000
 
 
@@ -268,7 +268,7 @@ id = "bob-peer-path-regenerated"
 action = "runtime_event_occurred"
 actor = "bob"
 runtime_event_kind = "peer_path_selected"
-contains = "network_generation:1"
+value = "network_generation:1"
 timeout_ms = 120000
 
 [[steps]]

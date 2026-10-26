@@ -28,7 +28,7 @@ run_dx_build() {
       "$repo_root/target/dx/aura-web/release/web/public/assets" \
       "$repo_root/target/dx/aura-web/release/web/public/fonts"
     attempt_log="$attempt_dir/attempt-$attempt.log"
-    if NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness >"$attempt_log" 2>&1; then
+    if NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness,production-build >"$attempt_log" 2>&1; then
       cat "$attempt_log"
       return 0
     else

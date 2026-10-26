@@ -1,6 +1,9 @@
-//! Original issuer required-task ownership and cleanup.
+//! Original issuer and notice required-task ownership and cleanup.
 
 use crate::core::AgentError;
+use crate::handlers::invitation::{
+    enrollment_stage_error, RetainedNoticeResult, RetainedOriginalCleanupFailure,
+};
 use crate::handlers::invitation::{Invitation, InvitationHandler, InvitationType};
 #[cfg(test)]
 use crate::handlers::invitation_service::take_original_issuer_before_vm_gate_for_test;
@@ -13,6 +16,153 @@ use crate::runtime::services::issuer_terminal_destination::OriginalIssuerTermina
 use crate::runtime::AuraEffectSystem;
 use std::sync::Arc;
 
+/// Runtime-owned storage shared only by the original notice custodian and its
+/// protocol borrow. Cloning the handle grants no disposal acknowledgment.
+#[derive(Clone, Default)]
+pub(crate) struct RetainedNoticeTaskState {
+    inner: Arc<tokio::sync::Mutex<RetainedNoticeTaskData>>,
+}
+#[derive(Default)]
+pub(crate) struct RetainedNoticeTaskData {
+    pub(crate) vm: crate::handlers::invitation::RetainedOriginalNoticeVm,
+    pub(crate) failure: Option<Arc<AgentError>>,
+}
+impl RetainedNoticeTaskState {
+    pub(crate) async fn lock(&self) -> tokio::sync::MutexGuard<'_, RetainedNoticeTaskData> {
+        self.inner.lock().await
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        pub(crate) type OriginalNoticeExecution = futures::future::LocalBoxFuture<'static, Result<(), aura_core::AuraError>>;
+    } else {
+        pub(crate) type OriginalNoticeExecution = futures::future::BoxFuture<'static, Result<(), aura_core::AuraError>>;
+    }
+}
+
+/// The registry retains this exact child's VM when its borrowed execution is
+/// cancelled. Cleanup runs under the original registered task binding.
+pub(crate) struct OriginalNoticeTaskCustody {
+    // The Send owner retains a factory for borrowed executor-local work, never
+    // an in-flight non-Send browser future. Reentry uses the same retained VM
+    // cursor, candidate, stop receiver and original budget.
+    pub(crate) execution: Option<Box<dyn FnMut() -> OriginalNoticeExecution + Send>>,
+    pub(crate) state: RetainedNoticeTaskState,
+    pub(crate) candidate_observed: Arc<std::sync::OnceLock<()>>,
+    pub(crate) completion: Option<futures::channel::oneshot::Sender<RetainedNoticeResult>>,
+}
+
+impl OriginalNoticeTaskCustody {
+    async fn execute_original(&mut self) -> Result<(), aura_core::AuraError> {
+        let result = match self.execution.as_mut() {
+            Some(execution) => execution().await,
+            None => Ok(()),
+        };
+        self.execution.take();
+        result
+    }
+
+    async fn cleanup_original(
+        &mut self,
+    ) -> Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError> {
+        let resume_postchecks = self.candidate_observed.get().is_some()
+            && self.execution.is_some()
+            && !self.state.lock().await.vm.is_eligible();
+        if resume_postchecks {
+            // Resume the captured original cursor and postchecks after registry
+            // cancellation drops their borrow. No new VM or receive is admitted.
+            if let Err(source) = self.execute_original().await {
+                self.state
+                    .lock()
+                    .await
+                    .failure
+                    .get_or_insert_with(|| Arc::new(AgentError::from(source)));
+            }
+        }
+        // An already eligible VM retains its original postcheck result and
+        // proceeds directly to close, including after a failed close retry.
+        // Drop the interrupted borrow before reacquiring the same retained VM.
+        // Neither dropping the future nor a parent task can acknowledge close.
+        self.execution.take();
+        let mut retained = self.state.lock().await;
+        if let Err(source) = retained.vm.close_for_required_cleanup().await {
+            let close = Arc::new(enrollment_stage_error(
+                "close original required terminal notice VM",
+                source,
+            ));
+            let failure = match retained.failure.take() {
+                Some(primary) => Arc::new(AgentError::Aura(aura_core::AuraError::Internal {
+                    message: "original notice execution and required close failed".into(),
+                    source: Some(Arc::new(RetainedOriginalCleanupFailure { primary, close })),
+                })),
+                None => close,
+            };
+            retained.failure = Some(Arc::clone(&failure));
+            return Err(aura_core::AuraError::Internal {
+                message: "original terminal notice cleanup refused".into(),
+                source: Some(failure),
+            });
+        }
+        let failure = retained.failure.as_ref().cloned();
+        let observed = if retained.vm.is_eligible() {
+            Ok(true)
+        } else {
+            match &failure {
+                Some(source) => Err(Arc::clone(source)),
+                None => Ok(false),
+            }
+        };
+        drop(retained);
+        if let Some(completion) = self.completion.take() {
+            let _ = completion.send(observed);
+        }
+        Ok(match failure {
+            Some(source) => {
+                aura_core::effects::task::RequiredTaskSettlement::ResolvedWithDomainFailure(
+                    aura_core::AuraError::Internal {
+                        message: "original terminal notice retained its domain failure".into(),
+                        source: Some(source),
+                    },
+                )
+            }
+            None => aura_core::effects::task::RequiredTaskSettlement::Resolved,
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl aura_core::effects::task::RequiredTaskCustody for OriginalNoticeTaskCustody {
+    fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>> {
+        Box::pin(self.execute_original())
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        _: &'a aura_core::effects::task::RequiredTaskExit,
+    ) -> futures::future::BoxFuture<
+        'a,
+        Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError>,
+    > {
+        Box::pin(self.cleanup_original())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl aura_core::effects::task::LocalRequiredTaskCustody for OriginalNoticeTaskCustody {
+    fn execute(&mut self) -> futures::future::LocalBoxFuture<'_, Result<(), aura_core::AuraError>> {
+        Box::pin(self.execute_original())
+    }
+    fn cleanup<'a>(
+        &'a mut self,
+        _: &'a aura_core::effects::task::RequiredTaskExit,
+    ) -> futures::future::LocalBoxFuture<
+        'a,
+        Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError>,
+    > {
+        Box::pin(self.cleanup_original())
+    }
+}
+
 /// The original registered owner retains protocol observation and signed result
 /// through every borrowed execution/cleanup future. No receipt lives only in a
 /// disposable async frame after it is delivered by the protocol child.
@@ -24,6 +174,41 @@ pub(crate) struct OriginalIssuerTerminalState {
     pub(crate) execution_failure: Option<aura_core::AuraError>,
     pub(crate) observation_failure: Option<aura_core::AuraError>,
     pub(crate) protocol_failure: Option<aura_core::AuraError>,
+    pub(crate) protocol_failure_combined: bool,
+    pub(crate) progress_failure_captured: bool,
+}
+impl OriginalIssuerTerminalState {
+    fn capture_published_terminal_and_failures(
+        &mut self,
+        destination: &OriginalIssuerTerminalDestination,
+    ) -> Result<(), aura_core::AuraError> {
+        let captured = capture_original_issuer_terminal(destination, self);
+        let finalizer = destination.retained_finalizer_failure();
+        if let Some(protocol) = self.protocol_failure.clone() {
+            // Combine once when the protocol is first observed, or when a
+            // finalizer failure arrives after a protocol-only observation.
+            // Repeated observation retains the same concrete failure carrier.
+            if !self.protocol_failure_combined {
+                if let Some(primary) = self.execution_failure.take().or_else(|| finalizer.clone()) {
+                    self.execution_failure = Some(aura_core::AuraError::Internal {
+                        message: "original issuer execution and protocol failed".into(),
+                        source: Some(Arc::new(EnrollmentInitiatorTaskFailure::new(
+                            AgentError::from(primary),
+                            Some(protocol),
+                        ))),
+                    });
+                    self.protocol_failure_combined = true;
+                }
+            }
+        }
+        if let Some(finalizer) = finalizer {
+            self.execution_failure.get_or_insert(finalizer);
+        }
+        match self.execution_failure.as_ref() {
+            Some(source) => Err(source.clone()),
+            None => captured,
+        }
+    }
 }
 pub(crate) struct PreparedOriginalIssuerHandoff {
     pub(crate) running:
@@ -66,7 +251,6 @@ pub(crate) struct OriginalIssuerTaskCustody {
     pub(crate) effects: Arc<AuraEffectSystem>,
     pub(crate) ceremony_runner: Option<CeremonyRunner>,
     pub(crate) invitation: Invitation,
-    pub(crate) terminal_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
     pub(crate) terminal_destination: Arc<OriginalIssuerTerminalDestination>,
     pub(crate) terminal_state: OriginalIssuerTerminalState,
     pub(crate) acknowledged:
@@ -202,14 +386,28 @@ impl OriginalIssuerTaskCustody {
         })?;
         self.ceremony_runner = None;
         self.finalizer = None;
+        let domain = acknowledged.domain_failure();
+        let original = self
+            .terminal_state
+            .execution_failure
+            .clone()
+            .or_else(|| self.terminal_state.protocol_failure.clone())
+            .or_else(|| self.terminal_state.observation_failure.clone());
+        let failure = match original {
+            Some(primary) => aura_core::AuraError::Internal {
+                message: "original issuer execution and signed cancellation failed".into(),
+                source: Some(Arc::new(EnrollmentInitiatorTaskFailure::new(
+                    AgentError::from(primary),
+                    Some(domain),
+                ))),
+            },
+            None => domain,
+        };
         Ok(
             aura_core::effects::task::RequiredTaskSettlement::ResolvedWithDomainFailure(
-                self.terminal_state
-                    .execution_failure
-                    .clone()
-                    .or_else(|| self.terminal_state.protocol_failure.clone())
-                    .or_else(|| self.terminal_state.observation_failure.clone())
-                    .unwrap_or_else(|| acknowledged.domain_failure()),
+                self.terminal_destination.with_retained_finalizer_failure(
+                    self.terminal_destination.with_retained_vm_failures(failure),
+                ),
             ),
         )
     }
@@ -225,11 +423,21 @@ impl OriginalIssuerTaskCustody {
         original
     }
     async fn observe_original_terminal(&mut self) -> Result<(), aura_core::AuraError> {
+        let captured = if self.acknowledged.is_none()
+            && !self.acknowledgment_retained
+            && self.terminal_destination.result.get().is_some()
+        {
+            Some(
+                self.terminal_state
+                    .capture_published_terminal_and_failures(&self.terminal_destination),
+            )
+        } else {
+            None
+        };
         if let Some(source) = self.terminal_destination.retained_finalizer_failure() {
             self.terminal_state.execution_failure.get_or_insert(source);
         }
         if let Some(source) = self.terminal_state.execution_failure.as_ref() {
-            self.terminal_receiver = None;
             return Err(source.clone());
         }
         if self.terminal_state.terminal.is_some()
@@ -239,73 +447,15 @@ impl OriginalIssuerTaskCustody {
         {
             return Ok(());
         }
-        if self.terminal_destination.result.get().is_some() {
-            return capture_original_issuer_terminal(
-                &self.terminal_destination,
-                &mut self.terminal_state,
-            );
+        if let Some(captured) = captured {
+            return captured;
         }
         if let Some(source) = self.terminal_state.observation_failure.as_ref() {
             return Err(source.clone());
         }
-        let receiver = self.terminal_receiver.as_mut().ok_or_else(|| {
-            aura_core::AuraError::invalid("original issuer protocol has not been admitted")
-        })?;
-        let destination = &self.terminal_destination;
-        let terminal_state = &mut self.terminal_state;
-        let observed = self
-            .original
-            .as_ref()
-            .ok_or_else(|| {
-                aura_core::AuraError::invalid("positive original issuer root is consumed")
-            })?
-            .child()
-            .execute(self.effects.as_ref(), || async {
-                let readiness = tokio::select! {
-                    biased;
-                    source = destination.await_finalizer_failure() => {
-                        terminal_state.execution_failure.get_or_insert_with(|| source.clone());
-                        return Err(AgentError::from(source));
-                    }
-                    result = receiver => result,
-                };
-                if let Some(source) = destination.retained_finalizer_failure() {
-                    terminal_state
-                        .execution_failure
-                        .get_or_insert_with(|| source.clone());
-                    return Err(AgentError::from(source));
-                }
-                if let Err(source) = readiness {
-                    let source = aura_core::AuraError::Internal {
-                        message: "original issuer terminal readiness observation failed".into(),
-                        source: Some(Arc::new(source)),
-                    };
-                    terminal_state
-                        .observation_failure
-                        .get_or_insert_with(|| source.clone());
-                    return Err(AgentError::from(source));
-                }
-                // Unit readiness conveys no receipt authority. Move only the exact
-                // result already retained by this custodian's original destination,
-                // and store it BEFORE Ready can lose the outer bounded race.
-                capture_original_issuer_terminal(destination, terminal_state)
-                    .map_err(AgentError::from)
-            })
-            .await;
-        if self.terminal_state.terminal.is_some()
-            || self.terminal_state.execution_failure.is_some()
-            || self.terminal_state.observation_failure.is_some()
-            || self.terminal_state.protocol_failure.is_some()
-        {
-            self.terminal_receiver = None;
-        }
-        observed.map_err(|source| match source {
-            aura_core::TimeoutRunError::Timeout(source) => aura_core::AuraError::from(source),
-            aura_core::TimeoutRunError::Operation(source) => aura_core::AuraError::Internal {
-                message: "original issuer terminal result".into(),
-                source: Some(Arc::new(source)),
-            },
-        })
+        Err(aura_core::AuraError::invalid(
+            "original issuer execution ended without a retained terminal result",
+        ))
     }
     async fn retain_original_ack(&mut self) -> Result<(), aura_core::AuraError> {
         if self.acknowledgment_retained {
@@ -319,6 +469,7 @@ impl OriginalIssuerTaskCustody {
                 })?
                 .acknowledge_issuer_terminal(
                     self.effects.as_ref(),
+                    &self.terminal_destination,
                     &mut self.terminal_state.terminal,
                     &mut self.acknowledged,
                 )
@@ -588,85 +739,22 @@ impl OriginalIssuerTaskCustody {
                 }
             }
             if self.terminal_state.execution_failure.is_none() {
-                let child = self
-                    .original
-                    .as_ref()
-                    .ok_or_else(|| {
-                        aura_core::AuraError::invalid("positive original issuer root is consumed")
-                    })?
-                    .owned_execution_child();
-                let (sender, receiver) = tokio::sync::oneshot::channel();
-                self.terminal_receiver = Some(receiver);
-                let handler = self.handler.clone();
-                let effects = self.effects.clone();
-                let runner = self.ceremony_runner.as_ref().cloned().ok_or_else(|| {
-                    aura_core::AuraError::invalid("original issuer context already settled")
-                })?;
-                let issued = Arc::clone(self.issued.as_ref().ok_or_else(|| {
+                let issued = self.issued.as_ref().ok_or_else(|| {
                     aura_core::AuraError::invalid(
-                        "original issuer control is missing at child admission",
+                        "original issuer control missing at protocol admission",
                     )
-                })?);
-                self.effects.retain_original_mailbox_issuer(&issued)?;
-                let destination = Arc::clone(&self.terminal_destination);
-                let execution = async move {
-                    #[cfg(test)]
-                    if let Some((entered, release)) =
-                        take_original_issuer_before_vm_gate_for_test(effects.runtime_authority_id())
-                    {
-                        let _ = entered.send(());
-                        let _ = release.await;
-                    }
-                    let result = handler
-                        .execute_device_enrollment_initiator_owned(
-                            effects,
-                            issued,
-                            runner,
-                            child,
-                            Arc::clone(&destination),
-                        )
-                        .await;
-                    let (result, failure) = match result {
-                        Ok(terminal) => (Ok(terminal), None),
-                        Err(source) => {
-                            let failure = aura_core::AuraError::Internal {
-                                message: "original issuer enrollment child failed".into(),
-                                source: Some(Arc::new(source)),
-                            };
-                            (Err(AgentError::from(failure.clone())), Some(failure))
-                        }
-                    };
-                    // The original destination retains the move-owned result before
-                    // signalling. A lost observer cannot destroy signed custody.
-                    destination.publish(result)?;
-                    sender
-                        .send(())
-                        .map_err(|_| aura_core::AuraError::PermissionDenied {
-                            message: "original issuer terminal observer was lost".into(),
-                            source: Some(Arc::new(
-                                crate::handlers::invitation::EnrollmentVmAdmissionError::TerminalObserverLost,
-                            )),
-                        })?;
-                    match failure {
-                        Some(source) => Err(source),
-                        None => Ok(()),
-                    }
-                };
-                cfg_if::cfg_if! {
-                    if #[cfg(target_arch = "wasm32")] {
-                        let child_admission = self.original.as_ref().ok_or_else(|| aura_core::AuraError::invalid("positive original issuer root is consumed"))?.children().spawn_local_try_named_observed("original_issuer_protocol", execution);
-                    } else {
-                        let child_admission = self.original.as_ref().ok_or_else(|| aura_core::AuraError::invalid("positive original issuer root is consumed"))?.children().spawn_try_named_observed("original_issuer_protocol", execution);
-                    }
-                }
-                if let Err(source) = child_admission {
-                    self.terminal_state
-                        .execution_failure
-                        .get_or_insert_with(|| aura_core::AuraError::Internal {
-                            message: "original issuer protocol admission failed".into(),
-                            source: Some(Arc::new(source)),
-                        });
-                }
+                })?;
+                self.effects.retain_original_mailbox_issuer(issued)?;
+                self.terminal_destination.bind_original_control(
+                    self.effects.as_ref(),
+                    issued,
+                    self.original
+                        .as_ref()
+                        .ok_or_else(|| {
+                            aura_core::AuraError::invalid("original protocol root missing")
+                        })?
+                        .child(),
+                )?;
             }
             if let Some(initialized) = self.initialized.take() {
                 let actual_admission = self
@@ -689,6 +777,102 @@ impl OriginalIssuerTaskCustody {
     }
     pub(crate) async fn execute_original(&mut self) -> Result<(), aura_core::AuraError> {
         self.initialize_original().await?;
+        if self.terminal_state.execution_failure.is_none() {
+            #[cfg(test)]
+            if let Some((entered, release)) =
+                take_original_issuer_before_vm_gate_for_test(self.effects.runtime_authority_id())
+            {
+                let _ = entered.send(());
+                #[cfg(target_arch = "wasm32")]
+                let _ = release.await;
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Ok(Some(clock)) = release.await {
+                    clock
+                        .fail_next_current_task_observation(
+                            aura_core::effects::TimeError::OperationFailed {
+                                reason: "original issuer progress read before cancellation".into(),
+                            },
+                        )
+                        .await
+                        .expect("only this original task owns the selected read fault");
+                }
+            }
+            let root = self
+                .original
+                .as_ref()
+                .ok_or_else(|| aura_core::AuraError::invalid("original issuer root is consumed"))?;
+            let issued =
+                Arc::clone(self.issued.as_ref().ok_or_else(|| {
+                    aura_core::AuraError::invalid("original issuer control missing")
+                })?);
+            let runner =
+                self.ceremony_runner.as_ref().cloned().ok_or_else(|| {
+                    aura_core::AuraError::invalid("original issuer runner missing")
+                })?;
+            // This future borrows the required owner's retained VM slot. Both
+            // execution and cleanup retain the same registered task binding.
+            let (result, negative_delivery_failure) = {
+                let mut protocol =
+                    Box::pin(self.handler.execute_device_enrollment_initiator_owned(
+                        Arc::clone(&self.effects),
+                        Arc::clone(&issued),
+                        runner,
+                        root.owned_execution_child(),
+                        Arc::clone(&self.terminal_destination),
+                    ));
+                tokio::select! {
+                    biased;
+                    source = self.terminal_destination.await_finalizer_failure() => {
+                        #[cfg(test)]
+                        eprintln!("original issuer: observed original finalizer failure");
+                        // An actual original rejection or cancellation still
+                        // owes its signed terminal. Continue this same
+                        // admitted protocol; the destination retains the native
+                        // finalizer failure for the failed domain disposition.
+                        let verified_rejection = matches!(super::enrollment_window::OriginalIssuerResourceDecision::from_original(
+                            &issued, root.child(),
+                        ), Ok(super::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected));
+                        let verified_cancellation = root.child().original_negative_decision(&issued)
+                            .is_ok_and(|receipt| receipt.kind() == aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::Cancelled);
+                        if verified_rejection || verified_cancellation {
+                                #[cfg(test)]
+                                eprintln!("original issuer: finish original verified negative delivery");
+                                match protocol.as_mut().await {
+                                    Ok(terminal) => (Ok(terminal), None),
+                                    Err(delivery) => {
+                                        let failure = aura_core::AuraError::Internal {
+                                            message: "original verified negative delivery failed".into(),
+                                            source: Some(Arc::new(EnrollmentInitiatorTaskFailure::new(
+                                                AgentError::from(source),
+                                                Some(aura_core::AuraError::Internal {
+                                                    message: "original signed negative protocol failed".into(),
+                                                    source: Some(Arc::new(delivery)),
+                                                }),
+                                            ))),
+                                        };
+                                        (Err(AgentError::from(failure.clone())), Some(failure))
+                                    }
+                                }
+                        } else {
+                            (Err(AgentError::from(source)), None)
+                        }
+                    }
+                    result = protocol.as_mut() => (result, None),
+                }
+            };
+            if let Some(source) = negative_delivery_failure {
+                self.terminal_state.execution_failure.get_or_insert(source);
+            }
+            let completion = if let Ok(terminal) = &result {
+                self.terminal_destination
+                    .retain_original_protocol_completion(terminal)
+            } else {
+                Ok(())
+            };
+            // Retain the actual result even when completion provenance refuses.
+            self.terminal_destination.publish(result)?;
+            completion?;
+        }
         let terminal = match self.terminal_state.execution_failure.as_ref() {
             Some(source) => Err(source.clone()),
             None => self.observe_original_terminal().await,
@@ -732,6 +916,8 @@ impl OriginalIssuerTaskCustody {
                     )
                 })
                 .await;
+            #[cfg(test)]
+            eprintln!("original issuer: failure publication completed");
             return Err(match published {
                 Ok(failure) => failure,
                 Err(publication_source) => {
@@ -809,18 +995,118 @@ impl OriginalIssuerTaskCustody {
             self.ceremony_runner = None;
             return Ok(settlement);
         }
-        // A protected Committed decision cannot be rewritten as cancellation.
-        // Interrupted producer cleanup closes only its original resources.
+        // A signed rejected terminal still requires failed-domain resource
+        // settlement. Its receipt cannot authorize the positive acknowledgment
+        // path, whose descendants include the original failed finalizer.
+        // Committed/interrupted cleanup retains its existing receipt boundary.
+        if self.acknowledged.is_none()
+            && !self.acknowledgment_retained
+            && (self.terminal_destination.result.get().is_some()
+                || self
+                    .terminal_destination
+                    .retained_original_progress_failure()
+                    .is_some())
+        {
+            if let Err(source) = self
+                .terminal_state
+                .capture_published_terminal_and_failures(&self.terminal_destination)
+            {
+                self.terminal_state
+                    .observation_failure
+                    .get_or_insert(source);
+            }
+        }
+        // Cancellation can drop the borrowed protocol before it has retained
+        // a terminal. The protected original decision still owes its signed
+        // notice; resource-only cleanup cannot replace that obligation.
+        if self.negative.is_none() && self.negative_acknowledged.is_none() {
+            if let Some((root, issued)) = self.original.as_ref().zip(self.issued.as_ref()) {
+                let cancelled = root.child().original_negative_decision(issued)
+                    .is_ok_and(|receipt| receipt.kind() == aura_invitation::enrollment_signing_intent::EnrollmentNegativeTerminalKind::Cancelled);
+                if cancelled
+                    && !self
+                        .terminal_destination
+                        .original_protocol_completed(issued)?
+                {
+                    let delivered = self
+                        .terminal_destination
+                        .cancelled
+                        .get()
+                        .map(|terminal| {
+                            self.terminal_destination
+                                .original_cancelled_send_completion(terminal)
+                                .map(|completed| completed.map(|completed| (terminal, completed)))
+                        })
+                        .transpose()?
+                        .flatten();
+                    let terminal = if let Some((terminal, completed)) = delivered {
+                        self.terminal_destination
+                            .complete_original_cancelled_send(
+                                self.effects.as_ref(),
+                                root.child(),
+                                terminal,
+                                completed,
+                            )
+                            .await?
+                    } else {
+                        let runner = self.ceremony_runner.as_ref().cloned().ok_or_else(|| {
+                            aura_core::AuraError::invalid("original cancellation runner missing")
+                        })?;
+                        let cancellation = runner.await_enrollment_cancellation(issued).await?;
+                        let terminal = self
+                            .handler
+                            .resume_original_enrollment_cancellation(
+                                Arc::clone(&self.effects),
+                                Arc::clone(issued),
+                                runner,
+                                root.owned_execution_child(),
+                                Arc::clone(&self.terminal_destination),
+                                cancellation,
+                            )
+                            .await
+                            .map_err(|source| match source {
+                                AgentError::Aura(source) => source,
+                                source => aura_core::AuraError::Internal {
+                                    message: "original cancellation continuation failed".into(),
+                                    source: Some(Arc::new(source)),
+                                },
+                            })?;
+                        // This witness is retained only after actual signed
+                        // delivery and same-slot VM close have completed.
+                        self.terminal_destination
+                            .retain_original_protocol_completion(&terminal)?;
+                        terminal
+                    };
+                    match terminal {
+                        crate::handlers::invitation::IssuerEnrollmentTerminalOutcome::Cancelled(
+                            terminal,
+                        ) => {
+                            self.terminal_state.cancelled = Some(terminal);
+                        }
+                        crate::handlers::invitation::IssuerEnrollmentTerminalOutcome::Committed(
+                            _,
+                        ) => {
+                            return Err(aura_core::AuraError::invalid(
+                                "cancelled original resumed a positive terminal",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         if self.issuer_resource_cleanup.is_some()
-            || (self.terminal_state.terminal.is_none()
-                && self.acknowledged.is_none()
+            || (self.acknowledged.is_none()
                 && !self.acknowledgment_retained
                 && self
                     .original
                     .as_ref()
                     .zip(self.issued.as_ref())
                     .is_some_and(|(root, issued)| {
-                        crate::runtime::services::enrollment_window::OriginalIssuerResourceDecision::from_original(issued, root.child()).is_ok()
+                        match crate::runtime::services::enrollment_window::OriginalIssuerResourceDecision::from_original(issued, root.child()) {
+                            Ok(crate::runtime::services::enrollment_window::OriginalIssuerResourceDecision::VerifiedRejected) => true,
+                            Ok(_) => self.terminal_state.terminal.is_none(),
+                            Err(_) => false,
+                        }
                     }))
         {
             if self.issuer_resource_cleanup.is_none() {
@@ -828,6 +1114,8 @@ impl OriginalIssuerTaskCustody {
                     .terminal_state
                     .execution_failure
                     .clone()
+                    .or_else(|| self.terminal_state.protocol_failure.clone())
+                    .or_else(|| self.terminal_destination.retained_finalizer_failure())
                     .unwrap_or_else(|| match exit {
                         aura_core::effects::task::RequiredTaskExit::Failed(source) => {
                             source.clone()
@@ -845,7 +1133,7 @@ impl OriginalIssuerTaskCustody {
                 let issued = Arc::clone(self.issued.as_ref().ok_or_else(|| {
                     aura_core::AuraError::invalid("committed original control missing")
                 })?);
-                match crate::runtime::services::enrollment_window::OriginalIssuerResourceCleanupOwner::from_original(root, issued, self.conditional_signing.clone(), primary) {
+                match crate::runtime::services::enrollment_window::OriginalIssuerResourceCleanupOwner::from_original(root, issued, self.conditional_signing.clone(), primary, Arc::clone(&self.terminal_destination)) {
                     Ok(owner) => self.issuer_resource_cleanup = Some(owner),
                     Err(rejected) => { let (root, source) = *rejected; self.original = Some(root); return Err(source); }
                 }
@@ -881,6 +1169,46 @@ impl OriginalIssuerTaskCustody {
             }
             return self.settle_original_negative().await;
         }
+        if matches!(
+            exit,
+            aura_core::effects::task::RequiredTaskExit::Cancelled
+                | aura_core::effects::task::RequiredTaskExit::Panicked
+        ) && self.terminal_state.terminal.is_none()
+            && self.acknowledged.is_none()
+            && !self.acknowledgment_retained
+        {
+            let primary = self
+                .terminal_state
+                .execution_failure
+                .get_or_insert_with(|| aura_core::AuraError::Internal {
+                    message: "original issuer execution interrupted before terminal settlement"
+                        .into(),
+                    source: Some(Arc::new(OriginalIssuerInitializationIncomplete {
+                        exit: exit.clone(),
+                    })),
+                })
+                .clone();
+            let issued = Arc::clone(self.issued.as_ref().ok_or_else(|| primary.clone())?);
+            let root = self.original.take().ok_or_else(|| {
+                aura_core::AuraError::invalid("interrupted original root missing")
+            })?;
+            self.issuer_resource_cleanup = Some(
+                crate::runtime::services::enrollment_window::OriginalIssuerResourceCleanupOwner::from_interrupted_original(
+                    root, issued, self.conditional_signing.clone(), primary, Arc::clone(&self.terminal_destination),
+                )
+            );
+            let settlement = self
+                .issuer_resource_cleanup
+                .as_mut()
+                .ok_or_else(|| {
+                    aura_core::AuraError::invalid("original interrupted cleanup owner missing")
+                })?
+                .settle(&self.effects)
+                .await?;
+            self.ceremony_runner = None;
+            self.finalizer = None;
+            return Ok(settlement);
+        }
         if self.initialized.is_some() {
             let source = match exit {
                 aura_core::effects::task::RequiredTaskExit::Failed(source) => source.clone(),
@@ -900,8 +1228,7 @@ impl OriginalIssuerTaskCustody {
         {
             capture_original_issuer_terminal(&self.terminal_destination, &mut self.terminal_state)?;
         }
-        if self.terminal_receiver.is_none()
-            && self.terminal_state.terminal.is_none()
+        if self.terminal_state.terminal.is_none()
             && !self.acknowledgment_retained
             && self.acknowledged.is_none()
         {
@@ -999,6 +1326,7 @@ pub(crate) fn assert_original_single_signer_cancelled_shutdown_source(
 struct OriginalIssuerInitializationIncomplete {
     exit: aura_core::effects::task::RequiredTaskExit,
 }
+
 #[cfg(not(target_arch = "wasm32"))]
 impl aura_core::effects::task::RequiredTaskCustody for OriginalIssuerTaskCustody {
     fn execute(&mut self) -> futures::future::BoxFuture<'_, Result<(), aura_core::AuraError>> {
@@ -1027,5 +1355,281 @@ impl aura_core::effects::task::LocalRequiredTaskCustody for OriginalIssuerTaskCu
         Result<aura_core::effects::task::RequiredTaskSettlement, aura_core::AuraError>,
     > {
         Box::pin(self.cleanup_original(exit))
+    }
+}
+
+#[cfg(test)]
+mod terminal_failure_observation_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("native original finalizer refusal")]
+    struct NativeFinalizerRefusal;
+    #[derive(Debug, thiserror::Error)]
+    #[error("native original protocol refusal")]
+    struct NativeProtocolRefusal;
+
+    fn cause<'a, T: Error + 'static>(mut source: &'a (dyn Error + 'static)) -> &'a T {
+        loop {
+            if let Some(actual) = source.downcast_ref::<T>() {
+                return actual;
+            }
+            source = source
+                .source()
+                .expect("original concrete source remains reachable");
+        }
+    }
+
+    #[test]
+    fn original_finalizer_and_protocol_causes_survive_both_publication_orders() {
+        for protocol_first in [false, true] {
+            let destination = OriginalIssuerTerminalDestination::default();
+            let mut state = OriginalIssuerTerminalState::default();
+            let native_finalizer = Arc::new(NativeFinalizerRefusal);
+            let native_protocol = Arc::new(NativeProtocolRefusal);
+            let finalizer = aura_core::AuraError::Internal {
+                message: "actual original finalizer failure".into(),
+                source: Some(native_finalizer.clone()),
+            };
+            if !protocol_first {
+                destination.retain_finalizer_failure(finalizer.clone());
+                // The original observer may have retained the finalizer before
+                // the protocol result becomes available.
+                state.execution_failure = Some(finalizer.clone());
+            }
+            destination
+                .publish(Err(AgentError::from(aura_core::AuraError::Internal {
+                    message: "actual original protocol failure".into(),
+                    source: Some(native_protocol.clone()),
+                })))
+                .expect("one original protocol producer");
+            if protocol_first {
+                let first = state
+                    .capture_published_terminal_and_failures(&destination)
+                    .expect_err("original protocol refusal is not success");
+                assert!(std::ptr::eq(
+                    cause::<NativeProtocolRefusal>(&first),
+                    native_protocol.as_ref()
+                ));
+                destination.retain_finalizer_failure(finalizer);
+            }
+            let failure = state
+                .capture_published_terminal_and_failures(&destination)
+                .expect_err("both original failures remain failures");
+            let retained = cause::<EnrollmentInitiatorTaskFailure>(&failure);
+            assert!(std::ptr::eq(
+                cause::<NativeFinalizerRefusal>(retained),
+                native_finalizer.as_ref()
+            ));
+            let protocol = retained
+                .terminal_publication_error()
+                .expect("independent protocol failure retained");
+            assert!(std::ptr::eq(
+                cause::<NativeProtocolRefusal>(protocol),
+                native_protocol.as_ref()
+            ));
+            assert!(state.terminal.is_none());
+            assert!(state.cancelled.is_none());
+            let repeated = state
+                .capture_published_terminal_and_failures(&destination)
+                .expect_err("observation cannot replace either native failure");
+            assert!(std::ptr::eq(
+                cause::<EnrollmentInitiatorTaskFailure>(&repeated),
+                retained
+            ));
+            drop(destination);
+            drop(state);
+            assert!(std::ptr::eq(
+                cause::<NativeFinalizerRefusal>(&repeated),
+                native_finalizer.as_ref()
+            ));
+            assert!(std::ptr::eq(
+                cause::<NativeProtocolRefusal>(
+                    cause::<EnrollmentInitiatorTaskFailure>(&repeated)
+                        .terminal_publication_error()
+                        .unwrap()
+                ),
+                native_protocol.as_ref()
+            ));
+        }
+        // A finalizer already reported before the synchronous progress deposit
+        // stays first even if no observer had copied it into owner state yet.
+        let destination = OriginalIssuerTerminalDestination::default();
+        let mut state = OriginalIssuerTerminalState::default();
+        let native_finalizer = Arc::new(NativeFinalizerRefusal);
+        let native_protocol = Arc::new(NativeProtocolRefusal);
+        destination.retain_finalizer_failure(aura_core::AuraError::Internal {
+            message: "original finalizer precedes progress deposit".into(),
+            source: Some(native_finalizer.clone()),
+        });
+        let progress = destination
+            .retain_original_progress_failure(AgentError::from(aura_core::AuraError::Internal {
+                message: "original progress before cancellation arbitration".into(),
+                source: Some(native_protocol.clone()),
+            }))
+            .expect("one original progress error is deposited");
+        destination
+            .publish(Err(AgentError::from(progress)))
+            .expect("original result publication");
+        let failure = state
+            .capture_published_terminal_and_failures(&destination)
+            .expect_err("earlier original finalizer remains primary");
+        assert!(std::ptr::eq(
+            cause::<NativeFinalizerRefusal>(&failure),
+            native_finalizer.as_ref()
+        ));
+        let combined = cause::<EnrollmentInitiatorTaskFailure>(&failure);
+        assert!(std::ptr::eq(
+            cause::<NativeProtocolRefusal>(combined.terminal_publication_error().unwrap()),
+            native_protocol.as_ref(),
+        ));
+        let repeated = state
+            .capture_published_terminal_and_failures(&destination)
+            .expect_err("repeated observation does not replace original source carrier");
+        assert!(std::ptr::eq(
+            cause::<EnrollmentInitiatorTaskFailure>(&repeated),
+            combined
+        ));
+
+        // A later delivery failure can reach owner state before the original
+        // progress source is observed. Publication order cannot reverse the
+        // producer's actual chronology or erase either concrete allocation.
+        for finalizer_preceded_progress in [false, true] {
+            let destination = OriginalIssuerTerminalDestination::default();
+            let mut state = OriginalIssuerTerminalState::default();
+            let native_earlier = Arc::new(NativeFinalizerRefusal);
+            let native_progress = Arc::new(NativeProtocolRefusal);
+            let native_later = Arc::new(NativeFinalizerRefusal);
+            if finalizer_preceded_progress {
+                destination.retain_finalizer_failure(aura_core::AuraError::Internal {
+                    message: "finalizer actually preceded progress".into(),
+                    source: Some(native_earlier.clone()),
+                });
+            }
+            destination
+                .retain_original_progress_failure(AgentError::from(
+                    aura_core::AuraError::Internal {
+                        message: "original progress before later delivery".into(),
+                        source: Some(native_progress.clone()),
+                    },
+                ))
+                .expect("original producer records chronology before close");
+            let later = aura_core::AuraError::Internal {
+                message: "later delivery reached the observer first".into(),
+                source: Some(native_later.clone()),
+            };
+            if !finalizer_preceded_progress {
+                destination.retain_finalizer_failure(later.clone());
+            }
+            state.execution_failure = Some(later);
+            let failure = state
+                .capture_published_terminal_and_failures(&destination)
+                .expect_err("later observation cannot supersede earlier production");
+            let retained = cause::<EnrollmentInitiatorTaskFailure>(&failure);
+            assert!(std::ptr::eq(
+                cause::<NativeFinalizerRefusal>(retained.terminal_publication_error().unwrap()),
+                native_later.as_ref(),
+            ));
+            if finalizer_preceded_progress {
+                assert!(std::ptr::eq(
+                    cause::<NativeFinalizerRefusal>(&failure),
+                    native_earlier.as_ref(),
+                ));
+                let original = cause::<EnrollmentInitiatorTaskFailure>(retained.source().unwrap());
+                assert!(std::ptr::eq(
+                    cause::<NativeProtocolRefusal>(original.terminal_publication_error().unwrap()),
+                    native_progress.as_ref(),
+                ));
+            } else {
+                assert!(std::ptr::eq(
+                    cause::<NativeProtocolRefusal>(&failure),
+                    native_progress.as_ref(),
+                ));
+            }
+            let repeated = state
+                .capture_published_terminal_and_failures(&destination)
+                .expect_err("repeated observation retains the same failure carrier");
+            assert!(std::ptr::eq(
+                cause::<EnrollmentInitiatorTaskFailure>(&repeated),
+                retained,
+            ));
+        }
+    }
+
+    #[test]
+    fn late_original_finalizer_keeps_protocol_primary_after_observation() {
+        let destination = OriginalIssuerTerminalDestination::default();
+        let mut state = OriginalIssuerTerminalState::default();
+        let native_protocol = Arc::new(NativeProtocolRefusal);
+        let progress = destination
+            .retain_original_progress_failure(AgentError::from(aura_core::AuraError::Internal {
+                message: "actual protocol failure before finalizer completion".into(),
+                source: Some(native_protocol.clone()),
+            }))
+            .expect("actual original progress survives its borrowed future");
+        let unpublished = state
+            .capture_published_terminal_and_failures(&destination)
+            .expect_err("original cause survives before terminal-result publication");
+        assert!(std::ptr::eq(
+            cause::<NativeProtocolRefusal>(&unpublished),
+            native_protocol.as_ref()
+        ));
+        destination
+            .publish(Err(AgentError::from(progress)))
+            .expect("one original producer");
+        let primary = state
+            .capture_published_terminal_and_failures(&destination)
+            .expect_err("first original protocol failure");
+        let native_finalizer = Arc::new(NativeFinalizerRefusal);
+        destination.retain_finalizer_failure(aura_core::AuraError::Internal {
+            message: "actual late original finalizer failure".into(),
+            source: Some(native_finalizer.clone()),
+        });
+        let retained = destination.with_retained_finalizer_failure(primary);
+        drop(destination);
+        drop(state);
+        assert!(std::ptr::eq(
+            cause::<NativeProtocolRefusal>(&retained),
+            native_protocol.as_ref()
+        ));
+        let finalizer = cause::<EnrollmentInitiatorTaskFailure>(&retained)
+            .terminal_publication_error()
+            .expect("late finalizer remains independently accessible");
+        assert!(std::ptr::eq(
+            cause::<NativeFinalizerRefusal>(finalizer),
+            native_finalizer.as_ref()
+        ));
+        // A distinct later protocol result must not mask the deposited cause.
+        let destination = OriginalIssuerTerminalDestination::default();
+        let first = Arc::new(NativeProtocolRefusal);
+        let returned = Arc::new(NativeProtocolRefusal);
+        destination
+            .retain_original_progress_failure(AgentError::from(aura_core::AuraError::Internal {
+                message: "original progress before later protocol failure".into(),
+                source: Some(first.clone()),
+            }))
+            .expect("original progress is retained");
+        destination
+            .publish(Err(AgentError::from(aura_core::AuraError::Internal {
+                message: "independent later original protocol failure".into(),
+                source: Some(returned.clone()),
+            })))
+            .expect("later result remains retained independently");
+        let mut state = OriginalIssuerTerminalState::default();
+        let retained = state
+            .capture_published_terminal_and_failures(&destination)
+            .expect_err("both original sources remain failed");
+        assert!(std::ptr::eq(
+            cause::<NativeProtocolRefusal>(&retained),
+            first.as_ref()
+        ));
+        let later = cause::<EnrollmentInitiatorTaskFailure>(&retained)
+            .terminal_publication_error()
+            .expect("later protocol source remains owned");
+        assert!(std::ptr::eq(
+            cause::<NativeProtocolRefusal>(later),
+            returned.as_ref()
+        ));
     }
 }

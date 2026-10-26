@@ -12,6 +12,8 @@ publish = false
 workspace = true
 
 [features]
+# Canonical shipping builds reject development key providers throughout the graph.
+production-build = ["aura-agent/production-build", "aura-effects/production-build"]
 default = []
 web = ["dioxus/web"]
 harness = []

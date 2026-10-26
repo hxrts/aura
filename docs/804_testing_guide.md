@@ -1,5 +1,37 @@
 # Testing Guide
 
+The command-plane policy scans the whole Playwright driver, including production
+MJS launchers. Its exact npm-declared smoke test may issue one checked direct RPC
+consumer call; this does not authorize handlers or exempt test directories.
+Comments, strings, unknown paths and additional occurrences cannot satisfy that
+consumer check.
+The fixture classifier supports a restricted lexical subset (known regex-start
+contexts and simple dotted-reference template substitutions); unsupported forms
+refuse. It is not a general JavaScript parser or live-authority proof.
+Repository rg-backed checks distinguish matches, valid no-match, and native
+query failures. Preserve each original failure and replay the same
+policy binary before editing. After security-sensitive toolkit changes, run the
+focused security-boundary policy before broader CI, and retain full toolkit tests
+and strict all-target Clippy evidence.
+
+For selected-operation waits, preserve the canonical
+`operation_handle_matches` lookup through
+`UiSnapshot::operation_state_for_instance(handle.id(), handle.instance_id())`.
+The wait-contract policy checks this exact unconditional owner with parsed Rust,
+including its typed snapshot/handle inputs and comparison to the requested state.
+Its focused controls reject weaker id-only lookups, foreign ids/instances, raw
+operation-vector observations, and comment/string/unrelated helper lookalikes.
+Conditional owners and test attributes, including qualified test-macro paths,
+cannot satisfy that production owner requirement.
+Keep actual selected-instance wait tests: this narrow source check proves the
+mechanical owner shape, not asynchronous observation or runtime provenance.
+
+Browser enrollment source-contract checks follow `begin_exact_enrollment_import`
+through required app admission, exact-instance handoff and transfer observation,
+including the app-owned browser persistence acknowledgment. Pre-admission refusal
+feedback uses the same guarded signal writer as asynchronous completion. These
+source checks complement mounted/runtime tests; they do not prove cleanup.
+
 Browser onboarding regressions must check guarded signal writes after async
 enrollment workflows, including identity persistence failures. Completion and
 error feedback use the browser retry helper; task spawning remains owned by
@@ -106,6 +138,13 @@ This covers membership rekeying; the later observational transition-policy
 steps still do not establish native normal/emergency finalization.
 An adjacent regression enforces a 16 KiB caller-future budget for membership
 rekeying, alongside execution on the default test stack.
+
+`just ci-test` excludes patchbay fixtures, including the
+`holepunch::holepunch_tier3_stress::` module whose individual fixture names do
+not contain `patchbay`. Those tests require actual network-namespace privileges
+and remain selected by `just ci-holepunch-nightly-stress`; they must fail on
+provisioning errors rather than silently substitute a mock backend. A passing
+workspace lane does not establish network-lab coverage.
 
 `just ci-test` first runs `just ci-amp-lifecycle-trace`, which regenerates the
 seed-424242, 24-step AMP harness trace and compares it with
@@ -1409,9 +1448,12 @@ before opening the modal, then assert its `operation_state_is = succeeded` after
 approval. The absence assertion reads the actor's semantic snapshot; it fails
 if any prior operation of that ID is present. This prevents setup or another
 actor's success from satisfying enrollment-import completion.
-The harness checks the selected actor's observed operation ID, state, and
-optional `after_instance` before it consults a matching exact submission
-handle. For browser enrollment approval, assert `modal_confirm_button` is
+The harness checks shared observation predicates, then uses the selected actor's
+matching retained submission handle to check the exact instance and state,
+including `at_instance` and `after_instance` constraints on that instance. Without
+a matching handle it retains the generic observed-operation checks. A stale
+earlier record of the same operation ID cannot override the retained instance.
+For browser enrollment approval, assert `modal_confirm_button` is
 mounted and activate that control after filling the code, manifest, and
 independent verifier; a raw Enter key is not the approval action in this
 scenario.
@@ -1521,6 +1563,12 @@ The shared-flow policy scripts target the published Cargo package names for rena
 
 When shared flows export data through runtime events, the event payload is part of the contract. Invitation and device-enrollment code capture should come from `RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or frontend-local heuristics. Shared chat waits should bind to semantic selection state so the harness targets the single shared channel instead of falling back to incidental render order.
 
+Semantic `runtime_event_occurred` steps express their detail constraint in
+`value`. Both the wait and any capture use the same event kind and detail
+predicate. Capture selects the latest matching record and requires its payload;
+it cannot borrow a code or manifest from another record. Enrollment code,
+manifest and verifier remain paired from that single selected record.
+
 AMP transition waits follow that runtime-event rule. Shared scenarios for normal transition, delayed or offline witnesses, conflicting `A2` certificates, subtractive membership, emergency quarantine, cryptoshred, rejected emergency attempts, cooldowns, duplicate-signing evidence, recovery replay, and authority-governance non-removal should wait on `RuntimeEventKind::AmpChannelTransitionUpdated`, parity snapshots, operation lifecycle, quiescence, and final reduced channel state.
 
 These scenarios must stay actor-based and semantic-only. Raw DOM selectors, PTY keys, compatibility steps, and label-only assertions are diagnostic or frontend-conformance tools. They are not shared AMP evidence.
@@ -1576,6 +1624,47 @@ cargo test --package aura-terminal --test unit_state_machine
 Use `just test` for the full suite. Use `just test-crate` for focused iteration on a single crate.
 
 ### Build and Caching
+Canonical terminal/app-host/browser shipping builds enable `production-build`.
+Native software-key storage requires `development-keys`; simulation and test
+keyring features imply it. Combining production and development key features
+fails compilation. The browser WebCrypto/IndexedDB provider stays available.
+Use `scripts/check/simulator-checkpoint-reachability.sh` to inspect the three
+shipping feature graphs before a build. `just build-terminal-release`,
+`just build-app-host` and the web release helper run that check themselves.
+The full-workspace release build is a validation build, not a deployable graph.
+For unattended native process integrations, use the existing explicit development
+lane: `scripts/harness/lan/build.sh terminal-dev` (or
+`just e2e-build-terminal-dev`). Select its software-key provider through the
+normal effects/configuration path and retain the genuine signed protocol and
+profile owner. A production terminal cannot re-enable excluded development keys
+through `AURA_HARNESS_MODE` or a storage-backend environment override. Keep the
+production terminal lane for its actual platform provider, with OS credential
+service integration isolated as described in the effects guide.
+
+
+The existing mandatory secret-lifetime/security lane runs these provider guards
+before the larger lifetime inventory. For focused iteration, use
+`just _policy-check check production-key-provider`: it checks shipping graphs,
+warning-denied production compilation, exact API doctest discovery/execution (including a positive external production
+consumer) and
+the intended conflicting-feature compiler failure. Its Cargo JSON validation
+requires the original exit101, exactly one root effects-library guard diagnostic
+and a failed build terminal; unrelated failures cannot satisfy the gate.
+
+When changing this boundary, check the effects production library first with
+`scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-effects --lib --features production-build`.
+Discover and execute both `ProductionSecureStorageHandler` production compile-fail
+doctests, then verify that `production-build,development-keys` fails with the
+intended development-provider compiler error. An unknown feature, dependency
+failure, zero-match doctest invocation or graph-only check is insufficient.
+The native `secure_immutable_publication` target and the handler encryption
+roundtrip require `--features development-keys`; they use the actual software-key
+provider rather than a mock. Run the affected real native development fixtures
+and browser configuration;
+keep actual OS credential-service testing in its isolated opt-in lane described
+in [Effects Guide](802_effects_guide.md). Use the build-budget wrapper and retain
+source, features and terminal receipts for each configuration.
+
 
 `nix/build-cache-key.nix` is the single pure key definition for the proposed
 dependency-only warm tree. `flake.nix` exports that function, and
@@ -1717,7 +1806,12 @@ to `scripts/dev/build-budget.sh --dry-run --no-prune --lane <lane> -- <command>`
 The preview reads the current source/workload identity, measured receipt peaks,
 and live reservations, then prints free space, incoming growth reservation,
 the 15 GiB floor, margin, and an advisory admission outcome. With no command,
-the incoming reservation is unknown. The exact `gates` commands
+the incoming reservation is unknown. A successful preview exits zero even when
+its advisory outcome is `refused`; its exit status cannot authorize a build.
+Enforce admission by running the actual command through the wrapper without
+`--dry-run`. If environment setup realizes substantial dependencies first, put
+that real admission after setup. Nested commands reuse their parent's held
+admission and do not establish fresh headroom. The exact `gates` commands
 `just ci-user-flow-policy`, `just ci-build-cache-policy`, and the actual
 `_policy-check` child argv `cargo run --quiet --manifest-path
 toolkit/xtask/Cargo.toml -- check security-boundary-policy` have distinct
@@ -1863,6 +1957,15 @@ source location when safely parseable, or a status class) and
 points to those protected logs for details. At terminal status, an atomic
 `completion.json` beside the receipt provides its path, exit status and UTC
 completion time for file watchers, after command output has flushed.
+Use `aura_receipt_validate_terminal_compile_commands` from
+`scripts/dev/build-receipt.sh` to check a terminal schema-2 receipt against a
+nonempty JSON array of expected compile argv arrays. It checks their exact order
+and count, successful phase outcomes and the separate final command-summary row.
+That summary has no compile argv. Empty phases, missing or unexpected repeated compile
+commands, pending outcomes and multiple receipt documents fail validation.
+Callers must also verify source/configuration identity, the matching completion
+record, exact test discovery/execution and protected artifact identity. This
+helper provides no resource-settlement acknowledgment.
 For coordinator wakeups, create a one-shot private subscriber with
 `bash scripts/dev/receipt-events.sh --create`, then block on
 `bash scripts/dev/receipt-events.sh --next "$FIFO"` in a separate caller-owned
@@ -1911,9 +2014,12 @@ command's original exit status, including 101. The canonical
 exact name before running any fixture, then executes those names with
 fail-fast behavior. A missing later declaration prevents all execution; a
 source change during discovery or execution refuses the batch.
-Pass `--timings` to collect Cargo's timing report during that same necessary
-compilation. The compile phase records the option in its command arguments;
-discovery, exact inventories, execution and failure handling remain unchanged.
+Pass `--timings` to this existing runner when profiling a necessary compilation.
+It forwards Cargo's HTML timing report option on that one compile and records
+the actual argument in its compile phase; it does not launch a second build.
+Retain the resulting `target/cargo-timings` report with the original source-bound
+receipt before cache cleanup. The option leaves the incremental/acceptance
+configuration and all discovery, execution and ownership requirements intact.
 Use a separate `disposal` phase for an actual native shutdown/cleanup command;
 its result remains independent of semantic or compile failure. Completion
 prints the final status and receipt path, so coordinators can inspect one
@@ -2611,6 +2717,19 @@ fast individual checks. Their execution receipts bind the current source,
 Git index/ref map, effective Git configuration and diff selectors, then rerun
 the Rust check against that source using the original verified toolkit binary.
 An invalid diff range or external Git diff/config input refuses this fast lane.
+The VM lifecycle gate checks all selected agent-suite source declarations before
+starting dependency/core compilation. It still requires actual feature-specific
+harness discovery and execution; declaration presence does not prove cfg
+applicability or cleanup. Keep checkpoint-restoration fixture inventories with
+their owning producer child and retain that child's complete acceptance.
+The disposable GitHub-hosted Build Cache Policy job removes only its unused
+system Git LFS helper section before capturing fixture inputs; this repository
+does not use LFS attributes. External filters and other unsupported configuration
+still refuse reuse. This setup applies to that dedicated CI worker, not a
+developer's global or system Git configuration.
+The selector fixture compares controlled empty/nonempty base-ref values, so a PR
+runner already exporting `GITHUB_BASE_REF=main` does not compare identical inputs.
+This isolation changes the fixture, while production selector binding stays strict.
 Run the complete `just ci-user-flow-policy` recipe at its integration checkpoint;
 it also includes the harness ownership check. `security-boundary-policy` runs
 required Rust tests and is not eligible for static execution. These
@@ -2623,7 +2742,15 @@ names before starting, compiles one libtest executable for a frozen source
 fingerprint, then discovers and executes each name under one guarded build
 lifetime. Its receipt records the inventory and each compile, discovery and
 execution result; a source change, missing fixture, failure or ignored test
-fails the batch. Run the full ownership aggregate at the combined checkpoint.
+fails the batch. Add `--decisive-name module::first` when the first declared
+fixture must execute immediately after its discovery. That explicit mode compiles
+once, discovers and executes the checkpoint, then discovers the entire remaining
+inventory before adjacent execution. Missing later fixtures still fail the batch;
+a checkpoint pass alone is not acceptance. Default mode retains complete discovery
+before any execution. Run the full ownership aggregate at the combined checkpoint.
+The budget fixture restores the caller's exact base-selector environment after
+its negative identity case, including whether the variable was originally unset.
+An inherited PR base must not become a different baseline for failed-run history.
 
 Before that aggregate, freeze the integrated source and compile the affected
 native targets and web target with the guarded build wrapper. Fix compiler
@@ -3463,16 +3590,50 @@ foreign custody and successful cleanup from failed domain execution. Pure or
 component evidence does not establish genuine signed enrollment, platform
 persistence, reopen correctness or final independent-process network behavior.
 
-For original issuer reconciliation, exercise genuine cancellation and actual
-cancelled-generation retirement before retrying cleanup through the retained
-control. Drop an in-flight reconciliation attempt and verify the canonical entry
-still owns that exact control; reject a same-named foreign task. Assert no new
-spawn, provider or budget birth, and preserve concrete operation failures apart
-from final negative-budget validation. Cover already disposed resource
-observation without granting positive authority, and active-execution refusal
-without unbounded polling or a fabricated ACK. Complete durable cleanup and
-original-window validation before asserting full resource acknowledgment.
+For original issuer reconciliation, hold the actual original-epoch retirement
+fault through the asserted no-ACK boundary. Release that fault and retry through
+the public cancellation API, preserving the original registration. Require genuine
+issuer and cancellation task disposal, the actual sealed issuer subtree receipt,
+the selected budget's observation-owner identity, and the same original native
+source allocation. A failed operation may have acknowledged cleanup; assert those
+outcomes separately. Reject a same-named foreign task and require no new spawn,
+provider or budget birth.
+
+To test observer abandonment, hold the real original cleanup after its retirement
+receipt and before its negative checkpoint. Await that producer acknowledgment,
+drop only the public observer, and prove neither owner has disposed before
+releasing the same pending cleanup. Drop of an observer must not destroy the
+original native or browser-local cleanup future. Shared-supervisor fixtures also
+exercise an abandoned request that actually completed with failure, then explicitly
+request the next same-original attempt. Complete that attempt before polling its
+async observer and verify observation does not submit an extra attempt. Retain
+concrete operation failures separately from final original-budget validation and
+require genuine original task/group disposal before claiming resource settlement.
+
+Use an actual worker process boundary for restart while failed original custody
+still owns a profile lease. Dropping an agent value alone does not release retained
+owners. After acknowledged in-process cleanup, release every actual observation
+holding that original profile before reopening it. Keep full agent WASM-libtest
+support explicit: portable local-supervisor fixture declarations do not establish
+the broader stage when existing modules still include native process/fault tests.
 These requirements are fixture scope, not evidence that the candidate ran.
+The exact native regression
+`handlers::invitation::tests::original_issuer_progress_time_failure_survives_committed_cancellation`
+uses the original admitted task gate and the selected `ManualPhysicalClock`'s
+task-scoped read failure. It observes the actual protocol error before committing
+cancellation, then requires signed delivery, original disposal and same-clock
+profile reopen before asserting the same native error allocation survives.
+Retain a fatal progress error in the original custodian before the first awaited
+arbitration read; a post-disposal diagnostic must not hold live owner capability.
+The existing component error-order tests cover an earlier finalizer and later
+finalizer separately. Discover and execute the required names from the same
+source-bound binary; replay its first failure before editing.
+
+The invitation large-stack helper boxes and erases each fixture future before
+entering one shared thread/runtime executor. It preserves the current-thread
+runtime, 32 MiB stack, `Send + 'static` bound, panic propagation and selected
+providers. This reduces distinct executor specializations; actual rebuild-time
+benefit requires measurement and is not implied by the type change.
 
 Run security-boundary policy first and strict Clippy once for the complete
 integration checkpoint, with required syntax, ownership, absolute-time,
@@ -3490,3 +3651,66 @@ Exercise the actual production scanner with production following a closed test
 module, text decoys and macro tokens; classifier-only coverage does not prove
 scanner wiring. Run `just _policy-check check security-boundary-policy` before
 broader CI.
+
+### Wrapper scratch ownership checks
+
+`just ci-preflight` runs `scripts/check/test-temporary-owner-wrappers.sh` before
+the real prerequisite checks. These fake-command contracts exercise preflight,
+protocol compatibility and quickstart scratch ownership without building Rust or
+opening an account. They retain actual command refusal statuses, check cleanup
+on success and failure, and protect unrelated PID-named temporary files. Scratch
+retirement does not certify shutdown of any native process, account or protocol.
+
+The static web wrapper owns a private completed Dioxus configuration backup
+before its first live edit. Its original config is restored through same-directory
+staging and atomic replacement before admitting the server. A refused restoration
+retains the complete backup and reports its path; a prior build/edit/cancellation
+status remains primary while cleanup failure is reported independently. This does
+not protect against SIGKILL, host death or an allocation lost before its path is
+observable. It requires exclusive single-invocation
+access while editing/restoring; concurrent independent config writers are unsupported.
+Symlink and non-regular configs are refused before allocation or live mutation.
+`just ci-preflight` runs `scripts/check/test-web-config-owner.sh`: fourteen actual
+wrapper cases inject allocation, partial copy/edit, TERM, build, restore-copy,
+rename, cleanup and non-regular-path refusals using fake commands. They invoke no real Dioxus/Cargo
+build or server and do not certify native tool or filesystem crash durability.
+
+For native `ManualPhysicalClock` rollback injection into one owning runtime task,
+use `script_next_current_task_observation` from that actual producer's acknowledged
+checkpoint callback. A global next-read override can be consumed by another
+runtime task sharing the selected provider. The task-bound script preserves the
+same provider and driven timer endpoints; it grants no cleanup acknowledgment.
+Keep the original signed-terminal and resource-disposal assertions after the
+injected operation returns.
+
+The live negative-notice correction keeps the two decisive cancellation rollback
+fixtures and their exact fault placement/assertions. Task-specific clock slots
+exclude foreign readers but do not isolate shared TimeoutBudget rollback state:
+a cancellation's actual final read can latch the same original high-water owner
+seen by its issuer descendants. The live signed-negative send therefore uses its
+actual negative authority throughout outer execution, inner finite-VM validity,
+per-round reads and retry delay. At the actual test issuance boundary, equal
+signed bytes in a foreign notice allocation are refused and original allocation
+start/signed-expiry-attenuated deadline are checked. These are additional
+assertions inside existing fixtures, not new discovered tests or execution proof.
+
+### Hosted bootstrap mailbox fixture feedback
+
+The existing deep-harness workflow has a manual `bootstrap_checkpoint` mode for
+an isolated native simulator checkpoint. Dispatch the candidate revision with
+`gh workflow run harness.yml --ref <candidate> -f bootstrap_checkpoint=true`.
+This mode runs only the four exact `bootstrap_delivery_checkpoint` fixtures;
+the default manual, push and scheduled harness campaigns remain unchanged.
+
+The maintained exact-fixture runner compiles that test target, discovers its
+exact names and count, and executes the decisive case immediately. With
+`--replay-first-failure`, a failure is replayed once against the same held binary
+only after its source/configuration/helper/inventory and binary identities still
+match. The original failure remains the workflow result even if replay differs.
+Receipts and the compiled executable are uploaded for source-bound review.
+
+Use this lane when existing local admission is unavailable; it is component
+feedback on real in-process runtimes, not full workspace acceptance, a real
+network-lab result, or a replacement for required production/ownership gates.
+Missing or ignored fixtures cannot satisfy its inventory. Keep baseline and
+corrected candidate evidence separate, including any workflow-only source delta.

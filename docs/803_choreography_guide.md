@@ -4,6 +4,27 @@ This guide covers how to build distributed protocols using Aura's choreographic 
 
 For theoretical foundations, see [MPST and Choreography](110_mpst_and_choreography.md). For operation categorization, see [Operation Categories](109_operation_categories.md).
 
+### Supported lowering boundary
+
+The pinned Telltale version is 17.0.1. Aura's macro serializes the compiled global
+and projected local types; `build_role_scoped_code_image` builds the machine image
+with `CodeImage::from_local_types`. Pinned theory conversion rejects explicit
+begin/await/resolve/invalidate lifecycle constructs and semantic handoff. Aura's
+coherence fallback also rejects authority-local constructs. Treat these as
+unsupported on this path until compiler rejection cases and a real admitted
+machine fixture prove the complete selected lowering. Parser acceptance, emitted
+metadata or a hand-written instruction image does not establish that proof.
+Theory conversion also erases a `let` wrapper while converting its continuation;
+that conversion alone does not implement an authoritative host read or receipt
+obligation. Prove the selected binding's executable producer before migrating it.
+
+The machine's synchronous effect handler does not retain arbitrary Rust futures.
+Keep original host resources, errors, selected physical deadlines and acknowledged
+cleanup in the existing Aura owners. Machine ticks and effect invalidation cannot
+replace those obligations. The threaded lifecycle audit export also omits authority
+records present in the cooperative export in this pin; identically named exports
+do not establish backend parity.
+
 ## 1. When to Use Choreography
 
 Use choreographic protocols when:
@@ -303,7 +324,27 @@ The currently published public protocol-critical surfaces are:
 - `reconfiguration_transition`
 
 These are the only current Aura-owned runtime consumers theorem-pack mapping is
-allowed to target.
+allowed to target. These inventory and admission categories do not by themselves
+prove execution of an equivalently named DSL construct; the lowering boundary
+above still applies.
+
+Treat these capability names as runtime admission surfaces. Before using an
+authority-language construct, trace its actual path through Aura's macro,
+`CompiledChoreography::global_type_json` / `local_type_r_json`,
+`CodeImage::from_local_types`, the machine compiler and the admitted role.
+Require a fixture that executes the intended issuance, consumption and terminal
+ordering. Metadata collectors and parser or obligation-checker acceptance alone
+do not establish that execution path.
+
+The inspected Telltale v19 release still rejects explicit commitment lifecycle,
+authority-local case/timeout, publication, materialization and handoff during
+the theory conversion used by Aura's VM artifacts. Its `Let` conversion traverses
+the continuation without emitting the bound authority operation. Keep those DSL
+surfaces unsupported for Aura protocol-obligation migration until their actual
+lowering and admitted-machine execution are verified. Existing runtime admission
+and owned-session APIs remain usable within their demonstrated contracts. Host
+futures, selected physical deadlines and resource cleanup remain with their
+actual Aura owners; semantic invalidation supplies no cleanup acknowledgment.
 
 ### Initial Aura Theorem-Pack Taxonomy
 

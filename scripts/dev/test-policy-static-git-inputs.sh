@@ -6,6 +6,10 @@ source "$repo_root/scripts/dev/policy-dependency-inputs.sh"
 source "$repo_root/scripts/dev/build-receipt.sh"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/aura-static-git.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
+# This fixture owns its Git user configuration; ambient filters remain refused
+# by production helpers and must not contaminate the isolated happy path.
+mkdir -p "$fixture/home" "$fixture/xdg"
+export HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/xdg"
 project="$fixture/project"
 mkdir -p "$project"
 project="$(cd "$project" && pwd -P)"
@@ -24,8 +28,11 @@ changed="$(AURA_UX_GUIDANCE_CHANGED_FILES='' policy_static_git_identity "$projec
 [[ "$base" != "$changed" ]] || {
   echo 'empty guidance override was conflated with unset' >&2; exit 1;
 }
+# A pull-request runner already exports GITHUB_BASE_REF=main. Compare controlled
+# different values instead of accidentally requiring identical inputs to differ.
+base_selector="$(GITHUB_BASE_REF='' policy_static_git_identity "$project")"
 changed="$(GITHUB_BASE_REF=main policy_static_git_identity "$project")"
-[[ "$base" != "$changed" ]] || { echo 'Git base selector was unbound' >&2; exit 1; }
+[[ "$base_selector" != "$changed" ]] || { echo 'Git base selector was unbound' >&2; exit 1; }
 if AURA_UX_GUIDANCE_DIFF_RANGE=missing-revision \
     policy_static_git_identity "$project" user-flow-guidance-sync > "$fixture/output" 2>&1; then
   echo 'invalid guidance range was accepted' >&2; exit 1
@@ -77,6 +84,14 @@ if policy_static_git_identity "$project" > "$fixture/output"; then
   echo 'external diff driver was accepted' >&2; exit 1
 fi
 git -C "$project" config --unset diff.fixture.command
+git config --global filter.fixture.clean /bin/true
+[[ "$(git config --global --get filter.fixture.clean)" == /bin/true ]]
+global_filter_status=0
+policy_static_git_identity "$project" > "$fixture/output" || global_filter_status=$?
+[[ "$global_filter_status" == 2 && ! -s "$fixture/output" ]] || {
+  echo 'global external Git filter did not produce its original refusal' >&2; exit 1;
+}
+git config --global --unset filter.fixture.clean
 git -C "$project" config include.path "$fixture/other-config"
 if policy_static_git_identity "$project" > "$fixture/output"; then
   echo 'external Git config include was accepted' >&2; exit 1

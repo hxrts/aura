@@ -33,9 +33,9 @@ fi
 
 tmp_root="${TMPDIR:-$repo_root/.tmp}"
 mkdir -p "$tmp_root"
-tmp_probe="$tmp_root/ci-preflight.$$"
+tmp_probe="$(mktemp "$tmp_root/ci-preflight.XXXXXXXX")" || fail "failed to allocate private temp probe under $tmp_root"
+trap 'rm -f -- "$tmp_probe"' EXIT
 : >"$tmp_probe" || fail "failed to write temp probe under $tmp_root"
-rm -f "$tmp_probe"
 
 nix_cache_dir="${HOME}/.cache/nix"
 if [[ -d "$nix_cache_dir" && ! -w "$nix_cache_dir" ]]; then

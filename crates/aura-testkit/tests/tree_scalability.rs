@@ -17,10 +17,10 @@
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::{
     tree::{snapshot::Snapshot, AttestedOp, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
-    DeviceId, Epoch, Hash32,
+    Epoch, Hash32,
 };
 use aura_journal::algebra::OpLog;
-use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
+use aura_journal::commitment_tree::{compaction::compact, reduction::reduce, TreeState};
 use aura_protocol::state::PeerView;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -30,16 +30,9 @@ use uuid::Uuid;
 // Helper Functions
 // ============================================================================
 
-/// Helper to create deterministic device IDs and UUIDs for tests
-fn test_device_id(seed: u64) -> DeviceId {
-    use aura_core::hash::hash;
-    let hash_input = format!("device-{}", seed);
-    let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .unwrap_or_else(|_| panic!("hash prefix should fit into UUID bytes"));
-    DeviceId(Uuid::from_bytes(uuid_bytes))
-}
+#[path = "fixtures/tree_scalability_history.rs"]
+mod tree_scalability_history;
+use tree_scalability_history::{connected_tree_history, test_device_id};
 
 fn test_uuid(seed: u64) -> Uuid {
     use aura_core::hash::hash;
@@ -52,10 +45,9 @@ fn test_uuid(seed: u64) -> Uuid {
 }
 
 fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
-    // Use genesis epoch (0) so that parent-binding verification is skipped.
-    // Give each operation a unique parent_commitment so the reduction
-    // topological sort treats every op as its own independent group rather
-    // than picking a single winner among concurrent siblings.
+    // Synthetic distinct parent keys support non-reducing OpLog/GC workloads.
+    // These operations are not a connected tree history and must not be
+    // supplied directly to reduce; use connected_tree_history for that.
     let mut parent_commitment = [0u8; 32];
     parent_commitment[..8].copy_from_slice(&epoch.to_le_bytes());
     parent_commitment[8..12].copy_from_slice(&leaf_id.to_le_bytes());
@@ -96,11 +88,11 @@ fn test_tree_with_100_devices() {
 
     let start = Instant::now();
 
-    // Create OpLog with 100 AddLeaf operations
+    // Every AddLeaf names the commitment of its actual reduced predecessor.
+    let (history, expected_state) = connected_tree_history(100, 0);
     let mut oplog = OpLog::new();
-    for i in 0..100 {
-        let op = create_add_leaf_op(i, i as u32);
-        oplog.add_operation(op);
+    for operation in history {
+        oplog.add_operation(operation);
     }
 
     let creation_time = start.elapsed();
@@ -111,6 +103,7 @@ fn test_tree_with_100_devices() {
     let ops: Vec<AttestedOp> = oplog.to_operations_vec();
     let state = reduce(&ops).unwrap_or_else(|e| panic!("Reduction should succeed: {}", e));
     let reduce_time = reduce_start.elapsed();
+    assert_eq!(state, expected_state);
 
     println!("Reduction time: {:?}", reduce_time);
     println!("Tree size: {} leaves", state.list_leaf_ids().len());
@@ -338,17 +331,15 @@ fn test_combined_load() {
 
     let start = Instant::now();
 
-    // Create tree with 100 devices
+    // Keep 100 devices while applying 1000 real epoch transitions, rather
+    // than disconnected additions that repeatedly replace existing leaves.
+    let (history, expected_state): (Vec<AttestedOp>, TreeState) =
+        serde_json::from_str(include_str!("fixtures/tree_scalability_history.json"))
+            .unwrap_or_else(|error| panic!("decode canonical structural history fixture: {error}"));
+    assert_eq!(history.len(), 1100);
     let mut oplog = OpLog::new();
-    for i in 0..100 {
-        let op = create_add_leaf_op(i, i as u32);
-        oplog.add_operation(op);
-    }
-
-    // Add 1000 more operations
-    for i in 100..1100 {
-        let op = create_add_leaf_op((i / 10) as u64, (i % 100) as u32);
-        oplog.add_operation(op);
+    for operation in history {
+        oplog.add_operation(operation);
     }
 
     // Create peer view with 50 peers
@@ -365,9 +356,14 @@ fn test_combined_load() {
     let ops: Vec<AttestedOp> = oplog.to_operations_vec();
     let state = reduce(&ops).unwrap_or_else(|e| panic!("Reduction should succeed: {}", e));
     let reduce_time = reduce_start.elapsed();
+    assert_eq!(state, expected_state);
 
     println!("Reduction time: {:?}", reduce_time);
     println!("Final tree size: {} leaves", state.list_leaf_ids().len());
+    assert_eq!(state.list_leaf_ids().len(), 100);
+    assert_eq!(u64::from(state.current_epoch()), 1000);
+    assert_eq!(oplog.len(), 1100);
+    assert_eq!(view.len(), 50);
     println!("OpLog size: {} operations", oplog.len());
     println!("PeerView size: {} peers", view.len());
 

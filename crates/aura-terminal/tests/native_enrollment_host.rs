@@ -18,7 +18,10 @@ use aura_app::{
     },
     ui::workflows::invitation::import_device_enrollment_with_terminal_status,
 };
-use aura_core::{effects::StorageCoreEffects, AuthorityId, ContextId, DeviceId};
+use aura_core::{
+    effects::{ReactiveEffects, StorageCoreEffects},
+    AuthorityId, ContextId, DeviceId,
+};
 use aura_simulator::native_enrollment_fixture::NativeEnrollmentFixture;
 use aura_terminal::{handlers::tui::ProfileStore, tui::context::AccountFilesHelper};
 use aura_testkit::time::ManualPhysicalClock;
@@ -68,6 +71,7 @@ async fn native_enrollment_host_ack_readback_and_same_profile_reopen() {
             seed: u64::from(seed),
         }
     });
+    let issuer_device = profiles[0].config.device_id;
     let owner =
         NativeEnrollmentFixture::prepare(profiles, clock.clone(), "native-host-adapter-auth")
             .await
@@ -80,10 +84,27 @@ async fn native_enrollment_host_ack_readback_and_same_profile_reopen() {
         .stage_provisional_runtime_account_for_testing(&recipient)
         .await
         .expect("actual native provisional account staging");
-    assert!(
-        ProfileStore::production(&recipient_root).is_err(),
-        "second native owner must be refused"
-    );
+    {
+        let refusal = match ProfileStore::production(&recipient_root) {
+            Err(refusal) => refusal,
+            Ok(_) => panic!("second native owner must be refused"),
+        };
+        let mut source: &dyn std::error::Error = &refusal;
+        let ownership = loop {
+            if let Some(ownership) =
+                source.downcast_ref::<aura_core::effects::profile_storage::ProfileStorageError>()
+            {
+                break ownership;
+            }
+            source = source
+                .source()
+                .expect("original profile ownership source retained");
+        };
+        assert!(matches!(
+            ownership,
+            aura_core::effects::profile_storage::ProfileStorageError::Busy
+        ));
+    }
     let account_files = AccountFilesHelper::new(
         recipient_root.clone(),
         recipient.runtime().effects().config().device_id.to_string(),
@@ -199,6 +220,13 @@ async fn native_enrollment_host_ack_readback_and_same_profile_reopen() {
         })
         .collect();
     assert_eq!(exact_terminals, vec![SemanticOperationPhase::Succeeded]);
+    // Read the actual post-terminal view without a test-side refresh that could
+    // hide a missing workflow publication. Device counts do not authorize success.
+    let original_settings = app
+        .read()
+        .await
+        .read(&*aura_app::ui::signals::SETTINGS_SIGNAL)
+        .await;
     drop(observation);
     drop(bridge);
     drop(admission);
@@ -220,6 +248,17 @@ async fn native_enrollment_host_ack_readback_and_same_profile_reopen() {
         .reopen_accepted_for_host_recovery(SharedTransport::default())
         .await
         .expect("same selected native provider reopens");
+    let reopened_app = reopened_runtime.recipient_app();
+    let reopened_signal_initialization =
+        aura_app::AppCore::init_signals_with_hooks(&reopened_app).await;
+    let reopened_settings_refresh =
+        aura_app::ui::workflows::settings::refresh_settings_from_runtime(&reopened_app).await;
+    let reopened_settings = reopened_app
+        .read()
+        .await
+        .read(&*aura_app::ui::signals::SETTINGS_SIGNAL)
+        .await;
+    drop(reopened_app);
     let reopened = ProfileStore::from_selected_runtime_for_testing(
         reopened_runtime.recipient().runtime().effects(),
     )
@@ -243,4 +282,46 @@ async fn native_enrollment_host_ack_readback_and_same_profile_reopen() {
         .shutdown()
         .await
         .expect("same confirmed native profiles reopen");
+    // Preserve original disposal/reopen even when a new observation assertion
+    // fails. These snapshots are read-only evidence, never completion authority.
+    reopened_signal_initialization.expect("same-profile app signals initialize");
+    reopened_settings_refresh.expect("same-profile startup refresh uses the actual runtime");
+    let expected_devices = [issuer_device, accepted.device_id()]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let original_settings =
+        original_settings.expect("original terminal has an actual settings snapshot");
+    assert_eq!(
+        original_settings.authority_id,
+        accepted.original_provisional().to_string(),
+        "the provisional runtime retains its authority until native reload"
+    );
+    {
+        let settings = reopened_settings.expect("reopened profile has an actual settings snapshot");
+        assert_eq!(
+            settings.authority_id,
+            accepted.subject_authority().to_string()
+        );
+        assert_eq!(
+            settings.devices.len(),
+            2,
+            "exact original enrolled device inventory"
+        );
+        assert_eq!(
+            settings
+                .devices
+                .iter()
+                .map(|device| device.id)
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected_devices,
+            "the app view observes both actual signed enrollment participants"
+        );
+        let current: Vec<_> = settings
+            .devices
+            .iter()
+            .filter(|device| device.is_current)
+            .collect();
+        assert_eq!(current.len(), 1, "one actual current device is observed");
+        assert_eq!(current[0].id, accepted.device_id());
+    }
 }

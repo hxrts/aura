@@ -20,7 +20,7 @@ SEED="${QUINT_TRACE_SEED:-424242}"
 MAX_STEPS="${QUINT_TRACE_MAX_STEPS:-50}"
 MAIN="${QUINT_TRACE_MAIN:-}"
 
-generate_trace() {
+generate_trace() (
     local spec="$1"
     local out="$2"
 
@@ -31,9 +31,11 @@ generate_trace() {
 
     mkdir -p "$(dirname "$out")"
 
-    local raw
-    raw="$(mktemp)"
-    trap "rm -f '$raw'" EXIT
+    local temporary_dir raw normalized
+    temporary_dir="$(mktemp -d "$(dirname "$out")/.aura-quint-trace.XXXXXX")"
+    trap 'rm -rf -- "$temporary_dir"' EXIT
+    raw="$temporary_dir/raw.itf.json"
+    normalized="$temporary_dir/normalized.itf.json"
 
     local args=(
         run
@@ -51,15 +53,17 @@ generate_trace() {
     quint "${args[@]}" >/dev/null
 
     if command -v jq >/dev/null 2>&1; then
-        jq -c 'del(."#meta".timestamp, ."#meta".description)' "$raw" >"$out"
+        jq -c 'del(."#meta".timestamp, ."#meta".description)' "$raw" >"$normalized"
     else
-        mv "$raw" "$out"
+        mv "$raw" "$normalized"
     fi
 
-    echo "wrote $out from ${spec#$ROOT/} (seed=$SEED, max_steps=$MAX_STEPS)"
-}
+    mv -f "$normalized" "$out"
 
-check_trace() {
+    echo "wrote $out from ${spec#$ROOT/} (seed=$SEED, max_steps=$MAX_STEPS)"
+)
+
+check_trace() (
     local spec="$1"
     local expected="$2"
 
@@ -68,9 +72,10 @@ check_trace() {
         exit 1
     fi
 
-    local tmp
-    tmp="$(mktemp)"
-    trap "rm -f '$tmp'" EXIT
+    local temporary_dir tmp
+    temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/aura-quint-check.XXXXXX")"
+    trap 'rm -rf -- "$temporary_dir"' EXIT
+    tmp="$temporary_dir/actual.itf.json"
 
     generate_trace "$spec" "$tmp" >/dev/null
 
@@ -91,7 +96,7 @@ check_trace() {
     echo "" >&2
     echo "To update: just quint-semantic-trace" >&2
     exit 1
-}
+)
 
 CMD="${1:-generate}"
 SPEC_INPUT="${2:-$DEFAULT_SPEC}"

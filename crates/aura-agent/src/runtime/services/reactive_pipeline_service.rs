@@ -135,6 +135,19 @@ impl ReactivePipelineService {
                 .is_some_and(|pipeline| pipeline.terminal_failure().is_none())
     }
 
+    /// Observe the actual scheduler's currently polled batch sleep only.
+    #[cfg(feature = "simulator-checkpoint")]
+    pub(crate) async fn current_batch_deadline_witness(
+        &self,
+    ) -> Option<crate::reactive::SchedulerBatchDeadlineWitness> {
+        self.shared
+            .pipeline
+            .read()
+            .await
+            .as_ref()?
+            .current_batch_deadline_witness()
+    }
+
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
         let _guard = self.shared.lifecycle.lock().await;
         let current = *self.shared.state.read().await;

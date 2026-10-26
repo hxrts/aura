@@ -80,12 +80,14 @@ build-dev:
 
 # Build Aura terminal in release mode without dev features
 build-terminal-release:
-    cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
+    bash scripts/check/simulator-checkpoint-reachability.sh
+    cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal,production-build
     bash scripts/dev/install-aura-binary.sh
 
 # Build app-host binary
 build-app-host:
-    cargo build -p hxrts-aura-app --bin app-host --features host --release
+    bash scripts/check/simulator-checkpoint-reachability.sh
+    cargo build -p hxrts-aura-app --bin app-host --features host,production-build --release
 
 # Read-only disk inventory for the current checkout
 disk-report:
@@ -109,21 +111,21 @@ build-budget-dry-run:
 
 # Guarded Work 8 production and harness builds (run separately on each host)
 e2e-build-terminal:
-    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production -- just build-terminal-release
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production -- just build-terminal-release
 
 # Terminal build during an approved live LAN run; only idle WASM debug may be collected
 e2e-build-terminal-live:
-    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production --allow-live-harness -- just build-terminal-release
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production --allow-live-harness -- just build-terminal-release
 
 e2e-build-terminal-dev:
     AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=development nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-development -- just build-dev
 
 e2e-build-web:
-    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production -- bash scripts/dev/build-web-release.sh
+    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane web-production -- bash scripts/dev/build-web-release.sh
 
 # Web build during an approved live LAN run; preserve live release/web caches
 e2e-build-web-live:
-    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production --allow-live-harness -- bash scripts/dev/build-web-release.sh
+    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness,production-build nice -n 10 bash scripts/dev/build-budget.sh --lane web-production --allow-live-harness -- bash scripts/dev/build-web-release.sh
 
 e2e-build-harness:
     AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=default nice -n 10 bash scripts/dev/build-budget.sh --lane harness-tools -- cargo build -p aura-harness --release --bin tool_repl
@@ -621,9 +623,9 @@ ci-bootstrap-discovery:
 ci-lan-deep:
     cargo test -p hxrts-aura-agent --test lan_integration -q -- --ignored
 
-# Test suite (excludes patchbay tests and contract_suite PTY/SSH tests which run in ci-harness-contract)
+# Test suite (patchbay tiers run in dedicated network lanes; PTY/SSH contracts run in ci-harness-contract)
 ci-test: ci-amp-lifecycle-trace
-    cargo test --workspace -- --skip patchbay --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
+    cargo test --workspace -- --skip patchbay --skip holepunch::holepunch_tier3_stress:: --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
     just ci-test-terminal-development
 
 # aura-terminal `development` feature (demo mode, demo peers, regression
@@ -712,9 +714,9 @@ ci-choreo-concurrency-contracts:
 # Warnings are denied by clippy or cargo-check-no-warnings.sh rather than
 # RUSTFLAGS, so these lanes reuse the dependency builds of every other lane.
 ci-agent-wasm:
-    cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
-    bash scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
-    bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features "web,harness"
+    cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib --features production-build -- -D warnings
+    bash scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-agent --target wasm32-unknown-unknown --features web,production-build
+    bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features "web,harness,production-build"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:
@@ -735,7 +737,7 @@ ci-workspace-wasm-test:
         --exclude aura-terminal \
         --exclude aura-simulator \
         --exclude aura-quint \
-        --exclude aura-agent \
+        --exclude hxrts-aura-agent \
         --exclude aura-harness \
         --exclude aura-testkit
     WASM_BINDGEN_USE_BROWSER=1 \
@@ -793,6 +795,8 @@ ci-user-flow-coverage:
 
 # Fast environment sanity checks before the expensive matrix.
 ci-preflight:
+    bash scripts/check/test-temporary-owner-wrappers.sh
+    bash scripts/check/test-web-config-owner.sh
     bash scripts/ci/preflight.sh
 
 # Verify shared user-flow policy guardrails and required docs/guidance sync
@@ -1039,6 +1043,7 @@ ci-harness-actor-vs-move-ownership:
 
 # Quint typecheck
 ci-quint-typecheck:
+    bash scripts/verify/test-quint-workflow.sh
     just quint check
 
 # Quint model checking

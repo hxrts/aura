@@ -367,3 +367,81 @@ jq -e '.metadata.packages=="hxrts-aura-agent" and .metadata.features=="testing" 
   [.phases[] | select(.phase=="discovery" or .phase=="execution") | .inventory_result]==["matched","matched"]' \
   "$AURA_BUILD_RECEIPT" >/dev/null
 echo 'build receipts: source fingerprint, unknown metadata, exact inventories, command failures and separate disposal passed'
+
+# Exercise the real budget/phase producers with shell-only commands: schema2
+# contains compile argv followed by a command-summary row with no argv.
+# Admission retains the ordinary floors; this fixture never invokes Rust.
+printf '[workspace]\n' > "$fixture/Cargo.toml"
+# Mock only admission measurement for the isolated shell fixture. The actual
+# schema writers and all production floor settings remain unchanged.
+mkdir "$fixture/budget-bin"
+cat > "$fixture/budget-bin/df" <<'DF'
+#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted\n'
+printf 'fixture 99999999 0 99999999 0%% /\n'
+DF
+chmod +x "$fixture/budget-bin/df"
+PATH="$fixture/budget-bin:$PATH" AURA_BUILD_SHARED_DIR="$fixture/reservations" \
+  bash "$repo_root/scripts/dev/build-budget.sh" --root "$fixture" --lane receipt-contract --no-prune -- \
+  bash -c 'bash "$1" compile -- printf first; bash "$1" compile -- printf second' \
+  sh "$repo_root/scripts/dev/build-phase.sh" > "$fixture/terminal-producer.log" 2>&1 || { cat "$fixture/terminal-producer.log" >&2; exit 1; }
+terminal_receipt=$(sed -n 's/^Build receipt: //p' "$fixture/terminal-producer.log" | tail -1)
+terminal_root=$(cd "$fixture" && pwd -P)
+[[ "$terminal_receipt" == "$terminal_root/artifacts/disk-budget/receipts/"*/receipt.json ]]
+printf '%s\n' '[["printf","first"],["printf","second"]]' > "$fixture/compile-argv.json"
+aura_receipt_validate_terminal_compile_commands "$terminal_receipt" "$fixture/compile-argv.json"
+jq -e '.schema==2 and [.phases[].phase]==["compile","compile","command"] and
+  .phases[-1].command_argv==null' "$terminal_receipt" >/dev/null
+# The historical private check false-rejects this genuine successful schema.
+if jq -e '[.phases[]|.command_argv]==[["printf","first"],["printf","second"]]' "$terminal_receipt" >/dev/null; then
+  echo 'historical unfiltered checker unexpectedly accepted summary row' >&2; exit 1
+fi
+reject_terminal() {
+  local filter=$1
+  jq "$filter" "$terminal_receipt" > "$fixture/rejected-terminal.json"
+  if aura_receipt_validate_terminal_compile_commands "$fixture/rejected-terminal.json" "$fixture/compile-argv.json"; then
+    echo "terminal compile validator accepted invalid receipt: $filter" >&2; exit 1
+  fi
+}
+for invalid in \
+  '.phases=[]' \
+  'del(.phases)' \
+  '.phases=[.phases[1],.phases[2]]' \
+  '.phases=[.phases[0],.phases[0],.phases[1],.phases[2]]' \
+  '.phases=[.phases[1],.phases[0],.phases[2]]' \
+  '.phases[0].command_argv=["printf","wrong"]' \
+  '.phases[0].exit_status=1' \
+  '.phases[0].command_exit_status=1' \
+  '.phases[0].exit_status=null' \
+  '.phases[0].command_argv="not an argv array"' \
+  '.phases[0].phase="unknown"' \
+  '.phases=[.phases[0],.phases[1]]' \
+  '.phases+=[.phases[-1]]' \
+  '.phases=[.phases[2],.phases[0],.phases[1]]' \
+  '.phases[-1].exit_status=1' \
+  '.command_phase.exit_status=1' \
+  '.current_phase="compile"' \
+  'del(.active_phase)' \
+  '.active_phase={phase:"compile"}' \
+  '.command_exit_status=1' \
+  '.final_exit_status=null' \
+  '.schema=1'; do
+  reject_terminal "$invalid"
+done
+for invalid in '[]' 'null' '{}' '[[]]' '[[1]]' '[[""]]' \
+  '[["printf","second"],["printf","first"]]' \
+  '[["printf","first"],["printf","first"],["printf","second"]]'; do
+  printf '%s\n' "$invalid" > "$fixture/rejected-argv.json"
+  if aura_receipt_validate_terminal_compile_commands "$terminal_receipt" "$fixture/rejected-argv.json"; then
+    echo 'terminal compile validator accepted invalid expected inventory' >&2; exit 1
+  fi
+done
+cat "$terminal_receipt" "$terminal_receipt" > "$fixture/rejected-terminal.json"
+if aura_receipt_validate_terminal_compile_commands "$fixture/rejected-terminal.json" "$fixture/compile-argv.json"; then
+  echo 'terminal compile validator accepted multiple receipt documents' >&2; exit 1
+fi
+printf '{invalid JSON\n' > "$fixture/rejected-argv.json"
+if aura_receipt_validate_terminal_compile_commands "$terminal_receipt" "$fixture/rejected-argv.json" 2>/dev/null; then exit 1; fi
+printf '{invalid JSON\n' > "$fixture/rejected-terminal.json"
+if aura_receipt_validate_terminal_compile_commands "$fixture/rejected-terminal.json" "$fixture/compile-argv.json" 2>/dev/null; then exit 1; fi
+echo 'terminal compile inventory: actual schema2 producer, summary separation and negative contracts passed'
