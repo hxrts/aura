@@ -26,6 +26,12 @@ cannot satisfy that production owner requirement.
 Keep actual selected-instance wait tests: this narrow source check proves the
 mechanical owner shape, not asynchronous observation or runtime provenance.
 
+Browser enrollment source-contract checks follow `begin_exact_enrollment_import`
+through required app admission, exact-instance handoff and transfer observation,
+including the app-owned browser persistence acknowledgment. Pre-admission refusal
+feedback uses the same guarded signal writer as asynchronous completion. These
+source checks complement mounted/runtime tests; they do not prove cleanup.
+
 Browser onboarding regressions must check guarded signal writes after async
 enrollment workflows, including identity persistence failures. Completion and
 error feedback use the browser retry helper; task spawning remains owned by

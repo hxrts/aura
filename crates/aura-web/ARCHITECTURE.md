@@ -69,6 +69,8 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   app facade. Browser compilation enforces the private-field boundary; it
   must not be relaxed to accommodate a stale frontend caller.
 - Shared UI behavior remains in `aura-ui`.
+- Enrollment admission refusal resets and error feedback use the same guarded
+  browser signal retry helper; refusal never starts an app import.
 - Onboarding enrollment completion and error signal writes use the guarded
   browser retry helper after async workflow execution, including persistence
   failures, so signal contention does not panic or silently lose feedback.

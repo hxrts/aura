@@ -359,12 +359,24 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 ) {
                     Ok(admitted) => admitted,
                     Err(detail) => {
-                        importing_code.set(false);
-                        import_error.set(Some(WebUiError::operation(
+                        write_signal_with_retry(
+                            importing_code,
+                            false,
                             WebUiOperation::ImportDeviceEnrollmentCode,
-                            "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",
-                            detail,
-                        )));
+                            "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
+                            "clear importing_code after device enrollment admission refusal",
+                        );
+                        write_signal_with_retry(
+                            import_error,
+                            Some(WebUiError::operation(
+                                WebUiOperation::ImportDeviceEnrollmentCode,
+                                "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",
+                                detail,
+                            )),
+                            WebUiOperation::ImportDeviceEnrollmentCode,
+                            "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
+                            "publish device enrollment admission refusal",
+                        );
                         return;
                     }
                 };
