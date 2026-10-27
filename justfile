@@ -509,6 +509,7 @@ ci-build-cache-policy:
     bash scripts/dev/test-cache-rank.sh
     bash scripts/dev/test-lane-idle-guard.sh
     bash scripts/dev/test-cold-cache-store.sh
+    bash scripts/dev/test-cold-native-evidence.sh
     bash scripts/dev/test-run-exact-fixtures.sh
     bash scripts/dev/test-run-ownership-fast.sh
     bash scripts/dev/test-policy-dependencies.sh

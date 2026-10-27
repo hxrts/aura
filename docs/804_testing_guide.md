@@ -1925,6 +1925,60 @@ It creates and removes synthetic private bundles only; it does not select or
 archive a real run. The ordinary cache-policy gate covers the local cold-store
 contract without requiring an SSH host.
 
+Completed native exact-runner artifacts use the same signed SSH retention
+transaction with `--native-run run.ID` in place of the LAN run selectors, plus
+`--native-binding /private/original-expectation.json` and
+`--native-binding-blake3 <originally-held-64-hex-digest>`.
+This opt-in mode selects only `artifacts/disk-budget/receipts/run.ID` from
+that checkout. It requires the original schema-2 receipt and matching atomic
+completion, a successful compile phase, the canonical checkout-local
+`run-exact-fixtures.sh --replay-first-failure` producer, its exact inventory,
+and the original protected-copy BLAKE3 binding. Initial applicability is the
+native default debug test profile (`target/debug/deps`), not cross-target,
+release, arbitrary executable or custom wrapper outputs. The current complete
+source fingerprint and revision must equal the original record, including any
+staged source; committing or changing it is not permission to relabel the run.
+
+The expectation file is a private, owner-only `0600` JSON input captured by the
+original producer or trusted control-channel observer. It contains `receipt`
+(the original receipt path), `source` (the original revision/fingerprint),
+`config` (the original metadata's packages, features, test_target, test_filter,
+test_inventory and expected_count), `protected_executable`, and the original
+`receipt_blake3`, `completion_blake3`, `inventory_blake3` and `binary_blake3`.
+Keep it independently of the archived run and retain its original file digest
+in the caller's trusted context. The retention owner does not generate this
+expectation by rereading the selected mutable receipt. Computing fresh hashes
+after a suspected substitution is not original-producer evidence; coupled
+receipt/completion/binary replacement must refuse against the held expectation.
+
+For example, with the independent remote settings above, pass those two held
+expectation arguments with
+`scripts/dev/cold-cache-store.sh --export --root /absolute/original/checkout --native-run run.ID`.
+Only the exact receipt-bound protected executable may have mode `0500`;
+other payload files remain `0600`, directories `0700`, and symlinks and hard
+links refuse. Original target binaries and warm dependencies are not selected.
+The original wrapper and command must have settled, and the existing builder,
+open-file, capacity, signed-location, archive readback and rollback checks still
+apply. The signed location also binds the original receipt, completion,
+inventory and binary BLAKE3 content identities and recorded source/configuration.
+It never rewrites the original receipt or produces a new test result.
+
+Restore with that same independently held expectation file and literal digest,
+original source, signing key, remote identity and
+`--restore --native-run run.ID`. It validates those original bindings and full
+member metadata in private staging before publishing the absent original
+receipt directory. Restore before a consumer uses its old executable path;
+this mode does not redirect that path through a writable alias. A consistently
+terminal test failure such as `101` is retained and restored unchanged.
+Successful archive/restore means transport succeeded, not that the test passed
+or that an application owner, credential or checkpoint was restored.
+This prerequisite archives whole completed bundles; content-addressed binary
+deduplication and physical-savings acceptance remain separate work.
+The self-contained `test-cold-native-evidence.sh` contract uses tiny synthetic
+artifacts with a controlled SSH identity/capacity provider and real signing,
+archive, readback and restoration. It does not establish remote ext4 or
+physical independence; the authenticated backend gate remains separate.
+
 Each budgeted command prints a JSON receipt path under
 `artifacts/disk-budget/receipts/`. The atomic snapshot records the source
 revision and fingerprint (including nonignored new source files), declared

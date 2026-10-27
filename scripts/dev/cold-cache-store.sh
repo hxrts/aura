@@ -4,21 +4,34 @@
 # ext4 volume on a separate Linux host.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-action='' lane='' root="$repo_root" lock_owner='' run_host='' run_id='' evidence=0
+action='' lane='' root="$repo_root" lock_owner='' run_host='' run_id='' evidence=0 native=0 native_run='' native_binding_file='' native_binding_blake3=''
 compression=plain
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --export|--restore) action="${1#--}"; shift ;;
     --root) root="${2:?missing root}"; shift 2 ;;
     --lane) lane="${2:?missing lane}"; shift 2 ;;
+    --native-binding) native_binding_file="${2:?missing native expectation file}"; shift 2 ;;
+    --native-binding-blake3) native_binding_blake3="${2:?missing held native expectation BLAKE3}"; shift 2 ;;
+    --native-run) native_run="${2:?missing native run}"; shift 2 ;;
     --run-host) run_host="${2:?missing run host}"; shift 2 ;;
     --run-id) run_id="${2:?missing run id}"; shift 2 ;;
     --lock-owned-by) lock_owner="${2:?missing owner}"; shift 2 ;;
     --compression) compression="${2:?missing compression}"; shift 2 ;;
-    *) echo 'usage: cold-cache-store.sh --export|--restore --lane LANE [--root PATH] [--lock-owned-by PID]' >&2; exit 2 ;;
+    *) echo 'usage: cold-cache-store.sh --export|--restore (--lane LANE | --native-run run.ID | --run-host HOST --run-id ID) [--root PATH] [--lock-owned-by PID]' >&2; exit 2 ;;
   esac
 done
-if [[ -n "$run_host" || -n "$run_id" ]]; then
+if [[ -n "$native_run" ]]; then
+  [[ -z "$lane" && -z "$run_host" && -z "$run_id" && "$native_run" =~ ^run\.[A-Za-z0-9]+$ &&
+     "$native_binding_file" == /* && "$native_binding_blake3" =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'cold-cache-store: invalid completed native run identity' >&2; exit 2;
+  }
+  evidence=1 native=1
+  lane="completed-native-$native_run"
+  relative="artifacts/disk-budget/receipts/$native_run"
+elif [[ -n "$native_binding_file" || -n "$native_binding_blake3" ]]; then
+  echo 'cold-cache-store: native expectation requires --native-run' >&2; exit 2
+elif [[ -n "$run_host" || -n "$run_id" ]]; then
   [[ -z "$lane" && "$run_host" =~ ^[A-Za-z0-9_-]+$ &&
      "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$run_id" != *..* ]] || {
     echo 'cold-cache-store: invalid evidence run identity' >&2; exit 2;
@@ -154,7 +167,7 @@ fi
 [[ ! -L "$root/target" && ! -L "$root/${relative%/*}" ]] || {
   echo 'cold-cache-store: target path contains a symlink' >&2; exit 1;
 }
-[[ -z "$(git -C "$root" status --porcelain --untracked-files=normal)" ]] || {
+[[ "$native" == 1 || -z "$(git -C "$root" status --porcelain --untracked-files=normal)" ]] || {
   echo 'cold-cache-store: source checkout must be clean' >&2; exit 1;
 }
 revision="$(git -C "$root" rev-parse HEAD)"
@@ -207,7 +220,162 @@ gzip_tool_identity() {
 archive_members() {
   evidence_members "$1"
 }
+# Native receipt fields are consumed as completed original evidence, never
+# rewritten into a new completion or converted into a LAN retention manifest.
+native_binding_json=''
+if (( native == 1 )); then
+  [[ -f "$native_binding_file" && ! -L "$native_binding_file" &&
+     "$(stat_mode "$native_binding_file")" == 600 &&
+     "$(stat_owner "$native_binding_file")" == "$(id -u)" ]] || {
+    echo 'cold-cache-store: native expectation file refused' >&2; exit 78;
+  }
+  command -v b3sum >/dev/null || { echo 'cold-cache-store: native retention requires b3sum' >&2; exit 2; }
+  actual=$(b3sum "$native_binding_file") || exit "$?"
+  [[ ${actual%% *} == "$native_binding_blake3" ]] || {
+    echo 'cold-cache-store: native expectation file differs' >&2; exit 78;
+  }
+  native_binding_json=$(jq -ecS --arg receipt "$path/receipt.json" '
+    select(.receipt==$receipt and (.source|type=="object") and (.config|type=="object") and
+      (.receipt_blake3|test("^[0-9a-f]{64}$")) and
+      (.completion_blake3|test("^[0-9a-f]{64}$")) and
+      (.inventory_blake3|test("^[0-9a-f]{64}$")) and
+      (.binary_blake3|test("^[0-9a-f]{64}$")))' "$native_binding_file") || {
+    echo 'cold-cache-store: native expectation identity refused' >&2; exit 78;
+  }
+fi
+native_validate_payload() {
+  local candidate=$1 receipt="$1/receipt.json" completion="$1/completion.json"
+  local source_fp protected producer expected actual member mode owner list receipt_digest completion_digest binding
+  local pid identity observed relative_copy copy_dir inventory inventory_name inventory_digest
+  command -v b3sum >/dev/null || return 1
+  actual=$(b3sum "$native_binding_file") || return "$?"
+  [[ ${actual%% *} == "$native_binding_blake3" ]] || {
+    echo 'cold-cache-store: native expectation file differs' >&2; return 78;
+  }
+  [[ -d "$candidate" && ! -L "$candidate" && -f "$receipt" && ! -L "$receipt" &&
+     -f "$completion" && ! -L "$completion" ]] || return 1
+  receipt_digest=$(b3sum "$receipt") || return "$?"
+  receipt_digest=${receipt_digest%% *}
+  completion_digest=$(b3sum "$completion") || return "$?"
+  completion_digest=${completion_digest%% *}
+  [[ "$receipt_digest" == "$(jq -r '.receipt_blake3' <<< "$native_binding_json")" &&
+     "$completion_digest" == "$(jq -r '.completion_blake3' <<< "$native_binding_json")" ]] || {
+    echo 'cold-cache-store: native expected identity differs' >&2; return 78;
+  }
+  # This is the selected canonical source, not reconstructed authority from IDs.
+  source_fp=$(aura_receipt_source_fingerprint "$root") || return "$?"
+  jq -e --arg root "$root" --arg rev "$revision" --arg fp "$source_fp" \
+    --arg receipt "$path/receipt.json" --arg notification "$path/completion.json" \
+    --slurpfile done "$completion" '
+    def status: type=="number" and floor==. and .>=0 and .<=255;
+    .schema==2 and .root==$root and .source.revision==$rev and
+    .source.fingerprint==$fp and .notification==$notification and
+    .admission.admitted==true and .current_phase=="finished" and
+    .active_phase==null and (.finished_utc|type=="string" and length>0) and
+    (.command_exit_status|status) and (.final_exit_status|status) and
+    .command_exit_status==.final_exit_status and
+    .command_argv[0]=="bash" and .command_argv[1]==($root+"/scripts/dev/run-exact-fixtures.sh") and
+    .command_argv[2]=="--inside" and any(.command_argv[]; .=="--replay-first-failure") and
+    .metadata.replay_first_failure==true and
+    (.metadata.expected_count|type=="number" and floor==. and .>0) and
+    (.metadata.packages|type=="string" and length>0) and
+    (.metadata.test_target|type=="string" and length>0) and
+    ([.phases[]?|select(.phase=="compile")]|length==1) and
+    all(.phases[]?|select(.phase=="compile");
+      .exit_status==0 and .command_exit_status==0) and
+    ($done|length==1) and $done[0].receipt==$receipt and
+    $done[0].exit_status==.final_exit_status and
+    $done[0].finished_utc==.finished_utc ' "$receipt" >/dev/null || return 1
+  # Bind each event to the enclosing original status, including native failure.
+  jq -e '.final_exit_status as $status | .source.fingerprint as $fp |
+    any(.events[]?; .kind=="completion" and .source_fingerprint==$fp and
+      .exit_status==$status)' "$receipt" >/dev/null || return 1
+  protected=$(jq -er '.artifacts.protected_test_executable' "$receipt") || return "$?"
+  producer=$(jq -er '.artifacts.test_executable' "$receipt") || return "$?"
+  [[ "$protected" == "$path"/test-binary.*/* && "$producer" == "$root"/target/debug/deps/* &&
+     "$protected" != *'/../'* && "$producer" != *'/../'* &&
+     "$protected" != *$'\n'* && "$producer" != *$'\n'* ]] || return 1
+  actual=${producer#"$root"/target/debug/deps/}
+  [[ "$actual" =~ ^[A-Za-z0-9_.-]+$ && "${protected##*/}" == "$actual" ]] || return 1
+  relative_copy=${protected#"$path"/}
+  copy_dir=${relative_copy%/*}
+  [[ "$copy_dir" =~ ^test-binary\.[A-Za-z0-9]+$ &&
+     ${relative_copy##*/} =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+  expected=$(jq -er '.artifacts.protected_test_executable_blake3' "$receipt") || return "$?"
+  [[ "$expected" == *"  $protected" ]] || return 1
+  expected=${expected%% *}
+  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || return 1
+  actual=$(jq -er '.metadata.producer_binary_blake3' "$receipt") || return "$?"
+  [[ "$actual" == "$expected  $producer" ]] || return 1
+inventory=$(jq -er '.artifacts.expected_inventory' "$receipt") || return "$?"
+[[ "$inventory" == "$path"/inventory.* ]] || return 1
+inventory_name=${inventory#"$path"/}
+[[ "$inventory_name" =~ ^inventory\.[A-Za-z0-9]+$ &&
+   -f "$candidate/$inventory_name" && ! -L "$candidate/$inventory_name" ]] || return 1
+jq -e --rawfile inventory "$candidate/$inventory_name" '
+  (.metadata.test_inventory+"\n")==$inventory and
+  ($inventory|split("\n")|.[0:-1]) as $names |
+  ($names|length)==.metadata.expected_count and
+  ($names|unique|length)==.metadata.expected_count and
+  all($names[]; test("^[A-Za-z0-9_:]+$"))' "$receipt" >/dev/null || return 1
+inventory_digest=$(b3sum "$candidate/$inventory_name") || return "$?"
+inventory_digest=${inventory_digest%% *}
+  # Validate the relocated staged copy, preserving original receipt paths.
+  protected="$candidate/$relative_copy"
+  [[ -f "$protected" && ! -L "$protected" && -x "$protected" ]] || return 1
+  actual=$(b3sum "$protected") || return "$?"
+  [[ "$expected" == "$(jq -r '.binary_blake3' <<< "$native_binding_json")" && ${actual%% *} == "$expected" ]] || {
+    echo 'cold-cache-store: native expected artifact differs' >&2; return 78;
+  }
+  list=$(mktemp "$shared_dir/cold-keys/.native-members.XXXXXX") || return "$?"
+  find "$candidate" -print0 > "$list" || { rm -f "$list"; return 1; }
+  while IFS= read -r -d '' member; do
+    [[ ! -L "$member" && ( -f "$member" || -d "$member" ) ]] || { rm -f "$list"; return 1; }
+    mode=$(stat_mode "$member") || { rm -f "$list"; return 1; }
+    owner=$(stat_owner "$member") || { rm -f "$list"; return 1; }
+    [[ $owner == "$(id -u)" ]] || { rm -f "$list"; return 1; }
+    if [[ -d "$member" ]]; then
+      [[ $mode == 700 ]] || { rm -f "$list"; return 1; }
+    elif [[ "$member" == "$protected" ]]; then
+      [[ $mode == 500 ]] || { rm -f "$list"; return 1; }
+    else
+      [[ $mode == 600 ]] || { rm -f "$list"; return 1; }
+    fi
+  done < "$list"
+  rm -f "$list" || return "$?"
+  actual=$(find "$candidate" -type f -links +1 -print -quit) || return "$?"
+  [[ -z $actual ]] || return 1
+  actual=$(b3sum "$receipt") || return "$?"
+  [[ ${actual%% *} == "$receipt_digest" ]] || return 1
+  actual=$(b3sum "$completion") || return "$?"
+  [[ ${actual%% *} == "$completion_digest" ]] || return 1
+  binding=$(jq -cS --arg receipt "$path/receipt.json" --arg r "$receipt_digest" \
+    --arg c "$completion_digest" --arg binary "$expected" --arg inventory "$inventory_digest" \
+    '{receipt:$receipt,source:.source,config:(.metadata|{packages,features,test_target,test_filter,test_inventory,expected_count}),
+      receipt_blake3:$r,completion_blake3:$c,binary_blake3:$binary,inventory_blake3:$inventory,
+      protected_executable:.artifacts.protected_test_executable}' "$receipt") || return "$?"
+  [[ "$binding" == "$native_binding_json" ]] || {
+    echo 'cold-cache-store: native expected binding differs' >&2; return 78;
+  }
+  # Terminal files alone cannot authorize moving a still-live original owner.
+  for member in wrapper child; do
+    pid=$(jq -er --arg key "$member" '.[$key].pid|select(type=="number" and .>0 and floor==.)' "$receipt") || return 1
+    identity=$(jq -er --arg key "$member" '.[$key].start_identity|select(type=="string" and length>0)' "$receipt") || return 1
+    if kill -0 "$pid" 2>/dev/null; then
+      observed=$(ps -p "$pid" -o lstart=) || return 1
+      [[ "$observed" != "$identity" ]] || return 1
+    fi
+  done
+  actual=$(b3sum "$receipt") || return "$?"
+  [[ ${actual%% *} == "$receipt_digest" ]] || return 1
+  actual=$(b3sum "$completion") || return "$?"
+  [[ ${actual%% *} == "$completion_digest" ]] || return 1
+  actual=$(b3sum "$protected") || return "$?"
+  [[ ${actual%% *} == "$expected" ]] || return 1
+}
+
 evidence_validate_payload() {
+  if (( native == 1 )); then native_validate_payload "$1"; return "$?"; fi
   local candidate="$1" check_newest="$2" manifest="$1/.aura-retention.json"
   local member mode owner sibling newest=-1 selected_epoch
   [[ -d "$candidate" && ! -L "$candidate" && -f "$manifest" && ! -L "$manifest" ]] || return 1
@@ -243,6 +411,12 @@ evidence_validate_payload() {
 }
 evidence_validate_source() {
   local ancestor active
+  if (( native == 1 )); then
+    for ancestor in "$root/artifacts" "$root/artifacts/disk-budget" "$root/artifacts/disk-budget/receipts"; do
+      [[ -d "$ancestor" && ! -L "$ancestor" ]] || return 1
+    done
+    native_validate_payload "$path"; return "$?"
+  fi
   for ancestor in "$root/.tmp" "$root/.tmp/e2e" "$root/.tmp/e2e/run" \
     "$root/.tmp/e2e/run/$run_host" "$root/.tmp/e2e/run/$run_host/artifacts" \
     "$evidence_runs"; do
@@ -252,6 +426,7 @@ evidence_validate_source() {
   [[ -z "$active" ]] || { echo 'cold-cache-store: harness consumer active' >&2; return 1; }
   evidence_validate_payload "$path" 1
 }
+if (( native == 1 )); then source "$repo_root/scripts/dev/build-receipt.sh"; fi
 shared_dir="${AURA_BUILD_SHARED_DIR:-$HOME/.cache/aura-build}"
 mkdir -p "$shared_dir/cold-keys"
 [[ "$(device_id "$shared_dir")" == "$(device_id "$root")" ]] || {
@@ -298,6 +473,7 @@ else
   printf '%s\n' "$$" > "$lock_dir/pid"
 fi
 if (( evidence == 1 )); then
+  if (( native == 1 )); then evidence_runs="$root/artifacts/disk-budget/receipts"; fi
   [[ -d "$evidence_runs" && ! -L "$evidence_runs" ]] || {
     echo 'cold-cache-store: evidence run root absent or linked' >&2; exit 1;
   }
@@ -395,7 +571,12 @@ remote_local_bucket_preflight() {
 }
 remote_export() {
   if (( evidence == 1 )); then
-    evidence_validate_source || { echo 'cold-cache-store: evidence source not safely inactive' >&2; return 1; }
+    local source_status=0
+    evidence_validate_source || source_status=$?
+    if (( source_status != 0 )); then
+      echo 'cold-cache-store: evidence source not safely inactive' >&2
+      if (( native == 1 )); then return "$source_status"; else return 1; fi
+    fi
   fi
   [[ -d "$path" && ! -L "$path" ]] || { echo 'cold-cache-store: lane absent or linked' >&2; return 1; }
   [[ -z "$(find "$path" -type l -print -quit)" &&
@@ -420,7 +601,11 @@ remote_export() {
   local tar_bytes='' tar_sha=''
   rollback_text="cold-cache-store.sh --restore --lane $lane --root $root with the same remote configuration and revision $revision"
   if (( evidence == 1 )); then
-    rollback_text="cold-cache-store.sh --restore --root $root --run-host $run_host --run-id $run_id with the same remote configuration and revision $revision"
+    if (( native == 1 )); then
+      rollback_text="cold-cache-store.sh --restore --root $root --native-run $native_run --native-binding $native_binding_file --native-binding-blake3 $native_binding_blake3 with the same remote configuration and original source"
+    else
+      rollback_text="cold-cache-store.sh --restore --root $root --run-host $run_host --run-id $run_id with the same remote configuration and revision $revision"
+    fi
   fi
   # Tar's logical bytes can greatly exceed allocated blocks for sparse files.
   # Measure the stream itself before admission rather than reserving from du.
@@ -508,6 +693,13 @@ REMOTE
   [[ "$expected_sha" == "$actual_sha" && "$remote_bytes" == "$archive_bytes" ]] || {
     echo 'cold-cache-store: remote archive differs from original lane' >&2; return 1;
   }
+  if (( native == 1 )); then
+    local native_status=0
+    native_validate_payload "$path" || native_status=$?
+    if (( native_status != 0 )); then
+      echo 'cold-cache-store: native artifact changed before signing' >&2; return "$native_status";
+    fi
+  fi
   umask 077
   pending="$(mktemp -d "$shared_dir/cold-keys/.remote.XXXXXX")"
   if (( evidence == 1 )) || [[ "$compression" == gzip-1 ]]; then
@@ -520,11 +712,12 @@ REMOTE
   jq -n --arg revision "$revision" --arg root "$root" --arg lane "$lane" \
     --arg sha "$actual_sha" --argjson bytes "$remote_bytes" \
     --argjson allocated "$source_allocated_kib" --arg metadata "$metadata_sha" \
-    --arg relative "${relative:-}" --arg compression "$compression" \
+    --argjson native_binding "${native_binding_json:-null}" --arg relative "${relative:-}" --arg compression "$compression" \
     --arg tar_sha "$tar_sha" --argjson tar_bytes "${tar_bytes:-0}" \
     --arg gzip_tool "$gzip_bin" --arg gzip_sha "$gzip_sha" \
     '{schema:(if $compression=="plain" then 1 else 2 end),source_revision:$revision,source_root:$root,lane:$lane,
       sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated} +
+      (if $native_binding==null then {} else {native_artifact:$native_binding} end) +
       (if $compression=="plain" then {} else
         {compression:$compression,tar_sha256:$tar_sha,tar_bytes:$tar_bytes,
          gzip_tool:$gzip_tool,gzip_sha256:$gzip_sha} end) +
@@ -546,7 +739,7 @@ REMOTE
     --arg host "$remote_host" --arg dir "$remote_dir" --arg machine "$remote_machine" \
     --arg device "$remote_device" --arg sha "$actual_sha" --argjson bytes "$remote_bytes" \
     --argjson allocated "$source_allocated_kib" --arg metadata "$metadata_sha" \
-    --arg relative "${relative:-}" --arg rollback "$rollback_text" \
+    --argjson native_binding "${native_binding_json:-null}" --arg relative "${relative:-}" --arg rollback "$rollback_text" \
     --arg compression "$compression" --arg tar_sha "$tar_sha" \
     --argjson tar_bytes "${tar_bytes:-0}" --arg gzip_tool "$gzip_bin" \
     --arg gzip_sha "$gzip_sha" \
@@ -554,6 +747,7 @@ REMOTE
       remote_host:$host,remote_dir:$dir,remote_machine:$machine,remote_device:$device,
       sha256:$sha,bytes:$bytes,source_allocated_kib:$allocated,
       rollback:$rollback} +
+      (if $native_binding==null then {} else {native_artifact:$native_binding} end) +
       (if $compression=="plain" then {} else
         {compression:$compression,tar_sha256:$tar_sha,tar_bytes:$tar_bytes,
          gzip_tool:$gzip_tool,gzip_sha256:$gzip_sha} end) +
@@ -612,13 +806,18 @@ REMOTE
     final_sha="$(tar -C "$path" -cf - . | sha256sum | awk '{print $1}')"
   fi
   [[ "$(git -C "$root" rev-parse HEAD)" == "$revision" &&
-     -z "$(git -C "$root" status --porcelain --untracked-files=normal)" &&
+     ( "$native" == 1 || -z "$(git -C "$root" status --porcelain --untracked-files=normal)" ) &&
      "$expected_sha" == "$final_sha" ]] || {
     echo 'cold-cache-store: source changed before guarded prune' >&2; return 1;
   }
   if (( evidence == 1 )) || [[ "$compression" == gzip-1 ]]; then
     if (( evidence == 1 )); then
-      evidence_validate_source || { echo 'cold-cache-store: evidence changed before guarded prune' >&2; return 1; }
+      local source_status=0
+      evidence_validate_source || source_status=$?
+      if (( source_status != 0 )); then
+        echo 'cold-cache-store: evidence changed before guarded prune' >&2
+        if (( native == 1 )); then return "$source_status"; else return 1; fi
+      fi
     fi
     archive_members "$path" > "$pending/final-members.tsv" || {
       echo 'cold-cache-store: final source inventory failed' >&2; return 1;
@@ -647,6 +846,11 @@ remote_restore() {
   [[ ! -e "$path" && ! -L "$path" ]] || { echo 'cold-cache-store: restore lane already exists' >&2; return 1; }
   if (( evidence == 1 )); then
     local ancestor active
+    if (( native == 1 )); then
+      for ancestor in "$root/artifacts" "$root/artifacts/disk-budget" "$root/artifacts/disk-budget/receipts"; do
+        [[ -d "$ancestor" && ! -L "$ancestor" ]] || return 1
+      done
+    else
     for ancestor in "$root/.tmp" "$root/.tmp/e2e" "$root/.tmp/e2e/run" \
       "$root/.tmp/e2e/run/$run_host" "$root/.tmp/e2e/run/$run_host/artifacts" \
       "$evidence_runs"; do
@@ -654,6 +858,7 @@ remote_restore() {
         echo 'cold-cache-store: evidence restore parent absent or linked' >&2; return 1;
       }
     done
+    fi
     active="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
     [[ -z "$active" ]] || { echo 'cold-cache-store: harness consumer active' >&2; return 1; }
   fi
@@ -714,6 +919,25 @@ remote_restore() {
       else (if .schema==2 then .source_relative==null
         else (.metadata_sha256==null and .source_relative==null) end) end)' \
     "$remote_location" >/dev/null || { echo 'cold-cache-store: location identity mismatch' >&2; return 1; }
+  if (( native == 1 )); then
+    local signed_native_binding
+    signed_native_binding=$(jq -ecS --arg receipt "$path/receipt.json" '
+      .native_artifact | select(.receipt==$receipt and
+        (.receipt_blake3|test("^[0-9a-f]{64}$")) and
+        (.completion_blake3|test("^[0-9a-f]{64}$")) and
+        (.binary_blake3|test("^[0-9a-f]{64}$")) and
+        (.inventory_blake3|test("^[0-9a-f]{64}$")))' "$remote_location") || {
+      echo 'cold-cache-store: signed native artifact binding refused' >&2; return 1;
+    }
+    [[ "$signed_native_binding" == "$native_binding_json" ]] || {
+      echo 'cold-cache-store: signed native expectation differs' >&2; return 78;
+    }
+    local actual_native_fp
+    actual_native_fp=$(aura_receipt_source_fingerprint "$root") || return "$?"
+    jq -e --arg rev "$revision" --arg fp "$actual_native_fp" '.source.revision==$rev and .source.fingerprint==$fp' <<< "$native_binding_json" >/dev/null || {
+      echo 'cold-cache-store: original native source differs' >&2; return 1;
+    }
+  fi
   local bytes expected allocated free floor others file pid kib archive_kib extract_kib metadata_sha
   local reserve_kib acquired holder attempt
   bytes="$(jq -r '.bytes' "$remote_location")"
@@ -855,9 +1079,12 @@ remote_restore() {
   fi
   if (( evidence == 1 )) || [[ "$signed_schema" == 2 ]]; then
     if (( evidence == 1 )); then
-      evidence_validate_payload "$restore_stage/payload" 0 || {
-      echo 'cold-cache-store: restored evidence metadata or permissions refused' >&2; return 1;
-      }
+      local payload_status=0
+      evidence_validate_payload "$restore_stage/payload" 0 || payload_status=$?
+      if (( payload_status != 0 )); then
+        echo 'cold-cache-store: restored evidence metadata or permissions refused' >&2
+        if (( native == 1 )); then return "$payload_status"; else return 1; fi
+      fi
     fi
     # Extraction writes children after creating '.', so restore its signed
     # directory mtime before comparing the full metadata inventory.
