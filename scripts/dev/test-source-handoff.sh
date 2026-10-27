@@ -32,7 +32,7 @@ pass=1
 refuse() {
  local status=0
  "$@" > "$f/negative.log" 2>&1 || status=$?
- [[ $status != 0 ]] || { printf 'unexpected acceptance: %s\n' "$*" >&2; exit 1; }
+ [[ $status == 78 ]] || { printf 'expected logical refusal 78, got %s: %s\n' "$status" "$*" >&2; cat "$f/negative.log" >&2; exit 1; }
  pass=$((pass+1))
 }
 verify() { aura_receipt_source_handoff_verify "$f/consumer" "$f/inputs" "$f/request.json" "$f/packets/original" "$exported"; }
